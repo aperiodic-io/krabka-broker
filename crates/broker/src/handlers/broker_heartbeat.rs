@@ -9,11 +9,13 @@
 //! KIP-112 offline-dir
 //! failover in `failover`.
 
-use krabka_protocol::owned::{
-    broker_heartbeat_request::BrokerHeartbeatRequest,
-    broker_heartbeat_response::BrokerHeartbeatResponse,
+use {
+    krabka_protocol::owned::{
+        broker_heartbeat_request::BrokerHeartbeatRequest,
+        broker_heartbeat_response::BrokerHeartbeatResponse,
+    },
+    krabka_raft::NodeId,
 };
-use krabka_raft::NodeId;
 
 mod failover;
 mod response;
@@ -26,27 +28,30 @@ mod test_support;
 mod tests;
 
 pub(crate) use self::failover::failover_offline_dirs;
-use self::{
-    response::success_response,
-    shutdown::{LeaveIsrs, leave_isrs},
-    validation::validate_registration,
-};
-use crate::{
-    codes,
-    cordoned_log_dirs::registration_change,
-    handlers::{
-        ErrorCodeResponse as _, cluster_action_denied, forward_to_controller::is_active_controller,
+use {
+    self::{
+        response::success_response,
+        shutdown::{LeaveIsrs, leave_isrs},
+        validation::validate_registration,
     },
-    heartbeat::{
-        controller_state::{
-            BrokerControlState, ControllerLivenessState, HeartbeatFacts, HeartbeatWants,
-            next_broker_state,
+    crate::{
+        codes,
+        cordoned_log_dirs::registration_change,
+        handlers::{
+            ErrorCodeResponse as _, cluster_action_denied,
+            forward_to_controller::is_active_controller,
         },
-        fencing::is_fenced,
+        heartbeat::{
+            controller_state::{
+                BrokerControlState, ControllerLivenessState, HeartbeatFacts, HeartbeatWants,
+                next_broker_state,
+            },
+            fencing::is_fenced,
+        },
+        leader_election::compute_unfence_changes,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
     },
-    leader_election::compute_unfence_changes,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
 };
 
 context_handler! {
@@ -236,19 +241,16 @@ async fn advance_broker_state(
     } else {
         LeaveIsrs::default()
     };
-    let next = next_broker_state(
-        current,
-        HeartbeatFacts {
-            wants: HeartbeatWants {
-                fence: req.want_fence,
-                shut_down: req.want_shut_down,
-            },
-            caught_up,
-            has_leaderships: left.has_leaderships,
-            controlled_shutdown_offset: liveness.controlled_shutdown_offset(broker.0).await,
-            lowest_active_offset: liveness.lowest_active_offset().await,
+    let next = next_broker_state(current, HeartbeatFacts {
+        wants: HeartbeatWants {
+            fence: req.want_fence,
+            shut_down: req.want_shut_down,
         },
-    );
+        caught_up,
+        has_leaderships: left.has_leaderships,
+        controlled_shutdown_offset: liveness.controlled_shutdown_offset(broker.0).await,
+        lowest_active_offset: liveness.lowest_active_offset().await,
+    });
     let leaves = match next {
         BrokerControlState::Fenced | BrokerControlState::ShutdownNow => current != next,
         BrokerControlState::ControlledShutdown => current != next || left.has_leaderships,

@@ -3,11 +3,12 @@
 //! smallest push interval across them, and the stable subscription id derived
 //! from that result.
 
-use krabka_metadata::MetadataImage;
-use uuid::Uuid;
-
-use super::{ClientAttributes, ComputedSubscription};
-use crate::client_metrics::config::{self, ALL_METRICS};
+use {
+    super::{ClientAttributes, ComputedSubscription},
+    crate::client_metrics::config::{self, ALL_METRICS},
+    krabka_metadata::MetadataImage,
+    uuid::Uuid,
+};
 
 /// Kafka's `ClientMetricsManager.createClientInstance`: the push interval
 /// starts at `default_interval_ms` (Kafka's
@@ -106,12 +107,13 @@ fn uuid_hashcode(id: Uuid) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::{ClientMetricsConfigRecord, MetadataImage, MetadataRecord};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::client_metrics::manager::test_support::{apply_config, attrs, img_with};
+    use {
+        super::*,
+        crate::client_metrics::manager::test_support::{apply_config, attrs, img_with},
+        assert2::{assert, check},
+        krabka_metadata::{ClientMetricsConfigRecord, MetadataImage, MetadataRecord},
+        uuid::Uuid,
+    };
 
     /// The subscription of a broker that keeps Kafka's default interval.
     fn compute_subscription(
@@ -170,23 +172,17 @@ mod tests {
 
     #[test]
     fn selector_filters_clients() {
-        let img = img_with(
-            "java-only",
-            &[
-                ("metrics", "a."),
-                ("match", "client_software_name=apache-kafka-java"),
-            ],
-        );
+        let img = img_with("java-only", &[
+            ("metrics", "a."),
+            ("match", "client_software_name=apache-kafka-java"),
+        ]);
         let m = compute_subscription(&img, &attrs());
         check!(m.metrics == vec!["a.".to_string()]);
 
-        let img2 = img_with(
-            "py-only",
-            &[
-                ("metrics", "a."),
-                ("match", "client_software_name=kafka-python"),
-            ],
-        );
+        let img2 = img_with("py-only", &[
+            ("metrics", "a."),
+            ("match", "client_software_name=kafka-python"),
+        ]);
         let m2 = compute_subscription(&img2, &attrs());
         assert!(
             m2.metrics.is_empty(),
@@ -197,11 +193,10 @@ mod tests {
     #[test]
     fn min_interval_and_metric_union_across_subs() {
         let mut img = img_with("s1", &[("metrics", "a."), ("interval.ms", "60000")]);
-        apply_config(
-            &mut img,
-            "s2",
-            &[("metrics", "b."), ("interval.ms", "30000")],
-        );
+        apply_config(&mut img, "s2", &[
+            ("metrics", "b."),
+            ("interval.ms", "30000"),
+        ]);
         let m = compute_subscription(&img, &attrs());
         let mut got = m.metrics.clone();
         got.sort();
@@ -271,21 +266,16 @@ mod tests {
                     push_interval_ms: 1_000,
                 },
             ),
-            (
-                "no subscription",
-                vec![],
-                attrs(),
-                ComputedSubscription {
-                    metrics: vec![],
-                    push_interval_ms: 300_000,
-                },
-            ),
+            ("no subscription", vec![], attrs(), ComputedSubscription {
+                metrics: vec![],
+                push_interval_ms: 300_000,
+            }),
             (
                 "an alternation full-matches its longer branch",
-                vec![(
-                    "s1",
-                    vec![("metrics", "*"), ("match", "client_id=app|app-1")],
-                )],
+                vec![("s1", vec![
+                    ("metrics", "*"),
+                    ("match", "client_id=app|app-1"),
+                ])],
                 with("app-1", "apache-kafka-java"),
                 ComputedSubscription {
                     metrics: vec!["*".into()],
@@ -303,10 +293,10 @@ mod tests {
             ),
             (
                 "a missing KIP-511 name is unknown",
-                vec![(
-                    "s1",
-                    vec![("metrics", "*"), ("match", "client_software_name=unknown")],
-                )],
+                vec![("s1", vec![
+                    ("metrics", "*"),
+                    ("match", "client_software_name=unknown"),
+                ])],
                 with("svc-1", "unknown"),
                 ComputedSubscription {
                     metrics: vec!["*".into()],
@@ -315,10 +305,10 @@ mod tests {
             ),
             (
                 "a repeated selector keeps its last pattern",
-                vec![(
-                    "s1",
-                    vec![("metrics", "*"), ("match", "client_id=a,client_id=b")],
-                )],
+                vec![("s1", vec![
+                    ("metrics", "*"),
+                    ("match", "client_id=a,client_id=b"),
+                ])],
                 with("b", "apache-kafka-java"),
                 ComputedSubscription {
                     metrics: vec!["*".into()],

@@ -24,23 +24,24 @@
 //!    `INVALID_REQUEST` for another topology epoch or a malformed
 //!    description, or success once the description is stored.
 
-use krabka_protocol::owned::{
-    streams_group_topology_description_update_request::StreamsGroupTopologyDescriptionUpdateRequest,
-    streams_group_topology_description_update_response::StreamsGroupTopologyDescriptionUpdateResponse,
-};
-
-use crate::{
-    broker::Broker,
-    codes,
-    coordinator::unified::{
-        GroupType,
-        streams::actor::{DescriptionPush, PushAnswer, StreamsGroupActorMessage},
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        coordinator::unified::{
+            GroupType,
+            streams::actor::{DescriptionPush, PushAnswer, StreamsGroupActorMessage},
+        },
+        handlers::{
+            ErrorResponse as _, RequestContext, group_coordinator_error, group_read_denied,
+            streams_protocol_enabled,
+        },
+        task_util::{AskError, ask},
     },
-    handlers::{
-        ErrorResponse as _, RequestContext, group_coordinator_error, group_read_denied,
-        streams_protocol_enabled,
+    krabka_protocol::owned::{
+        streams_group_topology_description_update_request::StreamsGroupTopologyDescriptionUpdateRequest,
+        streams_group_topology_description_update_response::StreamsGroupTopologyDescriptionUpdateResponse,
     },
-    task_util::{AskError, ask},
 };
 
 /// The message of trunk's `UnsupportedVersionException` for a broker with no

@@ -2,12 +2,13 @@
 //! producer identity and state, the partition set a marker fan-out targets, and
 //! an inter-broker client with neither TLS nor SASL configured.
 
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-
-use crate::{
-    network::client::InterBrokerClient,
-    txn::state::{TopicPartition, TxnEntry, TxnState},
+use {
+    crate::{
+        network::client::InterBrokerClient,
+        txn::state::{TopicPartition, TxnEntry, TxnState},
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::ProducerId,
 };
 
 /// Build a `TxnEntry` in a given (pid, epoch, state) for the re-validation
@@ -32,6 +33,4 @@ pub(super) fn tps() -> Vec<TopicPartition> {
 /// A client with no TLS connector and no SASL creds — fine here, every
 /// case fails at the TCP connect (unreachable address) before any
 /// handshake would run.
-pub(super) fn plaintext_client() -> InterBrokerClient {
-    InterBrokerClient::new(None, None)
-}
+pub(super) fn plaintext_client() -> InterBrokerClient { InterBrokerClient::new(None, None) }

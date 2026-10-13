@@ -49,6 +49,13 @@ mod record_strings;
 mod registration_listeners;
 mod request_names;
 mod response_encoding;
+
+pub(crate) fn map_partition_rows<T>(
+    indexes: impl Iterator<Item = i32>,
+    row: impl FnMut(i32) -> T,
+) -> Vec<T> {
+    indexes.map(row).collect()
+}
 mod submit_failure;
 
 pub(crate) use self::{

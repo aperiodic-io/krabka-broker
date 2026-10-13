@@ -6,22 +6,22 @@
 //! same assertion can be made twice over: against the in-process registry and
 //! against the scraped exposition text.
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::assert;
-use krabka_broker::{Broker, BrokerConfig, metrics::ShareGroupLabel};
-use krabka_protocol::owned::{
-    alter_share_group_offsets_request::{
-        AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestPartition,
-        AlterShareGroupOffsetsRequestTopic,
+use {
+    crate::{
+        harness::{TOPIC, create_topic, produce_five, scrape, test_lock},
+        support::client::connect_client,
     },
-    share_group_heartbeat_request::ShareGroupHeartbeatRequest,
-};
-use krabka_security::ListenerProtocol;
-
-use crate::{
-    harness::{TOPIC, create_topic, produce_five, scrape, test_lock},
-    support::client::connect_client,
+    assert2::assert,
+    krabka_broker::{Broker, BrokerConfig, metrics::ShareGroupLabel},
+    krabka_protocol::owned::{
+        alter_share_group_offsets_request::{
+            AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestPartition,
+            AlterShareGroupOffsetsRequestTopic,
+        },
+        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+    },
+    krabka_security::ListenerProtocol,
+    std::{sync::Arc, time::Duration},
 };
 
 const GROUP: &str = "backlog-workers";

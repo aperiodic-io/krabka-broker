@@ -33,17 +33,17 @@
 // cases need, the same arrangement as `tests/jvm_acceptance/mod.rs`.
 #![allow(dead_code)]
 
-use std::{
-    io::Write as _,
-    process::{Command, ExitStatus, Output, Stdio},
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-
-use crate::{
-    jvm_acceptance::{broker0_advertised, nc_check_connectivity, start_host_broker},
-    support::{self, docker_exec, docker_logs, remove_container},
+use {
+    crate::{
+        jvm_acceptance::{broker0_advertised, nc_check_connectivity, start_host_broker},
+        support::{self, docker_exec, docker_logs, remove_container},
+    },
+    assert2::assert,
+    std::{
+        io::Write as _,
+        process::{Command, ExitStatus, Output, Stdio},
+        time::{Duration, Instant},
+    },
 };
 
 /// The release both halves of every differential run: the oracle broker is
@@ -108,17 +108,13 @@ impl CliRun {
     }
 
     /// Whether the tool exited zero.
-    pub(crate) fn succeeded(&self) -> bool {
-        self.status.success()
-    }
+    pub(crate) fn succeeded(&self) -> bool { self.status.success() }
 
     /// Both streams as one text.
     ///
     /// The JVM tools split a failure across the two in ways that differ per
     /// tool, so a case about a refusal searches both.
-    pub(crate) fn text(&self) -> String {
-        format!("{}{}", self.stdout, self.stderr)
-    }
+    pub(crate) fn text(&self) -> String { format!("{}{}", self.stdout, self.stderr) }
 
     /// Fail the case unless the tool exited zero.
     pub(crate) fn expect_success(self) -> Self {
@@ -370,9 +366,7 @@ pub(crate) struct Oracle {
 
 impl Oracle {
     /// Boot the stock broker and wait until its own tools can reach it.
-    pub(crate) fn start(label: &str) -> Self {
-        Self::start_with_env(label, &[])
-    }
+    pub(crate) fn start(label: &str) -> Self { Self::start_with_env(label, &[]) }
 
     /// [`Self::start`] with extra `KAFKA_*` environment, for a case that needs
     /// the stock broker configured -- an authorizer, say.
@@ -425,9 +419,7 @@ impl Oracle {
     }
 
     /// Run a command inside the container and hand back what it did.
-    pub(crate) fn exec(&self, args: &[&str]) -> Output {
-        docker_exec(&self.name, args)
-    }
+    pub(crate) fn exec(&self, args: &[&str]) -> Output { docker_exec(&self.name, args) }
 
     /// Run `<tool>.sh <args>` inside the container.
     pub(crate) fn run(&self, tool: &str, args: &[&str], stdin: Option<&str>) -> CliRun {
@@ -444,14 +436,11 @@ impl Oracle {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let out = feed(command, stdin);
-        CliRun::new(
-            &out,
-            CliRunSetup {
-                side: "apache/kafka:4.3.1",
-                tool,
-                args,
-            },
-        )
+        CliRun::new(&out, CliRunSetup {
+            side: "apache/kafka:4.3.1",
+            tool,
+            args,
+        })
     }
 
     /// Write `contents` to `path` inside the container, world-readable.
@@ -513,15 +502,11 @@ impl Oracle {
     }
 
     /// The container's own logs, for the panic message when it never came up.
-    fn logs(&self) -> String {
-        docker_logs(&self.name)
-    }
+    fn logs(&self) -> String { docker_logs(&self.name) }
 }
 
 impl Drop for Oracle {
-    fn drop(&mut self) {
-        remove_container(&self.name);
-    }
+    fn drop(&mut self) { remove_container(&self.name); }
 }
 
 /// A tool left running in its own container, removed when this is dropped.
@@ -530,9 +515,7 @@ pub(crate) struct DetachedTool {
 }
 
 impl Drop for DetachedTool {
-    fn drop(&mut self) {
-        remove_container(&self.name);
-    }
+    fn drop(&mut self) { remove_container(&self.name); }
 }
 
 /// Stock-first brokers for CLI differential scenarios.
@@ -560,12 +543,9 @@ impl OracleComparison {
     }
 
     pub(crate) fn sides(&self) -> [Side<'_>; 2] {
-        [
-            Side::Oracle(&self.oracle),
-            Side::Krabka {
-                bootstrap: &self.bootstrap,
-            },
-        ]
+        [Side::Oracle(&self.oracle), Side::Krabka {
+            bootstrap: &self.bootstrap,
+        }]
     }
 }
 

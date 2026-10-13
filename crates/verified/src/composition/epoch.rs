@@ -1,7 +1,6 @@
+use super::*;
 #[cfg(creusot)]
 use creusot_std::prelude::*;
-
-use super::*;
 
 open_logic! {
 pub fn epoch_window_valid(base: Int, start: Int, end: Int) -> bool {

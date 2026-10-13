@@ -56,21 +56,24 @@ pub(crate) fn resolve_schema_validation(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_log::LogConfig;
-
-    use super::{
+    use {
         super::{
-            log_config::apply_to_log_config,
-            validation::{is_recognized, validate_topic_config},
+            super::{
+                log_config::apply_to_log_config,
+                validation::{is_recognized, validate_topic_config},
+            },
+            *,
         },
-        *,
+        assert2::{assert, check},
+        krabka_log::LogConfig,
     };
 
     /// A metadata image whose topic `t` carries exactly `overrides`.
     fn image_with_topic_config(overrides: &[(&str, &str)]) -> krabka_metadata::MetadataImage {
-        use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
-        use uuid::Uuid;
+        use {
+            krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
+            uuid::Uuid,
+        };
 
         let mut image = MetadataImage::new(Uuid::nil());
         image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {

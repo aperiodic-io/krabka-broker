@@ -5,17 +5,17 @@
 //! into a `CutValue`. Both steps are pure functions over that frozen set, so
 //! they sit apart from the group state the injection is driven from.
 
-use std::collections::BTreeMap;
-
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_verified::{
-    BarrierCutClassification, BarrierTargetCountDecision, barrier_cut_classification,
-    barrier_target_count_decision,
-};
-
-use crate::barrier::persistence::{
-    CutStatus, CutValue, MissingPartition, PartitionOffset, TopicOffsets, TopicTarget,
+use {
+    crate::barrier::persistence::{
+        CutStatus, CutValue, MissingPartition, PartitionOffset, TopicOffsets, TopicTarget,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_verified::{
+        BarrierCutClassification, BarrierTargetCountDecision, barrier_cut_classification,
+        barrier_target_count_decision,
+    },
+    std::collections::BTreeMap,
 };
 
 /// One partition of a frozen target set.
@@ -114,16 +114,16 @@ pub(crate) fn build_cut(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::{assert, check};
-    use krabka_ids::PartitionIndex;
-    use krabka_log::Offset;
-
-    use super::{build_cut, expand_targets};
-    use crate::barrier::{
-        persistence::{CutStatus, CutValue, MissingPartition, PartitionOffset, TopicOffsets},
-        state::test_support::{at, target},
+    use {
+        super::{build_cut, expand_targets},
+        crate::barrier::{
+            persistence::{CutStatus, CutValue, MissingPartition, PartitionOffset, TopicOffsets},
+            state::test_support::{at, target},
+        },
+        assert2::{assert, check},
+        krabka_ids::PartitionIndex,
+        krabka_log::Offset,
+        std::collections::BTreeMap,
     };
 
     #[test]

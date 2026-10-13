@@ -5,12 +5,13 @@
 //! to the per-domain appliers in the sibling `runtime_*` modules, which hold
 //! the assignments themselves.
 
-use krabka_units::{ByteSize, Ratio, Time};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
-use super::FileConfigError;
-use crate::config::{BrokerConfig, KAFKA_STATIC_KEYS};
+use {
+    super::FileConfigError,
+    crate::config::{BrokerConfig, KAFKA_STATIC_KEYS},
+    krabka_units::{ByteSize, Ratio, Time},
+    schemars::JsonSchema,
+    serde::{Deserialize, Serialize},
+};
 
 /// Validated operational policy loaded from `[runtime]`.
 #[krabka_macros::runtime_policy_fields(toml)]

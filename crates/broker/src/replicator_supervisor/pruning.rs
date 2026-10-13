@@ -2,18 +2,18 @@
 //! image no longer assigns to this broker, either because the topic was deleted
 //! or because the replica was reassigned elsewhere.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_metadata::MetadataImage;
-use tracing::warn;
-
-use super::{ReplicatorSupervisor, TopicPartition};
 #[cfg(test)]
 use crate::wal::quorum::engine::WalShardEngine;
-use crate::{
-    log_dir::partition_dir,
-    partition::Partition,
-    wal::quorum::{ShardRemoval, registry::ShardId, remove_shard},
+use {
+    super::{ReplicatorSupervisor, TopicPartition},
+    crate::{
+        log_dir::partition_dir,
+        partition::Partition,
+        wal::quorum::{ShardRemoval, registry::ShardId, remove_shard},
+    },
+    krabka_metadata::MetadataImage,
+    std::collections::{HashMap, HashSet},
+    tracing::warn,
 };
 
 impl ReplicatorSupervisor {
@@ -124,19 +124,19 @@ fn remove_partition_dir(path: &std::path::Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_ids::PartitionIndex;
-    use krabka_raft::NodeId;
-
-    use super::*;
-    use crate::{
-        replicator_supervisor::test_support::{
-            SupervisorPartitionSetup, SupervisorTopicSetup, image_with, partition_record,
-            supervisor_fixture, topic_partition_records, topic_record,
+    use {
+        super::*,
+        crate::{
+            replicator_supervisor::test_support::{
+                SupervisorPartitionSetup, SupervisorTopicSetup, image_with, partition_record,
+                supervisor_fixture, topic_partition_records, topic_record,
+            },
+            wal::quorum::{registry::ShardId, shard_dir},
         },
-        wal::quorum::{registry::ShardId, shard_dir},
+        assert2::assert,
+        krabka_ids::PartitionIndex,
+        krabka_raft::NodeId,
+        std::sync::Arc,
     };
 
     #[derive(Debug, PartialEq, Eq)]

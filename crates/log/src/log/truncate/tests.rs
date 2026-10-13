@@ -1,23 +1,24 @@
 //! Unit tests for truncation of the log tail and trimming of the log
 //! head, including the sidecar state each one has to carry with it.
 
-use assert2::check;
-use krabka_ids::{LeaderEpoch, ProducerId};
-use krabka_units::prelude::{bytes, gibibytes};
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    config::LogConfig,
-    leader_epoch_checkpoint::EpochEntry,
-    log::test_support::{
-        append_samples, check_stamps, rolling_test_log, sample_batch, sample_batch_with_epoch,
-        stamped_rolling_log, stamped_test_log, test_batch_at, test_log, tiny_segments,
+use {
+    super::*,
+    crate::{
+        config::LogConfig,
+        leader_epoch_checkpoint::EpochEntry,
+        log::test_support::{
+            append_samples, check_stamps, rolling_test_log, sample_batch, sample_batch_with_epoch,
+            stamped_rolling_log, stamped_test_log, test_batch_at, test_log, tiny_segments,
+        },
+        producer_snapshot::ProducerSnapshotEntry,
+        stamp_index::{StampEntry, StampIndex},
+        test_support::open_log,
+        txn_index::AbortedTxn,
     },
-    producer_snapshot::ProducerSnapshotEntry,
-    stamp_index::{StampEntry, StampIndex},
-    test_support::open_log,
-    txn_index::AbortedTxn,
+    assert2::check,
+    krabka_ids::{LeaderEpoch, ProducerId},
+    krabka_units::prelude::{bytes, gibibytes},
+    tempfile::tempdir,
 };
 
 /// Kafka's `UnifiedLog.truncateTo` never refuses a target below the log start.
@@ -376,13 +377,10 @@ fn a_no_op_truncation_still_drops_an_epoch_no_record_backs() {
 #[test]
 fn trim_to_offset_drops_old_segments() {
     let dir = tempdir().expect("tempdir");
-    let mut log = Log::open(
-        dir.path(),
-        LogConfig {
-            segment_size: bytes(200), // small so we roll fast
-            ..LogConfig::default()
-        },
-    )
+    let mut log = Log::open(dir.path(), LogConfig {
+        segment_size: bytes(200), // small so we roll fast
+        ..LogConfig::default()
+    })
     .expect("open");
     // Append 30 records to force multiple sealed segments.
     append_samples(&mut log, 30, 1);

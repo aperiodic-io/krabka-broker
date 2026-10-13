@@ -1,10 +1,6 @@
 //! Member fixtures the `classic_state` submodule tests share.
 
-use std::time::Duration;
-
-use bytes::Bytes;
-
-use super::member::Member;
+use {super::member::Member, bytes::Bytes, std::time::Duration};
 
 pub(super) fn sample_member(id: &str) -> Member {
     Member::new(

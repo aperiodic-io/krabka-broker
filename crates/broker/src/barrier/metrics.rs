@@ -3,11 +3,12 @@
 //! The coordinator reports each injection through [`BrokerBarrierMetrics`],
 //! which feeds the process metric registry.
 
-use krabka_units::{Time, convert::TimeExt as _};
-
-use crate::{
-    barrier::persistence::CutStatus,
-    metrics::{BarrierGroupLabel, BrokerMetrics},
+use {
+    crate::{
+        barrier::persistence::CutStatus,
+        metrics::{BarrierGroupLabel, BrokerMetrics},
+    },
+    krabka_units::{Time, convert::TimeExt as _},
 };
 
 /// What one finished injection reported.
@@ -35,9 +36,7 @@ pub(crate) struct BrokerBarrierMetrics {
 }
 
 impl BrokerBarrierMetrics {
-    pub(crate) const fn new(metrics: BrokerMetrics) -> Self {
-        Self { metrics }
-    }
+    pub(crate) const fn new(metrics: BrokerMetrics) -> Self { Self { metrics } }
 
     fn group(group: &str) -> BarrierGroupLabel {
         BarrierGroupLabel {

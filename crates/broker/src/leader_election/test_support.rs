@@ -3,23 +3,23 @@
 //! dead, and provide a `MetadataSource` double that records every batch the
 //! code under test submits.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use assert2::assert;
-use krabka_metadata::{
-    BrokerConfigRecord, LeaderEpoch, MetadataImage, MetadataRecord, PartitionRecord,
-    TopicConfigRecord, TopicRecord,
-};
-use krabka_raft::NodeId;
-use uuid::Uuid;
-
-use crate::{
-    config_keys::{BROKER_WITNESS, ELIGIBLE_LEADER_REPLICAS, WITNESS_TRUE},
-    elr::state::test_records,
-    heartbeat::controller_state::{ControllerLivenessState, TestClock},
-    metrics::BrokerMetrics,
-    test_support::{FakeMetadataSource, broker_registration, finalize_elr_version},
-    unclean_recovery::UncleanRecoveryHandle,
+use {
+    crate::{
+        config_keys::{BROKER_WITNESS, ELIGIBLE_LEADER_REPLICAS, WITNESS_TRUE},
+        elr::state::test_records,
+        heartbeat::controller_state::{ControllerLivenessState, TestClock},
+        metrics::BrokerMetrics,
+        test_support::{FakeMetadataSource, broker_registration, finalize_elr_version},
+        unclean_recovery::UncleanRecoveryHandle,
+    },
+    assert2::assert,
+    krabka_metadata::{
+        BrokerConfigRecord, LeaderEpoch, MetadataImage, MetadataRecord, PartitionRecord,
+        TopicConfigRecord, TopicRecord,
+    },
+    krabka_raft::NodeId,
+    std::{collections::BTreeMap, sync::Arc},
+    uuid::Uuid,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -69,13 +69,10 @@ pub fn img_with_partition(setup: ElectionSetup<'_>) -> MetadataImage {
         finalize_elr_version(&mut img);
     }
     if !setup.configs.is_empty() {
-        set_topic_configs(
-            &mut img,
-            TopicConfigSetup {
-                topic: setup.topic,
-                entries: setup.configs,
-            },
-        );
+        set_topic_configs(&mut img, TopicConfigSetup {
+            topic: setup.topic,
+            entries: setup.configs,
+        });
     }
     img
 }
@@ -183,9 +180,7 @@ pub fn expected_partition(setup: ExpectedPartitionSetup<'_>) -> PartitionRecord 
 
 /// The witness set for a plain, non-stretch cluster. Every pre-witness
 /// behaviour must be unchanged against it.
-pub fn no_witnesses() -> std::collections::HashSet<NodeId> {
-    std::collections::HashSet::new()
-}
+pub fn no_witnesses() -> std::collections::HashSet<NodeId> { std::collections::HashSet::new() }
 
 /// Mark `ids` as data-bearing witnesses.
 pub fn witnesses(ids: &[u64]) -> std::collections::HashSet<NodeId> {

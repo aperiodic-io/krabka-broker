@@ -5,24 +5,24 @@
 //! here proves that with an `ApiVersions` round-trip over the post-auth
 //! stream, and `gssapi` reuses it for the Kerberos path.
 
-use std::{io, net::SocketAddr};
-
-use krabka_broker::Broker;
-use krabka_protocol::owned::{
-    api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
-};
-use krabka_security::{ListenerProtocol, SaslMechanism};
-
-use crate::{
-    harness::admin_plain_password,
-    kafka_wire::encode_named,
-    support::{
-        sasl::sasl_temp_config,
-        wire::{
-            CorrelationId, WireFrameSetup, decode_response_frame, read_frame, request_frame,
-            write_frame,
+use {
+    crate::{
+        harness::admin_plain_password,
+        kafka_wire::encode_named,
+        support::{
+            sasl::sasl_temp_config,
+            wire::{
+                CorrelationId, WireFrameSetup, decode_response_frame, read_frame, request_frame,
+                write_frame,
+            },
         },
     },
+    krabka_broker::Broker,
+    krabka_protocol::owned::{
+        api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+    },
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::{io, net::SocketAddr},
 };
 
 /// Start a broker with a `SASL_PLAINTEXT` listener and one PLAIN credential,
@@ -38,13 +38,10 @@ async fn inter_broker_client_authenticates_via_plain() {
     cfg.plain_credentials
         .insert("broker".to_string(), admin_plain_password());
 
-    run_inter_broker_auth_test(
-        cfg,
-        krabka_broker::config::InterBrokerCredentials::Plain {
-            username: "broker".to_string(),
-            password: admin_plain_password(),
-        },
-    )
+    run_inter_broker_auth_test(cfg, krabka_broker::config::InterBrokerCredentials::Plain {
+        username: "broker".to_string(),
+        password: admin_plain_password(),
+    })
     .await
     .expect("InterBrokerClient PLAIN auth + ApiVersions round-trip must succeed");
 }

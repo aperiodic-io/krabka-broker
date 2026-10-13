@@ -23,50 +23,52 @@
 //! best-effort and retries on the next heartbeat. It never fails the
 //! heartbeat.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_metadata::NodeId;
-use krabka_protocol::owned::{
-    delete_share_group_state_request::{
-        DeleteShareGroupStateRequest, DeleteStateData, PartitionData as DeletePartitionData,
-    },
-    delete_share_group_state_response::DeleteShareGroupStateResponse,
-    initialize_share_group_state_request::{
-        InitializeShareGroupStateRequest, InitializeStateData, PartitionData as InitPartitionData,
-    },
-    initialize_share_group_state_response::InitializeShareGroupStateResponse,
-    read_share_group_state_request::{
-        PartitionData as ReadPartitionData, ReadShareGroupStateRequest, ReadStateData,
-    },
-    read_share_group_state_summary_request::{
-        PartitionData as ReadSummaryPartitionData, ReadShareGroupStateSummaryRequest,
-        ReadStateSummaryData,
-    },
-    write_share_group_state_request::{
-        PartitionData as WritePartitionData, StateBatch as ProtoStateBatch,
-        WriteShareGroupStateRequest, WriteStateData,
-    },
-    write_share_group_state_response::WriteShareGroupStateResponse,
-};
-use krabka_security::ListenerProtocol;
-
-use crate::{
-    auto_topic_creation::AutoTopicCreation,
-    broker::registered_listener_endpoint,
-    codes::{COORDINATOR_NOT_AVAILABLE, UNKNOWN_TOPIC_OR_PARTITION},
-    error::BrokerError,
-    metadata_source::MetadataSource,
-    network::client::InterBrokerClient,
-    share_coordinator::{
-        bootstrap,
-        coordinator::{
-            LoadStatus, ShareCoordinator, ShareStateSummary, ShareWrite, UNINITIALIZED_START_OFFSET,
+use {
+    crate::{
+        auto_topic_creation::AutoTopicCreation,
+        broker::registered_listener_endpoint,
+        codes::{COORDINATOR_NOT_AVAILABLE, UNKNOWN_TOPIC_OR_PARTITION},
+        error::BrokerError,
+        metadata_source::MetadataSource,
+        network::client::InterBrokerClient,
+        share_coordinator::{
+            bootstrap,
+            coordinator::{
+                LoadStatus, ShareCoordinator, ShareStateSummary, ShareWrite,
+                UNINITIALIZED_START_OFFSET,
+            },
+            persistence::StateBatch,
+            state::SharePartitionState,
         },
-        persistence::StateBatch,
-        state::SharePartitionState,
     },
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_metadata::NodeId,
+    krabka_protocol::owned::{
+        delete_share_group_state_request::{
+            DeleteShareGroupStateRequest, DeleteStateData, PartitionData as DeletePartitionData,
+        },
+        delete_share_group_state_response::DeleteShareGroupStateResponse,
+        initialize_share_group_state_request::{
+            InitializeShareGroupStateRequest, InitializeStateData,
+            PartitionData as InitPartitionData,
+        },
+        initialize_share_group_state_response::InitializeShareGroupStateResponse,
+        read_share_group_state_request::{
+            PartitionData as ReadPartitionData, ReadShareGroupStateRequest, ReadStateData,
+        },
+        read_share_group_state_summary_request::{
+            PartitionData as ReadSummaryPartitionData, ReadShareGroupStateSummaryRequest,
+            ReadStateSummaryData,
+        },
+        write_share_group_state_request::{
+            PartitionData as WritePartitionData, StateBatch as ProtoStateBatch,
+            WriteShareGroupStateRequest, WriteStateData,
+        },
+        write_share_group_state_response::WriteShareGroupStateResponse,
+    },
+    krabka_security::ListenerProtocol,
+    std::{sync::Arc, time::Duration},
 };
 
 /// The persister RPCs share a singleton topic/partition envelope.
@@ -703,14 +705,17 @@ fn check_partition_result<R: PartitionResults>(
 
 #[cfg(test)]
 mod tests {
-    use krabka_protocol::{
-        owned::initialize_share_group_state_response::{InitializeStateResult, PartitionResult},
-        primitives::uuid::Uuid as ProtoUuid,
-    };
-
-    use super::*;
-    use crate::codes::{
-        COORDINATOR_LOAD_IN_PROGRESS, FENCED_LEADER_EPOCH, FENCED_STATE_EPOCH, INVALID_REQUEST,
+    use {
+        super::*,
+        crate::codes::{
+            COORDINATOR_LOAD_IN_PROGRESS, FENCED_LEADER_EPOCH, FENCED_STATE_EPOCH, INVALID_REQUEST,
+        },
+        krabka_protocol::{
+            owned::initialize_share_group_state_response::{
+                InitializeStateResult, PartitionResult,
+            },
+            primitives::uuid::Uuid as ProtoUuid,
+        },
     };
 
     fn response(partitions: &[(i32, i16)]) -> InitializeShareGroupStateResponse {

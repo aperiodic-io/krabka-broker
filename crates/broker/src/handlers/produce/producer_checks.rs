@@ -2,30 +2,31 @@
 //! the append: the KIP-1319 transactional verify, and the idempotent-producer
 //! dedup that answers a retry with the offset it already assigned.
 
-use krabka_log::Offset;
-use krabka_protocol::owned::produce_response::PartitionProduceResponse;
-use krabka_units::convert::TimeExt as _;
-
-use super::{ACKS_ALL, INVALID_OFFSET, durability_frontier, prepare::PreparedBatch};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    broker::Broker,
-    codes,
-    error::BrokerError,
-    partition::{Partition, ProducerAppendCheck},
-    producer_state::{Checked, Decision, ProducerState, SequenceContext},
-    time_util::now_ms,
-    txn::{
-        coordinator::{
-            TxnCoordinator,
-            produce_verification::{
-                INTERNAL_REGISTRATION_VERSION, TransactionCheck, partition_verification_enabled,
-                skips_coordinator_verification,
+use {
+    super::{ACKS_ALL, INVALID_OFFSET, durability_frontier, prepare::PreparedBatch},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        partition::{Partition, ProducerAppendCheck},
+        producer_state::{Checked, Decision, ProducerState, SequenceContext},
+        time_util::now_ms,
+        txn::{
+            coordinator::{
+                TxnCoordinator,
+                produce_verification::{
+                    INTERNAL_REGISTRATION_VERSION, TransactionCheck,
+                    partition_verification_enabled, skips_coordinator_verification,
+                },
             },
+            state::TopicPartition,
+            version::resolve_txn_version,
         },
-        state::TopicPartition,
-        version::resolve_txn_version,
     },
+    krabka_log::Offset,
+    krabka_protocol::owned::produce_response::PartitionProduceResponse,
+    krabka_units::convert::TimeExt as _,
 };
 
 /// What the idempotent-producer dedup gate decided for one batch.
@@ -393,26 +394,28 @@ pub(super) async fn handle_duplicate(
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
-
-    use assert2::{assert, check};
-    use bytes::Bytes;
-    use krabka_protocol::records::{Record, RecordBatch};
-
-    use super::{PreparedBatch, verify_transactional_produce};
-    use crate::{
-        codes,
-        handlers::produce::{
-            framing::PartitionPayload,
-            leadership::current_effective_min_isr,
-            pipeline::{PartitionInput, PartitionOutcome, PartitionServices, process_partition},
-            prepare::PreparedSource,
-            test_support::{encode_batch, image_with_topic, pipeline_input},
+    use {
+        super::{PreparedBatch, verify_transactional_produce},
+        crate::{
+            codes,
+            handlers::produce::{
+                framing::PartitionPayload,
+                leadership::current_effective_min_isr,
+                pipeline::{
+                    PartitionInput, PartitionOutcome, PartitionServices, process_partition,
+                },
+                prepare::PreparedSource,
+                test_support::{encode_batch, image_with_topic, pipeline_input},
+            },
+            test_support::{
+                RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup,
+                repeated_records_batch, spawn_standalone_partition,
+            },
         },
-        test_support::{
-            RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup, repeated_records_batch,
-            spawn_standalone_partition,
-        },
+        assert2::{assert, check},
+        bytes::Bytes,
+        krabka_protocol::records::{Record, RecordBatch},
+        std::{sync::Arc, time::Duration},
     };
 
     fn transactional_batch(producer_id: i64, producer_epoch: i16) -> PreparedBatch {
@@ -863,9 +866,10 @@ mod tests {
     /// `unstable.api.versions.enable` accepts the batch.
     #[tokio::test]
     async fn a_producer_with_no_state_on_a_never_appended_partition_starts_at_zero_under_trunk() {
-        use krabka_protocol::owned::produce_response::PartitionProduceResponse;
-
-        use crate::api_catalog::UnstableApiVersions::{Disabled, Enabled};
+        use {
+            crate::api_catalog::UnstableApiVersions::{Disabled, Enabled},
+            krabka_protocol::owned::produce_response::PartitionProduceResponse,
+        };
 
         const PRODUCER_ID: i64 = 907;
 

@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{completion_offset, five_completions_above};
+use {
+    super::{completion_offset, five_completions_above},
+    creusot_std::prelude::*,
+};
 
 mod order;
 mod witness;

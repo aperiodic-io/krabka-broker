@@ -1,10 +1,11 @@
 //! `krabka-log` adapter for the sans-IO quorum core.
 
-use std::sync::{Arc, Mutex, MutexGuard};
-
-use krabka_ids::LeaderEpoch;
-use krabka_kraft_core::{Epoch, LogOffsetMetadata, LogView};
-use krabka_log::Log;
+use {
+    krabka_ids::LeaderEpoch,
+    krabka_kraft_core::{Epoch, LogOffsetMetadata, LogView},
+    krabka_log::Log,
+    std::sync::{Arc, Mutex, MutexGuard},
+};
 
 /// A durable WAL-replica log exposed through [`LogView`].
 #[derive(Debug, Clone)]
@@ -14,9 +15,7 @@ pub(crate) struct ShardLog {
 
 impl ShardLog {
     #[must_use]
-    pub(crate) fn new(log: Arc<Mutex<Log>>) -> Self {
-        Self { log }
-    }
+    pub(crate) fn new(log: Arc<Mutex<Log>>) -> Self { Self { log } }
 
     pub(crate) fn lock(&self) -> MutexGuard<'_, Log> {
         self.log
@@ -31,9 +30,7 @@ impl ShardLog {
 }
 
 impl LogView for ShardLog {
-    fn end_offset(&self) -> i64 {
-        self.lock().log_end_offset().0
-    }
+    fn end_offset(&self) -> i64 { self.lock().log_end_offset().0 }
 
     fn last_epoch(&self) -> Epoch {
         let latest = self
@@ -56,13 +53,13 @@ impl LogView for ShardLog {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use assert2::assert;
-    use krabka_log::{Log, LogConfig};
-    use krabka_protocol::records::{Record, RecordBatch};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_log::{Log, LogConfig},
+        krabka_protocol::records::{Record, RecordBatch},
+        std::sync::{Arc, Mutex},
+    };
 
     #[test]
     fn shard_log_view_reports_offset_and_epoch() {

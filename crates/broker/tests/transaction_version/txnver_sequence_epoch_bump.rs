@@ -8,39 +8,39 @@
 //! same data directory, sends the rejected batch again, and then sends the
 //! batch that Kafka accepts. The answer must not depend on the restart.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker};
-use krabka_client_core::Client;
-use krabka_ids::ProducerId;
-use krabka_protocol::{
-    owned::{init_producer_id_request::InitProducerIdRequest, produce_request::ProduceRequest},
-    records::RecordBatch,
-};
-use tempfile::TempDir;
-
-use crate::{
-    support::{
-        produce::{SinglePartitionProduceSetup, batch_request},
-        records::{
-            BatchTransaction, ProbeRecordCount, ProducerSequence, TransactionProbeBatchSetup,
-            transaction_probe_batch,
+use {
+    crate::{
+        support::{
+            produce::{SinglePartitionProduceSetup, batch_request},
+            records::{
+                BatchTransaction, ProbeRecordCount, ProducerSequence, TransactionProbeBatchSetup,
+                transaction_probe_batch,
+            },
+            topics::TopicPartitionCount,
+            transaction_wire::{
+                add_partition_request, coordinator_loading, initialize_transactional,
+                partition_error, retry_coordinator, settled_produce,
+            },
+            transactions::{
+                EndTransactionSetup, ProducerEpoch, ProducerEpochOffset, ProducerIdentity,
+                end_transaction_request,
+            },
         },
-        topics::TopicPartitionCount,
-        transaction_wire::{
-            add_partition_request, coordinator_loading, initialize_transactional, partition_error,
-            retry_coordinator, settled_produce,
-        },
-        transactions::{
-            EndTransactionSetup, ProducerEpoch, ProducerEpochOffset, ProducerIdentity,
-            end_transaction_request,
+        txnver_harness::{
+            admin_client, config, create_topic, downgrade_transaction_version, find_coordinator,
+            topic_id,
         },
     },
-    txnver_harness::{
-        admin_client, config, create_topic, downgrade_transaction_version, find_coordinator,
-        topic_id,
+    assert2::assert,
+    krabka_broker::{BootstrapMode, Broker},
+    krabka_client_core::Client,
+    krabka_ids::ProducerId,
+    krabka_protocol::{
+        owned::{init_producer_id_request::InitProducerIdRequest, produce_request::ProduceRequest},
+        records::RecordBatch,
     },
+    std::time::Duration,
+    tempfile::TempDir,
 };
 
 const OUT_OF_ORDER_SEQUENCE_NUMBER: i16 = 45;
@@ -91,14 +91,11 @@ async fn produce(
     let request = ProduceRequest {
         // A Kafka producer names its transactional id on every request.
         transactional_id: batch_transactional_id.map(str::to_owned),
-        ..batch_request(
-            batch,
-            SinglePartitionProduceSetup {
-                topic: (topic).into(),
-                topic_id: id,
-                ..SinglePartitionProduceSetup::replicated()
-            },
-        )
+        ..batch_request(batch, SinglePartitionProduceSetup {
+            topic: (topic).into(),
+            topic_id: id,
+            ..SinglePartitionProduceSetup::replicated()
+        })
     };
     let response = settled_produce(client, request, Duration::from_secs(10)).await;
     response.responses[0].partition_responses[0].error_code

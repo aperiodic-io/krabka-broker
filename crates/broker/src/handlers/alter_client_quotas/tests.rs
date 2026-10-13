@@ -4,26 +4,26 @@
 //!
 //! Most of them drive a live broker, so they are kept out of the module root.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_metadata::AclOperation;
-use krabka_protocol::owned::alter_client_quotas_response::{
-    EntityData as RespEntity, EntryData as RespEntry,
-};
-
-use super::{
-    test_support::{entry, request},
-    *,
-};
-use crate::{
-    broker::{Broker, BrokerHandle},
-    codes::INVALID_REQUEST,
-    handlers::RequestContext,
-    test_support::{
-        DenyAll, grant_cluster_operation, peer, principal,
-        start_broker_with_authorizer as start_broker, test_ctx,
+use {
+    super::{
+        test_support::{entry, request},
+        *,
     },
+    crate::{
+        broker::{Broker, BrokerHandle},
+        codes::INVALID_REQUEST,
+        handlers::RequestContext,
+        test_support::{
+            DenyAll, grant_cluster_operation, peer, principal,
+            start_broker_with_authorizer as start_broker, test_ctx,
+        },
+    },
+    assert2::assert,
+    krabka_metadata::AclOperation,
+    krabka_protocol::owned::alter_client_quotas_response::{
+        EntityData as RespEntity, EntryData as RespEntry,
+    },
+    std::sync::Arc,
 };
 
 crate::test_support::context_helper!(client_id = "admin-client");
@@ -106,10 +106,11 @@ async fn handle_denies_cluster_alter_for_each_entry() {
         context(ctx, "alice")
     );
     let req = request(
-        vec![entry(
-            vec![("user", Some("alice"))],
-            vec![("producer_byte_rate", 1024.0, false)],
-        )],
+        vec![entry(vec![("user", Some("alice"))], vec![(
+            "producer_byte_rate",
+            1024.0,
+            false,
+        )])],
         false,
     );
 
@@ -161,10 +162,11 @@ async fn cluster_alter_configs_gates_the_quota_write() {
         let principal = principal(user);
         let ctx = test_context(&principal, &peer);
         let req = request(
-            vec![entry(
-                vec![("user", Some(user))],
-                vec![("producer_byte_rate", 1024.0, false)],
-            )],
+            vec![entry(vec![("user", Some(user))], vec![(
+                "producer_byte_rate",
+                1024.0,
+                false,
+            )])],
             false,
         );
 
@@ -207,14 +209,16 @@ async fn handle_returns_entry_results_and_submits_valid_changes() {
     );
     let req = request(
         vec![
-            entry(
-                vec![("user", Some("alice"))],
-                vec![("producer_byte_rate", 1024.0, false)],
-            ),
-            entry(
-                vec![("user", Some("bob"))],
-                vec![("unknown_quota_key", 1.0, false)],
-            ),
+            entry(vec![("user", Some("alice"))], vec![(
+                "producer_byte_rate",
+                1024.0,
+                false,
+            )]),
+            entry(vec![("user", Some("bob"))], vec![(
+                "unknown_quota_key",
+                1.0,
+                false,
+            )]),
         ],
         false,
     );
@@ -251,10 +255,11 @@ async fn handle_validate_only_reports_success_without_submitting() {
         context(ctx, "admin")
     );
     let req = request(
-        vec![entry(
-            vec![("user", Some("carol"))],
-            vec![("producer_byte_rate", 2048.0, false)],
-        )],
+        vec![entry(vec![("user", Some("carol"))], vec![(
+            "producer_byte_rate",
+            2048.0,
+            false,
+        )])],
         true,
     );
 
@@ -289,18 +294,21 @@ async fn repeated_entity_answers_one_row_with_and_without_validate_only() {
         broker_fixture!((broker_handle, _dir, broker), allow_all);
         let req = request(
             vec![
-                entry(
-                    vec![("user", Some("dave"))],
-                    vec![("producer_byte_rate", 1024.0, false)],
-                ),
-                entry(
-                    vec![("user", Some("erin"))],
-                    vec![("request_percentage", 4.0, false)],
-                ),
-                entry(
-                    vec![("user", Some("dave"))],
-                    vec![("consumer_byte_rate", 2048.0, false)],
-                ),
+                entry(vec![("user", Some("dave"))], vec![(
+                    "producer_byte_rate",
+                    1024.0,
+                    false,
+                )]),
+                entry(vec![("user", Some("erin"))], vec![(
+                    "request_percentage",
+                    4.0,
+                    false,
+                )]),
+                entry(vec![("user", Some("dave"))], vec![(
+                    "consumer_byte_rate",
+                    2048.0,
+                    false,
+                )]),
             ],
             validate_only,
         );

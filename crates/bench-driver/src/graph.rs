@@ -13,26 +13,26 @@
 //! crate itself targets. It embeds each figure inline, so the whole report is
 //! a single `.html` file.
 
-use std::{
-    collections::BTreeMap,
-    fmt::{Arguments, Write},
-};
-
-use krabka_units::prelude::*;
-use plotly::{
-    Bar, Layout, Plot, Scatter,
-    common::{ErrorData, ErrorType, Line, Mode, Title},
-    layout::{Axis, BarMode},
-};
-
-use crate::{
-    aggregate::{
-        CellAgg, CellKey, ScalarMetric, StackAgg, TsSeries, aggregate_cells, averaged_timeseries,
-        scalar_metrics,
+use {
+    crate::{
+        aggregate::{
+            CellAgg, CellKey, ScalarMetric, StackAgg, TsSeries, aggregate_cells,
+            averaged_timeseries, scalar_metrics,
+        },
+        ids::TimeOffsetMs,
+        numeric::mebibytes_f64,
+        scenario::{RunOutput, Stack},
     },
-    ids::TimeOffsetMs,
-    numeric::mebibytes_f64,
-    scenario::{RunOutput, Stack},
+    krabka_units::prelude::*,
+    plotly::{
+        Bar, Layout, Plot, Scatter,
+        common::{ErrorData, ErrorType, Line, Mode, Title},
+        layout::{Axis, BarMode},
+    },
+    std::{
+        collections::BTreeMap,
+        fmt::{Arguments, Write},
+    },
 };
 
 fn push_fmt(output: &mut String, args: Arguments<'_>) {
@@ -376,12 +376,14 @@ fn escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-    use crate::{
-        ids::TimeOffsetMs,
-        scenario::{
-            Sample,
-            fixture::{RunSetup, empty_run as run},
+    use {
+        super::*,
+        crate::{
+            ids::TimeOffsetMs,
+            scenario::{
+                Sample,
+                fixture::{RunSetup, empty_run as run},
+            },
         },
     };
 

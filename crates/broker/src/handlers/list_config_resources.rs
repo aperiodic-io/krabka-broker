@@ -14,24 +14,25 @@
 //! `CLIENT_METRICS` enumerates configured subscription names from the
 //! metadata image (see `MetadataImage::client_metrics_subscriptions`).
 
-use krabka_metadata::AclOperation;
-use krabka_protocol::owned::{
-    list_config_resources_request::ListConfigResourcesRequest,
-    list_config_resources_response::{ConfigResource, ListConfigResourcesResponse},
-};
-
 #[cfg(test)]
 use crate::authorizer::SimpleAclAuthorizer;
-use crate::{
-    broker::Broker,
-    codes,
-    handlers::{
-        RequestContext, acl_denied,
-        acl_wire::CLUSTER_RESOURCE_NAME,
-        describe_configs::{
-            RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
-            RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{
+            RequestContext, acl_denied,
+            acl_wire::CLUSTER_RESOURCE_NAME,
+            describe_configs::{
+                RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
+                RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+            },
         },
+    },
+    krabka_metadata::AclOperation,
+    krabka_protocol::owned::{
+        list_config_resources_request::ListConfigResourcesRequest,
+        list_config_resources_response::{ConfigResource, ListConfigResourcesResponse},
     },
 };
 
@@ -103,9 +104,7 @@ pub(crate) fn handle(
 /// Whether `rt` is one of the types `ListConfigResourcesRequest.
 /// supportedResourceTypes()` reports at v1: `TOPIC`, `BROKER`,
 /// `BROKER_LOGGER`, `CLIENT_METRICS`, `GROUP`.
-fn is_supported_type(rt: i8) -> bool {
-    DEFAULT_RESOURCE_TYPES.contains(&rt)
-}
+fn is_supported_type(rt: i8) -> bool { DEFAULT_RESOURCE_TYPES.contains(&rt) }
 
 /// Resolve the effective filter and enumerate each requested type from the
 /// image, as Kafka's `KafkaApis.handleListConfigResources` does. v0 gives
@@ -189,14 +188,14 @@ fn collect_resources(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{BrokerRegistrationRecord, MetadataImage, MetadataRecord, TopicRecord};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{broker::BrokerHandle, test_support::DenyAll};
+    use {
+        super::*,
+        crate::{broker::BrokerHandle, test_support::DenyAll},
+        assert2::assert,
+        krabka_metadata::{BrokerRegistrationRecord, MetadataImage, MetadataRecord, TopicRecord},
+        std::sync::Arc,
+        uuid::Uuid,
+    };
 
     const VERSION: i16 = 1;
 
@@ -289,12 +288,10 @@ mod tests {
             (RESOURCE_TYPE_TOPIC, "t-b"),
         ];
         let cases: Vec<Case<'_>> = vec![
-            (
-                "v0 lists client metrics",
-                0,
-                vec![],
-                vec![(RESOURCE_TYPE_CLIENT_METRICS, "sub-1")],
-            ),
+            ("v0 lists client metrics", 0, vec![], vec![(
+                RESOURCE_TYPE_CLIENT_METRICS,
+                "sub-1",
+            )]),
             ("v1 empty filter lists every type", 1, vec![], all.to_vec()),
             (
                 "v1 repeated topic type lists once",
@@ -377,10 +374,11 @@ mod tests {
 
         for (name, resource_types) in [
             ("unsupported type alone", vec![64]),
-            (
-                "supported type mixed with unsupported",
-                vec![RESOURCE_TYPE_TOPIC, 64, RESOURCE_TYPE_BROKER],
-            ),
+            ("supported type mixed with unsupported", vec![
+                RESOURCE_TYPE_TOPIC,
+                64,
+                RESOURCE_TYPE_BROKER,
+            ]),
         ] {
             let req = ListConfigResourcesRequest {
                 resource_types,

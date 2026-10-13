@@ -21,20 +21,21 @@
 //! [`FollowedPartitions`] rather than by spawning and cancelling a task, so a
 //! reassignment does not redial the leader.
 
-use std::{
-    collections::BTreeMap,
-    hash::{Hash as _, Hasher as _},
-    path::PathBuf,
-    sync::{Arc, Mutex},
+use {
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    krabka_raft::NodeId,
+    krabka_security::ListenerProtocol,
+    std::{
+        collections::BTreeMap,
+        hash::{Hash as _, Hasher as _},
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
+    tokio_util::sync::CancellationToken,
+    tracing::{info, warn},
 };
-
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use krabka_raft::NodeId;
-use krabka_security::ListenerProtocol;
-use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
 
 /// Hold the current replication target through a mutation, or reject the stale row.
 macro_rules! lock_local_target {
@@ -67,14 +68,17 @@ mod session;
 mod test_support;
 mod truncation;
 
-use self::fetch_loop::run_fetcher_loop;
 pub(crate) use self::follower_throttle::ReplicaLag;
-use crate::{
-    broker::spawn_partition_with_replication_target, config::ReplicationRuntimeConfig,
-    log_dir::place_partition_dir_avoiding, log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource, metrics::BrokerMetrics, network::client::InterBrokerClient,
-    partition::ReplicationTarget, partition_registry::PartitionRegistry,
-    producer_state::ProducerState, throttle::ThrottleState,
+use {
+    self::fetch_loop::run_fetcher_loop,
+    crate::{
+        broker::spawn_partition_with_replication_target, config::ReplicationRuntimeConfig,
+        log_dir::place_partition_dir_avoiding, log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource, metrics::BrokerMetrics,
+        network::client::InterBrokerClient, partition::ReplicationTarget,
+        partition_registry::PartitionRegistry, producer_state::ProducerState,
+        throttle::ThrottleState,
+    },
 };
 
 /// Outbound dialer and pacing policy shared by the two replication loops.
@@ -381,12 +385,13 @@ fn task_replication_target(cfg: &Config) -> ReplicationTarget {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::replicator::test_support::{
-        LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID, image_with_leader,
-        image_with_topic_id_and_leader, test_config,
+    use {
+        super::*,
+        crate::replicator::test_support::{
+            LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID, image_with_leader,
+            image_with_topic_id_and_leader, test_config,
+        },
+        assert2::assert,
     };
 
     #[test]

@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use super::RemoteRetentionSegment;
+use {super::RemoteRetentionSegment, creusot_std::prelude::*};
 
 open_logic! {
 /// Prefix bytes charged to remote retention: log-start breaches are free,

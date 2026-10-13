@@ -5,10 +5,11 @@
 //! file, so the read path turns a requested offset into a position and then
 //! into an inclusive object-store byte range.
 
-use zerocopy::{BigEndian, FromBytes, Immutable, KnownLayout, Unaligned, byteorder::U32};
-
-use super::{BytePosition, RelativeOffset, corrupt_index};
-use crate::error::RemoteStorageError;
+use {
+    super::{BytePosition, RelativeOffset, corrupt_index},
+    crate::error::RemoteStorageError,
+    zerocopy::{BigEndian, FromBytes, Immutable, KnownLayout, Unaligned, byteorder::U32},
+};
 
 /// 8 bytes per entry: rel u32 BE, then pos u32 BE. It mirrors
 /// `krabka_log::index::OffsetEntryRaw`, so the remote-tier copy of an
@@ -80,9 +81,7 @@ pub fn position_for_relative_offset(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     fn offset_entries(pairs: &[(u32, u32)]) -> Vec<OffsetIndexEntry> {
         pairs

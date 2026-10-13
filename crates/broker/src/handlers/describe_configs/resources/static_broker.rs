@@ -62,23 +62,24 @@
 //! `offsets.retention.minutes=10080` -- Kafka's own default -- answers
 //! `synonyms={STATIC_BROKER_CONFIG:...=10080, DEFAULT_CONFIG:...=10080}`.
 
-use krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult;
-use krabka_units::{
-    Time,
-    convert::{ByteSizeExt as _, TimeExt as _},
-};
-
-use super::super::{
-    entry::{DefaultLayer, EntryOptions, Layer, config_entry},
-    wire::CONFIG_SOURCE_STATIC_BROKER,
-};
-use crate::{
-    config::{BrokerConfig, KAFKA_STATIC_KEYS, NodeRole},
-    config_keys::{
-        self,
-        registry::{self, ConfigScope},
+use {
+    super::super::{
+        entry::{DefaultLayer, EntryOptions, Layer, config_entry},
+        wire::CONFIG_SOURCE_STATIC_BROKER,
     },
-    cordoned_log_dirs::CORDONED_LOG_DIRS,
+    crate::{
+        config::{BrokerConfig, KAFKA_STATIC_KEYS, NodeRole},
+        config_keys::{
+            self,
+            registry::{self, ConfigScope},
+        },
+        cordoned_log_dirs::CORDONED_LOG_DIRS,
+    },
+    krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult,
+    krabka_units::{
+        Time,
+        convert::{ByteSizeExt as _, TimeExt as _},
+    },
 };
 
 /// One static broker setting as this node holds it: the value it runs with,

@@ -2,13 +2,14 @@
 //! comparison against the copying `encode_response` path, the frame-length
 //! accounting of the leading prefix.
 
-use krabka_protocol::Encode;
-
-use super::{
-    test_support::{inline_bytes, sample_response},
-    *,
+use {
+    super::{
+        test_support::{inline_bytes, sample_response},
+        *,
+    },
+    crate::handlers::fetch::encode_fetch_response,
+    krabka_protocol::Encode,
 };
-use crate::handlers::fetch::encode_fetch_response;
 
 fn empty_plan_body(
     response: &krabka_protocol::owned::fetch_response::FetchResponse,

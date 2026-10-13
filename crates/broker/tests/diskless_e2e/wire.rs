@@ -7,32 +7,32 @@
 //! object store on `OFFSET_OUT_OF_RANGE`. Driving either through an in-process
 //! shortcut would skip the code the suite exists to cover.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use bytes::{Bytes, BytesMut};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest},
-    primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch},
-};
-
-use crate::{
-    CLIENT_PRINCIPAL, PASSWORD, TOPIC,
-    support::{
-        self,
-        fetch::{
-            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+use {
+    crate::{
+        CLIENT_PRINCIPAL, PASSWORD, TOPIC,
+        support::{
+            self,
+            fetch::{
+                FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+                SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+            },
+            offsets::{
+                delete_records_partition, delete_records_request, delete_records_topic,
+                list_offset_partition, single_partition_list_offsets,
+            },
+            produce::{SinglePartitionProduceSetup, batch_request, send_batch},
+            records::batch_from_records,
         },
-        offsets::{
-            delete_records_partition, delete_records_request, delete_records_topic,
-            list_offset_partition, single_partition_list_offsets,
-        },
-        produce::{SinglePartitionProduceSetup, batch_request, send_batch},
-        records::batch_from_records,
     },
+    assert2::assert,
+    bytes::{Bytes, BytesMut},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest},
+        primitives::uuid::Uuid as WireUuid,
+        records::{Record, RecordBatch},
+    },
+    std::time::{Duration, Instant},
 };
 
 /// Kafka `NOT_LEADER_OR_FOLLOWER`. The Produce handler returns it before it
@@ -107,15 +107,11 @@ async fn produce_one(client: &Client, topic_id: WireUuid, value: Bytes, index: u
     let deadline = Instant::now() + Duration::from_mins(1);
     loop {
         let batch = stamped_batch(value.clone());
-        let response = send_batch(
-            &client,
-            batch,
-            SinglePartitionProduceSetup {
-                topic: (TOPIC).into(),
-                topic_id,
-                ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
-            },
-        )
+        let response = send_batch(&client, batch, SinglePartitionProduceSetup {
+            topic: (TOPIC).into(),
+            topic_id,
+            ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
+        })
         .await;
         let partition = &response.responses[0].partition_responses[0];
         match partition.error_code {
@@ -255,14 +251,11 @@ pub(crate) async fn produce_until_stopped(
     while !stop.is_cancelled() {
         let batch = stamped_batch(Bytes::from(format!("diskless-e2e-churn-{index:04}")));
         let _ = client
-            .send(batch_request(
-                batch,
-                SinglePartitionProduceSetup {
-                    topic: (TOPIC).into(),
-                    topic_id,
-                    ..SinglePartitionProduceSetup::replicated()
-                },
-            ))
+            .send(batch_request(batch, SinglePartitionProduceSetup {
+                topic: (TOPIC).into(),
+                topic_id,
+                ..SinglePartitionProduceSetup::replicated()
+            }))
             .await;
         index += 1;
         tokio::time::sleep(Duration::from_millis(5)).await;
@@ -295,10 +288,9 @@ pub(crate) async fn delete_records_below(bootstrap: &str, offset: i64) -> i64 {
     let client = support::sasl_client(bootstrap, CLIENT_PRINCIPAL, PASSWORD).await;
     let response = client
         .send(delete_records_request(
-            vec![delete_records_topic(
-                TOPIC,
-                vec![delete_records_partition(0, offset)],
-            )],
+            vec![delete_records_topic(TOPIC, vec![delete_records_partition(
+                0, offset,
+            )])],
             10_000,
         ))
         .await
@@ -317,13 +309,10 @@ pub(crate) async fn earliest_offset(bootstrap: &str) -> i64 {
     let response = client
         .send(ListOffsetsRequest {
             replica_id: -1,
-            ..single_partition_list_offsets(
-                TOPIC,
-                ListOffsetsPartition {
-                    current_leader_epoch: -1,
-                    ..list_offset_partition(0, EARLIEST_TIMESTAMP)
-                },
-            )
+            ..single_partition_list_offsets(TOPIC, ListOffsetsPartition {
+                current_leader_epoch: -1,
+                ..list_offset_partition(0, EARLIEST_TIMESTAMP)
+            })
         })
         .await
         .expect("ListOffsets");

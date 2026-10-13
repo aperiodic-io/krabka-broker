@@ -38,47 +38,27 @@ pub(crate) fn ports() -> &'static Ports {
     })
 }
 
-pub(crate) fn broker0_advertised() -> &'static str {
-    &ports().advertised[0]
-}
+pub(crate) fn broker0_advertised() -> &'static str { &ports().advertised[0] }
 
-pub(crate) fn broker0_listen() -> &'static str {
-    &ports().client[0]
-}
+pub(crate) fn broker0_listen() -> &'static str { &ports().client[0] }
 
-pub(crate) fn controller_addr_0() -> &'static str {
-    &ports().controller[0]
-}
+pub(crate) fn controller_addr_0() -> &'static str { &ports().controller[0] }
 
-pub(crate) fn broker1_advertised() -> &'static str {
-    &ports().advertised[1]
-}
+pub(crate) fn broker1_advertised() -> &'static str { &ports().advertised[1] }
 
-pub(crate) fn broker1_listen() -> &'static str {
-    &ports().client[1]
-}
+pub(crate) fn broker1_listen() -> &'static str { &ports().client[1] }
 
-pub(crate) fn controller_addr_1() -> &'static str {
-    &ports().controller[1]
-}
+pub(crate) fn controller_addr_1() -> &'static str { &ports().controller[1] }
 
-pub(crate) fn broker2_advertised() -> &'static str {
-    &ports().advertised[2]
-}
+pub(crate) fn broker2_advertised() -> &'static str { &ports().advertised[2] }
 
-pub(crate) fn broker2_listen() -> &'static str {
-    &ports().client[2]
-}
+pub(crate) fn broker2_listen() -> &'static str { &ports().client[2] }
 
-pub(crate) fn controller_addr_2() -> &'static str {
-    &ports().controller[2]
-}
+pub(crate) fn controller_addr_2() -> &'static str { &ports().controller[2] }
 
 /// Broker 0 over loopback. The tests' own clients use this; only the containers
 /// use the advertised `host.docker.internal` name.
-pub(crate) fn rlmm_broker0_advertised() -> &'static str {
-    &ports().loopback
-}
+pub(crate) fn rlmm_broker0_advertised() -> &'static str { &ports().loopback }
 
 pub(crate) fn host_port() -> u16 {
     ports().client[0]
@@ -88,9 +68,7 @@ pub(crate) fn host_port() -> u16 {
         .expect("client addr has a numeric port")
 }
 
-pub(crate) fn minio_port() -> u16 {
-    ports().minio
-}
+pub(crate) fn minio_port() -> u16 { ports().minio }
 
 /// The first `N` broker endpoints allocated for this test process.
 pub(crate) fn cluster_listeners<const N: usize>() -> [JvmListeners; N] {

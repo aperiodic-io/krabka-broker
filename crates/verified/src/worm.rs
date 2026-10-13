@@ -147,12 +147,13 @@ worm_object_set_kernel! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{
-        WormDigestFacts, WormObjectAvailabilityFacts, WormObjectIdentityFacts,
-        WormObjectSetDecision, WormObjectSetFacts, WormSignatureDecision, worm_object_set_decision,
-        worm_signature_decision,
+    use {
+        super::{
+            WormDigestFacts, WormObjectAvailabilityFacts, WormObjectIdentityFacts,
+            WormObjectSetDecision, WormObjectSetFacts, WormSignatureDecision,
+            worm_object_set_decision, worm_signature_decision,
+        },
+        assert2::assert,
     };
 
     #[test]

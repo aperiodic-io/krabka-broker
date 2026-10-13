@@ -2,18 +2,18 @@
 //! advanced LRU clock, and builders for the `FetchRequest` and `FetchTopic`
 //! values that the tests feed to it.
 
-use std::sync::Arc;
-
-use krabka_ids::PartitionIndex;
-use krabka_protocol::{
-    owned::fetch_request::{FetchPartition, FetchRequest, FetchTopic, ForgottenTopic},
-    primitives::uuid::Uuid as WireUuid,
-};
-use qubit_clock::ManualMonotonicClock;
-
-use super::{
-    CachedPartitionState, FetchSessionId, FetchSessionKey, SessionDecision,
-    cache::FetchSessionCache,
+use {
+    super::{
+        CachedPartitionState, FetchSessionId, FetchSessionKey, SessionDecision,
+        cache::FetchSessionCache,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_protocol::{
+        owned::fetch_request::{FetchPartition, FetchRequest, FetchTopic, ForgottenTopic},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    qubit_clock::ManualMonotonicClock,
+    std::sync::Arc,
 };
 
 #[derive(Clone, Copy)]
@@ -124,24 +124,21 @@ pub(super) fn seed_resolved_partition(
     cache: &FetchSessionCache,
     topic_id: WireUuid,
 ) -> FetchSessionId {
-    allocate_session(
-        cache,
-        SessionAllocationSetup {
-            partitions: vec![(
-                FetchSessionKey {
-                    topic_name: "t".into(),
-                    topic_id,
-                    partition: 0,
-                },
-                CachedPartitionState {
-                    fetch_offset: 5,
-                    max_bytes: 1024,
-                    ..Default::default()
-                },
-            )],
-            ..Default::default()
-        },
-    )
+    allocate_session(cache, SessionAllocationSetup {
+        partitions: vec![(
+            FetchSessionKey {
+                topic_name: "t".into(),
+                topic_id,
+                partition: 0,
+            },
+            CachedPartitionState {
+                fetch_offset: 5,
+                max_bytes: 1024,
+                ..Default::default()
+            },
+        )],
+        ..Default::default()
+    })
 }
 
 pub(super) fn error_code(cache: &FetchSessionCache, request: &FetchRequest, version: i16) -> i16 {

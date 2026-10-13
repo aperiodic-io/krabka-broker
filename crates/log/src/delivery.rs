@@ -11,9 +11,7 @@
 //! change it is recomputed from the segments, and a recomputation can only
 //! agree with what the records say.
 
-use krabka_ids::Offset;
-
-use crate::DeliveryPolicy;
+use {crate::DeliveryPolicy, krabka_ids::Offset};
 
 /// Result of
 /// [`Log::advance_delivery_watermark`](crate::Log::advance_delivery_watermark).
@@ -87,9 +85,7 @@ pub(crate) fn coalesce_ranges(ranges: Vec<(Offset, Offset)>) -> Vec<(Offset, Off
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn adjacent_and_overlapping_ranges_merge_but_separated_ones_do_not() {

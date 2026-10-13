@@ -4,10 +4,11 @@
 //! `submit_change` call, so an approval and the thaw it authorized reach the
 //! metadata log together or not at all.
 
-use krabka_metadata::MetadataRecord;
-
-use super::outcome::{Accepted, Refusal};
-use crate::{broker::Broker, codes, handlers::submit_failure_code};
+use {
+    super::outcome::{Accepted, Refusal},
+    crate::{broker::Broker, codes, handlers::submit_failure_code},
+    krabka_metadata::MetadataRecord,
+};
 
 /// Write the accepted records in one raft append.
 ///

@@ -1,7 +1,6 @@
 //! Broker adapters for the proved metadata-epoch successor.
 
-use krabka_metadata::LeaderEpoch;
-use krabka_verified::exact_epoch_successor;
+use {krabka_metadata::LeaderEpoch, krabka_verified::exact_epoch_successor};
 
 /// Advance a Kafka `int32` epoch exactly, rejecting exhaustion.
 pub(crate) fn next_i32(current: i32) -> Option<i32> {
@@ -30,15 +29,14 @@ pub(crate) fn next_partition_change(
 }
 
 /// Advance a barrier epoch exactly, rejecting exhaustion.
-pub(crate) fn next_i64(current: i64) -> Option<i64> {
-    exact_epoch_successor(current, i64::MAX)
-}
+pub(crate) fn next_i64(current: i64) -> Option<i64> { exact_epoch_successor(current, i64::MAX) }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{LeaderEpoch, next_i32, next_i64, next_leader, next_partition_change};
+    use {
+        super::{LeaderEpoch, next_i32, next_i64, next_leader, next_partition_change},
+        assert2::assert,
+    };
 
     #[test]
     fn int32_adapter_preserves_the_exact_boundary() {

@@ -1,33 +1,32 @@
 //! What `#[human_units]` gives a config struct: human strings in and out
 //! through serde, and a JSON Schema that names each field's unit.
 
-use assert2::assert;
-use krabka_units::{
-    ByteSize, Time,
-    prelude::{TimeExt as _, mebibytes, secs},
+use {
+    assert2::assert,
+    krabka_units::{
+        ByteSize, Time,
+        prelude::{TimeExt as _, mebibytes, secs},
+    },
+    schemars::JsonSchema,
+    serde::{Deserialize, Serialize},
+    serde_json::json,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 /// The markers the expansion names. The broker's own copy is
 /// `krabka_broker::file_config::schema_units`.
 mod file_config {
     pub mod schema_units {
-        use std::borrow::Cow;
-
-        use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+        use {
+            schemars::{JsonSchema, Schema, SchemaGenerator, json_schema},
+            std::borrow::Cow,
+        };
 
         pub struct Duration;
 
         impl JsonSchema for Duration {
-            fn schema_name() -> Cow<'static, str> {
-                Cow::Borrowed("Duration")
-            }
+            fn schema_name() -> Cow<'static, str> { Cow::Borrowed("Duration") }
 
-            fn inline_schema() -> bool {
-                true
-            }
+            fn inline_schema() -> bool { true }
 
             fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
                 json_schema!({ "type": "string", "format": "duration" })
@@ -37,13 +36,9 @@ mod file_config {
         pub struct ByteSize;
 
         impl JsonSchema for ByteSize {
-            fn schema_name() -> Cow<'static, str> {
-                Cow::Borrowed("ByteSize")
-            }
+            fn schema_name() -> Cow<'static, str> { Cow::Borrowed("ByteSize") }
 
-            fn inline_schema() -> bool {
-                true
-            }
+            fn inline_schema() -> bool { true }
 
             fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
                 json_schema!({ "type": "string", "format": "byte-size" })

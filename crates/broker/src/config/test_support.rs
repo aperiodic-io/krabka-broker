@@ -1,12 +1,13 @@
 //! Fixtures the configuration unit tests share: the invalid-runtime
 //! assertion, a well-formed two-listener config, and the witness role set.
 
-use assert2::assert;
-use krabka_security::{ListenerProtocol, SaslMechanism};
-
-use crate::{
-    BrokerError,
-    config::{BrokerConfig, ListenerSpec, NodeRole},
+use {
+    crate::{
+        BrokerError,
+        config::{BrokerConfig, ListenerSpec, NodeRole},
+    },
+    assert2::assert,
+    krabka_security::{ListenerProtocol, SaslMechanism},
 };
 
 pub type RuntimeInvalidator = (&'static str, fn(&mut BrokerConfig));

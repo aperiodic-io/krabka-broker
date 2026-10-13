@@ -74,12 +74,13 @@ pub(crate) fn decode_injection_start(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        barrier::persistence::test_support::sample_injection_start,
-        coordinator::unified::persistence::MAX_STRING_BYTES,
+    use {
+        super::*,
+        crate::{
+            barrier::persistence::test_support::sample_injection_start,
+            coordinator::unified::persistence::MAX_STRING_BYTES,
+        },
+        assert2::assert,
     };
 
     #[test]

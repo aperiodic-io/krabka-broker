@@ -1,8 +1,6 @@
 //! KIP-951 endpoint projection shared by Fetch, Produce and the share RPCs.
 
-use krabka_metadata::MetadataImage;
-
-use crate::handlers::metadata::pick_endpoint_host_port;
+use {crate::handlers::metadata::pick_endpoint_host_port, krabka_metadata::MetadataImage};
 
 #[cfg(test)]
 pub(crate) mod test_support;

@@ -2,29 +2,31 @@
 //! running broker: the authorization gate, the per-topic error rows, the
 //! `validate_only` dry run, a successful grow, and the KIP-599 mutation quota.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_protocol::owned::create_partitions_response::CreatePartitionsResponse;
-use krabka_units::convert::TimeExt as _;
-
-use super::*;
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::{Broker, BrokerHandle},
-    handlers::{
-        RequestContext,
-        create_partitions::test_support::{
-            PartitionMutation, PartitionTopicSetup, SeedTopicSetup, VERSION, assn,
-            expected_response, expected_result, request, seed_controller_quota, seed_topic,
-            topic_req,
+use {
+    super::*,
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::{Broker, BrokerHandle},
+        handlers::{
+            RequestContext,
+            create_partitions::test_support::{
+                PartitionMutation, PartitionTopicSetup, SeedTopicSetup, VERSION, assn,
+                expected_response, expected_result, request, seed_controller_quota, seed_topic,
+                topic_req,
+            },
+            test_support::{
+                TopicPartitionCount, replica_availability, replica_nodes_from_partitions,
+            },
         },
-        test_support::{TopicPartitionCount, replica_availability, replica_nodes_from_partitions},
+        test_support::{
+            DenyAll, begin_controlled_shutdown, fence_remote_broker, make_witness, peer, principal,
+            seed_remote_broker,
+        },
     },
-    test_support::{
-        DenyAll, begin_controlled_shutdown, fence_remote_broker, make_witness, peer, principal,
-        seed_remote_broker,
-    },
+    assert2::{assert, check},
+    krabka_protocol::owned::create_partitions_response::CreatePartitionsResponse,
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
 };
 
 crate::test_support::context_helper!(client_id = "admin-client");
@@ -71,69 +73,58 @@ macro_rules! seeded_partition_topic {
 async fn handle_denies_topic_alter_for_each_topic() {
     broker_fixture!((broker_handle, _dir, broker), deny_all);
     request_identity!((p, peer), principal("alice"));
-    check_topic_rows(
-        &broker,
-        &test_context(&p, &peer),
-        PartitionRowsCaseSetup {
-            topics: vec![
-                topic_req(PartitionTopicSetup {
-                    name: "orders",
-                    count: crate::handlers::test_support::TopicPartitionCount(2),
-                    ..Default::default()
-                }),
-                topic_req(PartitionTopicSetup {
-                    name: "payments",
-                    count: crate::handlers::test_support::TopicPartitionCount(2),
-                    ..Default::default()
-                }),
-            ],
-            expected: vec![
-                expected_result("orders", codes::TOPIC_AUTHORIZATION_FAILED, None),
-                expected_result("payments", codes::TOPIC_AUTHORIZATION_FAILED, None),
-            ],
-            ..Default::default()
-        },
-    )
+    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
+        topics: vec![
+            topic_req(PartitionTopicSetup {
+                name: "orders",
+                count: crate::handlers::test_support::TopicPartitionCount(2),
+                ..Default::default()
+            }),
+            topic_req(PartitionTopicSetup {
+                name: "payments",
+                count: crate::handlers::test_support::TopicPartitionCount(2),
+                ..Default::default()
+            }),
+        ],
+        expected: vec![
+            expected_result("orders", codes::TOPIC_AUTHORIZATION_FAILED, None),
+            expected_result("payments", codes::TOPIC_AUTHORIZATION_FAILED, None),
+        ],
+        ..Default::default()
+    })
     .await;
     broker_handle.shutdown().await;
 }
 
 #[tokio::test]
 async fn handle_reports_unknown_topic_and_rejects_same_partition_count() {
-    seeded_partition_topic!(
-        (broker_handle, _dir, broker),
-        SeedTopicSetup {
-            name: "stable",
-            ..Default::default()
-        }
-    );
+    seeded_partition_topic!((broker_handle, _dir, broker), SeedTopicSetup {
+        name: "stable",
+        ..Default::default()
+    });
     request_identity!((p, peer), principal("admin"));
-    check_topic_rows(
-        &broker,
-        &test_context(&p, &peer),
-        PartitionRowsCaseSetup {
-            topics: vec![
-                topic_req(PartitionTopicSetup {
-                    name: "missing",
-                    ..Default::default()
-                }),
-                topic_req(PartitionTopicSetup {
-                    name: "stable",
-                    count: crate::handlers::test_support::TopicPartitionCount(2),
-                    ..Default::default()
-                }),
-            ],
-            expected: vec![
-                expected_result("missing", codes::UNKNOWN_TOPIC_OR_PARTITION, None),
-                expected_result(
-                    "stable",
-                    codes::INVALID_PARTITIONS,
-                    Some("Topic already has 2 partition(s).".into()),
-                ),
-            ],
-            ..Default::default()
-        },
-    )
+    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
+        topics: vec![
+            topic_req(PartitionTopicSetup {
+                name: "missing",
+                ..Default::default()
+            }),
+            topic_req(PartitionTopicSetup {
+                name: "stable",
+                count: crate::handlers::test_support::TopicPartitionCount(2),
+                ..Default::default()
+            }),
+        ],
+        expected: vec![
+            expected_result("missing", codes::UNKNOWN_TOPIC_OR_PARTITION, None),
+            expected_result(
+                "stable",
+                codes::INVALID_PARTITIONS,
+                Some("Topic already has 2 partition(s).".into()),
+            ),
+        ],
+        ..Default::default()
+    })
     .await;
     assert!(
         broker_handle
@@ -152,18 +143,14 @@ async fn validate_only_reports_success_without_adding_partitions() {
         SeedTopicSetup::single_partition("dry-run")
     );
     request_identity!((p, peer), principal("admin"));
-    check_topic_rows(
-        &broker,
-        &test_context(&p, &peer),
-        PartitionRowsCaseSetup {
-            topics: vec![topic_req(PartitionTopicSetup {
-                name: "dry-run",
-                ..Default::default()
-            })],
-            expected: vec![expected_result("dry-run", codes::NONE, None)],
-            mutation: PartitionMutation::Validate,
-        },
-    )
+    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
+        topics: vec![topic_req(PartitionTopicSetup {
+            name: "dry-run",
+            ..Default::default()
+        })],
+        expected: vec![expected_result("dry-run", codes::NONE, None)],
+        mutation: PartitionMutation::Validate,
+    })
     .await;
     assert!(
         broker_handle
@@ -182,19 +169,15 @@ async fn handle_adds_new_partitions_and_preserves_response_identity() {
         SeedTopicSetup::single_partition("grow")
     );
     request_identity!((p, peer), principal("admin"));
-    check_topic_rows(
-        &broker,
-        &test_context(&p, &peer),
-        PartitionRowsCaseSetup {
-            topics: vec![topic_req(PartitionTopicSetup {
-                name: "grow",
-                assignments: Some(vec![assn(&[1]), assn(&[1])]),
-                ..Default::default()
-            })],
-            expected: vec![expected_result("grow", codes::NONE, None)],
+    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
+        topics: vec![topic_req(PartitionTopicSetup {
+            name: "grow",
+            assignments: Some(vec![assn(&[1]), assn(&[1])]),
             ..Default::default()
-        },
-    )
+        })],
+        expected: vec![expected_result("grow", codes::NONE, None)],
+        ..Default::default()
+    })
     .await;
     assert!(
         broker_handle
@@ -253,28 +236,21 @@ async fn handle_rejects_an_unplaceable_new_diskless_partition() {
 
 #[tokio::test]
 async fn strict_create_partitions_rejects_after_quota_exhaustion() {
-    seeded_partition_topic!(
-        (broker_handle, _dir, broker),
-        SeedTopicSetup {
-            name: "metered",
-            ..Default::default()
-        }
-    );
+    seeded_partition_topic!((broker_handle, _dir, broker), SeedTopicSetup {
+        name: "metered",
+        ..Default::default()
+    });
     seed_controller_quota(&broker_handle, 2.0).await;
     request_identity!((p, peer), principal("admin"));
-    check_topic_rows(
-        &broker,
-        &test_context(&p, &peer),
-        PartitionRowsCaseSetup {
-            topics: vec![topic_req(PartitionTopicSetup {
-                name: "metered",
-                count: crate::handlers::test_support::TopicPartitionCount(5),
-                ..Default::default()
-            })],
-            expected: vec![expected_result("metered", codes::NONE, None)],
+    check_topic_rows(&broker, &test_context(&p, &peer), PartitionRowsCaseSetup {
+        topics: vec![topic_req(PartitionTopicSetup {
+            name: "metered",
+            count: crate::handlers::test_support::TopicPartitionCount(5),
             ..Default::default()
-        },
-    )
+        })],
+        expected: vec![expected_result("metered", codes::NONE, None)],
+        ..Default::default()
+    })
     .await;
 
     let rejected = drive(
@@ -450,30 +426,18 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
     use crate::handlers::test_support::ManualAssignmentRow as Row;
     let n = krabka_raft::NodeId;
     let rows: [Row; 6] = [
-        (
-            &[],
-            &[],
-            &[&[2, 3]],
-            codes::NONE,
-            None,
-            vec![(n(2), vec![n(2), n(3)])],
-        ),
-        (
-            &[2],
-            &[],
-            &[&[2, 3]],
-            codes::NONE,
-            None,
-            vec![(n(3), vec![n(3)])],
-        ),
-        (
-            &[2],
-            &[],
-            &[&[4, 2], &[2, 3]],
-            codes::NONE,
-            None,
-            vec![(n(4), vec![n(4)]), (n(3), vec![n(3)])],
-        ),
+        (&[], &[], &[&[2, 3]], codes::NONE, None, vec![(n(2), vec![
+            n(2),
+            n(3),
+        ])]),
+        (&[2], &[], &[&[2, 3]], codes::NONE, None, vec![(
+            n(3),
+            vec![n(3)],
+        )]),
+        (&[2], &[], &[&[4, 2], &[2, 3]], codes::NONE, None, vec![
+            (n(4), vec![n(4)]),
+            (n(3), vec![n(3)]),
+        ]),
         (
             &[2, 3],
             &[],
@@ -496,14 +460,10 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
             ),
             vec![],
         ),
-        (
-            &[],
-            &[3],
-            &[&[3, 4]],
-            codes::NONE,
-            None,
-            vec![(n(4), vec![n(3), n(4)])],
-        ),
+        (&[], &[3], &[&[3, 4]], codes::NONE, None, vec![(
+            n(4),
+            vec![n(3), n(4)],
+        )]),
     ];
 
     for (fenced, witnesses, lists, error_code, error_message, partitions) in rows {

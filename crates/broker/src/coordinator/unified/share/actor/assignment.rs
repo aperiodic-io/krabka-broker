@@ -3,22 +3,22 @@
 //! it sits apart from the actor loop because it is pure, synchronous
 //! state-machine work with no log or persister access.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
-
-use krabka_protocol::primitives::uuid::Uuid;
-
-use crate::coordinator::unified::{
-    actor::MetadataProvider,
-    assignor::{GroupSpec, MemberSubscription, SubscriptionShape, subscription_type},
-    reconciler::ReconcileInput,
-    share::{
-        assignor::ShareGroupAssignor,
-        state::{ShareGroupState, ShareMemberState},
+use {
+    crate::coordinator::unified::{
+        actor::MetadataProvider,
+        assignor::{GroupSpec, MemberSubscription, SubscriptionShape, subscription_type},
+        reconciler::ReconcileInput,
+        share::{
+            assignor::ShareGroupAssignor,
+            state::{ShareGroupState, ShareMemberState},
+        },
+        wall_clock_ms,
     },
-    wall_clock_ms,
+    krabka_protocol::primitives::uuid::Uuid,
+    std::{
+        collections::{HashMap, HashSet},
+        time::Duration,
+    },
 };
 
 /// The group epoch cannot move past `i32::MAX`.
@@ -164,13 +164,13 @@ fn resolve_subscribed_topic_ids(member: &ShareMemberState, input: &ReconcileInpu
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, time::Duration};
-
-    use assert2::{assert, check};
-
-    use super::{
-        EpochExhausted, MetadataProvider, ReconcileInput, ShareGroupState, ShareMemberState, Uuid,
-        reconcile,
+    use {
+        super::{
+            EpochExhausted, MetadataProvider, ReconcileInput, ShareGroupState, ShareMemberState,
+            Uuid, reconcile,
+        },
+        assert2::{assert, check},
+        std::{collections::HashSet, time::Duration},
     };
 
     #[derive(Debug)]
@@ -252,11 +252,13 @@ mod tests {
     /// `0505..05-0505..05`, with one and with two partitions and no racks.
     #[test]
     fn a_replayed_hash_decides_the_first_epoch_bump() {
-        use super::super::seed::apply_seed;
-        use crate::coordinator::unified::{
-            ShareGroupSeed,
-            share::persistence::{
-                ShareGroupCurrentMemberAssignmentValue, ShareGroupMemberMetadataValue,
+        use {
+            super::super::seed::apply_seed,
+            crate::coordinator::unified::{
+                ShareGroupSeed,
+                share::persistence::{
+                    ShareGroupCurrentMemberAssignmentValue, ShareGroupMemberMetadataValue,
+                },
             },
         };
 
@@ -277,35 +279,26 @@ mod tests {
         ];
         for (case, stored, partitions, expected) in rows {
             let mut state = ShareGroupState::new("g");
-            apply_seed(
-                &mut state,
-                ShareGroupSeed {
-                    group_epoch: 3,
-                    metadata_hash: stored,
-                    target_epoch: 3,
-                    assignment_timestamp_ms: 0,
-                    members: [(
-                        "m".to_owned(),
-                        ShareGroupMemberMetadataValue {
-                            rack_id: None,
-                            client_id: "client".into(),
-                            client_host: "host".into(),
-                            subscribed_topic_names: vec!["t".into()],
-                        },
-                    )]
-                    .into(),
-                    current_per_member: [(
-                        "m".to_owned(),
-                        ShareGroupCurrentMemberAssignmentValue {
-                            member_epoch: 3,
-                            previous_member_epoch: 2,
-                            assigned_partitions: vec![],
-                        },
-                    )]
-                    .into(),
-                    ..ShareGroupSeed::default()
-                },
-            );
+            apply_seed(&mut state, ShareGroupSeed {
+                group_epoch: 3,
+                metadata_hash: stored,
+                target_epoch: 3,
+                assignment_timestamp_ms: 0,
+                members: [("m".to_owned(), ShareGroupMemberMetadataValue {
+                    rack_id: None,
+                    client_id: "client".into(),
+                    client_host: "host".into(),
+                    subscribed_topic_names: vec!["t".into()],
+                })]
+                .into(),
+                current_per_member: [("m".to_owned(), ShareGroupCurrentMemberAssignmentValue {
+                    member_epoch: 3,
+                    previous_member_epoch: 2,
+                    assigned_partitions: vec![],
+                })]
+                .into(),
+                ..ShareGroupSeed::default()
+            });
             check!(
                 reconcile(
                     &mut state,

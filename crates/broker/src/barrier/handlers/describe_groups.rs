@@ -12,19 +12,20 @@
 //! Authorization: `Describe` on `Cluster("kafka-cluster")`. On a deny every row
 //! carries `CLUSTER_AUTHORIZATION_FAILED` (31).
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::krabka::barrier::{
-    DescribeBarrierGroupsRequest, DescribeBarrierGroupsResponse, DescribedBarrierGroup,
-};
-
-use crate::{
-    barrier::{
-        STATE_TOPIC,
-        coordinator::{BarrierCoordinator, GroupDescription},
-        handlers::{cluster_describe_denied, interval_to_wire},
+use {
+    crate::{
+        barrier::{
+            STATE_TOPIC,
+            coordinator::{BarrierCoordinator, GroupDescription},
+            handlers::{cluster_describe_denied, interval_to_wire},
+        },
+        codes,
+        handlers::encode_response,
     },
-    codes,
-    handlers::encode_response,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::krabka::barrier::{
+        DescribeBarrierGroupsRequest, DescribeBarrierGroupsResponse, DescribedBarrierGroup,
+    },
 };
 
 /// The `coordinator_id` of a group that no broker coordinates now.
@@ -141,11 +142,7 @@ fn response(groups: Vec<DescribedBarrierGroup>) -> DescribeBarrierGroupsResponse
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::barrier::persistence::GroupValue;
+    use {super::*, crate::barrier::persistence::GroupValue, assert2::check, krabka_units::millis};
 
     fn description() -> GroupDescription {
         GroupDescription {

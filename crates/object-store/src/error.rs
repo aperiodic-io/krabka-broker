@@ -1,8 +1,6 @@
 //! Error taxonomy for object-store construction and access.
 
-use object_store::path::Path as ObjectPath;
-
-use super::object_store_api as object_store;
+use {super::object_store_api as object_store, object_store::path::Path as ObjectPath};
 
 /// Errors raised by the object-store substrate.
 #[derive(Debug, thiserror::Error)]
@@ -67,9 +65,10 @@ impl From<object_store::Error> for ObjectStoreError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{object_store, *};
+    use {
+        super::{object_store, *},
+        assert2::assert,
+    };
 
     #[test]
     fn io_error_converts_via_from() {

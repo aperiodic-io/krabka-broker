@@ -21,23 +21,23 @@
 //! Windows-gated like the other multi-broker tests, because openraft's
 //! `debug_assert!` races on the hosted Windows scheduler.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_client_consumer::AutoOffsetReset;
-use krabka_client_producer::{Acks, Producer};
-use support::cluster_lock;
-
-use crate::support::{
-    client::{connect_client, create_topic},
-    consumer_groups::{collect_routing_values, routing_consumer},
-    partitions::require_non_bootstrap_partitions,
-    producer::{ProducerRecordSetup, producer_record},
-    registered_cluster, shutdown_cluster,
+use {
+    crate::support::{
+        client::{connect_client, create_topic},
+        consumer_groups::{collect_routing_values, routing_consumer},
+        partitions::require_non_bootstrap_partitions,
+        producer::{ProducerRecordSetup, producer_record},
+        registered_cluster, shutdown_cluster,
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_client_consumer::AutoOffsetReset,
+    krabka_client_producer::{Acks, Producer},
+    std::{
+        collections::{HashMap, HashSet},
+        time::Duration,
+    },
+    support::cluster_lock,
 };
 
 mod support;

@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    RestoreBatchFrame, RestoreExclusions, RestoreFilterDecision, RestoreReconcileDecision,
-    RestoreRecordDeltas, RestoreSnapshotState, RestoreTimestampType,
+use {
+    super::{
+        RestoreBatchFrame, RestoreExclusions, RestoreFilterDecision, RestoreReconcileDecision,
+        RestoreRecordDeltas, RestoreSnapshotState, RestoreTimestampType,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

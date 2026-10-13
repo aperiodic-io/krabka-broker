@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{DeleteRecordsTrimApplication, DeleteRecordsTrimDecision, DeleteRecordsTrimFacts};
+use {
+    super::{DeleteRecordsTrimApplication, DeleteRecordsTrimDecision, DeleteRecordsTrimFacts},
+    creusot_std::prelude::*,
+};
 
 /// Admit a trim and cap it at every logical deletion frontier.
 ///

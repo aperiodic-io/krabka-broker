@@ -6,11 +6,12 @@
 //! session refresh that `OffsetMetadataManager.validateOffsetCommit` runs
 //! after it. [`validate_commit`] is the transactional rule.
 
-use std::time::Instant;
-
-use crate::{
-    codes,
-    coordinator::unified::classic_state::{ClassicGroup as ClassicState, GroupState},
+use {
+    crate::{
+        codes,
+        coordinator::unified::classic_state::{ClassicGroup as ClassicState, GroupState},
+    },
+    std::time::Instant,
 };
 
 /// Kafka's `ClassicGroup.validateOffsetCommit` for an `OffsetCommit`
@@ -96,12 +97,10 @@ pub(crate) fn validate_commit(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::classic_ops::test_support::stable_two_member_group;
+    use {
+        super::*, crate::coordinator::unified::classic_ops::test_support::stable_two_member_group,
+        assert2::assert, std::time::Duration,
+    };
 
     #[test]
     fn validate_commit_branches() {

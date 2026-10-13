@@ -1,11 +1,12 @@
 //! `#[derive(RefinedNewtype)]`: see the crate documentation.
 
-use moxy::{
-    ast::{Attributed, ItemStruct, ParseError},
-    token::{Ident, LitStr, Spanner, ToTokenStream, TokenStream},
+use {
+    crate::meta::{Tokens, inner_type},
+    moxy::{
+        ast::{Attributed, ItemStruct, ParseError},
+        token::{Ident, LitStr, Spanner, ToTokenStream, TokenStream},
+    },
 };
-
-use crate::meta::{Tokens, inner_type};
 
 /// The tokens inside a `key(...)` argument. A type with generic arguments
 /// goes here rather than after `=`, where moxy reads an expression and stops

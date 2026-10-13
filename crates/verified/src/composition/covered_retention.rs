@@ -1,12 +1,14 @@
-use creusot_std::prelude::*;
-
-use crate::retention::{
-    LocalRetentionSegment, local_retention_prefix, remote_covered_through, retention_delete_target,
-};
 #[cfg(creusot)]
 use crate::retention::{
     local_prefix_bytes, local_prefix_bytes_monotone, local_retention_limit, local_retention_model,
     remote_covers_offset, remote_ranges_valid,
+};
+use {
+    crate::retention::{
+        LocalRetentionSegment, local_retention_prefix, remote_covered_through,
+        retention_delete_target,
+    },
+    creusot_std::prelude::*,
 };
 
 type CoveredRetention = (Option<i64>, Vec<LocalRetentionSegment>, usize, Option<i64>);

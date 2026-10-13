@@ -3,17 +3,17 @@
 //! own file because presenting group state is separate from the state machine
 //! that maintains it.
 
-use std::collections::HashMap;
-
-use krabka_protocol::{
-    owned::share_group_describe_response::{DescribedGroup, Member as DescribeMember},
-    primitives::uuid::Uuid,
-};
-
-use super::records::member_metadata_value;
-use crate::{
-    codes,
-    coordinator::unified::share::{assignor::ShareGroupAssignor, state::ShareGroupState},
+use {
+    super::records::member_metadata_value,
+    crate::{
+        codes,
+        coordinator::unified::share::{assignor::ShareGroupAssignor, state::ShareGroupState},
+    },
+    krabka_protocol::{
+        owned::share_group_describe_response::{DescribedGroup, Member as DescribeMember},
+        primitives::uuid::Uuid,
+    },
+    std::collections::HashMap,
 };
 
 /// Read-only projection of [`ShareGroupState`], consumed by the

@@ -4,15 +4,17 @@
 //! so that a ratio sampler cannot drop it. An operator can thus see that a
 //! service still exports even when it serves no traffic.
 
-use krabka_units::prelude::{Time, TimeExt as _};
-use opentelemetry::{
-    Context, KeyValue,
-    trace::{
-        Span as _, SpanBuilder, SpanContext, SpanId, TraceContextExt as _, TraceFlags, TraceId,
-        TraceState, TracerProvider as _,
+use {
+    krabka_units::prelude::{Time, TimeExt as _},
+    opentelemetry::{
+        Context, KeyValue,
+        trace::{
+            Span as _, SpanBuilder, SpanContext, SpanId, TraceContextExt as _, TraceFlags, TraceId,
+            TraceState, TracerProvider as _,
+        },
     },
+    opentelemetry_sdk::trace::SdkTracerProvider,
 };
-use opentelemetry_sdk::trace::SdkTracerProvider;
 
 pub fn spawn_heartbeat_task(
     provider: SdkTracerProvider,
@@ -69,12 +71,12 @@ fn emit_heartbeat_span<T: opentelemetry::trace::Tracer>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use assert2::check;
-    use opentelemetry_sdk::{error::OTelSdkResult, trace::Sampler};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        opentelemetry_sdk::{error::OTelSdkResult, trace::Sampler},
+        std::sync::{Arc, Mutex},
+    };
 
     #[derive(Clone, Debug, Default)]
     struct RecordingSpanExporter {
@@ -102,8 +104,7 @@ mod tests {
 
     #[test]
     fn heartbeat_span_is_sampled_when_ratio_sampler_would_drop_roots() {
-        use opentelemetry::trace::TraceFlags;
-        use opentelemetry_sdk::trace::SimpleSpanProcessor;
+        use {opentelemetry::trace::TraceFlags, opentelemetry_sdk::trace::SimpleSpanProcessor};
 
         let exporter = RecordingSpanExporter::default();
         let provider = SdkTracerProvider::builder()

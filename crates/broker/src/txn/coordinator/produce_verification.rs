@@ -10,21 +10,22 @@
 //! when that is this broker, so the answer does not depend on where the
 //! coordinator lives.
 
-use krabka_log::ProducerId;
-use krabka_protocol::owned::{
-    add_partitions_to_txn_request::{AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction},
-    common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
-};
-
-use super::TxnCoordinator;
-use crate::{
-    broker::registered_listener_endpoint,
-    codes,
-    config::BrokerConfig,
-    txn::{
-        bootstrap,
-        state::{TopicPartition, TxnState},
-        version::TxnVersion,
+use {
+    super::TxnCoordinator,
+    crate::{
+        broker::registered_listener_endpoint,
+        codes,
+        config::BrokerConfig,
+        txn::{
+            bootstrap,
+            state::{TopicPartition, TxnState},
+            version::TxnVersion,
+        },
+    },
+    krabka_log::ProducerId,
+    krabka_protocol::owned::{
+        add_partitions_to_txn_request::{AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction},
+        common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
     },
 };
 
@@ -266,13 +267,10 @@ impl TxnCoordinator {
             .await
         {
             Ok(connection) => {
-                if let Some(stale) = connections.insert(
-                    leader,
-                    super::VerificationConnection {
-                        address: (host.to_string(), port),
-                        connection: connection.clone(),
-                    },
-                ) {
+                if let Some(stale) = connections.insert(leader, super::VerificationConnection {
+                    address: (host.to_string(), port),
+                    connection: connection.clone(),
+                }) {
                     stale.connection.close();
                 }
                 Some(connection)

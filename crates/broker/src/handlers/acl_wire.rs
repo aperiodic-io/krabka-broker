@@ -176,9 +176,10 @@ pub fn permission_to_wire(pt: PermissionType) -> PermissionTypeCode {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn resource_type_concrete_rejects_any() {

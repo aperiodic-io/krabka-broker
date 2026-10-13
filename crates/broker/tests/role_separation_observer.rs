@@ -16,29 +16,29 @@
 //! controller-only node's own id never is. The controller-only node itself
 //! opens no client listener, so a client never reaches it at all.
 
-use std::{
-    collections::BTreeSet,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use krabka_broker::{
-    BootstrapMode, Broker, BrokerConfig, BrokerHandle,
-    config::{DEFAULT_READINESS_MAX_METADATA_LAG, NodeRole},
-    health::HealthState,
-};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    describe_cluster_request::DescribeClusterRequest,
-    describe_log_dirs_request::DescribeLogDirsRequest, metadata_request::MetadataRequest,
-};
-use tempfile::TempDir;
-
-use crate::support::{
-    NodeIndex, RoleNodeSetup,
-    client::{connect_client, create_topic},
-    quorum::metadata_quorum_request,
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        NodeIndex, RoleNodeSetup,
+        client::{connect_client, create_topic},
+        quorum::metadata_quorum_request,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    assert2::assert,
+    krabka_broker::{
+        BootstrapMode, Broker, BrokerConfig, BrokerHandle,
+        config::{DEFAULT_READINESS_MAX_METADATA_LAG, NodeRole},
+        health::HealthState,
+    },
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        describe_cluster_request::DescribeClusterRequest,
+        describe_log_dirs_request::DescribeLogDirsRequest, metadata_request::MetadataRequest,
+    },
+    std::{
+        collections::BTreeSet,
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
 };
 
 mod support;
@@ -103,13 +103,10 @@ async fn start_role_separated_with(
     let mut dirs = Vec::with_capacity(nodes);
 
     let ctrl_dir = TempDir::new().unwrap();
-    let mut ctrl_cfg = topology.config(
-        ctrl_dir.path(),
-        RoleNodeSetup {
-            role: NodeRole::Controller,
-            ..Default::default()
-        },
-    );
+    let mut ctrl_cfg = topology.config(ctrl_dir.path(), RoleNodeSetup {
+        role: NodeRole::Controller,
+        ..Default::default()
+    });
     customize(0, &mut ctrl_cfg);
     let controller_metadata_dir = ctrl_cfg.metadata_dir().to_path_buf();
     let controller_client_addr = ctrl_cfg.listen_addr;
@@ -130,14 +127,11 @@ async fn start_role_separated_with(
     let mut broker_configs = Vec::with_capacity(brokers);
     for index in 1..nodes {
         let dir = TempDir::new().unwrap();
-        let mut cfg = topology.config(
-            dir.path(),
-            RoleNodeSetup {
-                index: NodeIndex(index),
-                mode: BootstrapMode::Join,
-                ..Default::default()
-            },
-        );
+        let mut cfg = topology.config(dir.path(), RoleNodeSetup {
+            index: NodeIndex(index),
+            mode: BootstrapMode::Join,
+            ..Default::default()
+        });
         customize(index, &mut cfg);
         broker_configs.push(cfg.clone());
         observers.push(

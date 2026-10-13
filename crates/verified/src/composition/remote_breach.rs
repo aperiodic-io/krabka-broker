@@ -1,14 +1,15 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::trim::trim_rejection;
 #[cfg(creusot)]
 use super::trim::{trim_frontier, trim_store_frontiers_valid, trim_well_formed};
-use super::{
-    DeleteRecordsTrimApplication, DeleteRecordsTrimDecision, DeleteRecordsTrimFacts,
-    delete_records_trim_application, delete_records_trim_decision, trim::trim_steps_converge,
+use {
+    super::{
+        DeleteRecordsTrimApplication, DeleteRecordsTrimDecision, DeleteRecordsTrimFacts,
+        delete_records_trim_application, delete_records_trim_decision, trim::trim_steps_converge,
+    },
+    crate::retention::{RemoteRetentionSegment, remote_retention_prefix},
+    creusot_std::prelude::*,
 };
-use crate::retention::{RemoteRetentionSegment, remote_retention_prefix};
 
 type RemoteBreachPlan = (
     i64,

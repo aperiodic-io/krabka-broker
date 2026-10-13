@@ -6,21 +6,22 @@
 //! is the half of every test that has nothing to do with what the restore
 //! then makes of it.
 
-use assert2::assert;
-use krabka_audit::signing::FileEd25519Signer;
-use krabka_log::Log;
-use krabka_protocol::records::RecordBatch;
-use krabka_remote_storage::{
-    ChainHead, ChainStamp, EpochId, LocalTieredStorage, MANIFEST_SUFFIX, ManifestSeq, ObjectEntry,
-    RemoteLogSegmentMetadata, Sha256Digest, TopicIdPartition, WormArchiver, WormChainRecord,
-    parse_segment_file_name, partition_dir_name, segment_file_name,
-};
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use crate::{
-    archive_fixture::archive_segment,
-    batches::{append_groups, tiny_segment_config},
+use {
+    crate::{
+        archive_fixture::archive_segment,
+        batches::{append_groups, tiny_segment_config},
+    },
+    assert2::assert,
+    krabka_audit::signing::FileEd25519Signer,
+    krabka_log::Log,
+    krabka_protocol::records::RecordBatch,
+    krabka_remote_storage::{
+        ChainHead, ChainStamp, EpochId, LocalTieredStorage, MANIFEST_SUFFIX, ManifestSeq,
+        ObjectEntry, RemoteLogSegmentMetadata, Sha256Digest, TopicIdPartition, WormArchiver,
+        WormChainRecord, parse_segment_file_name, partition_dir_name, segment_file_name,
+    },
+    tempfile::TempDir,
+    uuid::Uuid,
 };
 
 /// One archived segment: the id it was archived under, and the exact batch
@@ -174,9 +175,7 @@ impl Fixture {
     }
 
     /// Distinct topics the archive holds.
-    pub(crate) fn topic_count() -> usize {
-        2
-    }
+    pub(crate) fn topic_count() -> usize { 2 }
 
     /// The archived topic id for `topic`, which a restore must carry into the
     /// target unchanged and which a `Fetch` or `Produce` addresses the topic
@@ -268,50 +267,38 @@ pub(crate) fn build_fixture() -> Fixture {
     let orders_id = Uuid::new_v4();
     let payments_id = Uuid::new_v4();
 
-    let orders_0 = build_partition(
-        &storage,
-        PartitionSpec {
-            topic: "orders",
-            topic_id: orders_id,
-            partition: 0,
-            groups: &[&["o0-0", "o0-1"], &["o0-2"], &["o0-3", "o0-4"]],
-            unarchived_prefix: 0,
-        },
-    );
-    let orders_1 = build_partition(
-        &storage,
-        PartitionSpec {
-            topic: "orders",
-            topic_id: orders_id,
-            partition: 1,
-            groups: &[&["o1-0", "o1-1"], &["o1-2"]],
-            unarchived_prefix: 0,
-        },
-    );
-    let payments_0 = build_partition(
-        &storage,
-        PartitionSpec {
-            topic: "payments",
-            topic_id: payments_id,
-            partition: 0,
-            groups: &[&["p0-0", "p0-1"], &["p0-2"]],
-            unarchived_prefix: 0,
-        },
-    );
+    let orders_0 = build_partition(&storage, PartitionSpec {
+        topic: "orders",
+        topic_id: orders_id,
+        partition: 0,
+        groups: &[&["o0-0", "o0-1"], &["o0-2"], &["o0-3", "o0-4"]],
+        unarchived_prefix: 0,
+    });
+    let orders_1 = build_partition(&storage, PartitionSpec {
+        topic: "orders",
+        topic_id: orders_id,
+        partition: 1,
+        groups: &[&["o1-0", "o1-1"], &["o1-2"]],
+        unarchived_prefix: 0,
+    });
+    let payments_0 = build_partition(&storage, PartitionSpec {
+        topic: "payments",
+        topic_id: payments_id,
+        partition: 0,
+        groups: &[&["p0-0", "p0-1"], &["p0-2"]],
+        unarchived_prefix: 0,
+    });
     // The oldest two records never reach the bucket, so this partition's
     // archived history starts at offset 2. A restore of it is the only case
     // in the fixture where "the log starts at offset 0" and "the log starts
     // where the archive does" are different answers.
-    let payments_1 = build_partition(
-        &storage,
-        PartitionSpec {
-            topic: "payments",
-            topic_id: payments_id,
-            partition: 1,
-            groups: &[&["p1-0", "p1-1"], &["p1-2", "p1-3"], &["p1-4"], &["p1-5"]],
-            unarchived_prefix: 1,
-        },
-    );
+    let payments_1 = build_partition(&storage, PartitionSpec {
+        topic: "payments",
+        topic_id: payments_id,
+        partition: 1,
+        groups: &[&["p1-0", "p1-1"], &["p1-2", "p1-3"], &["p1-4"], &["p1-5"]],
+        unarchived_prefix: 1,
+    });
 
     Fixture {
         archive_root,

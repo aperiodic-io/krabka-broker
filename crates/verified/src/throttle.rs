@@ -67,9 +67,7 @@ pub fn plan_consume(
 
 #[cfg(test)]
 mod tests {
-    use proptest::prelude::*;
-
-    use super::*;
+    use {super::*, proptest::prelude::*};
 
     #[test]
     fn plan_consume_grants_and_caps() {

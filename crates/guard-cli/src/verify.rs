@@ -34,12 +34,12 @@
 //! verifier draws the same line, and the caller turns the two into different
 //! exit codes.
 
-use std::path::{Path, PathBuf};
-
-use krabka_broker::operator_keys::{OperatorKeyEntry, OperatorKeys, freeze_signing_input};
-use krabka_protocol::krabka::freeze::DescribedTopicFreeze;
-
-use crate::signing::freeze_signing_bytes;
+use {
+    crate::signing::freeze_signing_bytes,
+    krabka_broker::operator_keys::{OperatorKeyEntry, OperatorKeys, freeze_signing_input},
+    krabka_protocol::krabka::freeze::DescribedTopicFreeze,
+    std::path::{Path, PathBuf},
+};
 
 /// Why one registry entry is not proved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,15 +97,11 @@ pub struct VerifyOutcome {
 impl VerifyOutcome {
     /// Whether any entry's signature was checked and found wrong.
     #[must_use]
-    pub fn any_signature_failed(&self) -> bool {
-        self.has(Unproved::SignatureDidNotVerify)
-    }
+    pub fn any_signature_failed(&self) -> bool { self.has(Unproved::SignatureDidNotVerify) }
 
     /// Whether any entry names a key the local trust set does not hold.
     #[must_use]
-    pub fn any_key_is_unknown(&self) -> bool {
-        self.has(Unproved::UnknownKeyId)
-    }
+    pub fn any_key_is_unknown(&self) -> bool { self.has(Unproved::UnknownKeyId) }
 
     /// How many entries verified.
     #[must_use]
@@ -234,13 +230,14 @@ struct TrustFileKey {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_audit::FileEd25519Signer;
-    use krabka_protocol::primitives::uuid::Uuid;
-    use ring::signature::Ed25519KeyPair;
-    use tempfile::TempDir;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        krabka_audit::FileEd25519Signer,
+        krabka_protocol::primitives::uuid::Uuid,
+        ring::signature::Ed25519KeyPair,
+        tempfile::TempDir,
+    };
 
     const CLUSTER: &str = "krabka-test";
     const ALICE: &str = "User:alice";

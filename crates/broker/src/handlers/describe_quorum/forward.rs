@@ -17,17 +17,18 @@
 //! and [`super::handle`] re-runs the same `Describe` gate correctly on the
 //! leader.
 
-use bytes::Bytes;
-use krabka_protocol::{
-    Decode,
-    owned::{
-        describe_quorum_request::API_KEY as DESCRIBE_QUORUM_API_KEY,
-        envelope_request,
-        envelope_response::{self, EnvelopeResponse},
+use {
+    crate::{broker::Broker, codes, envelope, error::BrokerError, handlers::encode_response},
+    bytes::Bytes,
+    krabka_protocol::{
+        Decode,
+        owned::{
+            describe_quorum_request::API_KEY as DESCRIBE_QUORUM_API_KEY,
+            envelope_request,
+            envelope_response::{self, EnvelopeResponse},
+        },
     },
 };
-
-use crate::{broker::Broker, codes, envelope, error::BrokerError, handlers::encode_response};
 
 /// `Envelope`'s api key (58, KIP-590): what `DescribeQuorum` forwarding sends
 /// on the wire, in place of the bare `DescribeQuorum` api key (55).

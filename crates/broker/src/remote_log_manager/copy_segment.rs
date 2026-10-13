@@ -2,26 +2,26 @@
 //! upload, then `CopySegmentFinished`, together with the rollback that runs
 //! when any step of it fails.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_log::SegmentExport;
 #[cfg(test)]
 use krabka_remote_storage::LogSegmentData;
-use krabka_remote_storage::{
-    RemoteLogMetadataManager, RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentState,
-    RemoteStorageManager, TopicIdPartition, WormChainRecord,
+use {
+    super::{
+        RemoteTier,
+        archive::{ArchiveMode, ChainPosition},
+        leader_epoch::leader_epoch_index_bytes,
+        rlmm::rlmm_mutate,
+    },
+    crate::{blocking::spawn_blocking, metrics::RemoteTierPath, time_util::now_ms},
+    krabka_log::SegmentExport,
+    krabka_remote_storage::{
+        RemoteLogMetadataManager, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+        RemoteLogSegmentState, RemoteStorageManager, TopicIdPartition, WormChainRecord,
+    },
+    krabka_units::convert::{ByteSizeExt as _, TimeExt as _},
+    std::{collections::BTreeMap, sync::Arc},
+    tracing::{debug, error, warn},
+    uuid::Uuid,
 };
-use krabka_units::convert::{ByteSizeExt as _, TimeExt as _};
-use tracing::{debug, error, warn};
-use uuid::Uuid;
-
-use super::{
-    RemoteTier,
-    archive::{ArchiveMode, ChainPosition},
-    leader_epoch::leader_epoch_index_bytes,
-    rlmm::rlmm_mutate,
-};
-use crate::{blocking::spawn_blocking, metrics::RemoteTierPath, time_util::now_ms};
 
 /// What one [`copy_one`] attempt left behind.
 #[derive(Debug)]
@@ -319,23 +319,23 @@ async fn rollback(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
-    use assert2::{assert, check};
-    use krabka_ids::LeaderEpoch;
-    use krabka_log::Offset;
-    use krabka_remote_storage::{
-        ChainHead, ChainStamp, CustomMetadata, EpochId, ManifestSeq, RemoteStorageError,
-    };
-    use krabka_units::bytes;
-
-    use super::*;
-    use crate::remote_log_manager::{
-        copy_eligible, test_support as fixtures,
-        test_support::{
-            FakeWormArchive, copy_exports, local_backends, missing_remote_reads, rolled_log,
-            synth_export, tier, tp,
+    use {
+        super::*,
+        crate::remote_log_manager::{
+            copy_eligible,
+            test_support::{
+                self as fixtures, FakeWormArchive, copy_exports, local_backends,
+                missing_remote_reads, rolled_log, synth_export, tier, tp,
+            },
         },
+        assert2::{assert, check},
+        krabka_ids::LeaderEpoch,
+        krabka_log::Offset,
+        krabka_remote_storage::{
+            ChainHead, ChainStamp, CustomMetadata, EpochId, ManifestSeq, RemoteStorageError,
+        },
+        krabka_units::bytes,
+        std::sync::Mutex,
     };
 
     /// An RSM whose copy always fails, but whose delete succeeds. The tests
@@ -343,6 +343,8 @@ mod tests {
     struct AlwaysFailRsm;
 
     impl RemoteStorageManager for AlwaysFailRsm {
+        missing_remote_reads!(delete_ok);
+
         fn copy_log_segment_data(
             &self,
             _metadata: &RemoteLogSegmentMetadata,
@@ -350,13 +352,14 @@ mod tests {
         ) -> Result<Option<CustomMetadata>, RemoteStorageError> {
             Err(RemoteStorageError::InvalidArgument("boom".into()))
         }
-        missing_remote_reads!(delete_ok);
     }
 
     /// Returns caller-selected metadata without touching storage.
     struct ReturningRsm(Option<CustomMetadata>);
 
     impl RemoteStorageManager for ReturningRsm {
+        missing_remote_reads!(delete_ok);
+
         fn copy_log_segment_data(
             &self,
             _metadata: &RemoteLogSegmentMetadata,
@@ -364,7 +367,6 @@ mod tests {
         ) -> Result<Option<CustomMetadata>, RemoteStorageError> {
             Ok(self.0.clone())
         }
-        missing_remote_reads!(delete_ok);
     }
 
     /// Records the metadata every copy hands the backend, then fails the copy.
@@ -376,6 +378,8 @@ mod tests {
     }
 
     impl RemoteStorageManager for CapturingRsm {
+        missing_remote_reads!(delete_ok);
+
         fn copy_log_segment_data(
             &self,
             metadata: &RemoteLogSegmentMetadata,
@@ -387,7 +391,6 @@ mod tests {
                 .push(metadata.clone());
             Err(RemoteStorageError::InvalidArgument("captured".into()))
         }
-        missing_remote_reads!(delete_ok);
     }
 
     #[tokio::test]
@@ -595,16 +598,12 @@ mod tests {
         ];
         for (name, rsm, chain, sealed, failed) in cases {
             fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
-            let tier = fixtures::configured_tier(
-                &rsm,
-                &rlmm,
-                fixtures::TierSetup {
-                    metrics: &metrics,
-                    index_cache: &index_cache,
-                    archive: chain.archive(),
-                    ..Default::default()
-                },
-            );
+            let tier = fixtures::configured_tier(&rsm, &rlmm, fixtures::TierSetup {
+                metrics: &metrics,
+                index_cache: &index_cache,
+                archive: chain.archive(),
+                ..Default::default()
+            });
 
             copy_one(
                 &tier,

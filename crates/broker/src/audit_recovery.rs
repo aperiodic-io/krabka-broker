@@ -1,14 +1,15 @@
 //! Recover the audit hash-chain position from this broker's audit partition.
 
-use krabka_audit::{
-    EVENT_CLASS_CHECKPOINT, HEADER_PREV_HASH, HEADER_SEQ,
-    chain::{chain_hash, from_hex32},
-};
-use krabka_units::ByteSize;
 #[cfg(test)]
 use krabka_units::{bytes, kibibytes, mebibytes};
-
-use crate::partition::Partition;
+use {
+    crate::partition::Partition,
+    krabka_audit::{
+        EVENT_CLASS_CHECKPOINT, HEADER_PREV_HASH, HEADER_SEQ,
+        chain::{chain_hash, from_hex32},
+    },
+    krabka_units::ByteSize,
+};
 
 /// Audit record-header key carrying the event class (e.g. `checkpoint`).
 const HEADER_EVENT_CLASS: &str = "event_class";
@@ -70,17 +71,17 @@ fn tail_window_start(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_audit::chain::{GENESIS_HEAD, to_hex};
-    use krabka_log::Offset;
-    use krabka_protocol::records::{Record, RecordBatch, RecordHeader};
-    use tokio::sync::Notify;
-
-    use super::*;
-    use crate::partition::test_support::test_partition as make_test_partition;
+    use {
+        super::*,
+        crate::partition::test_support::test_partition as make_test_partition,
+        assert2::assert,
+        bytes::Bytes,
+        krabka_audit::chain::{GENESIS_HEAD, to_hex},
+        krabka_log::Offset,
+        krabka_protocol::records::{Record, RecordBatch, RecordHeader},
+        std::sync::Arc,
+        tokio::sync::Notify,
+    };
 
     fn test_partition() -> (Partition, tempfile::TempDir) {
         let (mut partition, dir) = make_test_partition(Arc::new(Notify::new()));
@@ -190,10 +191,12 @@ mod tests {
         };
         let second = chained_record(1, &first_head, b"second");
         let second_head = chain_hash(&first_head, 1, b"second");
-        append_records(
-            &partition,
-            vec![first, checkpoint_record(), malformed, second],
-        );
+        append_records(&partition, vec![
+            first,
+            checkpoint_record(),
+            malformed,
+            second,
+        ]);
 
         let recovered = recover_from_partition_tail(&partition, 4096, mebibytes(1))
             .expect("last chained record");

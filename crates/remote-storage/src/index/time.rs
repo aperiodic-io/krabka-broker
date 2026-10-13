@@ -6,13 +6,14 @@
 //! entry at or above the target and treats non-increasing relative offsets as
 //! trailing padding.
 
-use zerocopy::{
-    BigEndian, FromBytes, Immutable, KnownLayout, Unaligned,
-    byteorder::{I64, U32},
+use {
+    super::{RelativeOffset, TimestampMs, corrupt_index},
+    crate::error::RemoteStorageError,
+    zerocopy::{
+        BigEndian, FromBytes, Immutable, KnownLayout, Unaligned,
+        byteorder::{I64, U32},
+    },
 };
-
-use super::{RelativeOffset, TimestampMs, corrupt_index};
-use crate::error::RemoteStorageError;
 
 /// 12 bytes per entry: ts i64 BE, then rel u32 BE. It mirrors
 /// `krabka_log::index::TimeEntryRaw`.
@@ -69,9 +70,7 @@ pub fn relative_offset_floor_for_timestamp(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     fn time_entries(pairs: &[(i64, u32)]) -> Vec<TimeIndexEntry> {
         pairs
@@ -119,13 +118,15 @@ mod tests {
 
     #[test]
     fn archived_segment_timestamp_scan_matches_local_and_record_oracle() {
-        use krabka_ids::Offset;
-        use krabka_log::Segment;
-        use krabka_protocol::records::{Record, RecordBatch};
-        use krabka_units::prelude::{bytes, kibibytes};
-
-        use crate::{
-            first_record_at_or_after_timestamp, parse_offset_index, position_for_relative_offset,
+        use {
+            crate::{
+                first_record_at_or_after_timestamp, parse_offset_index,
+                position_for_relative_offset,
+            },
+            krabka_ids::Offset,
+            krabka_log::Segment,
+            krabka_protocol::records::{Record, RecordBatch},
+            krabka_units::prelude::{bytes, kibibytes},
         };
 
         let timestamps = [[100, 100], [500, 100], [100, 300]];

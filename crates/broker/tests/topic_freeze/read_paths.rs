@@ -7,26 +7,27 @@
 //! `OffsetCommit` would strand every group at its last pre-freeze position, so
 //! both are asserted rather than assumed.
 
-use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle, codes};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    krabka::freeze::PATTERN_TYPE_LITERAL,
-    owned::offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    control_plane::freeze_scope,
-    support::{
-        self,
-        client::{connect_owned, scrape_metrics},
-        discovery::named_topic_metadata,
-        fetch::{SinglePartitionFetchSetup, single_partition_fetch},
-        offsets::{offset_commit_partition, offset_commit_topic},
-        records::record_count,
+use {
+    crate::{
+        control_plane::freeze_scope,
+        support::{
+            self,
+            client::{connect_owned, scrape_metrics},
+            discovery::named_topic_metadata,
+            fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+            offsets::{offset_commit_partition, offset_commit_topic},
+            records::record_count,
+        },
+        wire::{CONTROL, accepted, create_topic, frozen_topic_with_record, refused},
     },
-    wire::{CONTROL, accepted, create_topic, frozen_topic_with_record, refused},
+    assert2::{assert, check},
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle, codes},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        krabka::freeze::PATTERN_TYPE_LITERAL,
+        owned::offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 /// [`support::start`] with the Prometheus listener bound.
@@ -48,9 +49,7 @@ async fn start_with_metrics() -> (BrokerHandle, Client, tempfile::TempDir) {
 }
 
 /// Scrape the `OpenMetrics` body from the broker's `/metrics` endpoint.
-async fn scrape(addr: std::net::SocketAddr) -> String {
-    scrape_metrics(addr).await
-}
+async fn scrape(addr: std::net::SocketAddr) -> String { scrape_metrics(addr).await }
 
 /// The number of records a fetch from offset zero returns.
 async fn fetch_record_count(client: &Client, topic: &str, topic_id: WireUuid) -> usize {
@@ -145,14 +144,12 @@ async fn offset_commit_still_works_against_a_frozen_topic() {
                 group_id: "drainers".into(),
                 generation_id_or_member_epoch: -1,
                 member_id: String::new(),
-                topics: vec![offset_commit_topic(
-                    topic,
-                    topic_id,
-                    vec![OffsetCommitRequestPartition {
+                topics: vec![offset_commit_topic(topic, topic_id, vec![
+                    OffsetCommitRequestPartition {
                         committed_leader_epoch: -1,
                         ..offset_commit_partition(0, 1, Some(String::new()))
-                    }],
-                )],
+                    },
+                ])],
                 ..Default::default()
             })
             .await

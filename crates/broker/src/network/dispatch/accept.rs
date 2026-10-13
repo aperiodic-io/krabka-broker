@@ -7,17 +7,17 @@
 //! loop's `connections.max.idle.ms` deadline cannot see, so this module bounds
 //! it by the same window: see `handshake_within_idle_window`.
 
-use std::net::SocketAddr;
-
-use tokio::net::TcpStream;
-
-use super::{serve_connection_stream, write_idle::WriteIdle};
-use crate::{
-    broker::Broker,
-    config::ListenerSpec,
-    metrics::{BrokerMetrics, ConnectionCloseReason},
-    network::auth::subject_dn_rfc2253,
-    platform::Sockets,
+use {
+    super::{serve_connection_stream, write_idle::WriteIdle},
+    crate::{
+        broker::Broker,
+        config::ListenerSpec,
+        metrics::{BrokerMetrics, ConnectionCloseReason},
+        network::auth::subject_dn_rfc2253,
+        platform::Sockets,
+    },
+    std::net::SocketAddr,
+    tokio::net::TcpStream,
 };
 
 /// Per-listener entrypoint.
@@ -265,11 +265,12 @@ async fn serve_connection_plaintext(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_security::ListenerProtocol;
-
-    use super::*;
-    use crate::{config::ListenerSpec, network::auth::SslPrincipalMapper};
+    use {
+        super::*,
+        crate::{config::ListenerSpec, network::auth::SslPrincipalMapper},
+        assert2::check,
+        krabka_security::ListenerProtocol,
+    };
 
     fn spec(protocol: ListenerProtocol, rules: &[&str]) -> ListenerSpec {
         ListenerSpec {

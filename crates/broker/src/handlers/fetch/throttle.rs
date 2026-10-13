@@ -2,23 +2,24 @@
 //! replication throttle on a follower fetch, and the KIP-13 consumer byte
 //! rate together with the KIP-124 request quota on a client fetch.
 
-use krabka_protocol::{
-    Encode as _,
-    owned::fetch_response::{FetchResponse, FetchableTopicResponse},
-    records::RecordsPayload,
-};
-use krabka_units::{Time, convert::TimeExt};
-use num_traits::ToPrimitive as _;
-
-use crate::{
-    broker::Broker,
-    handlers::RequestContext,
-    metrics::{BrokerMetrics, QuotaType},
-    quota::{
-        QuotaBuckets, QuotaDelay, debt_tokens, entity_field, lookup_quota_with_key,
-        throttle_time_ms,
+use {
+    crate::{
+        broker::Broker,
+        handlers::RequestContext,
+        metrics::{BrokerMetrics, QuotaType},
+        quota::{
+            QuotaBuckets, QuotaDelay, debt_tokens, entity_field, lookup_quota_with_key,
+            throttle_time_ms,
+        },
+        throttle::{REPLICATION_QUOTA_WINDOW, TokenBucket, TopicThrottle},
     },
-    throttle::{REPLICATION_QUOTA_WINDOW, TokenBucket, TopicThrottle},
+    krabka_protocol::{
+        Encode as _,
+        owned::fetch_response::{FetchResponse, FetchableTopicResponse},
+        records::RecordsPayload,
+    },
+    krabka_units::{Time, convert::TimeExt},
+    num_traits::ToPrimitive as _,
 };
 
 pub(super) fn throttle_follower_responses(
@@ -197,13 +198,12 @@ pub(super) fn apply_consumer_fetch_quota(
     // KIP-219: the connection is muted for the larger of the two delays.
     // Resolving it through the metric records the throttle phase and the quota
     // that caused it, and hands back the delay the response reports.
-    let delay = broker.metrics.record_applied_throttle(
-        super::FETCH_API_KEY,
-        &[
+    let delay = broker
+        .metrics
+        .record_applied_throttle(super::FETCH_API_KEY, &[
             (QuotaType::Fetch, data_delay).into(),
             (QuotaType::Request, request_delay).into(),
-        ],
-    );
+        ]);
     if delay <= <Time as TimeExt>::ZERO {
         return (0, charge);
     }
@@ -307,19 +307,20 @@ fn consume_consumer_quota(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::{Time, convert::TimeExt, millis, secs};
-
-    use crate::{
-        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
-        metrics::BrokerMetrics,
-        quota::{
-            QuotaBuckets,
-            test_support::{
-                QuotaRecordSetup, QuotaValue, check_fractional_bandwidth, image_with_quota,
+    use {
+        crate::{
+            handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+            metrics::BrokerMetrics,
+            quota::{
+                QuotaBuckets,
+                test_support::{
+                    QuotaRecordSetup, QuotaValue, check_fractional_bandwidth, image_with_quota,
+                },
             },
+            throttle::{LEADER_THROTTLED_REPLICAS_KEY, TokenBucket},
         },
-        throttle::{LEADER_THROTTLED_REPLICAS_KEY, TokenBucket},
+        assert2::{assert, check},
+        krabka_units::{Time, convert::TimeExt, millis, secs},
     };
 
     #[test]
@@ -518,12 +519,9 @@ mod tests {
                 vec![300, 300],
                 vec![300, 0],
             ),
-            (
-                "no list throttles nothing",
-                "",
-                vec![800, 800],
-                vec![800, 800],
-            ),
+            ("no list throttles nothing", "", vec![800, 800], vec![
+                800, 800,
+            ]),
         ];
         for (label, list, bytes, want) in cases {
             let partitions: Vec<(usize, bool)> = bytes.iter().map(|b| (*b, false)).collect();

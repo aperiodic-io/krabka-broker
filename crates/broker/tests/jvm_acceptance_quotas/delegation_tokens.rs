@@ -5,13 +5,14 @@
 //! The token producer runs through a directly spawned `docker run`, not the
 //! shared helper, because `kafka-console-producer` needs its records on stdin.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised, create_console_topic,
-    docker_run_kafka_tool_with_image_and_mount, extract_jvm_kv, nc_check_connectivity,
-    produce_console, start_three_broker_sasl_plaintext_jvm_cluster_with_delegation_tokens,
-    wait_three_brokers_registered, write_client_props, write_plain_props,
+use {
+    crate::jvm_acceptance::{
+        ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised, create_console_topic,
+        docker_run_kafka_tool_with_image_and_mount, extract_jvm_kv, nc_check_connectivity,
+        produce_console, start_three_broker_sasl_plaintext_jvm_cluster_with_delegation_tokens,
+        wait_three_brokers_registered, write_client_props, write_plain_props,
+    },
+    assert2::assert,
 };
 
 /// JVM acceptance: KIP-48 delegation-token round-trip through the official
@@ -56,20 +57,16 @@ async fn jvm_kafka_delegation_tokens_end_to_end() {
 
     // 1. Create the token. `--max-life-time-period -1` ⇒ use the broker's
     //    configured `delegation.token.max.lifetime.ms` default.
-    let create_out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-delegation-tokens",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--create",
-            "--max-life-time-period",
-            "-1",
-        ],
-    );
+    let create_out = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-delegation-tokens",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--create",
+        "--max-life-time-period",
+        "-1",
+    ]);
     let create_stdout = String::from_utf8_lossy(&create_out.stdout).to_string();
     eprintln!("KRABKA[test] --create stdout:\n{create_stdout}");
 
@@ -109,20 +106,16 @@ async fn jvm_kafka_delegation_tokens_end_to_end() {
     );
 
     // 5. Describe — confirm the token is visible to the owner principal.
-    let desc_out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-delegation-tokens",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--describe",
-            "--owner-principal",
-            "User:admin",
-        ],
-    );
+    let desc_out = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-delegation-tokens",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--describe",
+        "--owner-principal",
+        "User:admin",
+    ]);
     let desc_stdout = String::from_utf8_lossy(&desc_out.stdout);
     assert!(
         desc_stdout.contains(&token_id),
@@ -130,22 +123,18 @@ async fn jvm_kafka_delegation_tokens_end_to_end() {
     );
 
     // 6. Expire the token; `--expiry-time-period -1` deletes immediately.
-    let exp_out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-delegation-tokens",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--expire",
-            "--expiry-time-period",
-            "-1",
-            "--hmac",
-            &hmac,
-        ],
-    );
+    let exp_out = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-delegation-tokens",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--expire",
+        "--expiry-time-period",
+        "-1",
+        "--hmac",
+        &hmac,
+    ]);
     assert!(
         exp_out.status.success(),
         "--expire failed: stdout={} stderr={}",

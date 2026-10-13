@@ -6,20 +6,20 @@
 //! begins. Everything here is decided once, in [`StretchModel::new`], and the
 //! transition modules then only read it.
 
-use std::collections::{BTreeMap, HashSet};
-
-use assert2::assert;
-use krabka_metadata::PartitionRecord;
-use krabka_raft::NodeId;
-use krabka_verified::stretch::{
-    min_insync_is_site_loss_safe, quorum_survives_any_single_site_loss, site_loss_survivors,
-};
-
-use crate::{
-    config_keys::RecoveryStrategy,
-    elr::state::PartitionElr,
-    leader_election::FailoverDecision,
-    site_placement::{PlacementRng, SiteBrokerView, stretch_replicas},
+use {
+    crate::{
+        config_keys::RecoveryStrategy,
+        elr::state::PartitionElr,
+        leader_election::FailoverDecision,
+        site_placement::{PlacementRng, SiteBrokerView, stretch_replicas},
+    },
+    assert2::assert,
+    krabka_metadata::PartitionRecord,
+    krabka_raft::NodeId,
+    krabka_verified::stretch::{
+        min_insync_is_site_loss_safe, quorum_survives_any_single_site_loss, site_loss_survivors,
+    },
+    std::collections::{BTreeMap, HashSet},
 };
 
 /// The one topic of the model. Every action works on partition 0 of it.

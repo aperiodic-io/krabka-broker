@@ -8,30 +8,30 @@
 //! is stopped so that a produce to the leader stays uncommitted, which is what
 //! makes the two candidate samples differ.
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::assert;
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use krabka_broker::metrics::ShareGroupLabel;
-use krabka_protocol::{
-    owned::{
-        fetch_request::FetchPartition, fetch_response::FetchResponse,
-        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
-    },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    harness::{TOPIC, create_topic, scrape, test_lock},
-    support::{
-        self,
-        client::connect_client,
-        fetch::{
-            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+use {
+    crate::{
+        harness::{TOPIC, create_topic, scrape, test_lock},
+        support::{
+            self,
+            client::connect_client,
+            fetch::{
+                FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+                SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+            },
+            shutdown_cluster,
         },
-        shutdown_cluster,
     },
+    assert2::assert,
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    krabka_broker::metrics::ShareGroupLabel,
+    krabka_protocol::{
+        owned::{
+            fetch_request::FetchPartition, fetch_response::FetchResponse,
+            share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::{sync::Arc, time::Duration},
 };
 
 const OFFSETS_TOPIC: &str = "__consumer_offsets";

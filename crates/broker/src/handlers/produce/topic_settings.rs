@@ -1,13 +1,14 @@
 //! The per-topic produce settings that the handler resolves once per topic
 //! out of the metadata image, before it walks that topic's partitions.
 
-use krabka_protocol::records::TimestampType;
-
-use crate::config_keys::{
-    CLEANUP_POLICY, COMPRESSION_TYPE, DELIVERY_MODE, DELIVERY_MODE_SCHEDULED,
-    MESSAGE_TIMESTAMP_AFTER_MAX_MS, MESSAGE_TIMESTAMP_BEFORE_MAX_MS, MESSAGE_TIMESTAMP_TYPE,
-    MESSAGE_TIMESTAMP_TYPE_LOG_APPEND, node_min_insync_replicas, parse_cleanup_policy,
-    parse_compression_type,
+use {
+    crate::config_keys::{
+        CLEANUP_POLICY, COMPRESSION_TYPE, DELIVERY_MODE, DELIVERY_MODE_SCHEDULED,
+        MESSAGE_TIMESTAMP_AFTER_MAX_MS, MESSAGE_TIMESTAMP_BEFORE_MAX_MS, MESSAGE_TIMESTAMP_TYPE,
+        MESSAGE_TIMESTAMP_TYPE_LOG_APPEND, node_min_insync_replicas, parse_cleanup_policy,
+        parse_compression_type,
+    },
+    krabka_protocol::records::TimestampType,
 };
 
 /// Resolve `min.insync.replicas` for a topic on broker `node` from the
@@ -319,20 +320,22 @@ pub(super) fn resolve_compacted_topic(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::{assert, check};
-    use krabka_compression::CompressionType;
-    use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        config_keys::{
-            COMPRESSION_TYPE, DELIVERY_MODE_IMMEDIATE, MIN_INSYNC_REPLICAS,
-            effective_min_insync_replicas,
+    use {
+        super::*,
+        crate::{
+            config_keys::{
+                COMPRESSION_TYPE, DELIVERY_MODE_IMMEDIATE, MIN_INSYNC_REPLICAS,
+                effective_min_insync_replicas,
+            },
+            handlers::produce::test_support::{
+                image_with_overrides, image_with_topic, set_min_isr,
+            },
         },
-        handlers::produce::test_support::{image_with_overrides, image_with_topic, set_min_isr},
+        assert2::{assert, check},
+        krabka_compression::CompressionType,
+        krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
+        std::collections::BTreeMap,
+        uuid::Uuid,
     };
 
     /// The node the gate runs on in these tests.
@@ -662,9 +665,7 @@ mod tests {
     /// clock it may be stamped. The alias keeps the cases below reading as
     /// "Kafka's default" while pinning it to the same value
     /// `resolve_timestamp_policy`'s callers fall back to.
-    fn kafka_default() -> TimestampPolicy {
-        kafka_stock_broker_default()
-    }
+    fn kafka_default() -> TimestampPolicy { kafka_stock_broker_default() }
 
     /// The keys the produce path resolves per topic, and the defaults it
     /// resolves for a topic that set none of them.

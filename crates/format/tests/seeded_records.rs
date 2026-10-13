@@ -11,17 +11,18 @@
 //! (`bootstrap.records.bin` and its `bootstrap.json` mirror), and the
 //! offset-zero KIP-630/KIP-853 bootstrap checkpoint a dynamic format writes.
 
-use std::path::{Path, PathBuf};
-
-use assert2::check;
-use clap::Parser as _;
-use krabka_format::MetadataRecord;
-use krabka_metadata::{
-    KRaftVersionRecord, NodeId, PartitionRecord, TopicRecord, VoterSet, VotersRecord,
+use {
+    assert2::check,
+    clap::Parser as _,
+    krabka_format::MetadataRecord,
+    krabka_metadata::{
+        KRaftVersionRecord, NodeId, PartitionRecord, TopicRecord, VoterSet, VotersRecord,
+    },
+    serde_wincode::SerdeCompat,
+    std::path::{Path, PathBuf},
+    uuid::Uuid,
+    wincode::Deserialize as _,
 };
-use serde_wincode::SerdeCompat;
-use uuid::Uuid;
-use wincode::Deserialize as _;
 
 krabka_macros::single_replica_partition_fixture!(single_replica_partition);
 
@@ -34,9 +35,7 @@ const DIRECTORY_ID: &str = "8a2f4e1c-0000-4000-8000-00000000d1d0";
 ///
 /// It refuses a non-empty target, and `tempfile::tempdir` hands back a path
 /// that already exists, so every test formats a child of one.
-fn empty_log_dir(parent: &tempfile::TempDir, name: &str) -> PathBuf {
-    parent.path().join(name)
-}
+fn empty_log_dir(parent: &tempfile::TempDir, name: &str) -> PathBuf { parent.path().join(name) }
 
 /// The records a restore recovered for one topic: the topic, then its
 /// partitions, which is the order the partitions are keyed on.

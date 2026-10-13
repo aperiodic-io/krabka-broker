@@ -16,12 +16,13 @@
 //! has finished its load. In a multi-node cluster, call it on each broker
 //! whose coordinator the test uses.
 
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
-
-use crate::{
-    broker::{BrokerHandle, TEST_AWAITER_TIMEOUT},
-    txn::bootstrap::TOPIC as TXN_BOOTSTRAP_TOPIC,
+use {
+    crate::{
+        broker::{BrokerHandle, TEST_AWAITER_TIMEOUT},
+        txn::bootstrap::TOPIC as TXN_BOOTSTRAP_TOPIC,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
 };
 
 /// The partitions of `topic` that `node` leads, or `None` while `topic` is

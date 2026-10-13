@@ -6,13 +6,14 @@
 //! metadata image. A cluster whose `[break_glass]` section names no approver
 //! gates nothing, and a preferred election never reaches this module at all.
 
-use krabka_metadata::BreakGlassAction;
-use krabka_protocol::owned::elect_leaders_response::PartitionResult;
-
-use super::env::ElectionEnv;
 pub(super) use crate::break_glass::gate::consumed_proposal_id;
-use crate::{
-    break_glass::gate::BreakGlassDenial, codes, handlers::partition_transition::audit_refusal,
+use {
+    super::env::ElectionEnv,
+    crate::{
+        break_glass::gate::BreakGlassDenial, codes, handlers::partition_transition::audit_refusal,
+    },
+    krabka_metadata::BreakGlassAction,
+    krabka_protocol::owned::elect_leaders_response::PartitionResult,
 };
 
 crate::handlers::partition_transition::authorizer! {

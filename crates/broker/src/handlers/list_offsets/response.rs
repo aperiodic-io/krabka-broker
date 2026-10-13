@@ -5,9 +5,10 @@
 //! placeholders, and a client reads the pair as "nothing resolved here", so
 //! every error path in the handler builds its row through this one function.
 
-use krabka_protocol::owned::list_offsets_response::ListOffsetsPartitionResponse;
-
-use super::sentinels::{UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP};
+use {
+    super::sentinels::{UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
+    krabka_protocol::owned::list_offsets_response::ListOffsetsPartitionResponse,
+};
 
 pub(super) fn error_response(
     partition_index: i32,

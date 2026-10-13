@@ -61,6 +61,12 @@ mod subscriber;
 #[cfg(test)]
 mod test_support;
 
+pub use self::{
+    config::{OtlpConfig, OtlpProtocol},
+    error::TelemetryError,
+    log_levels::{LogLevel, LogLevelController, LogLevelFilter, ROOT_LOGGER, VALID_LOG_LEVELS},
+    subscriber::{TelemetryGuard, init},
+};
 /// W3C Trace Context propagation helpers.
 ///
 /// These helpers live in the standalone, publishable `krabka-trace-context`
@@ -68,10 +74,3 @@ mod test_support;
 /// the OTLP exporter, the admin HTTP server, or the profiler that this crate
 /// depends on.
 pub use krabka_trace_context as propagation;
-
-pub use self::{
-    config::{OtlpConfig, OtlpProtocol},
-    error::TelemetryError,
-    log_levels::{LogLevel, LogLevelController, LogLevelFilter, ROOT_LOGGER, VALID_LOG_LEVELS},
-    subscriber::{TelemetryGuard, init},
-};

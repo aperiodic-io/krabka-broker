@@ -3,28 +3,30 @@
 
 mod support;
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    common::consumer_group_heartbeat_response::topic_partitions::TopicPartitions,
-    consumer_group_describe_request::ConsumerGroupDescribeRequest,
-    consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-    consumer_group_heartbeat_response::{Assignment, ConsumerGroupHeartbeatResponse},
-    list_groups_request::ListGroupsRequest,
-};
-
-use crate::support::{
-    classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request},
-    client::connect_client,
-    consumer_groups::{consumer_heartbeat, reported_assignment},
-    discovery::named_topic_metadata,
-    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request},
+        client::connect_client,
+        consumer_groups::{consumer_heartbeat, reported_assignment},
+        discovery::named_topic_metadata,
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        },
+    },
+    assert2::{assert, check},
+    krabka_broker::{Broker, BrokerConfig},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        common::consumer_group_heartbeat_response::topic_partitions::TopicPartitions,
+        consumer_group_describe_request::ConsumerGroupDescribeRequest,
+        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        consumer_group_heartbeat_response::{Assignment, ConsumerGroupHeartbeatResponse},
+        list_groups_request::ListGroupsRequest,
+    },
+    std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    },
 };
 
 fn boot() -> std::pin::Pin<

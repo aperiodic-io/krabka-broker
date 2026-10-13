@@ -1,33 +1,35 @@
 //! Protocol and client fixtures shared by transaction coordinator scenarios.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_client_consumer::{AutoOffsetReset, Consumer, IsolationLevel};
-use krabka_protocol::{
-    owned::{
-        add_partitions_to_txn_request::{AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction},
-        add_partitions_to_txn_response::AddPartitionsToTxnResponse,
-        common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
-        init_producer_id_request::InitProducerIdRequest,
-        produce_request::ProduceRequest,
+use {
+    crate::support::{
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{batch_from_records, value_record},
+        topics::{
+            AssignedTopicSetup, ConfiguredTopicSetup, TopicPartitionCount, assigned_topic,
+            creatable_topic, create_topic_request,
+        },
+        transactions::{
+            InitProducerSetup, PartitionRegistration, ProducerIdentity,
+            init_producer_request as producer_initialization,
+        },
     },
-    primitives::uuid::Uuid,
-    records::{Attributes, RecordBatch},
-};
-
-use crate::support::{
-    produce::{SinglePartitionProduceSetup, batch_request},
-    records::{batch_from_records, value_record},
-    topics::{
-        AssignedTopicSetup, ConfiguredTopicSetup, TopicPartitionCount, assigned_topic,
-        creatable_topic, create_topic_request,
+    assert2::assert,
+    bytes::Bytes,
+    krabka_client_consumer::{AutoOffsetReset, Consumer, IsolationLevel},
+    krabka_protocol::{
+        owned::{
+            add_partitions_to_txn_request::{
+                AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction,
+            },
+            add_partitions_to_txn_response::AddPartitionsToTxnResponse,
+            common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+            init_producer_id_request::InitProducerIdRequest,
+            produce_request::ProduceRequest,
+        },
+        primitives::uuid::Uuid,
+        records::{Attributes, RecordBatch},
     },
-    transactions::{
-        InitProducerSetup, PartitionRegistration, ProducerIdentity,
-        init_producer_request as producer_initialization,
-    },
+    std::time::{Duration, Instant},
 };
 
 pub(crate) fn init_producer_request(transactional_id: &str) -> InitProducerIdRequest {
@@ -128,14 +130,11 @@ pub(crate) fn produce_request(setup: TransactionProduceSetup<'_>) -> ProduceRequ
     ProduceRequest {
         // KIP-890 verification needs the transactional id for transactional batches.
         transactional_id: producer.map(|_| transactional_id.to_string()),
-        ..batch_request(
-            batch,
-            SinglePartitionProduceSetup {
-                topic: (topic).into(),
-                topic_id,
-                ..SinglePartitionProduceSetup::replicated()
-            },
-        )
+        ..batch_request(batch, SinglePartitionProduceSetup {
+            topic: (topic).into(),
+            topic_id,
+            ..SinglePartitionProduceSetup::replicated()
+        })
     }
 }
 
@@ -217,9 +216,7 @@ pub async fn create_topic(client: &krabka_client_core::Client, setup: Transactio
 }
 
 /// Loading answers are shared by the coordinator readiness probes, not their response oracles.
-pub(crate) fn coordinator_loading(code: i16) -> bool {
-    matches!(code, 14..=16)
-}
+pub(crate) fn coordinator_loading(code: i16) -> bool { matches!(code, 14..=16) }
 
 /// Poll the RPC answer: coordinator loading has no materialization awaiter.
 pub(crate) async fn retry_coordinator<R, F: std::future::Future<Output = R>>(
@@ -480,15 +477,12 @@ pub(crate) async fn observed_values(
     done: impl Fn(&[String]) -> bool,
     context: Option<&str>,
 ) -> (Consumer, Vec<String>) {
-    let mut consumer = consumer(
-        bootstrap,
-        TransactionConsumerSetup {
-            group: group.into(),
-            topic,
-            isolation,
-            security,
-        },
-    )
+    let mut consumer = consumer(bootstrap, TransactionConsumerSetup {
+        group: group.into(),
+        topic,
+        isolation,
+        security,
+    })
     .await
     .unwrap();
     let seen = poll_values(&mut consumer, timeout, done, context).await;

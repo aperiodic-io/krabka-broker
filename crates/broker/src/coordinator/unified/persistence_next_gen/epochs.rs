@@ -40,11 +40,12 @@ epoch_value!(TargetAssignmentMetadataValue("ConsumerGroupTargetAssignmentMetadat
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::test_support::{
-        AssignmentMetadataGoldenSetup, assignment_metadata_golden_cases,
+    use {
+        super::*,
+        crate::coordinator::unified::test_support::{
+            AssignmentMetadataGoldenSetup, assignment_metadata_golden_cases,
+        },
+        assert2::{assert, check},
     };
 
     /// `ConsumerGroupMetadataValue` as Kafka 4.3.1's generated writer lays it

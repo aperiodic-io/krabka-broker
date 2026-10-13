@@ -1,38 +1,40 @@
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_protocol::{
-    Encode,
-    owned::{
-        alter_share_group_offsets_request::{
-            self, AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestTopic,
+use {
+    super::*,
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_protocol::{
+        Encode,
+        owned::{
+            alter_share_group_offsets_request::{
+                self, AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestTopic,
+            },
+            consumer_group_heartbeat_request::{self, ConsumerGroupHeartbeatRequest},
+            delete_groups_request::{self, DeleteGroupsRequest},
+            delete_share_group_offsets_request::{
+                self, DeleteShareGroupOffsetsRequest, DeleteShareGroupOffsetsRequestTopic,
+            },
+            delete_share_group_state_request::{self, DeleteShareGroupStateRequest},
+            heartbeat_request::{self, HeartbeatRequest},
+            init_producer_id_request::{self, InitProducerIdRequest},
+            initialize_share_group_state_request::{self, InitializeShareGroupStateRequest},
+            join_group_request::{self, JoinGroupRequest, JoinGroupRequestProtocol},
+            leave_group_request::{self, LeaveGroupRequest, MemberIdentity},
+            offset_commit_request::{
+                OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+            },
+            read_share_group_state_request::{self, ReadShareGroupStateRequest},
+            read_share_group_state_summary_request::{self, ReadShareGroupStateSummaryRequest},
+            share_group_heartbeat_request::{self, ShareGroupHeartbeatRequest},
+            streams_group_heartbeat_request::{self, StreamsGroupHeartbeatRequest},
+            sync_group_request::{self, SyncGroupRequest, SyncGroupRequestAssignment},
+            txn_offset_commit_request::{
+                TxnOffsetCommitRequest, TxnOffsetCommitRequestPartition,
+                TxnOffsetCommitRequestTopic,
+            },
+            write_share_group_state_request::{self, WriteShareGroupStateRequest},
         },
-        consumer_group_heartbeat_request::{self, ConsumerGroupHeartbeatRequest},
-        delete_groups_request::{self, DeleteGroupsRequest},
-        delete_share_group_offsets_request::{
-            self, DeleteShareGroupOffsetsRequest, DeleteShareGroupOffsetsRequestTopic,
-        },
-        delete_share_group_state_request::{self, DeleteShareGroupStateRequest},
-        heartbeat_request::{self, HeartbeatRequest},
-        init_producer_id_request::{self, InitProducerIdRequest},
-        initialize_share_group_state_request::{self, InitializeShareGroupStateRequest},
-        join_group_request::{self, JoinGroupRequest, JoinGroupRequestProtocol},
-        leave_group_request::{self, LeaveGroupRequest, MemberIdentity},
-        offset_commit_request::{
-            OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
-        },
-        read_share_group_state_request::{self, ReadShareGroupStateRequest},
-        read_share_group_state_summary_request::{self, ReadShareGroupStateSummaryRequest},
-        share_group_heartbeat_request::{self, ShareGroupHeartbeatRequest},
-        streams_group_heartbeat_request::{self, StreamsGroupHeartbeatRequest},
-        sync_group_request::{self, SyncGroupRequest, SyncGroupRequestAssignment},
-        txn_offset_commit_request::{
-            TxnOffsetCommitRequest, TxnOffsetCommitRequestPartition, TxnOffsetCommitRequestTopic,
-        },
-        write_share_group_state_request::{self, WriteShareGroupStateRequest},
     },
 };
-
-use super::*;
 
 /// The longest string Kafka's reader accepts.
 const LIMIT: usize = 32_767;

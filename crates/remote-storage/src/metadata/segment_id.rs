@@ -5,9 +5,10 @@
 //! UUID that makes one segment globally unique. Both are pure identity, which
 //! is why they sit apart from the metadata record that carries them.
 
-use std::hash::{Hash, Hasher};
-
-use uuid::Uuid;
+use {
+    std::hash::{Hash, Hasher},
+    uuid::Uuid,
+};
 
 /// A partition addressed by its stable topic UUID, with the topic name for
 /// diagnostics.
@@ -75,11 +76,7 @@ impl RemoteLogSegmentId {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert, std::collections::HashSet};
 
     #[test]
     fn topic_id_partition_identity_ignores_name() {

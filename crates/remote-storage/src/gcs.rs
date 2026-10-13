@@ -31,11 +31,12 @@
 //! through [`S3RemoteStorage::from_s3_config`]. That shim cannot use Workload
 //! Identity and needs HMAC interoperability keys.
 
-use krabka_object_store::{GcsConfig, ObjectStoreConfig};
-
-use crate::{
-    error::RemoteStorageError,
-    s3::{S3RemoteStorage, WormBucket},
+use {
+    crate::{
+        error::RemoteStorageError,
+        s3::{S3RemoteStorage, WormBucket},
+    },
+    krabka_object_store::{GcsConfig, ObjectStoreConfig},
 };
 
 impl S3RemoteStorage {
@@ -64,22 +65,22 @@ impl S3RemoteStorage {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::{Read, Write},
-        net::TcpListener,
-        sync::Arc,
-        thread,
-    };
-
-    use assert2::assert;
-    use object_store::memory::InMemory;
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::{
-        storage_manager::{IndexType, RemoteStorageManager},
-        test_support::{TransactionIndex, sample_data, sample_metadata},
-        worm::WormConfig,
+    use {
+        super::*,
+        crate::{
+            storage_manager::{IndexType, RemoteStorageManager},
+            test_support::{TransactionIndex, sample_data, sample_metadata},
+            worm::WormConfig,
+        },
+        assert2::assert,
+        object_store::memory::InMemory,
+        std::{
+            io::{Read, Write},
+            net::TcpListener,
+            sync::Arc,
+            thread,
+        },
+        tempfile::TempDir,
     };
 
     // The GCS backend reuses the generic `S3RemoteStorage` engine, so the

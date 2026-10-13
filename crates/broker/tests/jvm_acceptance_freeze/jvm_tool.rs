@@ -6,12 +6,13 @@
 //! output streams, and each case decides what that means. The rest of the
 //! module is the argument list of each tool the suite drives.
 
-use std::process::{ExitStatus, Output};
-
-use crate::{
-    jvm_acceptance::{ClientPropsFile, KAFKA_IMAGE_TXN, tool_output},
-    support,
-    vocabulary::{CONFIGS_TOPIC, CONTAINER_PROPS, ELECT_TOPIC},
+use {
+    crate::{
+        jvm_acceptance::{ClientPropsFile, KAFKA_IMAGE_TXN, tool_output},
+        support,
+        vocabulary::{CONFIGS_TOPIC, CONTAINER_PROPS, ELECT_TOPIC},
+    },
+    std::process::{ExitStatus, Output},
 };
 
 /// One JVM tool run: how it exited, and everything it printed.
@@ -40,14 +41,10 @@ impl ToolRun {
     }
 
     /// Whether the tool exited zero.
-    pub(super) fn succeeded(&self) -> bool {
-        self.status.success()
-    }
+    pub(super) fn succeeded(&self) -> bool { self.status.success() }
 
     /// Whether the tool printed `needle` on either stream.
-    pub(super) fn says(&self, needle: &str) -> bool {
-        self.output.contains(needle)
-    }
+    pub(super) fn says(&self, needle: &str) -> bool { self.output.contains(needle) }
 }
 
 /// Run one Kafka CLI tool in a cp-kafka container, and hand back what it did.
@@ -118,39 +115,31 @@ pub(super) fn jvm_produce(
 /// Preferred election is not gated, so the election type is the whole of what
 /// puts this request in front of the two-person rule.
 pub(super) fn jvm_unclean_election(bootstrap: &str, props: &ClientPropsFile) -> ToolRun {
-    run_tool(
-        Some(props),
-        None,
-        &[
-            "kafka-leader-election",
-            "--bootstrap-server",
-            bootstrap,
-            "--election-type",
-            "unclean",
-            "--topic",
-            ELECT_TOPIC,
-            "--partition",
-            "0",
-            "--admin.config",
-            CONTAINER_PROPS,
-        ],
-    )
+    run_tool(Some(props), None, &[
+        "kafka-leader-election",
+        "--bootstrap-server",
+        bootstrap,
+        "--election-type",
+        "unclean",
+        "--topic",
+        ELECT_TOPIC,
+        "--partition",
+        "0",
+        "--admin.config",
+        CONTAINER_PROPS,
+    ])
 }
 
 /// Read one topic's dynamic configs with `kafka-configs --describe`.
 pub(super) fn jvm_describe_configs(bootstrap: &str) -> ToolRun {
-    run_tool(
-        None,
-        None,
-        &[
-            "kafka-configs",
-            "--bootstrap-server",
-            bootstrap,
-            "--entity-type",
-            "topics",
-            "--entity-name",
-            CONFIGS_TOPIC,
-            "--describe",
-        ],
-    )
+    run_tool(None, None, &[
+        "kafka-configs",
+        "--bootstrap-server",
+        bootstrap,
+        "--entity-type",
+        "topics",
+        "--entity-name",
+        CONFIGS_TOPIC,
+        "--describe",
+    ])
 }

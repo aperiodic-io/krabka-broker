@@ -9,11 +9,12 @@
 //!   version:           i16 (big-endian) = 0
 //!   `coordinator_epoch`: i32 (big-endian)
 
-use bytes::Bytes;
-use krabka_log::{Offset, ProducerId};
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-
-use crate::{codes, error::BrokerError, txn::util::now_millis};
+use {
+    crate::{codes, error::BrokerError, txn::util::now_millis},
+    bytes::Bytes,
+    krabka_log::{Offset, ProducerId},
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkerType {
@@ -187,9 +188,7 @@ pub fn build_marker_batch(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// One row per branch of Kafka's
     /// `TransactionMarkerRequestCompletionHandler.onComplete` error match.

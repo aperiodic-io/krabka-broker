@@ -51,10 +51,11 @@
 //! ## In-process manager for tests and local tools
 //!
 //! ```no_run
-//! use std::{path::PathBuf, time::Duration};
-//!
-//! use krabka_remote_storage_topic::{
-//!     InProcessMetadataEventLog, TopicBasedRemoteLogMetadataManager,
+//! use {
+//!     krabka_remote_storage_topic::{
+//!         InProcessMetadataEventLog, TopicBasedRemoteLogMetadataManager,
+//!     },
+//!     std::{path::PathBuf, time::Duration},
 //! };
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -83,21 +84,23 @@ pub mod serde;
 pub mod snapshot;
 pub mod swappable;
 
-pub use error::{CodecError, MetadataLogError, SnapshotError};
-pub use kafka_log::{
-    DEFAULT_METADATA_EVENT_QUEUE_CAPACITY, DEFAULT_METADATA_FETCH_MAX_BYTES,
-    DEFAULT_METADATA_FETCH_MAX_WAIT, DEFAULT_METADATA_FETCH_RETRY_BACKOFF,
-    DEFAULT_METADATA_TOPIC_CREATE_TIMEOUT, DEFAULT_MIN_ISR, DEFAULT_NUM_PARTITIONS,
-    DEFAULT_REPLICATION, KafkaMetadataEventLog, KafkaMetadataLogConfig, METADATA_TOPIC,
-    MetadataEventQueueCapacity,
+pub use {
+    error::{CodecError, MetadataLogError, SnapshotError},
+    kafka_log::{
+        DEFAULT_METADATA_EVENT_QUEUE_CAPACITY, DEFAULT_METADATA_FETCH_MAX_BYTES,
+        DEFAULT_METADATA_FETCH_MAX_WAIT, DEFAULT_METADATA_FETCH_RETRY_BACKOFF,
+        DEFAULT_METADATA_TOPIC_CREATE_TIMEOUT, DEFAULT_MIN_ISR, DEFAULT_NUM_PARTITIONS,
+        DEFAULT_REPLICATION, KafkaMetadataEventLog, KafkaMetadataLogConfig, METADATA_TOPIC,
+        MetadataEventQueueCapacity,
+    },
+    log::{
+        AssignmentHandle, InProcessMetadataEventLog, MetadataEventLog, MetadataEventRecord,
+        MetadataEventStream, PartitionStart, RangeVisitor,
+    },
+    manager::TopicBasedRemoteLogMetadataManager,
+    not_ready::NotReadyRlmm,
+    partitioning::{metadata_partition_for, metadata_partitions_for},
+    serde::MetadataEvent,
+    snapshot::{SNAPSHOT_FILE_NAME, SNAPSHOT_FORMAT_VERSION, Snapshot},
+    swappable::SwappableRlmm,
 };
-pub use log::{
-    AssignmentHandle, InProcessMetadataEventLog, MetadataEventLog, MetadataEventRecord,
-    MetadataEventStream, PartitionStart, RangeVisitor,
-};
-pub use manager::TopicBasedRemoteLogMetadataManager;
-pub use not_ready::NotReadyRlmm;
-pub use partitioning::{metadata_partition_for, metadata_partitions_for};
-pub use serde::MetadataEvent;
-pub use snapshot::{SNAPSHOT_FILE_NAME, SNAPSHOT_FORMAT_VERSION, Snapshot};
-pub use swappable::SwappableRlmm;

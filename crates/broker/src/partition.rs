@@ -10,30 +10,30 @@
 //!   watermark and a second [`Notify`] that fires when a scheduled batch comes
 //!   due. See [`crate::delivery`].
 
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicI32, AtomicU64},
-    },
-};
-
-use arc_swap::ArcSwap;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, Offset, ReadOutput};
-use krabka_units::ByteSize;
-use tokio::{
-    sync::{Notify, mpsc},
-    task::JoinHandle,
-};
-
 // `std::sync::Mutex` is kept for `log` (sync hot-path callers);
 // `replica_state` uses `tokio::sync::Mutex` to avoid blocking worker threads.
-use crate::{
-    config::BrokerConfig,
-    diskless::hot_tail::HotTailCache,
-    txn::{handlers::write_txn_markers::CommittedOffsets, marker::MarkerType},
-    wal::{OffsetSequencer, quorum::registry::WalShardRegistry},
+use {
+    crate::{
+        config::BrokerConfig,
+        diskless::hot_tail::HotTailCache,
+        txn::{handlers::write_txn_markers::CommittedOffsets, marker::MarkerType},
+        wal::{OffsetSequencer, quorum::registry::WalShardRegistry},
+    },
+    arc_swap::ArcSwap,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, Offset, ReadOutput},
+    krabka_units::ByteSize,
+    std::{
+        path::PathBuf,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicI32, AtomicU64},
+        },
+    },
+    tokio::{
+        sync::{Notify, mpsc},
+        task::JoinHandle,
+    },
 };
 
 /// Per producer, the offset resolution a durable `__consumer_offsets` marker
@@ -363,13 +363,14 @@ impl Partition {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use tokio::sync::Notify;
-
-    use super::*;
-    use crate::{
-        partition::test_support::{append_records, test_partition},
-        test_support::{PartitionRecordsSetup, RecordCount},
+    use {
+        super::*,
+        crate::{
+            partition::test_support::{append_records, test_partition},
+            test_support::{PartitionRecordsSetup, RecordCount},
+        },
+        assert2::{assert, check},
+        tokio::sync::Notify,
     };
 
     /// `Partition::stamp_for_offset` returns the log's actual stamp for a
@@ -382,9 +383,7 @@ mod tests {
         #[derive(Debug)]
         struct FixedStamp(u64);
         impl krabka_log::StampSource for FixedStamp {
-            fn next_stamp(&self) -> u64 {
-                self.0
-            }
+            fn next_stamp(&self) -> u64 { self.0 }
         }
 
         let (p, _dir) = test_partition(Arc::new(Notify::new()));
@@ -393,13 +392,10 @@ mod tests {
             .expect("log mutex")
             .set_stamp_source(Arc::new(FixedStamp(4242)))
             .expect("set stamp source");
-        append_records(
-            &p,
-            PartitionRecordsSetup {
-                count: RecordCount(3),
-                ..Default::default()
-            },
-        ); // offsets 0..=2, each stamped 4242
+        append_records(&p, PartitionRecordsSetup {
+            count: RecordCount(3),
+            ..Default::default()
+        }); // offsets 0..=2, each stamped 4242
 
         check!(p.stamp_for_offset(Offset(0)) == Some(4242));
         check!(p.stamp_for_offset(Offset(2)) == Some(4242));
@@ -411,13 +407,10 @@ mod tests {
     #[tokio::test]
     async fn log_size_in_reports_the_logs_size_for_its_own_directory_only() {
         let (p, _dir) = test_partition(Arc::new(Notify::new()));
-        append_records(
-            &p,
-            PartitionRecordsSetup {
-                count: RecordCount(3),
-                ..Default::default()
-            },
-        );
+        append_records(&p, PartitionRecordsSetup {
+            count: RecordCount(3),
+            ..Default::default()
+        });
         let (log_dir, size) = {
             let log = p.log.lock().expect("log mutex");
             (log.dir().to_path_buf(), log.size())

@@ -6,12 +6,12 @@
 //! `kafka-console-producer` fed over stdin. Every scenario needs them, so they
 //! live apart from any one scenario.
 
-use std::process::Command;
-
-use base64::Engine as _;
-use uuid::Uuid;
-
-use crate::support::{bridge_gateway, jvm_acks_all_producer, jvm_tool_output};
+use {
+    crate::support::{bridge_gateway, jvm_acks_all_producer, jvm_tool_output},
+    base64::Engine as _,
+    std::process::Command,
+    uuid::Uuid,
+};
 
 /// cp-kafka 6.1.1 (Kafka 2.7) ships the standard Apache Kafka CLI tools used
 /// for produce / topic admin / `kafka-dump-log`. NOTE: its bundled consumer
@@ -40,9 +40,7 @@ pub fn kafka_cluster_id_string(id: Uuid) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(id.as_bytes())
 }
 
-pub fn docker_rm(name: &str) {
-    let _ = Command::new("docker").args(["rm", "-f", name]).output();
-}
+pub fn docker_rm(name: &str) { let _ = Command::new("docker").args(["rm", "-f", name]).output(); }
 
 pub fn set_container_paused(name: &str, paused: bool) {
     let action = if paused { "pause" } else { "unpause" };

@@ -1,28 +1,28 @@
 //! Tests for finding deleted topics and for tombstoning their offsets in every
 //! owned group.
 
-use std::collections::HashMap;
-
-use assert2::check;
-use krabka_metadata::{DeleteTopicRecord, MetadataRecord, TopicRecord};
-use uuid::Uuid;
-
-use super::{deleted_topics, on_topics_deleted};
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    coordinator::{
-        test_support::{fetch_offset, metadata_delta_image as image, offset_entry as entry},
-        unified::{
-            classic_state::ClassicGroup,
-            group::{CoordinatorGroup, GroupKind},
-            test_support::make_coord_with_log,
+use {
+    super::{deleted_topics, on_topics_deleted},
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        coordinator::{
+            test_support::{fetch_offset, metadata_delta_image as image, offset_entry as entry},
+            unified::{
+                classic_state::ClassicGroup,
+                group::{CoordinatorGroup, GroupKind},
+                test_support::make_coord_with_log,
+            },
         },
+        handlers::{
+            offset_commit::handle as offset_commit_handle,
+            test_support::{CreateTopicSetup, configured_topic_request},
+        },
+        test_support::start_broker_with_authorizer_no_audit,
     },
-    handlers::{
-        offset_commit::handle as offset_commit_handle,
-        test_support::{CreateTopicSetup, configured_topic_request},
-    },
-    test_support::start_broker_with_authorizer_no_audit,
+    assert2::check,
+    krabka_metadata::{DeleteTopicRecord, MetadataRecord, TopicRecord},
+    std::collections::HashMap,
+    uuid::Uuid,
 };
 
 krabka_macros::delete_topic_request!(delete_request);
@@ -103,11 +103,10 @@ async fn on_topics_deleted_tombstones_offsets_in_every_owned_group() {
         coordinator.seed_classic(group_id, Box::new(group));
     }
 
-    let changed = on_topics_deleted(
-        &coordinator,
-        |group_id| group_id != "not-owned",
-        &[("orders".to_string(), Uuid::from_u128(10))],
-    )
+    let changed = on_topics_deleted(&coordinator, |group_id| group_id != "not-owned", &[(
+        "orders".to_string(),
+        Uuid::from_u128(10),
+    )])
     .await;
 
     check!(
@@ -125,16 +124,16 @@ async fn on_topics_deleted_tombstones_offsets_in_every_owned_group() {
 /// answers no committed offset, as Kafka does.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recreated_topic_does_not_inherit_the_old_committed_offsets() {
-    use std::{sync::Arc, time::Duration};
-
-    use krabka_protocol::owned::offset_commit_request::{
-        OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
-    };
-
-    use crate::{
-        broker::Broker,
-        codes,
-        test_support::{peer, principal, request_context},
+    use {
+        crate::{
+            broker::Broker,
+            codes,
+            test_support::{peer, principal, request_context},
+        },
+        krabka_protocol::owned::offset_commit_request::{
+            OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+        },
+        std::{sync::Arc, time::Duration},
     };
 
     const TOPIC: &str = "orders";
@@ -237,11 +236,10 @@ async fn a_recreated_topic_does_not_inherit_the_old_committed_offsets() {
     // An offset committed to the new topic survives a deletion of the old
     // topic that reaches the group late: it carries the new topic id.
     check!(commit_offset(7).await == codes::NONE);
-    let changed = super::on_topics_deleted(
-        &broker.group_coordinator,
-        |_| true,
-        &[(TOPIC.to_string(), old_id)],
-    )
+    let changed = super::on_topics_deleted(&broker.group_coordinator, |_| true, &[(
+        TOPIC.to_string(),
+        old_id,
+    )])
     .await;
     check!(changed.is_empty());
     check!(fetched_offset(&broker).await == 7);

@@ -6,15 +6,16 @@
 //! [`next_chain_stamp`] reads those receipts back and works out where the next
 //! manifest goes.
 
-use krabka_verified::{ChainStep, chain::select_chain_tip, chain_step};
-use serde::{Deserialize, Serialize};
-
-use crate::{
-    metadata::{CustomMetadata, RemoteLogSegmentMetadata, RemoteLogSegmentState},
-    worm::{
-        error::WormError,
-        manifest::{ChainHead, ChainStamp, EpochId, ManifestSeq},
+use {
+    crate::{
+        metadata::{CustomMetadata, RemoteLogSegmentMetadata, RemoteLogSegmentState},
+        worm::{
+            error::WormError,
+            manifest::{ChainHead, ChainStamp, EpochId, ManifestSeq},
+        },
     },
+    krabka_verified::{ChainStep, chain::select_chain_tip, chain_step},
+    serde::{Deserialize, Serialize},
 };
 
 /// Version of the [`WormChainRecord`] JSON in a segment's
@@ -234,21 +235,18 @@ pub fn next_chain_stamp(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::LeaderEpoch;
-    use proptest::{collection::vec as prop_vec, num::u8::ANY as ANY_U8, proptest};
-    use uuid::Uuid;
+    use {
+        super::*,
+        crate::metadata::{RemoteLogSegmentDetails, RemoteLogSegmentId, TopicIdPartition},
+        assert2::check,
+        krabka_ids::LeaderEpoch,
+        proptest::{collection::vec as prop_vec, num::u8::ANY as ANY_U8, proptest},
+        uuid::Uuid,
+    };
 
-    use super::*;
-    use crate::metadata::{RemoteLogSegmentDetails, RemoteLogSegmentId, TopicIdPartition};
+    fn epoch() -> EpochId { EpochId(Uuid::from_u128(0x1234)) }
 
-    fn epoch() -> EpochId {
-        EpochId(Uuid::from_u128(0x1234))
-    }
-
-    fn head(byte: u8) -> ChainHead {
-        ChainHead([byte; 32])
-    }
+    fn head(byte: u8) -> ChainHead { ChainHead([byte; 32]) }
 
     fn sample_metadata(
         start_offset: i64,

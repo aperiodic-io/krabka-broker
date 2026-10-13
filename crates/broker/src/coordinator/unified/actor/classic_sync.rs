@@ -6,16 +6,17 @@
 //! assigned partitions, and writes nothing, as Kafka's
 //! `classicGroupSyncToConsumerGroup` does.
 
-use krabka_protocol::owned::sync_group_request::SyncGroupRequest;
-use tokio::sync::oneshot;
-
-use super::{
-    ActorServices, ParkedWaiters, SyncResult, persistence::flush_classic_metadata,
-    waiters::drain_parked_followers,
-};
-use crate::{
-    codes,
-    coordinator::unified::{classic_ops, group::CoordinatorGroup, migration},
+use {
+    super::{
+        ActorServices, ParkedWaiters, SyncResult, persistence::flush_classic_metadata,
+        waiters::drain_parked_followers,
+    },
+    crate::{
+        codes,
+        coordinator::unified::{classic_ops, group::CoordinatorGroup, migration},
+    },
+    krabka_protocol::owned::sync_group_request::SyncGroupRequest,
+    tokio::sync::oneshot,
 };
 
 pub(super) async fn handle_classic_sync_message(
@@ -83,21 +84,22 @@ pub(super) async fn handle_classic_sync_message(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::Bytes;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        actor::{
-            DescribeMember, GroupActorMessage,
-            test_support::{
-                decode_assignment, last_classic_metadata, make_coordinator,
-                make_coordinator_with_topic_policy, rpc, seed_and_upgrade, seed_completing_classic,
-                upgrade_and_rejoin_classic, upgrade_coordinator,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            actor::{
+                DescribeMember, GroupActorMessage,
+                test_support::{
+                    decode_assignment, last_classic_metadata, make_coordinator,
+                    make_coordinator_with_topic_policy, rpc, seed_and_upgrade,
+                    seed_completing_classic, upgrade_and_rejoin_classic, upgrade_coordinator,
+                },
             },
+            classic_state::GroupState as ClassicGroupState,
+            config::ConsumerGroupMigrationPolicy,
         },
-        classic_state::GroupState as ClassicGroupState,
-        config::ConsumerGroupMigrationPolicy,
+        assert2::{assert, check},
+        bytes::Bytes,
     };
 
     /// Partitions by topic id.

@@ -2,9 +2,10 @@
 //! response passes through. `changes` builds the per-partition response of
 //! the success path.
 
-use krabka_protocol::owned::assign_replicas_to_dirs_response::AssignReplicasToDirsResponse;
-
-use crate::codes;
+use {
+    crate::codes,
+    krabka_protocol::owned::assign_replicas_to_dirs_response::AssignReplicasToDirsResponse,
+};
 
 pub(super) fn not_controller_response() -> AssignReplicasToDirsResponse {
     AssignReplicasToDirsResponse {
@@ -15,18 +16,20 @@ pub(super) fn not_controller_response() -> AssignReplicasToDirsResponse {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::{
-        owned::assign_replicas_to_dirs_response::{
-            DirectoryData as RespDirData, PartitionData as RespPartData, TopicData as RespTopicData,
+    use {
+        super::*,
+        crate::handlers::{
+            assign_replicas_to_dirs::test_support::{VERSION, decode_response},
+            encode_response,
         },
-        primitives::uuid::Uuid as ProtocolUuid,
-    };
-
-    use super::*;
-    use crate::handlers::{
-        assign_replicas_to_dirs::test_support::{VERSION, decode_response},
-        encode_response,
+        assert2::assert,
+        krabka_protocol::{
+            owned::assign_replicas_to_dirs_response::{
+                DirectoryData as RespDirData, PartitionData as RespPartData,
+                TopicData as RespTopicData,
+            },
+            primitives::uuid::Uuid as ProtocolUuid,
+        },
     };
 
     #[test]

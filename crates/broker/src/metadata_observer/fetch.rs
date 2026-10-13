@@ -6,18 +6,18 @@
 //! [`snapshot::install_snapshot`], on the same connection, before the round
 //! trip returns.
 
-use std::sync::Arc;
-
-use krabka_metadata::MetadataImage;
-use krabka_protocol::records::{
-    HEADER_LEN, RecordBatch, RecordBatchHeader, RecordsError, validate_one_v2_batch,
+use {
+    super::{ObserverConfig, snapshot::install_snapshot, store::ObserverStore},
+    krabka_metadata::MetadataImage,
+    krabka_protocol::records::{
+        HEADER_LEN, RecordBatch, RecordBatchHeader, RecordsError, validate_one_v2_batch,
+    },
+    krabka_raft::NodeId,
+    krabka_units::convert::ByteSizeExt as _,
+    std::sync::Arc,
+    tokio::sync::watch,
+    tracing::{debug, error, info, warn},
 };
-use krabka_raft::NodeId;
-use krabka_units::convert::ByteSizeExt as _;
-use tokio::sync::watch;
-use tracing::{debug, error, info, warn};
-
-use super::{ObserverConfig, snapshot::install_snapshot, store::ObserverStore};
 
 /// What one successful observer fetch round trip learned.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -415,14 +415,15 @@ fn apply_fetch_records(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_metadata::{MetadataRecord, to_kraft_values};
-    use krabka_protocol::records::{Record, header::Attributes};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::test_support::single_partition_topic;
+    use {
+        super::*,
+        crate::test_support::single_partition_topic,
+        assert2::assert,
+        bytes::Bytes,
+        krabka_metadata::{MetadataRecord, to_kraft_values},
+        krabka_protocol::records::{Record, header::Attributes},
+        uuid::Uuid,
+    };
 
     fn topic_record(name: &str) -> MetadataRecord {
         MetadataRecord::V1Topic(single_partition_topic(name, Uuid::new_v4()))
@@ -629,19 +630,20 @@ mod tests {
     /// and an `InvalidValue`, which the bytes alone decide, is a load error.
     #[test]
     fn a_record_that_does_not_decode_counts_and_skips_the_rest_of_the_response() {
-        use krabka_metadata::TranslateError;
-        use krabka_protocol::{
-            owned::{
-                broker_registration_change_record::BrokerRegistrationChangeRecord,
-                partition_change_record::PartitionChangeRecord,
+        use {
+            crate::metadata_observer::test_support::{
+                encode_batches, patched_topic_value, topic_value, undecodable_private_value,
+                values_batch,
             },
-            primitives::uuid::Uuid as KUuid,
-            records::metadata::KraftMetadataRecord,
-        };
-
-        use crate::metadata_observer::test_support::{
-            encode_batches, patched_topic_value, topic_value, undecodable_private_value,
-            values_batch,
+            krabka_metadata::TranslateError,
+            krabka_protocol::{
+                owned::{
+                    broker_registration_change_record::BrokerRegistrationChangeRecord,
+                    partition_change_record::PartitionChangeRecord,
+                },
+                primitives::uuid::Uuid as KUuid,
+                records::metadata::KraftMetadataRecord,
+            },
         };
 
         let unknown_topic_config = to_kraft_values(
@@ -967,14 +969,11 @@ mod tests {
 
             let image = image_tx.borrow().clone();
             assert!(
-                (
-                    applied,
-                    [
-                        image.topic("a").is_some(),
-                        image.topic("b").is_some(),
-                        image.topic("c").is_some(),
-                    ],
-                ) == (want, topics),
+                (applied, [
+                    image.topic("a").is_some(),
+                    image.topic("b").is_some(),
+                    image.topic("c").is_some(),
+                ],) == (want, topics),
                 "{case}"
             );
         }

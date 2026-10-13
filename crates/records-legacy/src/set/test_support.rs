@@ -4,11 +4,7 @@
 //! decodes a wrapper built from them, so the fixtures sit beside the two
 //! modules rather than inside either one.
 
-use bytes::Bytes;
-use krabka_ids::Offset;
-
-use super::ParsedRecord;
-use crate::Magic;
+use {super::ParsedRecord, crate::Magic, bytes::Bytes, krabka_ids::Offset};
 
 pub(super) fn sample_records_v1() -> Vec<ParsedRecord> {
     sample_records_v1_at(100, [1_700_000_000, 1_700_000_010, 1_700_000_020])

@@ -5,32 +5,32 @@
 //! classic members of a consumer group, and the atomic record batch that makes
 //! the flip durable.
 
-use std::{collections::HashMap, time::Instant};
-
-use krabka_protocol::{
-    Decode,
-    owned::{
-        consumer_protocol_assignment::{
-            ConsumerProtocolAssignment, MAX_VERSION as ASSIGNMENT_MAX_VERSION,
-        },
-        consumer_protocol_subscription::{
-            ConsumerProtocolSubscription, MAX_VERSION as SUBSCRIPTION_MAX_VERSION,
-        },
+use {
+    super::assignment::embedded_protocol_version,
+    crate::coordinator::unified::{
+        actor::{PendingRecords, full_pending_records},
+        classic_state::ClassicGroup as ClassicState,
+        consumer_state::{ClassicMemberFacade, GroupState as ConsumerState, MemberState},
+        persistence_next_gen::MemberAssignmentState,
+        reconciler::{self, ReconcileInput},
     },
-    primitives::uuid::Uuid,
-};
-use krabka_verified::{
-    GroupMigrationDirection, GroupMigrationRecordAction, classic_upgrade_epoch,
-    group_migration_record_plan,
-};
-
-use super::assignment::embedded_protocol_version;
-use crate::coordinator::unified::{
-    actor::{PendingRecords, full_pending_records},
-    classic_state::ClassicGroup as ClassicState,
-    consumer_state::{ClassicMemberFacade, GroupState as ConsumerState, MemberState},
-    persistence_next_gen::MemberAssignmentState,
-    reconciler::{self, ReconcileInput},
+    krabka_protocol::{
+        Decode,
+        owned::{
+            consumer_protocol_assignment::{
+                ConsumerProtocolAssignment, MAX_VERSION as ASSIGNMENT_MAX_VERSION,
+            },
+            consumer_protocol_subscription::{
+                ConsumerProtocolSubscription, MAX_VERSION as SUBSCRIPTION_MAX_VERSION,
+            },
+        },
+        primitives::uuid::Uuid,
+    },
+    krabka_verified::{
+        GroupMigrationDirection, GroupMigrationRecordAction, classic_upgrade_epoch,
+        group_migration_record_plan,
+    },
+    std::{collections::HashMap, time::Instant},
 };
 
 /// Decodes a classic member's `protocol_metadata` blob as a
@@ -271,16 +271,16 @@ pub(crate) fn upgrade_pending_records(state: &ConsumerState) -> PendingRecords {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::{assert, check};
-    use bytes::{BufMut, Bytes, BytesMut};
-    use krabka_protocol::Encode;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        actor::test_support::subscription_blob,
-        classic_state::{ClassicGroup, Member},
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            actor::test_support::subscription_blob,
+            classic_state::{ClassicGroup, Member},
+        },
+        assert2::{assert, check},
+        bytes::{BufMut, Bytes, BytesMut},
+        krabka_protocol::Encode,
+        std::time::Duration,
     };
 
     fn consumer_member(id: &str, metadata: Bytes) -> Member {

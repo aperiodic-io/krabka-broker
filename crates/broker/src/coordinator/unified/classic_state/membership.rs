@@ -5,13 +5,13 @@
 //! session timeout replaces a static slot in place, and the per-round join
 //! bookkeeping the `JoinGroup` handler reads.
 
-use std::time::{Duration, Instant};
-
-use bytes::Bytes;
-
-use super::{
-    group::{ClassicGroup, GroupState},
-    member::{AddMemberOutcome, Member},
+use {
+    super::{
+        group::{ClassicGroup, GroupState},
+        member::{AddMemberOutcome, Member},
+    },
+    bytes::Bytes,
+    std::time::{Duration, Instant},
 };
 
 /// Kafka's `CLASSIC_GROUP_NEW_MEMBER_JOIN_TIMEOUT_MS`: how long a member that
@@ -325,12 +325,12 @@ impl ClassicGroup {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::classic_state::test_support::{sample_member, static_member};
+    use {
+        super::*,
+        crate::coordinator::unified::classic_state::test_support::{sample_member, static_member},
+        assert2::{assert, check},
+        std::collections::HashMap,
+    };
 
     #[test]
     fn empty_to_preparing_on_first_join() {

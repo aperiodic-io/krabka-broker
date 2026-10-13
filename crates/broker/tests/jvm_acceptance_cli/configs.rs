@@ -1,15 +1,16 @@
 //! The `kafka-configs` tool: an `--alter --add-config` and `--describe`
 //! round-trip over a topic configuration.
 
-use assert2::assert;
-
-use crate::{
-    jvm_acceptance::{
-        alter_console_topic_config, broker0_advertised, docker_run_kafka_tool,
-        docker_run_kafka_tool_allowing_failure, nc_check_connectivity, start_console_broker,
-        start_host_broker, tool_output,
+use {
+    crate::{
+        jvm_acceptance::{
+            alter_console_topic_config, broker0_advertised, docker_run_kafka_tool,
+            docker_run_kafka_tool_allowing_failure, nc_check_connectivity, start_console_broker,
+            start_host_broker, tool_output,
+        },
+        oracle::OracleComparison,
     },
-    oracle::OracleComparison,
+    assert2::assert,
 };
 
 /// `kafka-configs --alter --add-config retention.ms=60000 --topic t` then

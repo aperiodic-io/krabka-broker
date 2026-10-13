@@ -33,7 +33,5 @@ impl ReconModel {
         }
     }
 
-    pub(super) fn metadata(&self) -> ModelMetadata {
-        metadata(self.partitions)
-    }
+    pub(super) fn metadata(&self) -> ModelMetadata { metadata(self.partitions) }
 }

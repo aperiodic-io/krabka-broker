@@ -3,11 +3,11 @@
 //! This layout mirrors the Apache Kafka convention, so `krabka-log` can open
 //! existing Kafka log directories with byte compatibility.
 
-use std::path::{Path, PathBuf};
-
 pub use krabka_log::name::{FUTURE_SUFFIX, parse_partition_dir, partition_dir};
-
-use crate::{cordoned_log_dirs::CordonedLogDirs, error::BrokerError};
+use {
+    crate::{cordoned_log_dirs::CordonedLogDirs, error::BrokerError},
+    std::path::{Path, PathBuf},
+};
 
 /// Builds the future-log directory path for a (topic, partition) in `log_dir`.
 ///
@@ -198,11 +198,12 @@ pub fn scan_all(log_dirs: &[PathBuf]) -> Result<Vec<(String, i32, PathBuf)>, Bro
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{cordoned_log_dirs::CordonedLogDirs, test_support::two_log_dirs};
+    use {
+        super::*,
+        crate::{cordoned_log_dirs::CordonedLogDirs, test_support::two_log_dirs},
+        assert2::{assert, check},
+        tempfile::tempdir,
+    };
 
     fn partition_dirs(names: &[&str]) -> tempfile::TempDir {
         let dir = tempdir().unwrap();

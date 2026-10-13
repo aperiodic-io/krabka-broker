@@ -7,11 +7,10 @@
 //! `FileRegions` payload file-backed, one op per contributing segment, for the
 //! kernel `sendfile(2)` drain.
 
-use bytes::BytesMut;
-use krabka_protocol::records::RecordsPayload;
-
-use super::WriteOp;
-use crate::error::BrokerError;
+use {
+    super::WriteOp, crate::error::BrokerError, bytes::BytesMut,
+    krabka_protocol::records::RecordsPayload,
+};
 
 /// Portable (Increment C) records resolver: emit the records payload as a
 /// single inline segment. For `RecordsPayload::Raw` this function hands the
@@ -90,14 +89,15 @@ crate::sendfile_cfg! {
     target_os = "dragonfly",
 ))]
 mod tests {
-    use krabka_protocol::owned::fetch_response::{
-        FetchResponse, FetchableTopicResponse, PartitionData,
-    };
-
-    use super::*;
-    use crate::network::fetch_writer::{
-        build_fetch_plan,
-        test_support::{file_payload, raw_batch},
+    use {
+        super::*,
+        crate::network::fetch_writer::{
+            build_fetch_plan,
+            test_support::{file_payload, raw_batch},
+        },
+        krabka_protocol::owned::fetch_response::{
+            FetchResponse, FetchableTopicResponse, PartitionData,
+        },
     };
 
     /// The Increment-D wire invariant: a `FileRegions` payload through the

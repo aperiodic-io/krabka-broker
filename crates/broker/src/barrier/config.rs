@@ -52,10 +52,7 @@ pub(crate) struct BarrierConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::convert::TimeExt as _;
-
-    use super::*;
+    use {super::*, assert2::assert, krabka_units::convert::TimeExt as _};
 
     #[test]
     fn the_defaults_are_the_documented_values() {

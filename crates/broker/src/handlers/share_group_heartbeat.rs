@@ -2,19 +2,20 @@
 //! handler routes the request to the per-group share actor in
 //! `GroupCoordinator`.
 
-use krabka_protocol::owned::{
-    share_group_heartbeat_request::ShareGroupHeartbeatRequest,
-    share_group_heartbeat_response::ShareGroupHeartbeatResponse,
-};
-
 #[cfg(test)]
 use crate::config::BrokerConfig;
-use crate::{
-    broker::Broker,
-    codes,
-    coordinator::unified::{GroupCoordinator, GroupType, share::actor::ShareGroupActorMessage},
-    handlers::{ErrorResponse as _, group_coordinator_error},
-    task_util::{AskError, ask},
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        coordinator::unified::{GroupCoordinator, GroupType, share::actor::ShareGroupActorMessage},
+        handlers::{ErrorResponse as _, group_coordinator_error},
+        task_util::{AskError, ask},
+    },
+    krabka_protocol::owned::{
+        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+        share_group_heartbeat_response::ShareGroupHeartbeatResponse,
+    },
 };
 
 /// Kafka's `ShareGroupHeartbeatRequest.LEAVE_GROUP_MEMBER_EPOCH`.
@@ -144,9 +145,7 @@ fn share_group_lookup_error(
 /// Kafka's `Utils.throwIfEmptyString` test: a set value that Java's
 /// `String.trim` reduces to nothing, which strips every character at or below
 /// U+0020 from both ends.
-fn blank(value: &str) -> bool {
-    value.chars().all(|c| c <= ' ')
-}
+fn blank(value: &str) -> bool { value.chars().all(|c| c <= ' ') }
 
 /// The `INVALID_REQUEST` message of Kafka's
 /// `GroupCoordinatorService.throwIfShareGroupHeartbeatRequestIsInvalid`, or
@@ -196,29 +195,29 @@ fn stopped_actor_code(broker: &Broker, group_id: &str) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, sync::Arc};
-
-    use assert2::assert;
-    use krabka_metadata::MetadataImage;
-    use krabka_protocol::{Decode, owned::share_group_heartbeat_response};
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        handlers::{
-            encode_response,
-            group_heartbeat_test_support::{
-                GroupTopicSetup, acl_authorizer, alice, describe_acl, grant_group_read,
-                group_read_acl, subscribed_names_describe_denied_table as denied_table_fixture,
-                topic_with_partitions,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            handlers::{
+                encode_response,
+                group_heartbeat_test_support::{
+                    GroupTopicSetup, acl_authorizer, alice, describe_acl, grant_group_read,
+                    group_read_acl, subscribed_names_describe_denied_table as denied_table_fixture,
+                    topic_with_partitions,
+                },
+                group_read_denied,
             },
-            group_read_denied,
+            task_util::ask,
+            test_support::{
+                ControllerPeerAllowed, PartitionCount, finalize_share_version, peer, principal,
+                request_context, start_broker_with_authorizer as start_broker, test_ctx,
+            },
         },
-        task_util::ask,
-        test_support::{
-            ControllerPeerAllowed, PartitionCount, finalize_share_version, peer, principal,
-            request_context, start_broker_with_authorizer as start_broker, test_ctx,
-        },
+        assert2::assert,
+        krabka_metadata::MetadataImage,
+        krabka_protocol::{Decode, owned::share_group_heartbeat_response},
+        std::{net::SocketAddr, sync::Arc},
     };
 
     const VERSION: i16 = share_group_heartbeat_response::MAX_VERSION;
@@ -487,9 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn subscribed_names_describe_denied_table() {
-        denied_table_fixture();
-    }
+    fn subscribed_names_describe_denied_table() { denied_table_fixture(); }
 
     // ── Explicit-name `Describe` checks (issue #720) ────────────────────
 

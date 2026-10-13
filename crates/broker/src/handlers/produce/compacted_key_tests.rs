@@ -2,25 +2,25 @@
 //! `cleanup.policy` holds `compact` refuses a batch that holds a record with no
 //! key, with `INVALID_RECORD` and one record error per keyless record.
 
-use std::sync::Arc;
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        produce_response::{
-            BatchIndexAndErrorMessage, PartitionProduceResponse, ProduceResponse,
-            TopicProduceResponse,
-        },
+use {
+    crate::{
+        authorizer::AllowAllAuthorizer, broker::BrokerHandle, codes,
+        handlers::test_support::produce_wire, test_support::start_broker_with_authorizer_no_audit,
     },
-    records::{Record, RecordBatch, RecordsPayload},
-};
-
-use crate::{
-    authorizer::AllowAllAuthorizer, broker::BrokerHandle, codes,
-    handlers::test_support::produce_wire, test_support::start_broker_with_authorizer_no_audit,
+    assert2::check,
+    bytes::Bytes,
+    krabka_protocol::{
+        owned::{
+            create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
+            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+            produce_response::{
+                BatchIndexAndErrorMessage, PartitionProduceResponse, ProduceResponse,
+                TopicProduceResponse,
+            },
+        },
+        records::{Record, RecordBatch, RecordsPayload},
+    },
+    std::sync::Arc,
 };
 
 /// Produce v12 names the topic and carries `record_errors` and

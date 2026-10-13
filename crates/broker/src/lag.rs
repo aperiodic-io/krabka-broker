@@ -20,41 +20,41 @@
 //! publishing also releases the series the pass no longer justifies —
 //! see [`crate::metrics::lag`].
 
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    sync::{Arc, atomic::Ordering},
-};
-
-use krabka_client_core::ConnectionOptions;
-use krabka_ids::PartitionIndex;
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_protocol::{
-    owned::{
-        fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-        fetch_response::FetchResponse,
-        list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
-        list_offsets_response::ListOffsetsResponse,
+use {
+    crate::{
+        broker::registered_listener_endpoint,
+        codes,
+        coordinator::{
+            GroupCoordinator,
+            bootstrap::OFFSETS_TOPIC,
+            partitioner,
+            unified::{actor::GroupActorMessage, classic_state::OffsetEntry},
+        },
+        metadata_source::MetadataSource,
+        metrics::{BrokerMetrics, ConsumerGroupLabel, ReplicaLagLabel},
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use krabka_security::ListenerProtocol;
-use krabka_units::{Time, convert::TimeExt as _, secs};
-use tokio::sync::oneshot;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    broker::registered_listener_endpoint,
-    codes,
-    coordinator::{
-        GroupCoordinator,
-        bootstrap::OFFSETS_TOPIC,
-        partitioner,
-        unified::{actor::GroupActorMessage, classic_state::OffsetEntry},
+    krabka_client_core::ConnectionOptions,
+    krabka_ids::PartitionIndex,
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_protocol::{
+        owned::{
+            fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+            fetch_response::FetchResponse,
+            list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
+            list_offsets_response::ListOffsetsResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    metadata_source::MetadataSource,
-    metrics::{BrokerMetrics, ConsumerGroupLabel, ReplicaLagLabel},
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
+    krabka_security::ListenerProtocol,
+    krabka_units::{Time, convert::TimeExt as _, secs},
+    std::{
+        collections::{BTreeMap, HashMap, HashSet},
+        sync::{Arc, atomic::Ordering},
+    },
+    tokio::sync::oneshot,
+    tokio_util::sync::CancellationToken,
 };
 
 /// One `(topic, partition)` pair, as both samplers key their lookups.

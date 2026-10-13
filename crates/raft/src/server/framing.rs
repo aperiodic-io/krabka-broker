@@ -3,15 +3,16 @@
 //! flexible-version negotiation that decides whether a frame carries tagged
 //! fields.
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use krabka_ids::{ApiKey, ApiVersion};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-
-use super::api_versions::table;
-use crate::{
-    ControllerAdminRouter,
-    error::RaftError,
-    wire::{API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE},
+use {
+    super::api_versions::table,
+    crate::{
+        ControllerAdminRouter,
+        error::RaftError,
+        wire::{API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE},
+    },
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    krabka_ids::{ApiKey, ApiVersion},
+    tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
 };
 
 /// Kafka request-header `correlation_id`, echoed back in the response header.
@@ -24,9 +25,7 @@ pub(super) fn is_eof(e: &RaftError) -> bool {
     )
 }
 
-fn io_err(e: std::io::Error) -> RaftError {
-    RaftError::Storage(krabka_log::LogError::Io(e))
-}
+fn io_err(e: std::io::Error) -> RaftError { RaftError::Storage(krabka_log::LogError::Io(e)) }
 
 fn truncated(needed: usize) -> RaftError {
     RaftError::Protocol(krabka_protocol::ProtocolError::UnexpectedEof { needed })
@@ -205,12 +204,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::{
-        ControllerAdminRequest, ControllerAdminRouteFuture, ControllerAdminRouter,
-        ControllerApiVersion,
+    use {
+        super::*,
+        crate::{
+            ControllerAdminRequest, ControllerAdminRouteFuture, ControllerAdminRouter,
+            ControllerApiVersion,
+        },
+        assert2::check,
     };
 
     /// `socket.request.max.bytes` for the tests that do not probe it.
@@ -308,9 +308,7 @@ mod tests {
     struct StubAdminRouter(Vec<ControllerApiVersion>);
 
     impl ControllerAdminRouter for StubAdminRouter {
-        fn api_versions(&self) -> &[ControllerApiVersion] {
-            &self.0
-        }
+        fn api_versions(&self) -> &[ControllerApiVersion] { &self.0 }
 
         fn route(&self, _request: ControllerAdminRequest) -> ControllerAdminRouteFuture<'_> {
             Box::pin(std::future::ready(Ok(None)))

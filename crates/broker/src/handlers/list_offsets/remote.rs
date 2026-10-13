@@ -32,19 +32,19 @@ pub(super) fn remote_timeout(version: i16, timeout_ms: i32, server_timeout: Dura
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_protocol::owned::list_offsets_response::ListOffsetsPartitionResponse;
-
-    use super::*;
-    use crate::{
-        codes,
-        config_keys::REMOTE_LIST_OFFSETS_REQUEST_TIMEOUT_MS,
-        handlers::list_offsets::{
-            response::error_response,
-            sentinels::{UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
+    use {
+        super::*,
+        crate::{
+            codes,
+            config_keys::REMOTE_LIST_OFFSETS_REQUEST_TIMEOUT_MS,
+            handlers::list_offsets::{
+                response::error_response,
+                sentinels::{UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
+            },
         },
+        assert2::assert,
+        krabka_protocol::owned::list_offsets_response::ListOffsetsPartitionResponse,
+        std::sync::Arc,
     };
 
     #[test]

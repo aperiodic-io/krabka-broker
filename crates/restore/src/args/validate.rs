@@ -7,8 +7,10 @@
 //! backend rule is `krabka_object_store::ArchiveArgs::validate`, the one
 //! `krabka backup` applies to the same flags.
 
-use super::{PartitionRef, RestoreArgs};
-use crate::error::RestoreError;
+use {
+    super::{PartitionRef, RestoreArgs},
+    crate::error::RestoreError,
+};
 
 impl RestoreArgs {
     /// Check the flag combinations clap cannot express.
@@ -88,10 +90,11 @@ impl RestoreArgs {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use clap::Parser as _;
-
-    use crate::{Cli, args::test_support::args_from, error::RestoreError};
+    use {
+        crate::{Cli, args::test_support::args_from, error::RestoreError},
+        assert2::check,
+        clap::Parser as _,
+    };
 
     #[test]
     fn backend_sub_flags_require_their_bucket() {

@@ -8,24 +8,24 @@
 //! Kafka answer from `ProducerAppendInfo.checkSequence` and
 //! `checkProducerEpoch`.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig, ProducerId};
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-
-use super::{
-    Decision, ProducerState,
-    test_support::{ProducerEpoch, ProducerSequence},
-};
-use crate::{
-    broker::spawn_partition,
-    log_dir_status::LogDirRegistry,
-    partition::Partition,
-    test_support::RecordCount,
-    txn::marker::{MarkerType, build_marker_batch},
+use {
+    super::{
+        Decision, ProducerState,
+        test_support::{ProducerEpoch, ProducerSequence},
+    },
+    crate::{
+        broker::spawn_partition,
+        log_dir_status::LogDirRegistry,
+        partition::Partition,
+        test_support::RecordCount,
+        txn::marker::{MarkerType, build_marker_batch},
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig, ProducerId},
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    std::sync::Arc,
 };
 
 const TOPIC: &str = "orders";
@@ -199,21 +199,15 @@ const FIRST_TRANSACTION_BATCH: Step = Step::Data(DataBatchSetup {
     transaction: TransactionMode::Transactional,
 });
 
-const TV2_COMMIT: &[Step] = &[
-    FIRST_TRANSACTION_BATCH,
-    Step::Marker {
-        epoch: ProducerEpoch(4),
-        marker: MarkerType::Commit,
-    },
-];
+const TV2_COMMIT: &[Step] = &[FIRST_TRANSACTION_BATCH, Step::Marker {
+    epoch: ProducerEpoch(4),
+    marker: MarkerType::Commit,
+}];
 
-const TV2_ABORT: &[Step] = &[
-    FIRST_TRANSACTION_BATCH,
-    Step::Marker {
-        epoch: ProducerEpoch(4),
-        marker: MarkerType::Abort,
-    },
-];
+const TV2_ABORT: &[Step] = &[FIRST_TRANSACTION_BATCH, Step::Marker {
+    epoch: ProducerEpoch(4),
+    marker: MarkerType::Abort,
+}];
 
 const TV2_TWO_TRANSACTIONS: &[Step] = &[
     FIRST_TRANSACTION_BATCH,
@@ -233,13 +227,10 @@ const TV2_TWO_TRANSACTIONS: &[Step] = &[
     },
 ];
 
-const TV1_COMMIT: &[Step] = &[
-    FIRST_TRANSACTION_BATCH,
-    Step::Marker {
-        epoch: ProducerEpoch(3),
-        marker: MarkerType::Commit,
-    },
-];
+const TV1_COMMIT: &[Step] = &[FIRST_TRANSACTION_BATCH, Step::Marker {
+    epoch: ProducerEpoch(3),
+    marker: MarkerType::Commit,
+}];
 
 const IDEMPOTENT_EPOCH_BUMP: &[Step] = &[
     Step::Data(DataBatchSetup {

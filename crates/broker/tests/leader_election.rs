@@ -5,20 +5,20 @@
 //! openraft and `tokio` scheduling on Windows runners cause flakes that have
 //! nothing to do with the protocol under test.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_broker::{BrokerConfig, BrokerHandle};
-use krabka_metadata::{LeaderRecoveryState, MetadataRecord, TopicConfigRecord};
-use support::{cluster_lock, durability::produce_acks};
-use tempfile::TempDir;
-
-use crate::support::{
-    client::{BatchProduceSetup, connect_client},
-    discovery::named_topic_metadata,
-    durability::{ReplicatedTopicSetup, replicated_topic_fixture},
-    produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
-    shutdown_cluster,
+use {
+    crate::support::{
+        client::{BatchProduceSetup, connect_client},
+        discovery::named_topic_metadata,
+        durability::{ReplicatedTopicSetup, replicated_topic_fixture},
+        produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
+        shutdown_cluster,
+    },
+    assert2::assert,
+    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_metadata::{LeaderRecoveryState, MetadataRecord, TopicConfigRecord},
+    std::time::{Duration, Instant},
+    support::{cluster_lock, durability::produce_acks},
+    tempfile::TempDir,
 };
 
 mod support;
@@ -188,16 +188,12 @@ async fn acks_all_completes_after_isr_shrink() {
     // replica_lag_time_max (2s on CI) + heartbeat_timeout (2s); produce
     // completes after.
     let start = Instant::now();
-    let offset = produce_acks(
-        &bootstrap_1,
-        &["a", "b", "c"],
-        BatchProduceSetup {
-            topic: "shrink2",
-            acknowledgements: ProduceAcknowledgements::AllReplicas,
-            timeout: ProduceTimeoutMillis(15_000),
-            ..Default::default()
-        },
-    )
+    let offset = produce_acks(&bootstrap_1, &["a", "b", "c"], BatchProduceSetup {
+        topic: "shrink2",
+        acknowledgements: ProduceAcknowledgements::AllReplicas,
+        timeout: ProduceTimeoutMillis(15_000),
+        ..Default::default()
+    })
     .await
     .expect("acks=-1 after shrink");
     let elapsed = start.elapsed();
@@ -307,14 +303,10 @@ async fn produce_during_leader_failover() {
     // more pointed at broker 2's bootstrap (clients will re-fetch
     // metadata on NOT_LEADER_OR_FOLLOWER).
     for v in &["a", "b", "c", "d", "e"] {
-        produce_acks(
-            &bootstrap_1,
-            &[v],
-            BatchProduceSetup {
-                topic: "failover",
-                ..Default::default()
-            },
-        )
+        produce_acks(&bootstrap_1, &[v], BatchProduceSetup {
+            topic: "failover",
+            ..Default::default()
+        })
         .await
         .expect("pre");
     }
@@ -334,14 +326,10 @@ async fn produce_during_leader_failover() {
     // Continue producing. The first attempt may hit NOT_LEADER_OR_FOLLOWER;
     // retry via bootstrap_2.
     for v in &["f", "g", "h", "i", "j"] {
-        let res = produce_acks(
-            &bootstrap_2,
-            &[v],
-            BatchProduceSetup {
-                topic: "failover",
-                ..Default::default()
-            },
-        )
+        let res = produce_acks(&bootstrap_2, &[v], BatchProduceSetup {
+            topic: "failover",
+            ..Default::default()
+        })
         .await;
         // Either success (election done) or NOT_LEADER_OR_FOLLOWER if metadata still stale.
         // For test purposes, accept either; just verify the cluster keeps serving.

@@ -5,9 +5,10 @@
 //! [`NullPeerSender`] backs the single-voter case where no peer RPC is ever
 //! sent.
 
-use bytes::Bytes;
-
-use crate::{error::RaftError, kraft::types::NodeId};
+use {
+    crate::{error::RaftError, kraft::types::NodeId},
+    bytes::Bytes,
+};
 
 /// Outbound peer RPC sender.
 ///
@@ -42,9 +43,7 @@ pub trait PeerSender: Send + Sync {
     fn update_voters(&self, _voters: &krabka_metadata::VoterSet) {}
 
     /// Transport-only bootstrap peers used by an observer with no voter view.
-    fn discovery_peers(&self) -> Vec<NodeId> {
-        Vec::new()
-    }
+    fn discovery_peers(&self) -> Vec<NodeId> { Vec::new() }
 
     /// Address `leader` at `address`, the `host:port` it announced in a
     /// response's `NodeEndpoints`. A voter-set listener for the same node
@@ -71,10 +70,7 @@ impl PeerSender for NullPeerSender {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::kraft::transport::api_key;
+    use {super::*, crate::kraft::transport::api_key, assert2::assert};
 
     #[tokio::test]
     async fn null_peer_sender_reports_target_as_current_leader() {
@@ -83,12 +79,9 @@ mod tests {
             .await
             .expect_err("null sender should reject peer sends");
 
-        assert2::assert!(matches!(
-            err,
-            RaftError::NotLeader {
-                current_leader: Some(NodeId(7))
-            }
-        ));
+        assert2::assert!(matches!(err, RaftError::NotLeader {
+            current_leader: Some(NodeId(7))
+        }));
     }
 
     #[tokio::test]

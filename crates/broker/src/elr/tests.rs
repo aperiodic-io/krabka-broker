@@ -7,32 +7,34 @@
 //! through the real `DescribeTopicPartitions` handler, which is the path
 //! `kafka-topics --describe` takes.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_metadata::{
-    BrokerRegistrationRecord, LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionRecord,
-};
-use krabka_protocol::owned::{
-    broker_registration_request::{BrokerRegistrationRequest, Listener},
-    describe_topic_partitions_response::DescribeTopicPartitionsResponsePartition,
-};
-
-use super::{ElrPublisher, TopicElr, state::PartitionElr};
-use crate::{
-    BrokerHandle,
-    broker::Broker,
-    codes,
-    handlers::{
-        broker_registration::handle,
-        describe_topic_partitions::handle as describe_topic_partitions_handle,
+use {
+    super::{ElrPublisher, TopicElr, state::PartitionElr},
+    crate::{
+        BrokerHandle,
+        broker::Broker,
+        codes,
+        handlers::{
+            broker_registration::handle,
+            describe_topic_partitions::handle as describe_topic_partitions_handle,
+        },
+        heartbeat::controller_state::BrokerControlState,
+        test_support::{
+            IsrResponseCheck, LiveIsrSetup, WireBrokerId, accepted_isr_proposal,
+            broker_registration, elr_topic_records, end_heartbeat_session,
+            finalized_broker_features, peer, principal, request_context, started_controller_broker,
+            topic_partitions_request,
+        },
     },
-    heartbeat::controller_state::BrokerControlState,
-    test_support::{
-        IsrResponseCheck, LiveIsrSetup, WireBrokerId, accepted_isr_proposal, broker_registration,
-        elr_topic_records, end_heartbeat_session, finalized_broker_features, peer, principal,
-        request_context, started_controller_broker, topic_partitions_request,
+    assert2::assert,
+    krabka_metadata::{
+        BrokerRegistrationRecord, LeaderEpoch, MetadataImage, MetadataRecord, NodeId,
+        PartitionRecord,
     },
+    krabka_protocol::owned::{
+        broker_registration_request::{BrokerRegistrationRequest, Listener},
+        describe_topic_partitions_response::DescribeTopicPartitionsResponsePartition,
+    },
+    std::sync::Arc,
 };
 
 const TOPIC: &str = "orders";
@@ -60,9 +62,7 @@ fn partition_record(isr: &[NodeId]) -> PartitionRecord {
 /// The records that put topic `orders` in the image: one RF=3 partition whose
 /// ISR is full, and a `min.insync.replicas` of 2, which is what gives the
 /// partition an ELR to fall below.
-fn seed_records() -> Vec<MetadataRecord> {
-    seed_records_with_min_isr("2")
-}
+fn seed_records() -> Vec<MetadataRecord> { seed_records_with_min_isr("2") }
 
 /// [`seed_records`] with `min.insync.replicas` chosen by the caller. A value
 /// equal to the replication factor is what makes the ISR shrink of a single

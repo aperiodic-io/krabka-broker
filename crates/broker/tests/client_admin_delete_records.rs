@@ -1,11 +1,12 @@
 mod support;
 
-use assert2::assert;
-use krabka_client_admin::DeleteRecordsOp;
-use krabka_client_core::{ClientError, Connection, ConnectionOptions, fetch_partition};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-use crate::support::client_admin::*;
+use {
+    crate::support::client_admin::*,
+    assert2::assert,
+    krabka_client_admin::DeleteRecordsOp,
+    krabka_client_core::{ClientError, Connection, ConnectionOptions, fetch_partition},
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn delete_records_truncates_wal_and_maps_outcome() {
@@ -88,13 +89,10 @@ async fn connect_reader(bootstrap: &str) -> Connection {
         .expect("resolve bootstrap")
         .next()
         .expect("bootstrap address");
-    Connection::connect_with_options(
-        addr,
-        ConnectionOptions {
-            client_id: "delete-records-test-reader".to_string(),
-            ..Default::default()
-        },
-    )
+    Connection::connect_with_options(addr, ConnectionOptions {
+        client_id: "delete-records-test-reader".to_string(),
+        ..Default::default()
+    })
     .await
     .expect("connect reader")
 }

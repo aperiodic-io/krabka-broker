@@ -4,25 +4,25 @@
 //! openraft-leader check, and the `submit_change` of an accepted ISR proposal
 //! are exercised together, which is why they are kept out of the module root.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_protocol::owned::{
-    alter_partition_request::{PartitionData as ReqPartitionData, TopicData as ReqTopicData},
-    alter_partition_response,
-};
-
-use super::{
-    test_support::{request_with_topics, seed_partition, wire_topic_id},
-    *,
-};
-use crate::{
-    broker::Broker,
-    handlers::RequestContext,
-    test_support::{
-        DenyAll, KafkaErrorCode, dispatch_wire, start_broker_with_authorizer as start_broker,
-        test_ctx,
+use {
+    super::{
+        test_support::{request_with_topics, seed_partition, wire_topic_id},
+        *,
     },
+    crate::{
+        broker::Broker,
+        handlers::RequestContext,
+        test_support::{
+            DenyAll, KafkaErrorCode, dispatch_wire, start_broker_with_authorizer as start_broker,
+            test_ctx,
+        },
+    },
+    assert2::assert,
+    krabka_protocol::owned::{
+        alter_partition_request::{PartitionData as ReqPartitionData, TopicData as ReqTopicData},
+        alter_partition_response,
+    },
+    std::sync::Arc,
 };
 
 crate::test_support::context_helper!(client_id = "broker-client");
@@ -57,14 +57,10 @@ async fn handle_denies_cluster_action_for_whole_request() {
         deny_all,
         context(ctx, "replica")
     );
-    check_empty_alter_partition(
-        &broker,
-        &ctx,
-        EmptyAlterPartitionSetup {
-            expected: KafkaErrorCode(codes::CLUSTER_AUTHORIZATION_FAILED),
-            ..Default::default()
-        },
-    )
+    check_empty_alter_partition(&broker, &ctx, EmptyAlterPartitionSetup {
+        expected: KafkaErrorCode(codes::CLUSTER_AUTHORIZATION_FAILED),
+        ..Default::default()
+    })
     .await;
     broker_handle.shutdown().await;
 }
@@ -199,14 +195,11 @@ async fn topic_row_error_follows_version_and_topic_id() {
             partition_epoch,
             ..Default::default()
         };
-        let req = request_with_topics(
-            &broker,
-            vec![ReqTopicData {
-                topic_id,
-                partitions: vec![row(0), row(1)],
-                ..Default::default()
-            }],
-        );
+        let req = request_with_topics(&broker, vec![ReqTopicData {
+            topic_id,
+            partitions: vec![row(0), row(1)],
+            ..Default::default()
+        }]);
         let resp = dispatch_wire(
             &broker,
             krabka_protocol::owned::alter_partition_request::API_KEY,
@@ -274,22 +267,19 @@ async fn a_stale_sender_broker_epoch_refuses_the_whole_request() {
         let req = AlterPartitionRequest {
             broker_id,
             broker_epoch,
-            ..request_with_topics(
-                &broker,
-                vec![ReqTopicData {
-                    topic_id: wire_topic_id(),
-                    partitions: vec![ReqPartitionData {
-                        partition_index: 0,
-                        leader_epoch: 5,
-                        new_isr_with_epochs: vec![super::test_support::bs(
-                            crate::test_support::WireBrokerId(1),
-                            crate::test_support::BrokerEpoch(-1),
-                        )],
-                        ..Default::default()
-                    }],
+            ..request_with_topics(&broker, vec![ReqTopicData {
+                topic_id: wire_topic_id(),
+                partitions: vec![ReqPartitionData {
+                    partition_index: 0,
+                    leader_epoch: 5,
+                    new_isr_with_epochs: vec![super::test_support::bs(
+                        crate::test_support::WireBrokerId(1),
+                        crate::test_support::BrokerEpoch(-1),
+                    )],
                     ..Default::default()
                 }],
-            )
+                ..Default::default()
+            }])
         };
         let resp = super::handle(&broker, req, version, &ctx)
             .await
@@ -309,20 +299,17 @@ async fn a_stale_sender_broker_epoch_refuses_the_whole_request() {
 }
 
 fn single_partition_request(broker: &Broker) -> AlterPartitionRequest {
-    request_with_topics(
-        broker,
-        vec![ReqTopicData {
-            topic_id: wire_topic_id(),
-            partitions: vec![ReqPartitionData {
-                partition_index: 0,
-                leader_epoch: 5,
-                new_isr: vec![1],
-                partition_epoch: 0,
-                ..Default::default()
-            }],
+    request_with_topics(broker, vec![ReqTopicData {
+        topic_id: wire_topic_id(),
+        partitions: vec![ReqPartitionData {
+            partition_index: 0,
+            leader_epoch: 5,
+            new_isr: vec![1],
+            partition_epoch: 0,
             ..Default::default()
         }],
-    )
+        ..Default::default()
+    }])
 }
 
 fn accepted_isr_response() -> AlterPartitionResponse {

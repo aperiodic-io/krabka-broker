@@ -10,15 +10,16 @@
 //! partition that is unavailable, and a lookup that lands below the bound is
 //! still answered normally to both isolation levels.
 
-use assert2::check;
-use krabka_client_producer::Producer;
-
-use crate::{
-    support,
-    wire::{
-        EndOfPartition, both_levels, create_topic, matched_row, refused_row, send_at,
-        wait_for_settled_log,
+use {
+    crate::{
+        support,
+        wire::{
+            EndOfPartition, both_levels, create_topic, matched_row, refused_row, send_at,
+            wait_for_settled_log,
+        },
     },
+    assert2::check,
+    krabka_client_producer::Producer,
 };
 
 /// An open transaction fences `MAX_TIMESTAMP` and a by-timestamp lookup for a

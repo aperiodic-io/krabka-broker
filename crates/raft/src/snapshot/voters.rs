@@ -5,13 +5,14 @@
 //! it lives in its own module. Every range check that rejects a malformed voter
 //! id or `kraft.version` bound is here.
 
-use krabka_metadata::{NodeId, VoterSet, voters::KRaftVersionRange};
-use krabka_protocol::owned::voters_record::VotersRecord as WireVotersRecord;
-use uuid::Uuid;
-
-use crate::{
-    error::RaftError,
-    voter_wire::{from_wire, record, to_wire},
+use {
+    crate::{
+        error::RaftError,
+        voter_wire::{from_wire, record, to_wire},
+    },
+    krabka_metadata::{NodeId, VoterSet, voters::KRaftVersionRange},
+    krabka_protocol::owned::voters_record::VotersRecord as WireVotersRecord,
+    uuid::Uuid,
 };
 
 pub(super) fn voter_set_to_wire(voters: &VoterSet) -> Result<WireVotersRecord, RaftError> {
@@ -70,9 +71,10 @@ pub(super) fn voter_set_from_wire(record: &WireVotersRecord) -> Result<VoterSet,
 
 #[cfg(test)]
 mod tests {
-    use krabka_metadata::{Voter, VoterEndpoint};
-
-    use super::*;
+    use {
+        super::*,
+        krabka_metadata::{Voter, VoterEndpoint},
+    };
 
     #[test]
     fn snapshot_voters_wire_round_trip_and_version_range() {

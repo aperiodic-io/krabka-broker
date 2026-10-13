@@ -7,20 +7,20 @@
 //! and the topology, in the field order and the sort order of Kafka's
 //! `StreamsGroup.asDescribedGroup`.
 
-use std::collections::BTreeMap;
-
-use krabka_protocol::owned::{
-    common::streams_group_describe_response::{
-        assignment::Assignment, endpoint::Endpoint, key_value::KeyValue, task_ids::TaskIds,
-        task_offset::TaskOffset, topic_info::TopicInfo,
+use {
+    crate::coordinator::unified::streams::{
+        actor::{StreamsDescribeMember, StreamsDescribeView},
+        persistence::{StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue},
+        topology::{ConfiguredInternalTopic, ConfiguredTopology},
     },
-    streams_group_describe_response::{DescribedGroup, Member, Subtopology, Topology},
-};
-
-use crate::coordinator::unified::streams::{
-    actor::{StreamsDescribeMember, StreamsDescribeView},
-    persistence::{StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue},
-    topology::{ConfiguredInternalTopic, ConfiguredTopology},
+    krabka_protocol::owned::{
+        common::streams_group_describe_response::{
+            assignment::Assignment, endpoint::Endpoint, key_value::KeyValue, task_ids::TaskIds,
+            task_offset::TaskOffset, topic_info::TopicInfo,
+        },
+        streams_group_describe_response::{DescribedGroup, Member, Subtopology, Topology},
+    },
+    std::collections::BTreeMap,
 };
 
 /// Map a [`StreamsDescribeView`] into a wire `DescribedGroup`.
@@ -225,15 +225,16 @@ fn task_map_to_ids(map: &BTreeMap<String, Vec<i32>>) -> Vec<TaskIds> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        codes,
-        handlers::streams_group_describe::test_support::{
-            describe_member, expected_rendered_topology, expected_task_ids, task_map,
-            topology_value,
+    use {
+        super::*,
+        crate::{
+            codes,
+            handlers::streams_group_describe::test_support::{
+                describe_member, expected_rendered_topology, expected_task_ids, task_map,
+                topology_value,
+            },
         },
+        assert2::assert,
     };
 
     #[test]
@@ -319,9 +320,10 @@ mod tests {
     /// one (`ConfiguredTopology`), whatever order the members sent.
     #[test]
     fn topologies_render_in_kafka_order() {
-        use std::collections::BTreeSet;
-
-        use crate::coordinator::unified::streams::topology::ConfiguredSubtopology;
+        use {
+            crate::coordinator::unified::streams::topology::ConfiguredSubtopology,
+            std::collections::BTreeSet,
+        };
 
         let info = |name: &str, partitions| StoredTopicInfo {
             name: name.into(),
@@ -345,22 +347,19 @@ mod tests {
             configs: BTreeMap::new(),
         };
         let configured = |id: &str| {
-            (
-                id.to_owned(),
-                ConfiguredSubtopology {
-                    number_of_tasks: 3,
-                    source_topics: BTreeSet::from(["t2".to_owned(), "t1".to_owned()]),
-                    repartition_source_topics: [("r2", internal("r2")), ("r1", internal("r1"))]
-                        .into_iter()
-                        .map(|(name, topic)| (name.to_owned(), topic))
-                        .collect(),
-                    repartition_sink_topics: BTreeSet::from(["s2".to_owned(), "s1".to_owned()]),
-                    state_changelog_topics: [("c2", internal("c2")), ("c1", internal("c1"))]
-                        .into_iter()
-                        .map(|(name, topic)| (name.to_owned(), topic))
-                        .collect(),
-                },
-            )
+            (id.to_owned(), ConfiguredSubtopology {
+                number_of_tasks: 3,
+                source_topics: BTreeSet::from(["t2".to_owned(), "t1".to_owned()]),
+                repartition_source_topics: [("r2", internal("r2")), ("r1", internal("r1"))]
+                    .into_iter()
+                    .map(|(name, topic)| (name.to_owned(), topic))
+                    .collect(),
+                repartition_sink_topics: BTreeSet::from(["s2".to_owned(), "s1".to_owned()]),
+                state_changelog_topics: [("c2", internal("c2")), ("c1", internal("c1"))]
+                    .into_iter()
+                    .map(|(name, topic)| (name.to_owned(), topic))
+                    .collect(),
+            })
         };
         let wire = |partitions| {
             let topic = |name: &str| TopicInfo {

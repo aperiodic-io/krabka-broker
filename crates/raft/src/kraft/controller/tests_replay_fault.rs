@@ -6,31 +6,32 @@
 //! the image (`TranslateError::InvalidReference`) is a skip. Control-record
 //! replay stops on an invalid KIP-853 record.
 
-use assert2::check;
-use bytes::Bytes;
-use krabka_metadata::{TopicConfigRecord, TopicRecord, TranslateError};
-use krabka_protocol::{
-    owned::{
-        broker_registration_change_record::BrokerRegistrationChangeRecord,
-        k_raft_version_record::KRaftVersionRecord, no_op_record::NoOpRecord,
-        partition_change_record::PartitionChangeRecord, remove_topic_record::RemoveTopicRecord,
-        voters_record::VotersRecord as WireVotersRecord,
+use {
+    super::*,
+    crate::{
+        MetadataLogConfig,
+        error::MetadataReplayError,
+        kraft::controller::{
+            control_batch_image_records,
+            control_state::voter_set_from_wire,
+            records::{decode_control_record, typed_control_batch},
+            recovery::{replay_committed, replay_control_records},
+            test_support::{one_offset_batch, voter_set},
+        },
     },
-    primitives::uuid::Uuid as KUuid,
-    records::metadata::KraftMetadataRecord,
-    tagged_fields::{UnknownTaggedField, UnknownTaggedFields},
-};
-
-use super::*;
-use crate::{
-    MetadataLogConfig,
-    error::MetadataReplayError,
-    kraft::controller::{
-        control_batch_image_records,
-        control_state::voter_set_from_wire,
-        records::{decode_control_record, typed_control_batch},
-        recovery::{replay_committed, replay_control_records},
-        test_support::{one_offset_batch, voter_set},
+    assert2::check,
+    bytes::Bytes,
+    krabka_metadata::{TopicConfigRecord, TopicRecord, TranslateError},
+    krabka_protocol::{
+        owned::{
+            broker_registration_change_record::BrokerRegistrationChangeRecord,
+            k_raft_version_record::KRaftVersionRecord, no_op_record::NoOpRecord,
+            partition_change_record::PartitionChangeRecord, remove_topic_record::RemoveTopicRecord,
+            voters_record::VotersRecord as WireVotersRecord,
+        },
+        primitives::uuid::Uuid as KUuid,
+        records::metadata::KraftMetadataRecord,
+        tagged_fields::{UnknownTaggedField, UnknownTaggedFields},
     },
 };
 
@@ -328,15 +329,13 @@ fn a_stopped_controller_applies_no_later_record() {
 /// handler halts the process.
 #[test]
 fn control_replay_stops_on_an_invalid_control_record() {
-    let negative_version = typed_control_batch(
-        1,
-        &[ControlRecord::KRaftVersion(KRaftVersionRecord {
+    let negative_version =
+        typed_control_batch(1, &[ControlRecord::KRaftVersion(KRaftVersionRecord {
             version: 0,
             k_raft_version: -1,
             ..Default::default()
-        })],
-    )
-    .expect("negative kraft.version batch");
+        })])
+        .expect("negative kraft.version batch");
 
     let mut undecodable = negative_version.clone();
     undecodable.records[0].value = Some(Bytes::from_static(&[0xff]));
@@ -443,9 +442,7 @@ fn only_image_lookups_are_skipped() {
 }
 
 /// The value bytes of the empty KIP-835 no-op.
-fn noop_value() -> Vec<u8> {
-    records::noop_record_value().expect("no-op").to_vec()
-}
+fn noop_value() -> Vec<u8> { records::noop_record_value().expect("no-op").to_vec() }
 
 /// Kafka's `RecordsIterator.decodeControlRecord` refuses a control record
 /// whose key or value is missing or empty, with these messages, and the
@@ -454,14 +451,11 @@ fn noop_value() -> Vec<u8> {
 /// broker-only observer share.
 #[test]
 fn a_control_record_without_its_key_or_value_is_invalid() {
-    let batch = typed_control_batch(
-        1,
-        &[ControlRecord::KRaftVersion(KRaftVersionRecord {
-            version: 0,
-            k_raft_version: 1,
-            ..Default::default()
-        })],
-    )
+    let batch = typed_control_batch(1, &[ControlRecord::KRaftVersion(KRaftVersionRecord {
+        version: 0,
+        k_raft_version: 1,
+        ..Default::default()
+    })])
     .expect("kraft.version batch");
     let good = &batch.records[0];
     let (key, value) = (good.key.clone(), good.value.clone());

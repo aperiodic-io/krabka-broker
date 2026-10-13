@@ -6,16 +6,17 @@
 //! `SHA-256` digest, and the translation of every backend call into an
 //! [`ObjectStoreError`].
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use futures_util::{StreamExt as _, TryStreamExt as _};
-use object_store::{
-    GetOptions, GetRange, MultipartUpload, ObjectMeta, ObjectStoreExt as _, PutOptions, PutPayload,
-    PutResult, UploadPart, WriteMultipart, path::Path,
+use {
+    bytes::Bytes,
+    futures_util::{StreamExt as _, TryStreamExt as _},
+    object_store::{
+        GetOptions, GetRange, MultipartUpload, ObjectMeta, ObjectStoreExt as _, PutOptions,
+        PutPayload, PutResult, UploadPart, WriteMultipart, path::Path,
+    },
+    sha2::{Digest as _, Sha256},
+    std::sync::Arc,
+    tokio::io::AsyncReadExt as _,
 };
-use sha2::{Digest as _, Sha256};
-use tokio::io::AsyncReadExt as _;
 
 #[cfg(test)]
 mod tests;
@@ -60,9 +61,7 @@ impl AbortOnDrop {
 
 #[async_trait::async_trait]
 impl MultipartUpload for AbortOnDrop {
-    fn put_part(&mut self, data: PutPayload) -> UploadPart {
-        self.upload().put_part(data)
-    }
+    fn put_part(&mut self, data: PutPayload) -> UploadPart { self.upload().put_part(data) }
 
     async fn complete(&mut self) -> object_store::Result<PutResult> {
         let result = self.upload().complete().await;
@@ -113,43 +112,12 @@ impl Drop for AbortOnDrop {
 impl ObjectStoreClient {
     /// Wrap an existing object-store handle.
     #[must_use]
-    pub fn new(inner: Arc<dyn object_store::ObjectStore>) -> Self {
-        Self { inner }
-    }
+    pub fn new(inner: Arc<dyn object_store::ObjectStore>) -> Self { Self { inner } }
 }
 
 #[krabka_macros::object_ops]
 #[async_trait::async_trait]
 impl ObjectOps for ObjectStoreClient {
-    async fn put(
-        &self,
-        key: &Path,
-        bytes: Bytes,
-        req: PutRequest,
-    ) -> Result<PutOutcome, ObjectStoreError> {
-        let create_precondition = matches!(req.mode, object_store::PutMode::Create);
-        let size_bytes = bytes.len() as u64;
-        let sha256 = req.digest.then(|| Sha256::digest(&bytes).into());
-        let result = self
-            .inner
-            .put_opts(
-                key,
-                PutPayload::from_bytes(bytes),
-                PutOptions {
-                    mode: req.mode,
-                    ..Default::default()
-                },
-            )
-            .await?;
-        Ok(PutOutcome {
-            size_bytes,
-            sha256,
-            e_tag: result.e_tag,
-            version_id: result.version,
-            create_precondition,
-        })
-    }
-
     put_from_path!({
         if chunk_size == 0 {
             return Err(std::io::Error::new(
@@ -169,14 +137,10 @@ impl ObjectOps for ObjectStoreClient {
         // safety wins over retrying a key whose ownership is now ambiguous.
         if matches!(req.mode, object_store::PutMode::Create) {
             self.inner
-                .put_opts(
-                    key,
-                    PutPayload::from_bytes(Bytes::new()),
-                    PutOptions {
-                        mode: object_store::PutMode::Create,
-                        ..PutOptions::default()
-                    },
-                )
+                .put_opts(key, PutPayload::from_bytes(Bytes::new()), PutOptions {
+                    mode: object_store::PutMode::Create,
+                    ..PutOptions::default()
+                })
                 .await?;
         }
         let upload = Box::new(AbortOnDrop::new(self.inner.put_multipart(key).await?, key));
@@ -242,6 +206,31 @@ impl ObjectOps for ObjectStoreClient {
             create_precondition: false,
         })
     });
+
+    async fn put(
+        &self,
+        key: &Path,
+        bytes: Bytes,
+        req: PutRequest,
+    ) -> Result<PutOutcome, ObjectStoreError> {
+        let create_precondition = matches!(req.mode, object_store::PutMode::Create);
+        let size_bytes = bytes.len() as u64;
+        let sha256 = req.digest.then(|| Sha256::digest(&bytes).into());
+        let result = self
+            .inner
+            .put_opts(key, PutPayload::from_bytes(bytes), PutOptions {
+                mode: req.mode,
+                ..Default::default()
+            })
+            .await?;
+        Ok(PutOutcome {
+            size_bytes,
+            sha256,
+            e_tag: result.e_tag,
+            version_id: result.version,
+            create_precondition,
+        })
+    }
 
     async fn get(&self, key: &Path) -> Result<Bytes, ObjectStoreError> {
         Ok(self.inner.get(key).await?.bytes().await?)

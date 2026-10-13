@@ -2,18 +2,19 @@
 //! it places, the cut it publishes, and the group lock that holds a second
 //! caller off.
 
-use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_units::millis;
-
-use super::*;
-use crate::{
-    barrier::{
-        coordinator::test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
-        marker::parse_barrier_marker,
-        persistence::{MissingPartition, PartitionOffset, TopicOffsets},
+use {
+    super::*,
+    crate::{
+        barrier::{
+            coordinator::test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
+            marker::parse_barrier_marker,
+            persistence::{MissingPartition, PartitionOffset, TopicOffsets},
+        },
+        partition_registry::PartitionRegistry,
     },
-    partition_registry::PartitionRegistry,
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_units::millis,
 };
 
 async fn check_retained_epochs(coordinator: &BarrierCoordinator, expected: &[i64]) {

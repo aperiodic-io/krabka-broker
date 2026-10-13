@@ -6,9 +6,10 @@
 //! fetches again, so the model gets Kafka's real truncation point rather than
 //! a hand-written prefix comparison.
 
-use krabka_log::{EpochEntry, Offset, epoch_and_offset_for_entries};
-
-use super::bounds::model_offset;
+use {
+    super::bounds::model_offset,
+    krabka_log::{EpochEntry, Offset, epoch_and_offset_for_entries},
+};
 
 /// The leader-epoch entries for a log: one entry per epoch change.
 fn epoch_entries(log: &[u8]) -> Vec<EpochEntry> {

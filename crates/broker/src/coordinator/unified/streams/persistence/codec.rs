@@ -7,20 +7,21 @@
 //! [`persistence::flex`](crate::coordinator::unified::persistence::flex); what
 //! is here is the two shapes that only streams records use.
 
-use std::collections::BTreeMap;
-
-use bytes::{BufMut, BytesMut};
-
-use crate::{
-    coordinator::unified::persistence::{
-        flex::{
-            get_compact_array, get_compact_array_len, get_compact_string, get_i32_array,
-            put_compact_array, put_compact_array_len, put_compact_string, put_empty_tagged_fields,
-            put_i32_array, put_tagged_fields, read_tagged, skip_tagged_fields,
+use {
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{
+                get_compact_array, get_compact_array_len, get_compact_string, get_i32_array,
+                put_compact_array, put_compact_array_len, put_compact_string,
+                put_empty_tagged_fields, put_i32_array, put_tagged_fields, read_tagged,
+                skip_tagged_fields,
+            },
+            get_i16,
         },
-        get_i16,
+        error::BrokerError,
     },
-    error::BrokerError,
+    bytes::{BufMut, BytesMut},
+    std::collections::BTreeMap,
 };
 
 /// The tag of `TaskIds.AssignmentEpochs` in

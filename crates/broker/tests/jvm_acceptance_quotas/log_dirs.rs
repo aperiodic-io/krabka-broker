@@ -4,10 +4,11 @@
 //! This is the one suite here that boots a single host broker rather than the
 //! three-broker SASL cluster, because JBOD spread is a per-broker property.
 
-use assert2::check;
-
-use crate::jvm_acceptance::{
-    broker0_advertised, docker_run_kafka_tool, nc_check_connectivity, start_host_broker_jbod,
+use {
+    crate::jvm_acceptance::{
+        broker0_advertised, docker_run_kafka_tool, nc_check_connectivity, start_host_broker_jbod,
+    },
+    assert2::check,
 };
 
 /// KIP-113: `kafka-log-dirs --describe` against a two-directory

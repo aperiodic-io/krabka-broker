@@ -3,25 +3,25 @@
 //! reaches the broker's self-registration record and survives a Metadata
 //! round-trip.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_broker::{Broker, BrokerConfig};
-use krabka_protocol::owned::metadata_request::MetadataRequest;
-use krabka_security::{ListenerProtocol, TlsConfig};
-use tokio_rustls::{
-    TlsConnector,
-    rustls::{
-        ClientConfig,
-        pki_types::{CertificateDer, ServerName, pem::PemObject as _},
+use {
+    crate::{
+        DEV_CERT, DEV_KEY,
+        support::{
+            client::connect_owned,
+            tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
+        },
     },
-};
-
-use crate::{
-    DEV_CERT, DEV_KEY,
-    support::{
-        client::connect_owned,
-        tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
+    assert2::assert,
+    krabka_broker::{Broker, BrokerConfig},
+    krabka_protocol::owned::metadata_request::MetadataRequest,
+    krabka_security::{ListenerProtocol, TlsConfig},
+    std::sync::Arc,
+    tokio_rustls::{
+        TlsConnector,
+        rustls::{
+            ClientConfig,
+            pki_types::{CertificateDer, ServerName, pem::PemObject as _},
+        },
     },
 };
 
@@ -37,16 +37,13 @@ fn write_dev_pem(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathB
 async fn tls_listener_accepts_tls_handshake_only() {
     let (log_dir, _pem_dir, cert_path, key_path) = tls_fixture();
 
-    let cfg = ssl_config(
-        log_dir.path().to_path_buf(),
-        TlsConfig {
-            cert_chain_path: cert_path.clone(),
-            private_key_path: key_path,
-            trust_roots_path: None,
-            client_ca_path: None,
-            client_auth: krabka_security::ClientAuthMode::Disabled,
-        },
-    );
+    let cfg = ssl_config(log_dir.path().to_path_buf(), TlsConfig {
+        cert_chain_path: cert_path.clone(),
+        private_key_path: key_path,
+        trust_roots_path: None,
+        client_ca_path: None,
+        client_auth: krabka_security::ClientAuthMode::Disabled,
+    });
 
     let handle = Broker::start(cfg).await.expect("broker must start");
     let addr = handle.listen_addr();

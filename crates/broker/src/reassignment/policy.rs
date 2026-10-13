@@ -5,18 +5,19 @@
 //! The logic lives apart from the background task in [`super`] so that a unit
 //! test and the `stateright` model checker can drive the policy on its own.
 
-use krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord};
-use krabka_raft::NodeId;
-use krabka_verified::{
-    FreezeMutationKind,
-    reassignment::{ReassignmentAction, reassignment_action},
-};
-
-use crate::{
-    elr::ElrPublisher,
-    freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
-    heartbeat::controller_state::ControllerLivenessState,
-    metadata_epoch::{next_i32, next_leader},
+use {
+    crate::{
+        elr::ElrPublisher,
+        freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
+        heartbeat::controller_state::ControllerLivenessState,
+        metadata_epoch::{next_i32, next_leader},
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord},
+    krabka_raft::NodeId,
+    krabka_verified::{
+        FreezeMutationKind,
+        reassignment::{ReassignmentAction, reassignment_action},
+    },
 };
 
 /// Remaps a partition's `directories` vector onto a new `replicas` order. A
@@ -206,23 +207,23 @@ pub(crate) async fn compute_reassignment_progress(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use krabka_metadata::{
-        BrokerRegistrationRecord, MetadataImage, MetadataRecord, TopicFreezeRecord, TopicRecord,
-    };
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        config_keys::MIN_INSYNC_REPLICAS,
-        elr::state::test_records,
-        reassignment::test_support::{first_partition, img, liveness},
-        test_support::{
-            FreezeSetup, ReassignmentSetup, broker_registration, finalize_elr_version,
-            topic_freeze_record,
+    use {
+        super::*,
+        crate::{
+            config_keys::MIN_INSYNC_REPLICAS,
+            elr::state::test_records,
+            reassignment::test_support::{first_partition, img, liveness},
+            test_support::{
+                FreezeSetup, ReassignmentSetup, broker_registration, finalize_elr_version,
+                topic_freeze_record,
+            },
         },
+        assert2::{assert, check},
+        krabka_metadata::{
+            BrokerRegistrationRecord, MetadataImage, MetadataRecord, TopicFreezeRecord, TopicRecord,
+        },
+        std::sync::Arc,
+        uuid::Uuid,
     };
 
     fn leader_handoff_setup() -> ReassignmentSetup<'static> {
@@ -240,11 +241,10 @@ mod tests {
         let db = uuid::Uuid::from_u128(0xB);
         let dc = uuid::Uuid::from_u128(0xC);
         // replicas [1,2,3] dirs [dA,dB,dC]; reassignment removes broker 2.
-        let new = remap_directories(
-            &[NodeId(1), NodeId(2), NodeId(3)],
-            &[da, db, dc],
-            &[NodeId(1), NodeId(3)],
-        );
+        let new = remap_directories(&[NodeId(1), NodeId(2), NodeId(3)], &[da, db, dc], &[
+            NodeId(1),
+            NodeId(3),
+        ]);
         // broker 1 keeps dA at slot 0; broker 3 keeps dC at slot 1 (NOT dB).
         assert!(new == vec![da, dc]);
     }

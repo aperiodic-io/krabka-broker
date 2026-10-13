@@ -2,11 +2,9 @@
 //! byte counters of a replica fetch, and the unclean-election counter that
 //! records when an out-of-ISR replica took leadership.
 
-use std::sync::Arc;
-
-use super::BrokerMetrics;
 #[cfg(test)]
 use super::PartitionLabel;
+use {super::BrokerMetrics, std::sync::Arc};
 
 impl BrokerMetrics {
     /// Account bytes this broker received from the partition
@@ -21,9 +19,7 @@ impl BrokerMetrics {
     /// KIP-841: account one unclean leader election (an
     /// election that picked an out-of-ISR replica because the ISR was
     /// empty and the topic had `unclean.leader.election.enable=true`).
-    pub fn record_unclean_leader_election(&self) {
-        self.unclean_leader_elections_total.inc();
-    }
+    pub fn record_unclean_leader_election(&self) { self.unclean_leader_elections_total.inc(); }
 
     /// Account bytes this broker served to a follower as the
     /// partition leader (inter-broker `Fetch` round-trip, leader side).
@@ -36,9 +32,7 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn replication_helpers_accumulate_per_partition() {

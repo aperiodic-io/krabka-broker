@@ -22,22 +22,16 @@ impl BrokerMetrics {
 
     /// KFC-7: account one schema lookup the broker answered from its local
     /// cache.
-    pub fn record_schema_cache_hit(&self) {
-        self.schema_validation_cache_hits.inc();
-    }
+    pub fn record_schema_cache_hit(&self) { self.schema_validation_cache_hits.inc(); }
 
     /// KFC-7: account one schema lookup that cost a registry round trip on the
     /// produce path.
-    pub fn record_schema_cache_miss(&self) {
-        self.schema_validation_cache_misses.inc();
-    }
+    pub fn record_schema_cache_miss(&self) { self.schema_validation_cache_misses.inc(); }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn schema_validation_helpers_accumulate_per_topic_and_reason() {

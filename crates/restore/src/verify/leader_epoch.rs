@@ -4,10 +4,11 @@
 //! integrity, because the epoch-to-offset rows it yields are handed on to the
 //! restored partition.
 
-use krabka_ids::{LeaderEpoch, Offset};
-use object_store::path::Path;
-
-use crate::error::RestoreError;
+use {
+    crate::error::RestoreError,
+    krabka_ids::{LeaderEpoch, Offset},
+    object_store::path::Path,
+};
 
 /// Build the [`RestoreError::TruncatedSegment`] a malformed
 /// `.leader_epoch_checkpoint` row reports. `declared` is the row count the

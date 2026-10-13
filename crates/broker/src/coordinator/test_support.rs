@@ -1,38 +1,38 @@
 //! Protocol fixtures shared by coordinator retention and deletion tests.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_log::Offset;
-use krabka_protocol::{
-    owned::{
-        offset_commit_request::{
-            OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+use {
+    crate::{
+        broker::Broker,
+        codes::{COORDINATOR_NOT_AVAILABLE, NOT_COORDINATOR},
+        coordinator::{
+            bootstrap::OFFSETS_TOPIC,
+            persistence::{Key, OffsetCommitValue},
+            unified::{
+                GroupCoordinator,
+                actor::MetadataProvider,
+                classic_state::OffsetEntry,
+                config::NextGenConfig,
+                offsets_log::OffsetsLog,
+                persistence::{Key as NextGenKey, parse_key},
+                share::config::ShareGroupConfig,
+                streams::config::StreamsGroupConfig,
+            },
         },
-        offset_fetch_request::{OffsetFetchRequest, OffsetFetchRequestTopic},
+        handlers::offset_fetch::handle,
+        test_support::{KafkaErrorCode, peer, principal, request_context},
     },
-    records::{Attributes, Record, RecordBatch},
-};
-
-use crate::{
-    broker::Broker,
-    codes::{COORDINATOR_NOT_AVAILABLE, NOT_COORDINATOR},
-    coordinator::{
-        bootstrap::OFFSETS_TOPIC,
-        persistence::{Key, OffsetCommitValue},
-        unified::{
-            GroupCoordinator,
-            actor::MetadataProvider,
-            classic_state::OffsetEntry,
-            config::NextGenConfig,
-            offsets_log::OffsetsLog,
-            persistence::{Key as NextGenKey, parse_key},
-            share::config::ShareGroupConfig,
-            streams::config::StreamsGroupConfig,
+    bytes::Bytes,
+    krabka_log::Offset,
+    krabka_protocol::{
+        owned::{
+            offset_commit_request::{
+                OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+            },
+            offset_fetch_request::{OffsetFetchRequest, OffsetFetchRequestTopic},
         },
+        records::{Attributes, Record, RecordBatch},
     },
-    handlers::offset_fetch::handle,
-    test_support::{KafkaErrorCode, peer, principal, request_context},
+    std::sync::Arc,
 };
 
 krabka_macros::single_replica_partition_fixture!(single_replica_partition);
@@ -61,26 +61,23 @@ pub(crate) fn offsets_partition_image(
     (partition, leader, epoch): (i32, krabka_metadata::NodeId, i32),
     replicas: &[krabka_metadata::NodeId],
 ) -> krabka_metadata::MetadataImage {
-    krabka_metadata::MetadataImage::from_records(
-        uuid::Uuid::nil(),
-        &[
-            krabka_metadata::MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
-                name: OFFSETS_TOPIC.into(),
-                topic_id: uuid::Uuid::from_u128(7),
-                partitions: partition + 1,
-                replication_factor: i16::try_from(replicas.len()).unwrap(),
-            }),
-            krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
-                topic: OFFSETS_TOPIC.into(),
-                partition,
-                leader,
-                leader_epoch: krabka_metadata::LeaderEpoch(epoch),
-                replicas: replicas.to_vec(),
-                isr: replicas.to_vec(),
-                ..krabka_metadata::PartitionRecord::default()
-            }),
-        ],
-    )
+    krabka_metadata::MetadataImage::from_records(uuid::Uuid::nil(), &[
+        krabka_metadata::MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
+            name: OFFSETS_TOPIC.into(),
+            topic_id: uuid::Uuid::from_u128(7),
+            partitions: partition + 1,
+            replication_factor: i16::try_from(replicas.len()).unwrap(),
+        }),
+        krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
+            topic: OFFSETS_TOPIC.into(),
+            partition,
+            leader,
+            leader_epoch: krabka_metadata::LeaderEpoch(epoch),
+            replicas: replicas.to_vec(),
+            isr: replicas.to_vec(),
+            ..krabka_metadata::PartitionRecord::default()
+        }),
+    ])
 }
 
 /// An independent expected committed-offset entry with the ordinary fixture fields.
@@ -377,9 +374,10 @@ impl CommitWaitOutcome {
 }
 
 pub(crate) fn commit_wait_cases() -> [CommitWaitCase; 6] {
-    use std::time::Duration;
-
-    use CommitWaitOutcome::{Committed, NotLeader, TimedOut};
+    use {
+        CommitWaitOutcome::{Committed, NotLeader, TimedOut},
+        std::time::Duration,
+    };
     let long = Duration::from_secs(30);
     [
         CommitWaitCase {

@@ -1,13 +1,14 @@
 //! Round-trip tests for the OAUTHBEARER handler, including KIP-368 re-auth.
 
-use assert2::{assert, check};
-use krabka_security::{Principal, SaslMechanism};
-use krabka_units::{millis, secs};
-
-use super::*;
-use crate::network::auth::test_support::{
-    assert_failed_authenticate_response, assert_success_authenticate_response,
-    oauth_reauthenticating,
+use {
+    super::*,
+    crate::network::auth::test_support::{
+        assert_failed_authenticate_response, assert_success_authenticate_response,
+        oauth_reauthenticating,
+    },
+    assert2::{assert, check},
+    krabka_security::{Principal, SaslMechanism},
+    krabka_units::{millis, secs},
 };
 
 fn unsecured_token(sub: &str, exp_s: i64) -> String {
@@ -178,13 +179,10 @@ async fn oauthbearer_invalid_token_returns_error_json_then_fails_on_dummy() {
     )
     .await;
     assert_invalid_token_challenge(&resp);
-    assert!(matches!(
-        auth,
-        ConnectionAuth::Negotiating {
-            exchange: SaslExchange::OAuthBearerFailed,
-            ..
-        }
-    ));
+    assert!(matches!(auth, ConnectionAuth::Negotiating {
+        exchange: SaslExchange::OAuthBearerFailed,
+        ..
+    }));
     // Round 2: the client's `\x01` dummy → SASL_AUTHENTICATION_FAILED (58).
     let dummy = SaslAuthenticateRequest {
         auth_bytes: bytes::Bytes::from_static(&[1u8]),
@@ -238,14 +236,11 @@ async fn authenticate_during_reauth_same_principal_transitions_back_to_authentic
     let token = unsecured_token("alice", new_token_exp_seconds);
     let (auth, resp) = reauthenticate(&validator, now_ms, &token).await;
     assert_success_authenticate_response(&resp, b"", new_token_exp_millis - now_ms);
-    assert!(matches!(
-        auth,
-        ConnectionAuth::Authenticated {
-            mechanism: SaslMechanism::OAuthBearer,
-            expires_at_ms: Some(_),
-            ..
-        }
-    ));
+    assert!(matches!(auth, ConnectionAuth::Authenticated {
+        mechanism: SaslMechanism::OAuthBearer,
+        expires_at_ms: Some(_),
+        ..
+    }));
     if let ConnectionAuth::Authenticated {
         principal,
         expires_at_ms,
@@ -363,13 +358,10 @@ async fn handle_authenticate_oauthbearer_rejects_a_zero_session_cap() {
     assert!(response.error_code == 0);
     assert!(response.session_lifetime_ms == 0);
     assert!(response.auth_bytes == bytes::Bytes::from_static(br#"{"status":"invalid_token"}"#));
-    assert!(matches!(
-        auth,
-        ConnectionAuth::Negotiating {
-            exchange: SaslExchange::OAuthBearerFailed,
-            ..
-        }
-    ));
+    assert!(matches!(auth, ConnectionAuth::Negotiating {
+        exchange: SaslExchange::OAuthBearerFailed,
+        ..
+    }));
 }
 
 mod completion;

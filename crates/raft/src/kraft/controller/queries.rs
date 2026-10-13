@@ -2,28 +2,29 @@
 //! structured consensus snapshot behind `DescribeQuorum`, and the committed
 //! `__cluster_metadata` slice an observer fetches.
 
-use krabka_ids::Offset;
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::ByteSize;
-
-use super::{
-    Engine,
-    offsets::{
-        fetch_batch_committed_before_hwm, metadata_fetch_offset_below_log_start,
-        metadata_fetch_offset_in_committed_window,
+use {
+    super::{
+        Engine,
+        offsets::{
+            fetch_batch_committed_before_hwm, metadata_fetch_offset_below_log_start,
+            metadata_fetch_offset_in_committed_window,
+        },
+        quorum_state_file::save_quorum_state,
+        records::encode_batches,
     },
-    quorum_state_file::save_quorum_state,
-    records::encode_batches,
-};
-use crate::{
-    error::RaftError,
-    kraft::{
-        core::QuorumStateMachine,
-        log::KraftLog,
-        role::{ReplicaProgress, Role},
-        transport::{MetadataFetchSlice, ObserverReplica, QuorumStateSnapshot},
-        types::{NodeId, SimInstant},
+    crate::{
+        error::RaftError,
+        kraft::{
+            core::QuorumStateMachine,
+            log::KraftLog,
+            role::{ReplicaProgress, Role},
+            transport::{MetadataFetchSlice, ObserverReplica, QuorumStateSnapshot},
+            types::{NodeId, SimInstant},
+        },
     },
+    krabka_ids::Offset,
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::ByteSize,
 };
 
 /// Floor on an observer's metadata-fetch budget: at least the first committed
@@ -93,9 +94,7 @@ impl Engine {
     /// watermark on a leader, and the highest watermark a leader has reported
     /// on a follower, which is the larger of the two while the follower is
     /// still replaying.
-    pub fn quorum_high_watermark(&self) -> i64 {
-        self.log.hwm().0.max(self.leader_reported_hwm)
-    }
+    pub fn quorum_high_watermark(&self) -> i64 { self.log.hwm().0.max(self.leader_reported_hwm) }
 
     /// Wall-clock milliseconds of `at`, or -1 when the clock base cannot be
     /// mapped to the Unix epoch.
@@ -109,9 +108,7 @@ impl Engine {
     /// Wall-clock milliseconds of a progress timestamp the leader tracks, or -1
     /// while it has not recorded that event (a zero instant), as Kafka reports
     /// it.
-    fn tracked_ms(&self, at: SimInstant) -> i64 {
-        if at.0 == 0 { -1 } else { self.unix_ms(at) }
-    }
+    fn tracked_ms(&self, at: SimInstant) -> i64 { if at.0 == 0 { -1 } else { self.unix_ms(at) } }
 
     /// Snapshot the consensus state for `DescribeQuorum`.
     pub fn quorum_state_snapshot(&self) -> QuorumStateSnapshot {

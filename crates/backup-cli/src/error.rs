@@ -100,9 +100,10 @@ impl BackupError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::{BackupError, EXIT_BAD_ARGUMENT, EXIT_CLUSTER, EXIT_INTEGRITY, EXIT_UNREADABLE};
+    use {
+        super::{BackupError, EXIT_BAD_ARGUMENT, EXIT_CLUSTER, EXIT_INTEGRITY, EXIT_UNREADABLE},
+        assert2::check,
+    };
 
     #[test]
     fn every_variant_maps_onto_its_documented_exit_code() {

@@ -1,9 +1,7 @@
 //! Serializes a segment's leader-epoch map into the Kafka
 //! `leader-epoch-checkpoint` text format that the copy path uploads.
 
-use std::collections::BTreeMap;
-
-use bytes::Bytes;
+use {bytes::Bytes, std::collections::BTreeMap};
 
 /// Serialize a segment's leader-epoch map into Kafka's
 /// `leader-epoch-checkpoint` text format (the bytes carried as
@@ -22,9 +20,7 @@ pub(super) fn leader_epoch_index_bytes(epochs: &BTreeMap<krabka_ids::LeaderEpoch
 
 #[cfg(test)]
 mod tests {
-    use krabka_ids::LeaderEpoch;
-
-    use super::*;
+    use {super::*, krabka_ids::LeaderEpoch};
 
     #[test]
     fn serializes_leader_epoch_index() {

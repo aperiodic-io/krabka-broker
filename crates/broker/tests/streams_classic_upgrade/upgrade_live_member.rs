@@ -6,22 +6,22 @@
 //! live, which is why it does not reuse the full `classic_join_sync` driver and
 //! lives apart from the conversion scenario.
 
-use std::time::Duration;
-
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    join_group_request::JoinGroupRequest,
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-};
-
-use crate::{
-    support::client::connect_client,
-    upgrade_classic::join_request,
-    upgrade_harness::{
-        ERR_GROUP_ID_NOT_FOUND, ERR_MEMBER_ID_REQUIRED, boot, connect, create_topic,
-        finalize_streams_version,
+use {
+    crate::{
+        support::client::connect_client,
+        upgrade_classic::join_request,
+        upgrade_harness::{
+            ERR_GROUP_ID_NOT_FOUND, ERR_MEMBER_ID_REQUIRED, boot, connect, create_topic,
+            finalize_streams_version,
+        },
+        upgrade_streams::{first_join, topology},
     },
-    upgrade_streams::{first_join, topology},
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        join_group_request::JoinGroupRequest,
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
+    std::time::Duration,
 };
 
 /// Parks the `JoinGroup` of one classic member of `group` on a connection of

@@ -2,13 +2,14 @@
 //! `log_store`, `state_machine`, and the listener, and it needs no 3-node
 //! cluster.
 
-use std::time::Duration;
-
-use krabka_metadata::{MetadataRecord, NodeId};
-use krabka_raft::{Controller, ControllerConfig, ControllerHandle};
-use krabka_units::prelude::{Time, millis};
-use tempfile::TempDir;
-use uuid::Uuid;
+use {
+    krabka_metadata::{MetadataRecord, NodeId},
+    krabka_raft::{Controller, ControllerConfig, ControllerHandle},
+    krabka_units::prelude::{Time, millis},
+    std::time::Duration,
+    tempfile::TempDir,
+    uuid::Uuid,
+};
 
 /// Single-voter elections are instant, and a short timeout keeps each test well
 /// inside its 30-second leader deadline.

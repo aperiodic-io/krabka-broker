@@ -7,9 +7,10 @@
 //! on one screen is what lets a reader check that a config is still both
 //! memory-safe and non-vacuous.
 
-use std::time::{Duration, Instant};
-
-use krabka_log::Offset;
+use {
+    krabka_log::Offset,
+    std::time::{Duration, Instant},
+};
 
 /// The single acquisition-lock duration used by the model. A lock taken at
 /// logical time `clock` has deadline `t0 + LOCK*(clock + 1)`, so it expires once
@@ -136,11 +137,7 @@ impl ShareModel {
         }
     }
 
-    pub(super) fn now(&self, clock: u8) -> Instant {
-        self.t0 + LOCK * u32::from(clock)
-    }
+    pub(super) fn now(&self, clock: u8) -> Instant { self.t0 + LOCK * u32::from(clock) }
 
-    pub(super) fn member_name(member: u8) -> String {
-        format!("m{member}")
-    }
+    pub(super) fn member_name(member: u8) -> String { format!("m{member}") }
 }

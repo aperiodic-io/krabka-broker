@@ -10,17 +10,17 @@
 //! Kafka does, and the subscription id is a function of the subscription and
 //! the instance id alone, so every broker computes the same id.
 
-use std::{
-    collections::{BTreeMap, HashMap, hash_map::Entry},
-    sync::Mutex,
-    time::{Duration, Instant},
+use {
+    crate::{api_catalog::UnstableApiVersions, codes},
+    krabka_metadata::MetadataImage,
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::{
+        collections::{BTreeMap, HashMap, hash_map::Entry},
+        sync::Mutex,
+        time::{Duration, Instant},
+    },
+    uuid::Uuid,
 };
-
-use krabka_metadata::MetadataImage;
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-use uuid::Uuid;
-
-use crate::{api_catalog::UnstableApiVersions, codes};
 
 mod subscription;
 #[cfg(test)]
@@ -256,9 +256,7 @@ pub(crate) const ACCEPTED_COMPRESSION_TYPES: [i8; 4] = [4, 3, 1, 2];
 
 /// Kafka's `Uuid.RESERVED`: the zero UUID and `Uuid.ONE_UUID`, which no
 /// client instance may use.
-fn is_reserved_instance_id(id: Uuid) -> bool {
-    id.is_nil() || id == Uuid::from_u128(1)
-}
+fn is_reserved_instance_id(id: Uuid) -> bool { id.is_nil() || id == Uuid::from_u128(1) }
 
 impl ClientMetricsManager {
     pub(crate) fn new(telemetry_max: ByteSize, default_interval_ms: i32) -> Self {
@@ -276,15 +274,11 @@ impl ClientMetricsManager {
 
     /// The KIP-714 `telemetry.max.bytes` ceiling: the largest compressed push,
     /// and the largest payload a push may decompress to.
-    pub(crate) fn telemetry_max(&self) -> ByteSize {
-        self.telemetry_max
-    }
+    pub(crate) fn telemetry_max(&self) -> ByteSize { self.telemetry_max }
 
     /// The KIP-714 `PushTelemetry` size ceiling in the `int32` byte form the
     /// wire response carries.
-    pub(crate) fn telemetry_max_bytes(&self) -> i32 {
-        self.telemetry_max.bytes_i32()
-    }
+    pub(crate) fn telemetry_max_bytes(&self) -> i32 { self.telemetry_max.bytes_i32() }
 
     /// Kafka's `processGetTelemetrySubscriptionRequest`. A zero
     /// `attrs.client_instance_id` asks for a new id, and the assignment
@@ -440,14 +434,15 @@ impl ClientMetricsManager {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use uuid::Uuid;
-
-    use super::{
-        test_support::{attrs, expect_assignment, img_with},
-        *,
+    use {
+        super::{
+            test_support::{attrs, expect_assignment, img_with},
+            *,
+        },
+        crate::{client_metrics::config::INTERVAL_MS_DEFAULT, test_support::KafkaErrorCode},
+        assert2::assert,
+        uuid::Uuid,
     };
-    use crate::{client_metrics::config::INTERVAL_MS_DEFAULT, test_support::KafkaErrorCode};
 
     fn manager() -> ClientMetricsManager {
         ClientMetricsManager::new(krabka_units::kibibytes(1), INTERVAL_MS_DEFAULT)
@@ -601,15 +596,10 @@ mod tests {
         ];
         for (name, at, check, expected) in steps {
             assert!(
-                run(
-                    &m,
-                    &img,
-                    &attrs,
-                    TelemetryStepSetup {
-                        now: at,
-                        step: Step::Push(check)
-                    }
-                ) == expected,
+                run(&m, &img, &attrs, TelemetryStepSetup {
+                    now: at,
+                    step: Step::Push(check)
+                }) == expected,
                 "step {name}"
             );
         }
@@ -683,15 +673,10 @@ mod tests {
                 };
                 let at = t + Duration::from_secs(secs);
                 assert!(
-                    run(
-                        &m,
-                        &img,
-                        &attrs,
-                        TelemetryStepSetup {
-                            now: at,
-                            step: Step::Push(check)
-                        }
-                    ) == expected,
+                    run(&m, &img, &attrs, TelemetryStepSetup {
+                        now: at,
+                        step: Step::Push(check)
+                    }) == expected,
                     "row {name} at {secs} s"
                 );
             }
@@ -739,15 +724,10 @@ mod tests {
         for (name, attrs, id, expected) in rows {
             let m = manager();
             assert!(
-                run(
-                    &m,
-                    &img,
-                    &attrs,
-                    TelemetryStepSetup {
-                        now: Instant::now(),
-                        step: Step::Push(push(TelemetrySubscriptionId(id)))
-                    }
-                ) == expected,
+                run(&m, &img, &attrs, TelemetryStepSetup {
+                    now: Instant::now(),
+                    step: Step::Push(push(TelemetrySubscriptionId(id)))
+                }) == expected,
                 "row {name}"
             );
         }
@@ -887,22 +867,16 @@ mod tests {
     fn get_answers_with_the_instance_id_it_used() {
         let m = manager();
         let img = MetadataImage::new(Uuid::nil());
-        let fresh = expect_assignment(m.get_subscription(
-            &img,
-            &ClientAttributes {
-                client_instance_id: Uuid::nil(),
-                ..attrs()
-            },
-        ));
+        let fresh = expect_assignment(m.get_subscription(&img, &ClientAttributes {
+            client_instance_id: Uuid::nil(),
+            ..attrs()
+        }));
         assert!(!fresh.client_instance_id.is_nil());
         for id in [Uuid::from_u128(1), Uuid::from_u128(42)] {
-            let assigned = expect_assignment(m.get_subscription(
-                &img,
-                &ClientAttributes {
-                    client_instance_id: id,
-                    ..attrs()
-                },
-            ));
+            let assigned = expect_assignment(m.get_subscription(&img, &ClientAttributes {
+                client_instance_id: id,
+                ..attrs()
+            }));
             assert!(assigned.client_instance_id == id);
         }
     }
@@ -978,28 +952,18 @@ mod tests {
                 ..push(TelemetrySubscriptionId(id))
             };
             assert!(
-                run(
-                    &m,
-                    &img,
-                    &attrs,
-                    TelemetryStepSetup {
-                        now: t,
-                        step: Step::Push(terminate)
-                    }
-                ) == ACCEPT
+                run(&m, &img, &attrs, TelemetryStepSetup {
+                    now: t,
+                    step: Step::Push(terminate)
+                }) == ACCEPT
             );
 
             m.evict_stale_at(3, floor, t + Duration::from_secs(idle));
 
-            let next = run(
-                &m,
-                &img,
-                &attrs,
-                TelemetryStepSetup {
-                    now: t + Duration::from_secs(idle),
-                    step: Step::Push(push(TelemetrySubscriptionId(id))),
-                },
-            );
+            let next = run(&m, &img, &attrs, TelemetryStepSetup {
+                now: t + Duration::from_secs(idle),
+                step: Step::Push(push(TelemetrySubscriptionId(id))),
+            });
             let expected = if expired {
                 ACCEPT
             } else {
@@ -1027,15 +991,10 @@ mod tests {
             ..push(TelemetrySubscriptionId(id))
         };
         let push_on = |connection: &str, at, check| {
-            run(
-                &m,
-                &img,
-                &attrs_on(connection),
-                TelemetryStepSetup {
-                    now: secs(at),
-                    step: Step::Push(check),
-                },
-            )
+            run(&m, &img, &attrs_on(connection), TelemetryStepSetup {
+                now: secs(at),
+                step: Step::Push(check),
+            })
         };
 
         assert!(push_on("a", 0, terminate) == ACCEPT, "built on a");

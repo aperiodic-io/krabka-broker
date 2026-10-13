@@ -2,13 +2,16 @@
 //! updates, and log bookkeeping, plus the replication the harness performs on a
 //! follower's behalf. This is where the core's outputs become the peers' inputs.
 
-use krabka_raft::kraft::types::NodeId;
-
-use super::{cluster::Sim, node::Message, node_log::SimNodeLog};
+use {
+    super::{cluster::Sim, node::Message, node_log::SimNodeLog},
+    krabka_raft::kraft::types::NodeId,
+};
 
 impl<L: SimNodeLog> Sim<L> {
     // Broadcasts a vote or pre-vote request from `id` to every other voter.
     krabka_macros::simulation_actions!(krabka_kraft_core);
+
+    krabka_macros::simulation_transport!(krabka_kraft_core);
 
     fn advance_simulated_watermark(&mut self, id: NodeId, hwm: i64) {
         let node = self.nodes.get_mut(&id).unwrap();
@@ -54,6 +57,4 @@ impl<L: SimNodeLog> Sim<L> {
         follower_node.high_watermark = leader_hwm.min(follower_node.log.end_offset());
         self.nodes.insert(follower, follower_node);
     }
-
-    krabka_macros::simulation_transport!(krabka_kraft_core);
 }

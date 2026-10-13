@@ -5,9 +5,7 @@
 //! record, so every caller that must tell a transaction end marker from a
 //! barrier marker reads it through this module.
 
-use krabka_protocol::records::RecordBatch;
-
-use crate::error::LogError;
+use {crate::error::LogError, krabka_protocol::records::RecordBatch};
 
 /// Control-record type of a krabka barrier marker.
 ///
@@ -232,29 +230,30 @@ pub fn check_control_record_versions(batch: &RecordBatch) -> Result<(), LogError
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::Bytes;
-    use krabka_ids::{Offset, ProducerId};
-    use krabka_protocol::records::Record;
-    use krabka_units::prelude::mebibytes;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        compact::build_offset_map,
-        log::{
-            Log,
-            test_support::{
-                BarrierEpoch, BarrierMarkerSetup, HostileBarrierSetup, PartitionState,
-                ProducerEpoch, abort_marker, barrier_marker, barrier_marker_from_producer,
-                commit_marker, compact_test_log, compaction_ctx, control_key, control_value,
-                install_stamps, keyed_batch, partition_state, sample_batch, stamped_test_log,
-                test_log, transactional_batch,
+    use {
+        super::*,
+        crate::{
+            compact::build_offset_map,
+            log::{
+                Log,
+                test_support::{
+                    BarrierEpoch, BarrierMarkerSetup, HostileBarrierSetup, PartitionState,
+                    ProducerEpoch, abort_marker, barrier_marker, barrier_marker_from_producer,
+                    commit_marker, compact_test_log, compaction_ctx, control_key, control_value,
+                    install_stamps, keyed_batch, partition_state, sample_batch, stamped_test_log,
+                    test_log, transactional_batch,
+                },
             },
+            producer_snapshot::ProducerSnapshotEntry,
+            segment::Segment,
+            test_support::open_log,
         },
-        producer_snapshot::ProducerSnapshotEntry,
-        segment::Segment,
-        test_support::open_log,
+        assert2::check,
+        bytes::Bytes,
+        krabka_ids::{Offset, ProducerId},
+        krabka_protocol::records::Record,
+        krabka_units::prelude::mebibytes,
+        tempfile::tempdir,
     };
 
     /// What one parse came to, with a refusal reduced to the fields that say
@@ -324,14 +323,10 @@ mod tests {
                 Some(&[0x7f, 0xff, 0, 1]),
                 Parsed::Value(1),
             ),
-            (
-                "minus one",
-                Some(&[0xff, 0xff, 0, 1]),
-                Parsed::BadVersion {
-                    record: "control record",
-                    version: -1,
-                },
-            ),
+            ("minus one", Some(&[0xff, 0xff, 0, 1]), Parsed::BadVersion {
+                record: "control record",
+                version: -1,
+            }),
             (
                 "the smallest version",
                 Some(&[0x80, 0x00, 0, 1]),
@@ -340,38 +335,22 @@ mod tests {
                     version: i16::MIN,
                 },
             ),
-            (
-                "no key",
-                None,
-                Parsed::TooShort {
-                    record: KEY,
-                    found: 0,
-                },
-            ),
-            (
-                "one byte",
-                Some(&[0]),
-                Parsed::TooShort {
-                    record: KEY,
-                    found: 1,
-                },
-            ),
-            (
-                "two bytes",
-                Some(&[0, 0]),
-                Parsed::TooShort {
-                    record: KEY,
-                    found: 2,
-                },
-            ),
-            (
-                "three bytes",
-                Some(&[0, 0, 0]),
-                Parsed::TooShort {
-                    record: KEY,
-                    found: 3,
-                },
-            ),
+            ("no key", None, Parsed::TooShort {
+                record: KEY,
+                found: 0,
+            }),
+            ("one byte", Some(&[0]), Parsed::TooShort {
+                record: KEY,
+                found: 1,
+            }),
+            ("two bytes", Some(&[0, 0]), Parsed::TooShort {
+                record: KEY,
+                found: 2,
+            }),
+            ("three bytes", Some(&[0, 0, 0]), Parsed::TooShort {
+                record: KEY,
+                found: 3,
+            }),
         ];
         for (what, key, want) in cases {
             check!(
@@ -419,38 +398,22 @@ mod tests {
                     version: i16::MIN,
                 },
             ),
-            (
-                "no value",
-                None,
-                Parsed::TooShort {
-                    record: VALUE,
-                    found: 0,
-                },
-            ),
-            (
-                "version only",
-                Some(&[0, 0]),
-                Parsed::TooShort {
-                    record: VALUE,
-                    found: 2,
-                },
-            ),
-            (
-                "four bytes",
-                Some(&[0, 0, 0, 0]),
-                Parsed::TooShort {
-                    record: VALUE,
-                    found: 4,
-                },
-            ),
-            (
-                "five bytes",
-                Some(&[0, 0, 0, 0, 0]),
-                Parsed::TooShort {
-                    record: VALUE,
-                    found: 5,
-                },
-            ),
+            ("no value", None, Parsed::TooShort {
+                record: VALUE,
+                found: 0,
+            }),
+            ("version only", Some(&[0, 0]), Parsed::TooShort {
+                record: VALUE,
+                found: 2,
+            }),
+            ("four bytes", Some(&[0, 0, 0, 0]), Parsed::TooShort {
+                record: VALUE,
+                found: 4,
+            }),
+            ("five bytes", Some(&[0, 0, 0, 0, 0]), Parsed::TooShort {
+                record: VALUE,
+                found: 5,
+            }),
         ];
         for (what, value, want) in cases {
             check!(
@@ -617,12 +580,12 @@ mod tests {
             current_txn_first_offset: None,
         };
         for (name, mut marker, want_aborted, want_stamps) in [
-            (
-                "commit",
-                commit_marker(1000, 2),
-                Vec::new(),
-                vec![Some(40), Some(40), None, None],
-            ),
+            ("commit", commit_marker(1000, 2), Vec::new(), vec![
+                Some(40),
+                Some(40),
+                None,
+                None,
+            ]),
             (
                 "abort",
                 abort_marker(1000, 2),

@@ -6,12 +6,12 @@
 //! charges the copied bytes against the broker-wide log-directory move budget,
 //! and it re-bases the future log when retention advances the source start.
 
-use std::sync::{Arc, Mutex};
-
-use krabka_log::{Log, Offset};
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use crate::{error::BrokerError, partition::Partition, throttle::TokenBucket};
+use {
+    crate::{error::BrokerError, partition::Partition, throttle::TokenBucket},
+    krabka_log::{Log, Offset},
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::sync::{Arc, Mutex},
+};
 
 /// One catch-up iteration. It reads whatever the future log is missing,
 /// up to `read_chunk`, and appends it. Returns `true` if the
@@ -115,18 +115,19 @@ pub(super) fn catch_up(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_ids::PartitionIndex;
-    use krabka_units::mebibytes;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        future_log::test_support::{
-            FutureSourceSetup, fixture_partition, open_future_log, source_fixture,
+    use {
+        super::*,
+        crate::{
+            future_log::test_support::{
+                FutureSourceSetup, fixture_partition, open_future_log, source_fixture,
+            },
+            test_support::RecordCount,
+            throttle::TokenBucket,
         },
-        test_support::RecordCount,
-        throttle::TokenBucket,
+        assert2::assert,
+        krabka_ids::PartitionIndex,
+        krabka_units::mebibytes,
+        tempfile::tempdir,
     };
 
     fn first_catch_up(

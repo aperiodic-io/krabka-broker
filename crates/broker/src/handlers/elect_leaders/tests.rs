@@ -5,35 +5,39 @@
 //! so an unclean election always has an out-of-ISR replica to elect and the
 //! tests differ only in the approvals the metadata image holds.
 
-use std::collections::HashSet;
-
-use assert2::{assert, check};
-use krabka_metadata::{
-    BreakGlassAction, BreakGlassProposalRecord, LeaderEpoch, MetadataImage, MetadataRecord, NodeId,
-    PartitionRecord, TopicRecord,
-};
-use krabka_protocol::owned::{
-    elect_leaders_request::{ElectLeadersRequest, TopicPartitions},
-    elect_leaders_response::{self, ElectLeadersResponse, PartitionResult, ReplicaElectionResult},
-};
-use uuid::Uuid;
-
-use super::{
-    WIRE_ELECTION_PREFERRED, WIRE_ELECTION_UNCLEAN, batch::ElectionBatch, env::ElectionEnv, handle,
-    partition::elect_one,
-};
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    break_glass::gate::tests::{APPROVED_PROPOSAL_ID, approved_proposal},
-    broker::{Broker, BrokerHandle},
-    codes,
-    config::BreakGlassConfig,
-    handlers::{
-        RequestContext, encode_response,
-        test_support::{ReplicatedPartitionSetup, replicated_partition, single_replica_partition},
+use {
+    super::{
+        WIRE_ELECTION_PREFERRED, WIRE_ELECTION_UNCLEAN, batch::ElectionBatch, env::ElectionEnv,
+        handle, partition::elect_one,
     },
-    leader_election::{ElectionType, test_support::one_partition_change},
-    test_support::{decode_response, start_broker_no_audit_with, test_ctx},
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        break_glass::gate::tests::{APPROVED_PROPOSAL_ID, approved_proposal},
+        broker::{Broker, BrokerHandle},
+        codes,
+        config::BreakGlassConfig,
+        handlers::{
+            RequestContext, encode_response,
+            test_support::{
+                ReplicatedPartitionSetup, replicated_partition, single_replica_partition,
+            },
+        },
+        leader_election::{ElectionType, test_support::one_partition_change},
+        test_support::{decode_response, start_broker_no_audit_with, test_ctx},
+    },
+    assert2::{assert, check},
+    krabka_metadata::{
+        BreakGlassAction, BreakGlassProposalRecord, LeaderEpoch, MetadataImage, MetadataRecord,
+        NodeId, PartitionRecord, TopicRecord,
+    },
+    krabka_protocol::owned::{
+        elect_leaders_request::{ElectLeadersRequest, TopicPartitions},
+        elect_leaders_response::{
+            self, ElectLeadersResponse, PartitionResult, ReplicaElectionResult,
+        },
+    },
+    std::collections::HashSet,
+    uuid::Uuid,
 };
 
 const TOPIC: &str = "orders";
@@ -94,9 +98,7 @@ fn elected() -> PartitionRecord {
 
 /// Broker 2 alive, broker 1 dead, so an unclean election has an out-of-ISR
 /// replica to elect.
-fn alive() -> HashSet<u64> {
-    HashSet::from([2])
-}
+fn alive() -> HashSet<u64> { HashSet::from([2]) }
 
 async fn broker_with(config: BreakGlassConfig) -> (BrokerHandle, tempfile::TempDir) {
     start_broker_no_audit_with(move |cfg| {
@@ -318,13 +320,10 @@ fn a_whole_request_refusal_sets_the_top_level_code_and_every_named_row() {
             true,
             ElectLeadersResponse {
                 error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-                replica_election_results: vec![topic_rows(
-                    "t",
-                    vec![
-                        row(0, codes::CLUSTER_AUTHORIZATION_FAILED, DENIED),
-                        row(1, codes::CLUSTER_AUTHORIZATION_FAILED, DENIED),
-                    ],
-                )],
+                replica_election_results: vec![topic_rows("t", vec![
+                    row(0, codes::CLUSTER_AUTHORIZATION_FAILED, DENIED),
+                    row(1, codes::CLUSTER_AUTHORIZATION_FAILED, DENIED),
+                ])],
                 ..Default::default()
             },
         ),
@@ -335,10 +334,11 @@ fn a_whole_request_refusal_sets_the_top_level_code_and_every_named_row() {
             WIRE_ELECTION_PREFERRED,
             true,
             ElectLeadersResponse {
-                replica_election_results: vec![topic_rows(
-                    "t",
-                    vec![row(0, codes::CLUSTER_AUTHORIZATION_FAILED, DENIED)],
-                )],
+                replica_election_results: vec![topic_rows("t", vec![row(
+                    0,
+                    codes::CLUSTER_AUTHORIZATION_FAILED,
+                    DENIED,
+                )])],
                 ..Default::default()
             },
         ),
@@ -349,10 +349,11 @@ fn a_whole_request_refusal_sets_the_top_level_code_and_every_named_row() {
             false,
             ElectLeadersResponse {
                 error_code: codes::INVALID_REQUEST,
-                replica_election_results: vec![topic_rows(
-                    "t",
-                    vec![row(0, codes::INVALID_REQUEST, UNKNOWN_TYPE)],
-                )],
+                replica_election_results: vec![topic_rows("t", vec![row(
+                    0,
+                    codes::INVALID_REQUEST,
+                    UNKNOWN_TYPE,
+                )])],
                 ..Default::default()
             },
         ),
@@ -407,38 +408,29 @@ async fn the_handler_elects_exactly_the_partitions_the_request_names() {
     seed_preferred_topic(&broker).await;
     test_ctx!(ctx, "admin");
     let cases: Vec<(Option<Vec<TopicPartitions>>, Vec<ReplicaElectionResult>)> = vec![
-        (
-            Some(vec![named(TOPIC, &[])]),
-            vec![topic_rows(TOPIC, vec![])],
-        ),
-        (
-            Some(vec![named(TOPIC, &[0, 9])]),
-            vec![topic_rows(
-                TOPIC,
-                vec![
-                    row(0, codes::ELECTION_NOT_NEEDED, NOT_NEEDED),
-                    row(
-                        9,
-                        codes::UNKNOWN_TOPIC_OR_PARTITION,
-                        "No such partition as orders-9",
-                    ),
-                ],
-            )],
-        ),
-        (
-            Some(vec![named("missing", &[0]), named(TOPIC, &[])]),
+        (Some(vec![named(TOPIC, &[])]), vec![topic_rows(
+            TOPIC,
+            vec![],
+        )]),
+        (Some(vec![named(TOPIC, &[0, 9])]), vec![topic_rows(
+            TOPIC,
             vec![
-                topic_rows(
-                    "missing",
-                    vec![row(
-                        0,
-                        codes::UNKNOWN_TOPIC_OR_PARTITION,
-                        "No such topic as missing",
-                    )],
+                row(0, codes::ELECTION_NOT_NEEDED, NOT_NEEDED),
+                row(
+                    9,
+                    codes::UNKNOWN_TOPIC_OR_PARTITION,
+                    "No such partition as orders-9",
                 ),
-                topic_rows(TOPIC, vec![]),
             ],
-        ),
+        )]),
+        (Some(vec![named("missing", &[0]), named(TOPIC, &[])]), vec![
+            topic_rows("missing", vec![row(
+                0,
+                codes::UNKNOWN_TOPIC_OR_PARTITION,
+                "No such topic as missing",
+            )]),
+            topic_rows(TOPIC, vec![]),
+        ]),
     ];
     for (topic_partitions, expected) in cases {
         let request = ElectLeadersRequest {

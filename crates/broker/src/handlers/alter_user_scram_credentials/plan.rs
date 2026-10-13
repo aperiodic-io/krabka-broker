@@ -7,26 +7,26 @@
 //! result rows in first-seen order, and the metadata records of the accepted
 //! rows.
 
-use std::collections::HashMap;
-
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::owned::{
-    alter_user_scram_credentials_request::{
-        AlterUserScramCredentialsRequest, ScramCredentialDeletion, ScramCredentialUpsertion,
+use {
+    super::{
+        records::{delete_record, upsertion_record},
+        response::{err_result, ok_result},
+        validation::{
+            AlterationError, decide_deletion, decide_upsertion, decision_error, decision_mechanism,
+        },
     },
-    alter_user_scram_credentials_response::AlterUserScramCredentialsResult,
-};
-use krabka_security::SaslMechanism;
-use krabka_verified::{ScramAlterationDecision, ScramPriorState};
-
-use super::{
-    records::{delete_record, upsertion_record},
-    response::{err_result, ok_result},
-    validation::{
-        AlterationError, decide_deletion, decide_upsertion, decision_error, decision_mechanism,
+    crate::broker::Broker,
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::owned::{
+        alter_user_scram_credentials_request::{
+            AlterUserScramCredentialsRequest, ScramCredentialDeletion, ScramCredentialUpsertion,
+        },
+        alter_user_scram_credentials_response::AlterUserScramCredentialsResult,
     },
+    krabka_security::SaslMechanism,
+    krabka_verified::{ScramAlterationDecision, ScramPriorState},
+    std::collections::HashMap,
 };
-use crate::broker::Broker;
 
 pub(super) struct AlterationPlan {
     pub(super) user_results: Vec<AlterUserScramCredentialsResult>,
@@ -187,23 +187,23 @@ fn stage_upsertion(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::ScramCredentialRecord;
-    use krabka_security::scram::MIN_SCRAM_ITERATIONS;
-
-    use super::*;
-    use crate::{
-        codes,
-        handlers::alter_user_scram_credentials::{
-            answer,
-            test_support::{
-                KAFKA_DUPLICATE_RESOURCE, expected_result, mixed_mechanisms, start_broker,
-                test_context, valid_upsertion, valid_upsertion_for_mechanism,
+    use {
+        super::*,
+        crate::{
+            codes,
+            handlers::alter_user_scram_credentials::{
+                answer,
+                test_support::{
+                    KAFKA_DUPLICATE_RESOURCE, expected_result, mixed_mechanisms, start_broker,
+                    test_context, valid_upsertion, valid_upsertion_for_mechanism,
+                },
             },
+            test_support::test_ctx,
         },
-        test_support::test_ctx,
+        assert2::assert,
+        krabka_metadata::ScramCredentialRecord,
+        krabka_security::scram::MIN_SCRAM_ITERATIONS,
+        std::sync::Arc,
     };
 
     /// Check the response and unchanged credential image for a refused request.

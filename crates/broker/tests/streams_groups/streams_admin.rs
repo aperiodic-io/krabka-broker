@@ -6,11 +6,13 @@
 //! they are grouped here rather than with the membership scenarios that assert
 //! on heartbeat responses.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::list_groups_request::ListGroupsRequest;
-
-use crate::streams_harness::{
-    boot, connect, create_topic, describe, finalize_streams_version, join_and_converge, topology,
+use {
+    crate::streams_harness::{
+        boot, connect, create_topic, describe, finalize_streams_version, join_and_converge,
+        topology,
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::list_groups_request::ListGroupsRequest,
 };
 
 /// After a member joins, `StreamsGroupDescribe` reports exactly one group row

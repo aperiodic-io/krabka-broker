@@ -4,23 +4,26 @@
 //! past their session timeout and completes any rebalance their departure
 //! unblocks, and it evicts next-gen members and writes their tombstones.
 
-use std::time::Instant;
-
-use super::{
-    ActorServices, ParkedWaiters, chrono_now_ms,
-    downgrade::{downgrade_fencing, downgrades_without},
-    heartbeat::fence_members,
-    persistence::{flush_classic_metadata, flush_pending},
-    waiters::settle_removed_classic_waiters,
-};
 #[cfg(test)]
 use crate::coordinator::unified::share::config::ShareGroupConfig;
 #[cfg(test)]
 use crate::coordinator::unified::streams::config::StreamsGroupConfig;
-use crate::{
-    coordinator::unified::{classic_state::ClassicGroup as ClassicState, group::CoordinatorGroup},
-    error::BrokerError,
-    metadata_epoch::next_i32,
+use {
+    super::{
+        ActorServices, ParkedWaiters, chrono_now_ms,
+        downgrade::{downgrade_fencing, downgrades_without},
+        heartbeat::fence_members,
+        persistence::{flush_classic_metadata, flush_pending},
+        waiters::settle_removed_classic_waiters,
+    },
+    crate::{
+        coordinator::unified::{
+            classic_state::ClassicGroup as ClassicState, group::CoordinatorGroup,
+        },
+        error::BrokerError,
+        metadata_epoch::next_i32,
+    },
+    std::time::Instant,
 };
 
 pub(super) async fn handle_actor_tick(
@@ -174,34 +177,34 @@ async fn handle_session_tick(
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
-
-    use assert2::{assert, check};
-    use krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest;
-
-    use super::*;
-    use crate::{
-        codes,
-        coordinator::unified::{
-            ClientIdentity, GroupCoordinator,
-            actor::{
-                GroupActorMessage, GroupKindTag, PendingRecords, RegexResolution,
-                test_support::{
-                    ConsumerMemberSetup, actor_services_with, completing_classic_group,
-                    empty_metadata, last_classic_metadata, make_coordinator, parked_follower, rpc,
-                    subscribed_member,
+    use {
+        super::*,
+        crate::{
+            codes,
+            coordinator::unified::{
+                ClientIdentity, GroupCoordinator,
+                actor::{
+                    GroupActorMessage, GroupKindTag, PendingRecords, RegexResolution,
+                    test_support::{
+                        ConsumerMemberSetup, actor_services_with, completing_classic_group,
+                        empty_metadata, last_classic_metadata, make_coordinator, parked_follower,
+                        rpc, subscribed_member,
+                    },
                 },
+                classic_state::GroupState as ClassicGroupState,
+                config::NextGenConfig,
+                consumer_state::GroupState,
+                group::GroupKind,
+                offsets_log::fake::InMemoryOffsetsLog,
+                persistence_next_gen::GroupMetadataValue,
+                reconciler::ReconcileInput,
+                regex_resolver::no_topic_regex_resolver,
+                test_support::{check_two_members_expired, expired_session_last_seen},
             },
-            classic_state::GroupState as ClassicGroupState,
-            config::NextGenConfig,
-            consumer_state::GroupState,
-            group::GroupKind,
-            offsets_log::fake::InMemoryOffsetsLog,
-            persistence_next_gen::GroupMetadataValue,
-            reconciler::ReconcileInput,
-            regex_resolver::no_topic_regex_resolver,
-            test_support::{check_two_members_expired, expired_session_last_seen},
         },
+        assert2::{assert, check},
+        krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        std::{sync::Arc, time::Duration},
     };
 
     #[tokio::test]
@@ -305,15 +308,15 @@ mod tests {
     /// their new owner.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_member_that_misses_its_rebalance_timeout_is_fenced() {
-        use std::collections::HashMap;
-
-        use krabka_protocol::{
-            owned::consumer_group_heartbeat_request::TopicPartitions, primitives::uuid::Uuid,
-        };
-
-        use crate::coordinator::unified::{
-            actor::{step_heartbeat, test_support::StaticMetadata},
-            reconciler::ReconcileInput,
+        use {
+            crate::coordinator::unified::{
+                actor::{step_heartbeat, test_support::StaticMetadata},
+                reconciler::ReconcileInput,
+            },
+            krabka_protocol::{
+                owned::consumer_group_heartbeat_request::TopicPartitions, primitives::uuid::Uuid,
+            },
+            std::collections::HashMap,
         };
 
         struct Row {
@@ -449,10 +452,11 @@ mod tests {
     /// never fires, so only the deadline wake can fence the member.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_actor_fences_at_the_rebalance_deadline_between_session_ticks() {
-        use krabka_protocol::owned::consumer_group_heartbeat_request::TopicPartitions;
-        use qubit_clock::{ManualMonotonicClock, MonotonicClock as _};
-
-        use crate::coordinator::unified::actor::{GroupActorMessage, test_support::StaticMetadata};
+        use {
+            crate::coordinator::unified::actor::{GroupActorMessage, test_support::StaticMetadata},
+            krabka_protocol::owned::consumer_group_heartbeat_request::TopicPartitions,
+            qubit_clock::{ManualMonotonicClock, MonotonicClock as _},
+        };
 
         let topic = krabka_protocol::primitives::uuid::Uuid([42; 16]);
         let clock = ManualMonotonicClock::new_shared();

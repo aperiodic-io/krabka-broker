@@ -6,16 +6,16 @@
 //! far longer than the bounded search reaches, over the same handler guards and
 //! the same invariants.
 
-use std::time::Duration;
-
-use bytes::Bytes;
-use proptest::prelude::*;
-
-use super::{
-    fixtures::{at, mk_member},
-    invariants::{index_coherent, single_owner},
+use {
+    super::{
+        fixtures::{at, mk_member},
+        invariants::{index_coherent, single_owner},
+    },
+    crate::coordinator::unified::classic_state::{ClassicGroup, GroupState},
+    bytes::Bytes,
+    proptest::prelude::*,
+    std::time::Duration,
 };
-use crate::coordinator::unified::classic_state::{ClassicGroup, GroupState};
 
 #[derive(Clone, Debug)]
 enum Op {

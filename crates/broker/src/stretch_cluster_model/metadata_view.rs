@@ -5,15 +5,16 @@
 //! from its own state and hands them over unchanged. Keeping the projection in
 //! one file keeps the rest of the model free of the metadata vocabulary.
 
-use krabka_metadata::{LeaderEpoch, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord};
-use uuid::Uuid;
-
-use super::{
-    block_on,
-    config::{StretchModel, TOPIC},
-    state::StretchState,
+use {
+    super::{
+        block_on,
+        config::{StretchModel, TOPIC},
+        state::StretchState,
+    },
+    crate::heartbeat::controller_state::ControllerLivenessState,
+    krabka_metadata::{LeaderEpoch, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord},
+    uuid::Uuid,
 };
-use crate::heartbeat::controller_state::ControllerLivenessState;
 
 impl StretchModel {
     /// The `PartitionRecord` that the metadata image holds in `state`.

@@ -6,13 +6,14 @@
 //! `WriteBarrierMarkers` inter-broker request, and a test binds a mock, so the
 //! fan-out is exercised without a network.
 
-use async_trait::async_trait;
-use krabka_log::Offset;
-use krabka_metadata::NodeId;
-
-use crate::{
-    barrier::{marker::BarrierMarker, state::TargetPartition},
-    error::BrokerError,
+use {
+    crate::{
+        barrier::{marker::BarrierMarker, state::TargetPartition},
+        error::BrokerError,
+    },
+    async_trait::async_trait,
+    krabka_log::Offset,
+    krabka_metadata::NodeId,
 };
 
 /// One marker that an append placed, and the offset it took.

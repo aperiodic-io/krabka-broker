@@ -5,16 +5,17 @@
 //! relational checks that only run once the whole table is applied — so they
 //! belong to the table's own module rather than to one domain applier.
 
-use assert2::assert;
-use krabka_units::{
-    bytes,
-    convert::{ByteSizeExt as _, TimeExt as _},
-    days, hours, mebibytes, millis, minutes, secs,
-};
-
-use crate::{
-    config::BrokerConfig,
-    file_config::{FileConfig, test_support::configured},
+use {
+    crate::{
+        config::BrokerConfig,
+        file_config::{FileConfig, test_support::configured},
+    },
+    assert2::assert,
+    krabka_units::{
+        bytes,
+        convert::{ByteSizeExt as _, TimeExt as _},
+        days, hours, mebibytes, millis, minutes, secs,
+    },
 };
 
 #[test]

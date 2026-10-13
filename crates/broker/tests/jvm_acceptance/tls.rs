@@ -5,13 +5,13 @@
 //! complete either handshake, so the keytool round-trip that builds one lives
 //! here too.
 
-use std::process::Command;
-
-use assert2::assert;
-use krabka_broker::BrokerConfig;
-
-use super::{docker::KAFKA_IMAGE, ports::broker0_advertised};
-use crate::support::{fixture_cache_dir, manifest_dir};
+use {
+    super::{docker::KAFKA_IMAGE, ports::broker0_advertised},
+    crate::support::{fixture_cache_dir, manifest_dir},
+    assert2::assert,
+    krabka_broker::BrokerConfig,
+    std::process::Command,
+};
 
 /// Spawn the broker with a single `SSL` listener on an allocated port
 /// (advertised as an allocated port) with the dev cert/key from
@@ -132,8 +132,10 @@ pub(crate) fn start_sasl_ssl_broker(
 }
 
 fn configure_tls(config: &mut BrokerConfig, protocol: krabka_security::ListenerProtocol) {
-    use krabka_broker::config::ListenerSpec;
-    use krabka_security::{ClientAuthMode, ListenerProtocol, TlsConfig};
+    use {
+        krabka_broker::config::ListenerSpec,
+        krabka_security::{ClientAuthMode, ListenerProtocol, TlsConfig},
+    };
 
     let name = if protocol == ListenerProtocol::SaslSsl {
         "SASL_SSL"

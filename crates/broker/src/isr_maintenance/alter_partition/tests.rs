@@ -2,33 +2,33 @@
 //! where the request goes and at which version. A real in-process controller
 //! shows what a krabka controller listener answers.
 
-use std::{
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
-
-use assert2::assert;
-use bytes::{BufMut as _, BytesMut};
-use krabka_client_core::{MockBroker, MockReply};
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_protocol::{
-    Decode as _, UnknownTaggedFields,
-    owned::{
-        alter_partition_request::{self, BrokerState, PartitionData, TopicData},
-        api_versions_request,
-        api_versions_response::{ApiVersion, ApiVersionsResponse},
+use {
+    super::*,
+    crate::{
+        BrokerHandle, codes,
+        isr_maintenance::test_support::{fake_source, reg_at, topic},
+        metadata_source::MetadataSource,
+        network::{client::InterBrokerClient, request::parse_request},
+        test_support::start_controller as start_test_support_controller,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use krabka_raft::NodeId;
-
-use super::*;
-use crate::{
-    BrokerHandle, codes,
-    isr_maintenance::test_support::{fake_source, reg_at, topic},
-    metadata_source::MetadataSource,
-    network::{client::InterBrokerClient, request::parse_request},
-    test_support::start_controller as start_test_support_controller,
+    assert2::assert,
+    bytes::{BufMut as _, BytesMut},
+    krabka_client_core::{MockBroker, MockReply},
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    krabka_protocol::{
+        Decode as _, UnknownTaggedFields,
+        owned::{
+            alter_partition_request::{self, BrokerState, PartitionData, TopicData},
+            api_versions_request,
+            api_versions_response::{ApiVersion, ApiVersionsResponse},
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    krabka_raft::NodeId,
+    std::{
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+    },
 };
 
 /// The node that leads the metadata quorum. As node 3001 of the Kafka system
@@ -212,9 +212,7 @@ impl ScriptedListener {
         Self { mock, received }
     }
 
-    fn addr(&self) -> SocketAddr {
-        self.mock.addr
-    }
+    fn addr(&self) -> SocketAddr { self.mock.addr }
 
     fn received(&self) -> Received {
         self.received
@@ -309,10 +307,10 @@ async fn send_alter_partition_goes_only_to_the_controller_listener_of_the_active
                 .await;
         let (voter_at, quorum_voters) = match case.source {
             EndpointSource::VoterSet => (Some(active_controller.addr()), Vec::new()),
-            EndpointSource::ConfiguredQuorum => (
-                None,
-                vec![(ACTIVE_CONTROLLER, active_controller.addr().to_string())],
-            ),
+            EndpointSource::ConfiguredQuorum => (None, vec![(
+                ACTIVE_CONTROLLER,
+                active_controller.addr().to_string(),
+            )]),
         };
         let metadata = source_of(
             cluster_image(brokers.addr(), voter_at),

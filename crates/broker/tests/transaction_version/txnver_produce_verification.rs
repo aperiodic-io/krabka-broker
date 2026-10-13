@@ -9,39 +9,40 @@
 //! and a non-transactional batch from a producer with an open transaction
 //! (`ProducerAppendInfo.appendDataBatch`).
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_ids::ProducerId;
-use krabka_protocol::{
-    owned::{
-        list_offsets_request::ListOffsetsRequest, produce_request::ProduceRequest,
-        produce_response::PartitionProduceResponse,
+use {
+    crate::{
+        support::{
+            discovery::coordinator_lookup_request,
+            offsets::{list_offset_partition, single_partition_list_offsets},
+            produce::{SinglePartitionProduceSetup, batch_request},
+            records::{
+                BatchTransaction, ProducerSequence, TransactionProbeBatchSetup,
+                transaction_probe_batch,
+            },
+            topics::TopicPartitionCount,
+            transaction_wire::{
+                TransactionPartitionsSetup, initialize_transactional, partition_error,
+                partitions_request, retry_coordinator, transaction_topic,
+            },
+            transactions::{
+                EndTransactionSetup, ProducerEpoch, ProducerEpochOffset, ProducerIdentity,
+                end_transaction_request,
+            },
+            wire::At,
+        },
+        txnver_harness::{admin_client, boot_single, create_topic},
     },
-    records::RecordBatch,
-};
-
-use crate::{
-    support::{
-        discovery::coordinator_lookup_request,
-        offsets::{list_offset_partition, single_partition_list_offsets},
-        produce::{SinglePartitionProduceSetup, batch_request},
-        records::{
-            BatchTransaction, ProducerSequence, TransactionProbeBatchSetup, transaction_probe_batch,
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_ids::ProducerId,
+    krabka_protocol::{
+        owned::{
+            list_offsets_request::ListOffsetsRequest, produce_request::ProduceRequest,
+            produce_response::PartitionProduceResponse,
         },
-        topics::TopicPartitionCount,
-        transaction_wire::{
-            TransactionPartitionsSetup, initialize_transactional, partition_error,
-            partitions_request, retry_coordinator, transaction_topic,
-        },
-        transactions::{
-            EndTransactionSetup, ProducerEpoch, ProducerEpochOffset, ProducerIdentity,
-            end_transaction_request,
-        },
-        wire::At,
+        records::RecordBatch,
     },
-    txnver_harness::{admin_client, boot_single, create_topic},
+    std::time::Duration,
 };
 
 const NOT_COORDINATOR: i16 = 16;
@@ -130,13 +131,10 @@ async fn produce_at(
 ) -> PartitionProduceResponse {
     let request = ProduceRequest {
         transactional_id: transactional_id.map(str::to_owned),
-        ..batch_request(
-            batch,
-            SinglePartitionProduceSetup {
-                topic: (topic).into(),
-                ..SinglePartitionProduceSetup::replicated()
-            },
-        )
+        ..batch_request(batch, SinglePartitionProduceSetup {
+            topic: (topic).into(),
+            ..SinglePartitionProduceSetup::replicated()
+        })
     };
     let response = match version.0 {
         10 => client.send(At::<_, 10>(request)).await,
@@ -180,11 +178,9 @@ where
 
 async fn init(client: &Client, transactional_id: &'static str) -> Producer {
     let _ = client
-        .send(coordinator_lookup_request(
-            transactional_id,
-            1,
-            vec![transactional_id.into()],
-        ))
+        .send(coordinator_lookup_request(transactional_id, 1, vec![
+            transactional_id.into(),
+        ]))
         .await;
     let response = initialize_transactional(
         client,
@@ -258,13 +254,10 @@ async fn set_up(client: &Client, case: &Case) -> Producer {
     }
     if matches!(case.setup, Setup::Committed) {
         let end = client
-            .send(end_transaction_request(
-                case.name,
-                EndTransactionSetup {
-                    producer: ProducerIdentity::from_wire((producer.id.0, producer.epoch.0)),
-                    ..Default::default()
-                },
-            ))
+            .send(end_transaction_request(case.name, EndTransactionSetup {
+                producer: ProducerIdentity::from_wire((producer.id.0, producer.epoch.0)),
+                ..Default::default()
+            }))
             .await
             .expect("EndTxn");
         assert!(end.error_code == 0, "{}: EndTxn {end:?}", case.name);

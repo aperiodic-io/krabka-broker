@@ -29,12 +29,13 @@
 //! | TransactionalId  | Describe, Write, TwoPhaseCommit                                    |
 //! | DelegationToken  | Describe                                                          |
 
-use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
-
-use super::{RequestContext, acl_wire::operation_to_wire};
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
-    codes,
+use {
+    super::{RequestContext, acl_wire::operation_to_wire},
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+        codes,
+    },
+    krabka_metadata::{AclOperation, MetadataImage, ResourceType},
 };
 
 /// Returns the operations whose Allow decision adds to the
@@ -104,16 +105,13 @@ pub(crate) fn authorized_operations_bits(
 ) -> i32 {
     let mut bits: i32 = 0;
     for &op in supported_operations(resource_type) {
-        let allow = authorizer.authorize_quiet(
-            image,
-            &AuthorizationRequest {
-                principal: ctx.principal,
-                host: ctx.peer,
-                resource_type,
-                resource_name,
-                operation: op,
-            },
-        );
+        let allow = authorizer.authorize_quiet(image, &AuthorizationRequest {
+            principal: ctx.principal,
+            host: ctx.peer,
+            resource_type,
+            resource_name,
+            operation: op,
+        });
         if allow == AuthorizationResult::Allow {
             bits |= 1_i32 << operation_to_wire(op);
         }
@@ -195,27 +193,23 @@ pub(crate) fn fill_group_authorized_operations<R: DescribedGroupRow>(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, net::SocketAddr};
+    use {
+        super::*,
+        crate::authorizer::{AllowAllAuthorizer, SimpleAclAuthorizer},
+        assert2::assert,
+        krabka_metadata::{AclEntry, MetadataRecord, PermissionType, ResourceType},
+        krabka_security::Principal,
+        std::{collections::HashSet, net::SocketAddr},
+        uuid::Uuid,
+    };
 
-    use assert2::assert;
-    use krabka_metadata::{AclEntry, MetadataRecord, PermissionType, ResourceType};
-    use krabka_security::Principal;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::authorizer::{AllowAllAuthorizer, SimpleAclAuthorizer};
-
-    fn principal(name: &str) -> Principal {
-        sasl_principal(name)
-    }
+    fn principal(name: &str) -> Principal { sasl_principal(name) }
 
     fn ctx<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> RequestContext<'a> {
         request_context(principal, peer, "authorized-operations-test")
     }
 
-    fn addr() -> SocketAddr {
-        "127.0.0.1:0".parse().unwrap()
-    }
+    fn addr() -> SocketAddr { "127.0.0.1:0".parse().unwrap() }
 
     use crate::test_support::{AllowAclSetup, allow_acl, request_context, sasl_principal};
 
@@ -225,14 +219,17 @@ mod tests {
         image
     }
 
-    fn bit(op: AclOperation) -> i32 {
-        1_i32 << operation_to_wire(op)
-    }
+    fn bit(op: AclOperation) -> i32 { 1_i32 << operation_to_wire(op) }
 
     /// Bind the empty ACL authorizer and Alice's existing test identity before
     /// calculating one resource's bitfield, retaining their caller lifetimes.
     macro_rules! alice_acl_bits {
-        (($auth:ident, $principal:ident, $host:ident, $bits:ident), $image:expr, $resource:expr, $name:expr) => {
+        (
+            ($auth:ident, $principal:ident, $host:ident, $bits:ident),
+            $image:expr,
+            $resource:expr,
+            $name:expr
+        ) => {
             let $auth = SimpleAclAuthorizer::new(HashSet::new());
             let $principal = principal("alice");
             let $host = addr();

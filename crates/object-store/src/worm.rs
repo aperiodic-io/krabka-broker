@@ -1,12 +1,13 @@
 //! S3 control-plane checks required before enabling a WORM writer.
 
-use object_store::RetryConfig;
-use serde::{Deserialize, de::DeserializeOwned};
-
-use crate::{
-    GcsConfig, ObjectStoreError, S3Config,
-    build::{build_gcs_store, build_s3_store},
-    multipart::{backend, read_ok_body, s3_bucket_url, s3_http_client, signed_s3_get_xml},
+use {
+    crate::{
+        GcsConfig, ObjectStoreError, S3Config,
+        build::{build_gcs_store, build_s3_store},
+        multipart::{backend, read_ok_body, s3_bucket_url, s3_http_client, signed_s3_get_xml},
+    },
+    object_store::RetryConfig,
+    serde::{Deserialize, de::DeserializeOwned},
 };
 
 #[derive(Deserialize)]
@@ -139,15 +140,11 @@ pub async fn verify_gcs_worm_bucket(cfg: &GcsConfig) -> Result<(), ObjectStoreEr
     if !credential.bearer.is_empty() {
         request = request.bearer_auth(&credential.bearer);
     }
-    let body = read_ok_body(
-        request,
-        "GCS Buckets.get",
-        &RetryConfig {
-            max_retries: cfg.max_retries,
-            retry_timeout: cfg.retry_timeout,
-            ..RetryConfig::default()
-        },
-    )
+    let body = read_ok_body(request, "GCS Buckets.get", &RetryConfig {
+        max_retries: cfg.max_retries,
+        retry_timeout: cfg.retry_timeout,
+        ..RetryConfig::default()
+    })
     .await?;
     let policy: GcsBucketPolicy = serde_json::from_slice(&body)
         .map_err(|error| ObjectStoreError::Backend(format!("GCS Buckets.get: {error}")))?;
@@ -205,12 +202,12 @@ async fn get_bucket_xml<T: DeserializeOwned>(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::check;
-
-    use super::*;
-    use crate::test_support::{accept_http_request, http_listener, s3_config, serve_http_pages};
+    use {
+        super::*,
+        crate::test_support::{accept_http_request, http_listener, s3_config, serve_http_pages},
+        assert2::check,
+        std::time::Duration,
+    };
 
     const GCS_TEST_KEY: &str = r#"{
         "private_key":"unused",

@@ -1,17 +1,17 @@
 //! Owned cleanup of a captured topic generation after its deletion commits.
 
-use std::{path::PathBuf, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use uuid::Uuid;
-
-use crate::{
-    broker::Broker,
-    diskless::hot_tail::HotTailCache,
-    log_dir,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    wal::quorum::{ShardRemoval, registry::WalShardRegistry, remove_shard},
+use {
+    crate::{
+        broker::Broker,
+        diskless::hot_tail::HotTailCache,
+        log_dir,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        wal::quorum::{ShardRemoval, registry::WalShardRegistry, remove_shard},
+    },
+    krabka_ids::PartitionIndex,
+    std::{path::PathBuf, sync::Arc},
+    uuid::Uuid,
 };
 
 struct CapturedPartition {

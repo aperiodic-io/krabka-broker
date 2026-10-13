@@ -23,30 +23,31 @@
 //! earlier. The handler appends a fresh `V1DelegationToken` record with the
 //! same `token_id`; the image semantics are replace.
 
-use krabka_metadata::{DelegationToken, DelegationTokenRecord};
-use krabka_protocol::owned::{
-    renew_delegation_token_request::RenewDelegationTokenRequest,
-    renew_delegation_token_response::RenewDelegationTokenResponse,
-};
-use krabka_raft::DelegationTokenMutation;
-use krabka_security::{Principal, SecretBytes};
-use krabka_verified::{
-    TokenRenewDecision,
-    delegation_token::{TokenApi, TokenApiAdmission},
-    renew_token_expiry,
-};
-
-use crate::{
-    codes::{
-        DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_NOT_FOUND,
-        DELEGATION_TOKEN_OWNER_MISMATCH, DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, INVALID_REQUEST,
-        UNSUPPORTED_VERSION,
+use {
+    crate::{
+        codes::{
+            DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_NOT_FOUND,
+            DELEGATION_TOKEN_OWNER_MISMATCH, DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, INVALID_REQUEST,
+            UNSUPPORTED_VERSION,
+        },
+        features::{METADATA_VERSION, require_feature},
+        handlers::ErrorCodeResponse as _,
+        metadata_source::MetadataSource,
+        network::auth::ConnectionAuth,
+        time_util::now_ms,
     },
-    features::{METADATA_VERSION, require_feature},
-    handlers::ErrorCodeResponse as _,
-    metadata_source::MetadataSource,
-    network::auth::ConnectionAuth,
-    time_util::now_ms,
+    krabka_metadata::{DelegationToken, DelegationTokenRecord},
+    krabka_protocol::owned::{
+        renew_delegation_token_request::RenewDelegationTokenRequest,
+        renew_delegation_token_response::RenewDelegationTokenResponse,
+    },
+    krabka_raft::DelegationTokenMutation,
+    krabka_security::{Principal, SecretBytes},
+    krabka_verified::{
+        TokenRenewDecision,
+        delegation_token::{TokenApi, TokenApiAdmission},
+        renew_token_expiry,
+    },
 };
 
 /// Kafka's `DelegationTokenManager.ERROR_TIMESTAMP`, the expiry the broker
@@ -170,20 +171,21 @@ pub(crate) fn admit_token_request<'a>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_raft::ControllerHandle;
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::{
-        codes::DELEGATION_TOKEN_EXPIRED,
-        handlers::delegation_token_test_support::{
-            DAY_MS, ExpiryExpectation, MutationSeedSetup, TokenExpirySetup, TokenMutationIndex,
-            TokenMutationRefusalSetup, TokenPeriodMillis, authed, in_mutation_window,
-            mutation_credential_refusals, ordinary_ownership_refusals,
-            stored_expiry as stored_expiry_fixture, test_controller,
+    use {
+        super::*,
+        crate::{
+            codes::DELEGATION_TOKEN_EXPIRED,
+            handlers::delegation_token_test_support::{
+                DAY_MS, ExpiryExpectation, MutationSeedSetup, TokenExpirySetup, TokenMutationIndex,
+                TokenMutationRefusalSetup, TokenPeriodMillis, authed, in_mutation_window,
+                mutation_credential_refusals, ordinary_ownership_refusals,
+                stored_expiry as stored_expiry_fixture, test_controller,
+            },
+            test_support::{KafkaErrorCode, UnixMillis},
         },
-        test_support::{KafkaErrorCode, UnixMillis},
+        assert2::assert,
+        krabka_raft::ControllerHandle,
+        tempfile::TempDir,
     };
 
     fn stored_expiry(controller: &ControllerHandle, token_id: &str) -> i64 {
@@ -351,17 +353,13 @@ mod tests {
                 &*controller,
             ))
             .await;
-            check_token_expiry!(
-                case,
-                resp,
-                TokenExpirySetup {
-                    window,
-                    expectation: ExpiryExpectation::for_period(
-                        expected_delta.map(TokenPeriodMillis),
-                        UnixMillis(max_timestamp_ms)
-                    ),
-                }
-            );
+            check_token_expiry!(case, resp, TokenExpirySetup {
+                window,
+                expectation: ExpiryExpectation::for_period(
+                    expected_delta.map(TokenPeriodMillis),
+                    UnixMillis(max_timestamp_ms)
+                ),
+            });
             assert!(
                 stored_expiry(&controller, &token_id) == resp.expiry_timestamp_ms,
                 "{case}"

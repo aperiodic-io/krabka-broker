@@ -7,15 +7,15 @@
 //! `SASL_PLAINTEXT` flavours of the same two drivers live in `sasl`, next to
 //! the authorization test that is the only user of a SASL listener here.
 
-use std::net::SocketAddr;
-
-use assert2::assert;
-use krabka_protocol::owned::elect_leaders_request::ElectLeadersRequest;
-use tokio::net::TcpStream;
-
-use crate::{
-    kafka_wire,
-    support::{admin::ElectionKind, topics::AssignedTopicSetup},
+use {
+    crate::{
+        kafka_wire,
+        support::{admin::ElectionKind, topics::AssignedTopicSetup},
+    },
+    assert2::assert,
+    krabka_protocol::owned::elect_leaders_request::ElectLeadersRequest,
+    std::net::SocketAddr,
+    tokio::net::TcpStream,
 };
 
 /// The client id every request header in this suite carries.
@@ -70,13 +70,10 @@ pub async fn drive_elect_all_partitions(
 /// which broker leads it and which one they can elect: an automatic placement
 /// starts at a random broker.
 pub async fn create_topic_plaintext(addr: SocketAddr, topic: AssignedTopicSetup) {
-    kafka_wire::create_assigned_topic_plaintext(
-        addr,
-        kafka_wire::AssignedTopicExchangeSetup {
-            client_id: CLIENT_ID,
-            topic,
-        },
-    )
+    kafka_wire::create_assigned_topic_plaintext(addr, kafka_wire::AssignedTopicExchangeSetup {
+        client_id: CLIENT_ID,
+        topic,
+    })
     .await;
 }
 pub use crate::kafka_wire::elect_leaders_plaintext as drive_elect_leaders;

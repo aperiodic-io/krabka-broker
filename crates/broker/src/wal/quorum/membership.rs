@@ -6,11 +6,11 @@
 //! the new bytes go to a temporary file, the previous descriptor moves aside as
 //! a backup, and a failed rename puts that backup back.
 
-use std::{fs, io::Write as _};
-
-use krabka_kraft_core::NodeId;
-
-use crate::error::BrokerError;
+use {
+    crate::error::BrokerError,
+    krabka_kraft_core::NodeId,
+    std::{fs, io::Write as _},
+};
 
 pub(super) const QUORUM_STATE_FILE: &str = "quorum-state.json";
 pub(super) const QUORUM_STATE_BACKUP_FILE: &str = "quorum-state.json.bak";
@@ -172,10 +172,7 @@ fn restore_membership_backup(backup: &std::path::Path, path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use uuid::Uuid;
-
-    use super::*;
+    use {super::*, assert2::assert, uuid::Uuid};
 
     fn prepared_three_voter_root() -> (tempfile::TempDir, Vec<NodeId>) {
         let root = tempfile::tempdir().unwrap();

@@ -26,21 +26,22 @@
 //! | `LOAD_ACKS` | `1` | `0`, `1` or `all`. |
 //! | `LOAD_CONSUME` | `0` | `1` also runs one consumer group. |
 
-use std::{
-    collections::VecDeque,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+use {
+    bytes::Bytes,
+    krabka_client_consumer::{AutoOffsetReset, Consumer},
+    krabka_client_core::Client,
+    krabka_client_producer::{Acks, Producer, ProducerRecord},
+    krabka_protocol::owned::create_topics_request::{CreatableTopic, CreateTopicsRequest},
+    num_traits::ToPrimitive,
+    std::{
+        collections::VecDeque,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicU64, Ordering},
+        },
+        time::{Duration, Instant},
     },
-    time::{Duration, Instant},
 };
-
-use bytes::Bytes;
-use krabka_client_consumer::{AutoOffsetReset, Consumer};
-use krabka_client_core::Client;
-use krabka_client_producer::{Acks, Producer, ProducerRecord};
-use krabka_protocol::owned::create_topics_request::{CreatableTopic, CreateTopicsRequest};
-use num_traits::ToPrimitive;
 
 /// `TOPIC_ALREADY_EXISTS`. A second run against the same broker is expected.
 const TOPIC_ALREADY_EXISTS: i16 = 36;
@@ -58,14 +59,10 @@ fn env<T: std::str::FromStr>(key: &str, default: T) -> T {
 ///
 /// `to_f64` rather than an `as` cast: the cast is lossy above 2^53 and says
 /// nothing about it, and this crate's lint set rejects it.
-fn as_f64(value: u64) -> f64 {
-    value.to_f64().expect("a u64 below 2^53 is exact as an f64")
-}
+fn as_f64(value: u64) -> f64 { value.to_f64().expect("a u64 below 2^53 is exact as an f64") }
 
 /// A byte count as a `u64`. `usize` is 64 bits on every target this runs on.
-fn bytes_as_u64(value: usize) -> u64 {
-    u64::try_from(value).unwrap_or(u64::MAX)
-}
+fn bytes_as_u64(value: usize) -> u64 { u64::try_from(value).unwrap_or(u64::MAX) }
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -125,7 +122,7 @@ async fn main() {
     let elapsed = start.elapsed().as_secs_f64();
     let acked = acked.load(Ordering::Relaxed);
     let sent = sent.load(Ordering::Relaxed);
-    let megabytes = as_f64(acked) * as_f64(bytes_as_u64(value_bytes)) / 1e6;
+    let megabytes = as_f64(acked) * as_f64(bytes_as_u64(value_bytes)) / 1.0e6;
     println!(
         "loadgen: acks={acks_name} producers={producers} value={value_bytes}B \
          parts={partitions} | sent={sent} acked={acked} | {:.0} msg/s | {:.1} MB/s \

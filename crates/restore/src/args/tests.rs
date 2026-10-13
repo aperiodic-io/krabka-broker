@@ -1,13 +1,14 @@
 //! Unit tests for the command line itself: what clap accepts, what it refuses,
 //! and what the parsed `RestoreArgs` holds.
 
-use assert2::check;
-use clap::Parser as _;
-use krabka_ids::Offset;
-
-use super::{
-    test_support::{args_from, partition},
-    *,
+use {
+    super::{
+        test_support::{args_from, partition},
+        *,
+    },
+    assert2::check,
+    clap::Parser as _,
+    krabka_ids::Offset,
 };
 
 #[test]

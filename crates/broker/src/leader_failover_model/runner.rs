@@ -5,8 +5,10 @@
 //! exhaustive: a search that hit either cap proves nothing, and the two must
 //! be tuned together.
 
-use super::{failover_state::FailoverModel, recovery_state::RecoveryModel};
-use crate::model_check::check_model;
+use {
+    super::{failover_state::FailoverModel, recovery_state::RecoveryModel},
+    crate::model_check::check_model,
+};
 
 const MAX_STATES: usize = 200_000;
 const MAX_DEPTH: usize = 80;

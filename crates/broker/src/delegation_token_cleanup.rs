@@ -12,16 +12,16 @@
 //! This matches Kafka's "every broker sweeps, idempotent" pattern from
 //! KIP-48 §6.
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use krabka_metadata::{DelegationToken, DelegationTokenRecord, MetadataImage};
-use krabka_raft::DelegationTokenMutation;
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
-
-use crate::{task_util::run_every, time_util::now_ms};
+use {
+    crate::{task_util::run_every, time_util::now_ms},
+    async_trait::async_trait,
+    krabka_metadata::{DelegationToken, DelegationTokenRecord, MetadataImage},
+    krabka_raft::DelegationTokenMutation,
+    krabka_units::{Time, convert::TimeExt as _},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
+    tracing::{debug, info, warn},
+};
 
 /// Minimal controller surface for the sweep. [`crate::broker`] adapts the
 /// real [`krabka_raft::ControllerHandle`]. Tests inject a mock.
@@ -75,15 +75,15 @@ pub(crate) async fn sweep(controller: &dyn DelegationTokenController) {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Mutex, time::Duration};
-
-    use assert2::assert;
-    use krabka_metadata::{DelegationTokenRecord, MetadataImage, MetadataRecord};
-    use krabka_security::KafkaPrincipal;
-    use krabka_units::hours;
-    use uuid::Uuid;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_metadata::{DelegationTokenRecord, MetadataImage, MetadataRecord},
+        krabka_security::KafkaPrincipal,
+        krabka_units::hours,
+        std::{sync::Mutex, time::Duration},
+        uuid::Uuid,
+    };
 
     struct MockController {
         image: Mutex<Arc<MetadataImage>>,
@@ -92,9 +92,8 @@ mod tests {
 
     #[async_trait]
     impl DelegationTokenController for MockController {
-        fn current_image(&self) -> Arc<MetadataImage> {
-            self.image.lock().unwrap().clone()
-        }
+        fn current_image(&self) -> Arc<MetadataImage> { self.image.lock().unwrap().clone() }
+
         async fn submit_mutations(
             &self,
             mutations: Vec<DelegationTokenMutation>,

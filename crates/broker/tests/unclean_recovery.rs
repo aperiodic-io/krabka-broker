@@ -53,12 +53,13 @@
 //! convention. The openraft `debug_assert!` races on the hosted Windows
 //! scheduler are unrelated.
 
-use std::{net::SocketAddr, time::Duration};
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-use krabka_metadata::{
-    BrokerConfigRecord, MetadataRecord, PartitionElrRecord, PartitionRecord, TopicConfigRecord,
+use {
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    krabka_metadata::{
+        BrokerConfigRecord, MetadataRecord, PartitionElrRecord, PartitionRecord, TopicConfigRecord,
+    },
+    std::{net::SocketAddr, time::Duration},
 };
 
 mod kafka_wire;
@@ -169,13 +170,10 @@ async fn offline_partition_with_diverged_logs(
     let [h1, h2, h3] = handles;
     // ── Create the RF=3 topic. Partition 0's replica assignment is
     //    [1, 2, 3]; broker 1 is the preferred/first. ──
-    create_topic_plaintext(
-        addr,
-        AssignedTopicExchangeSetup {
-            client_id: CLIENT_ID,
-            topic: AssignedTopicSetup::three_replicas(topic),
-        },
-    )
+    create_topic_plaintext(addr, AssignedTopicExchangeSetup {
+        client_id: CLIENT_ID,
+        topic: AssignedTopicSetup::three_replicas(topic),
+    })
     .await;
     wait_partition_hosted(h1, topic, 0).await;
     wait_partition_hosted(h2, topic, 0).await;
@@ -359,17 +357,14 @@ async fn run_unclean_recovery(elr: Option<&str>, witness: Option<u64>, expected_
     eprintln!("sending ElectLeaders UNCLEAN to raft leader at {elect_addr}");
 
     // ── Trigger offset-aware recovery (election_type = 1 = UNCLEAN). ──
-    let result = drive_elect_leaders(
-        elect_addr,
-        ElectionExchangeSetup {
-            client_id: CLIENT_ID,
-            election: ElectionSetup {
-                topic: (topic).to_string(),
-                kind: ElectionKind::Unclean,
-                ..Default::default()
-            },
+    let result = drive_elect_leaders(elect_addr, ElectionExchangeSetup {
+        client_id: CLIENT_ID,
+        election: ElectionSetup {
+            topic: (topic).to_string(),
+            kind: ElectionKind::Unclean,
+            ..Default::default()
         },
-    )
+    })
     .await;
     assert!(
         result == vec![(0, 0)],

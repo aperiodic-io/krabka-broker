@@ -44,9 +44,8 @@ macro_rules! reaper_task {
         }
     };
 }
-pub(super) use reaper_task;
-
 use crate::codes::{INVALID_PRODUCER_EPOCH, PRODUCER_FENCED};
+pub(super) use reaper_task;
 
 /// Independent expected wire codes shared by the utility and response tests.
 #[cfg(test)]
@@ -68,9 +67,7 @@ pub(crate) fn producer_fenced_cases(other_code_version: i16) -> [(i16, i16, i16)
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn producer_fenced_is_invalid_producer_epoch_below_version_2() {

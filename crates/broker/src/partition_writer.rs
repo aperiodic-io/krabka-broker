@@ -6,26 +6,26 @@
 //! long-poll Fetch consumers with a shared `Notify` after each successful
 //! append.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-
-use arc_swap::ArcSwap;
-use krabka_ids::PartitionIndex;
-use krabka_log::Log;
-use tokio::sync::{Notify, mpsc};
-
 #[cfg(test)]
 use crate::config::BrokerConfig;
-use crate::{
-    delivery::DeliveryHandles,
-    error::BrokerError,
-    log_dir_status::LogDirRegistry,
-    partition::{SwapOutcome, WriterMessage},
-    producer_state::ProducerState,
-    replica_state::ReplicaState,
-    wal::{OffsetSequencer, SharedWal},
+use {
+    crate::{
+        delivery::DeliveryHandles,
+        error::BrokerError,
+        log_dir_status::LogDirRegistry,
+        partition::{SwapOutcome, WriterMessage},
+        producer_state::ProducerState,
+        replica_state::ReplicaState,
+        wal::{OffsetSequencer, SharedWal},
+    },
+    arc_swap::ArcSwap,
+    krabka_ids::PartitionIndex,
+    krabka_log::Log,
+    std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
+    tokio::sync::{Notify, mpsc},
 };
 
 mod append;

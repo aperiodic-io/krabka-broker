@@ -5,9 +5,10 @@
 //! exporter build, so the decision logic stays pure and testable without a
 //! collector.
 
-use krabka_units::prelude::{Time, TimeExt, secs};
-
-use crate::error::TelemetryError;
+use {
+    crate::error::TelemetryError,
+    krabka_units::prelude::{Time, TimeExt, secs},
+};
 
 /// OTLP transport.
 ///

@@ -13,17 +13,18 @@
 //! has applied is checkpointed in a directory of its own (the `store` module)
 //! so a restart resumes there instead of at offset 0.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicI64, AtomicU64, Ordering},
+use {
+    krabka_metadata::MetadataImage,
+    krabka_raft::{NodeId, OutboundDialer, kraft::snapshot_fetch::MetadataSnapshotFetchMax},
+    krabka_units::{ByteSize, Time},
+    qubit_clock::Timer,
+    std::sync::{
+        Arc,
+        atomic::{AtomicI64, AtomicU64, Ordering},
+    },
+    tokio::{sync::watch, task::JoinHandle},
+    tokio_util::sync::CancellationToken,
 };
-
-use krabka_metadata::MetadataImage;
-use krabka_raft::{NodeId, OutboundDialer, kraft::snapshot_fetch::MetadataSnapshotFetchMax};
-use krabka_units::{ByteSize, Time};
-use qubit_clock::Timer;
-use tokio::{sync::watch, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
 
 mod fetch;
 mod serve_loop;
@@ -156,24 +157,16 @@ impl MetadataObserver {
     }
 
     #[must_use]
-    pub fn current_image(&self) -> Arc<MetadataImage> {
-        self.image.borrow().clone()
-    }
+    pub fn current_image(&self) -> Arc<MetadataImage> { self.image.borrow().clone() }
 
     #[must_use]
-    pub fn watch_image(&self) -> watch::Receiver<Arc<MetadataImage>> {
-        self.image.subscribe()
-    }
+    pub fn watch_image(&self) -> watch::Receiver<Arc<MetadataImage>> { self.image.subscribe() }
 
     #[must_use]
-    pub fn watch_leader(&self) -> watch::Receiver<Option<NodeId>> {
-        self.leader.subscribe()
-    }
+    pub fn watch_leader(&self) -> watch::Receiver<Option<NodeId>> { self.leader.subscribe() }
 
     #[must_use]
-    pub fn current_metadata_offset(&self) -> i64 {
-        self.metadata_offset.load(Ordering::Acquire)
-    }
+    pub fn current_metadata_offset(&self) -> i64 { self.metadata_offset.load(Ordering::Acquire) }
 
     /// Highest `__cluster_metadata` offset the quorum has committed, as the
     /// last successful fetch reported it, or `-1` before the observer has
@@ -194,9 +187,7 @@ impl MetadataObserver {
     /// Committed metadata records this observer could not decode and
     /// skipped since it started: Kafka's `metadata-load-error-count`.
     #[must_use]
-    pub fn metadata_load_error_count(&self) -> u64 {
-        self.load_errors.load(Ordering::Acquire)
-    }
+    pub fn metadata_load_error_count(&self) -> u64 { self.load_errors.load(Ordering::Acquire) }
 
     /// Record one completed pass over committed metadata records. The pair
     /// returned by [`Self::pending_record_processing_time_us`] is a
@@ -231,9 +222,7 @@ impl MetadataObserver {
     /// `KRaft` control record. Kafka's raft layer halts the process on one, on
     /// every role, so the broker stops itself when this changes to `Some`.
     #[must_use]
-    pub fn watch_fatal(&self) -> watch::Receiver<Option<String>> {
-        self.fatal.subscribe()
-    }
+    pub fn watch_fatal(&self) -> watch::Receiver<Option<String>> { self.fatal.subscribe() }
 
     /// Stops the fetch loop and drains the task.
     pub async fn cancel(&self) {
@@ -244,24 +233,22 @@ impl MetadataObserver {
     }
 
     #[cfg(test)]
-    pub(crate) async fn task_drained_for_test(&self) -> bool {
-        self.task.lock().await.is_none()
-    }
+    pub(crate) async fn task_drained_for_test(&self) -> bool { self.task.lock().await.is_none() }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-    use krabka_metadata::MetadataRecord;
-    use krabka_raft::{BootstrapMode, Controller, ControllerConfig};
-    use krabka_units::millis;
-    use tempfile::TempDir;
-    use uuid::Uuid;
-
-    use super::{test_support::observer_config, *};
-    use crate::test_support::RecordingDialer;
+    use {
+        super::{test_support::observer_config, *},
+        crate::test_support::RecordingDialer,
+        assert2::assert,
+        krabka_metadata::MetadataRecord,
+        krabka_raft::{BootstrapMode, Controller, ControllerConfig},
+        krabka_units::millis,
+        std::time::Duration,
+        tempfile::TempDir,
+        uuid::Uuid,
+    };
 
     #[test]
     fn pending_record_processing_time_tracks_average_and_max() {

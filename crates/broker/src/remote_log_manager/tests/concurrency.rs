@@ -7,22 +7,22 @@
 //! waited. These cases pin the property that replaces that walk: a copy that
 //! is parked is one copier slot, not the whole tick.
 
-use std::{
-    sync::{
-        Condvar, Mutex,
-        atomic::{AtomicBool, AtomicUsize},
+use {
+    super::*,
+    crate::remote_log_manager::test_support as fixtures,
+    assert2::check,
+    fixtures::{missing_remote_reads, rolled_tiered_partition_at},
+    krabka_remote_storage::{
+        CustomMetadata, LogSegmentData, RemoteLogSegmentMetadata, RemoteStorageError,
     },
-    time::Instant,
+    std::{
+        sync::{
+            Condvar, Mutex,
+            atomic::{AtomicBool, AtomicUsize},
+        },
+        time::Instant,
+    },
 };
-
-use assert2::check;
-use fixtures::{missing_remote_reads, rolled_tiered_partition_at};
-use krabka_remote_storage::{
-    CustomMetadata, LogSegmentData, RemoteLogSegmentMetadata, RemoteStorageError,
-};
-
-use super::*;
-use crate::remote_log_manager::test_support as fixtures;
 
 /// How long a parked copy waits for the other partition before it gives up.
 ///
@@ -89,6 +89,8 @@ impl TestRsm {
 }
 
 impl RemoteStorageManager for TestRsm {
+    missing_remote_reads!(delete_ok);
+
     fn copy_log_segment_data(
         &self,
         metadata: &RemoteLogSegmentMetadata,
@@ -129,8 +131,6 @@ impl RemoteStorageManager for TestRsm {
             }
         }
     }
-
-    missing_remote_reads!(delete_ok);
 }
 
 /// The `orders` topic with `partitions` partitions, so a tick has more than
@@ -139,17 +139,13 @@ use fixtures::orders_image as image_with_orders_partitions;
 
 /// `orders-index`, led by this broker, with sealed segments the tier lacks.
 fn tiered_partition_at(index: i32, log_dir: &std::path::Path) -> Arc<Partition> {
-    rolled_tiered_partition_at(
-        PartitionIndex(index),
-        log_dir,
-        LogConfig {
-            segment_size: bytes(256),
-            remote_storage_enable: true,
-            retention: None,
-            retention_size: None,
-            ..LogConfig::default()
-        },
-    )
+    rolled_tiered_partition_at(PartitionIndex(index), log_dir, LogConfig {
+        segment_size: bytes(256),
+        remote_storage_enable: true,
+        retention: None,
+        retention_size: None,
+        ..LogConfig::default()
+    })
 }
 
 /// The head-of-line block this issue is about. Partition 0's copy parks

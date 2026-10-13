@@ -28,22 +28,23 @@
 //! These tests are Windows-gated like the other multi-broker tests. openraft
 //! `debug_assert!` races on the hosted Windows scheduler.
 
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::{create_topics_request::CreateTopicsRequest, produce_response::NodeEndpoint},
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-use support::cluster_lock;
-
-use crate::support::{
-    client::connect_client,
-    produce::{SinglePartitionProduceSetup, batch_request},
-    records::{batch_from_records, value_record},
-    registered_cluster, shutdown_cluster,
-    topics::creatable_topic,
+use {
+    crate::support::{
+        client::connect_client,
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{batch_from_records, value_record},
+        registered_cluster, shutdown_cluster,
+        topics::creatable_topic,
+    },
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::{create_topics_request::CreateTopicsRequest, produce_response::NodeEndpoint},
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
+    },
+    support::cluster_lock,
 };
 
 mod support;

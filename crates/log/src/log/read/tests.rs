@@ -2,22 +2,23 @@
 //! boundaries, the byte-exactness of the verbatim read, and the joins a
 //! fetch makes across a segment seam.
 
-use assert2::check;
-use krabka_units::prelude::{gibibytes, kibibytes, mebibytes};
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    config::LogConfig,
-    log::{
-        RawRead,
-        test_support::{
-            NO_LIMIT, append_samples, configured_test_log, sample_batch, test_batch_at, test_log,
-            tiny_segments,
+use {
+    super::*,
+    crate::{
+        config::LogConfig,
+        log::{
+            RawRead,
+            test_support::{
+                NO_LIMIT, append_samples, configured_test_log, sample_batch, test_batch_at,
+                test_log, tiny_segments,
+            },
         },
+        segment::Segment,
+        test_support::{RecordedAdvice, segmented_log},
     },
-    segment::Segment,
-    test_support::{RecordedAdvice, segmented_log},
+    assert2::check,
+    krabka_units::prelude::{gibibytes, kibibytes, mebibytes},
+    tempfile::tempdir,
 };
 
 /// Read a complete raw response and check every byte against the written wire image.

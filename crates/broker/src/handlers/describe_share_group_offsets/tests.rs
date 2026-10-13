@@ -5,26 +5,26 @@
 //! per-partition rows KIP-932 asks for -- feature disabled, group
 //! denied, topic unknown -- stay exactly what the JVM admin client reads.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_protocol::{
-    owned::{
-        describe_share_group_offsets_request::{
-            DescribeShareGroupOffsetsRequestGroup, DescribeShareGroupOffsetsRequestTopic,
-        },
-        describe_share_group_offsets_response::{
-            self, DescribeShareGroupOffsetsResponsePartition,
-            DescribeShareGroupOffsetsResponseTopic,
-        },
+use {
+    super::*,
+    crate::{
+        authorizer::Authorizer,
+        test_support::{DenyAll, ShareApiSupport, test_ctx},
     },
-    primitives::uuid::Uuid,
-};
-
-use super::*;
-use crate::{
-    authorizer::Authorizer,
-    test_support::{DenyAll, ShareApiSupport, test_ctx},
+    assert2::assert,
+    krabka_protocol::{
+        owned::{
+            describe_share_group_offsets_request::{
+                DescribeShareGroupOffsetsRequestGroup, DescribeShareGroupOffsetsRequestTopic,
+            },
+            describe_share_group_offsets_response::{
+                self, DescribeShareGroupOffsetsResponsePartition,
+                DescribeShareGroupOffsetsResponseTopic,
+            },
+        },
+        primitives::uuid::Uuid,
+    },
+    std::sync::Arc,
 };
 
 type RequestTopic<'a> = (&'a str, Vec<i32>);

@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn snapshot_retry_covers_wraparound_exhaustion_and_invalid_rows() {
@@ -25,57 +23,36 @@ fn snapshot_retry_covers_wraparound_exhaustion_and_invalid_rows() {
     );
     for (snapshot, row) in [
         (entry.last_offset, entry),
-        (
-            i64::MAX,
-            ProducerSnapshotEntryFacts {
-                offset_delta: -1,
-                ..entry
-            },
-        ),
-        (
-            i64::MAX,
-            ProducerSnapshotEntryFacts {
-                last_offset: 1,
-                ..entry
-            },
-        ),
-        (
-            i64::MAX,
-            ProducerSnapshotEntryFacts {
-                producer_epoch: -1,
-                ..entry
-            },
-        ),
-        (
-            i64::MAX,
-            ProducerSnapshotEntryFacts {
-                producer_id: -1,
-                ..entry
-            },
-        ),
-        (
-            i64::MAX,
-            ProducerSnapshotEntryFacts {
-                coordinator_epoch: -2,
-                ..entry
-            },
-        ),
-        (
-            i64::MAX,
-            ProducerSnapshotEntryFacts {
-                current_txn_first_offset: i64::MAX,
-                ..entry
-            },
-        ),
-        (
-            i64::MAX,
-            ProducerSnapshotEntryFacts {
-                last_offset: -1,
-                last_sequence: -1,
-                offset_delta: 0,
-                ..entry
-            },
-        ),
+        (i64::MAX, ProducerSnapshotEntryFacts {
+            offset_delta: -1,
+            ..entry
+        }),
+        (i64::MAX, ProducerSnapshotEntryFacts {
+            last_offset: 1,
+            ..entry
+        }),
+        (i64::MAX, ProducerSnapshotEntryFacts {
+            producer_epoch: -1,
+            ..entry
+        }),
+        (i64::MAX, ProducerSnapshotEntryFacts {
+            producer_id: -1,
+            ..entry
+        }),
+        (i64::MAX, ProducerSnapshotEntryFacts {
+            coordinator_epoch: -2,
+            ..entry
+        }),
+        (i64::MAX, ProducerSnapshotEntryFacts {
+            current_txn_first_offset: i64::MAX,
+            ..entry
+        }),
+        (i64::MAX, ProducerSnapshotEntryFacts {
+            last_offset: -1,
+            last_sequence: -1,
+            offset_delta: 0,
+            ..entry
+        }),
     ] {
         assert!(reloaded_snapshot_preserves_last_batch_retry(snapshot, row, 7) == None);
     }

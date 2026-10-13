@@ -5,16 +5,17 @@
 //! three alter rows are the other half of that rule: the key takes no write,
 //! whichever operation the tool sends.
 
-use assert2::check;
-use krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL;
-
-use crate::{
-    control_plane::{freeze, plain_topic_fixture},
-    jvm_tool::{jvm_describe_configs, run_tool},
-    vocabulary::{
-        CONFIGS_REASON, CONFIGS_TOPIC, INVALID_CONFIG_EXCEPTION, WRITE_FREEZE_ALTER_REFUSAL,
-        write_freeze_value,
+use {
+    crate::{
+        control_plane::{freeze, plain_topic_fixture},
+        jvm_tool::{jvm_describe_configs, run_tool},
+        vocabulary::{
+            CONFIGS_REASON, CONFIGS_TOPIC, INVALID_CONFIG_EXCEPTION, WRITE_FREEZE_ALTER_REFUSAL,
+            write_freeze_value,
+        },
     },
+    assert2::check,
+    krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL,
 };
 
 /// `kafka-configs` reads the freeze and cannot write it.
@@ -70,22 +71,18 @@ async fn kafka_configs_reads_the_freeze_and_cannot_write_it() {
             "write.freeze",
         ),
     ] {
-        let run = run_tool(
-            None,
-            None,
-            &[
-                "kafka-configs",
-                "--bootstrap-server",
-                &broker.container,
-                "--entity-type",
-                "topics",
-                "--entity-name",
-                CONFIGS_TOPIC,
-                "--alter",
-                flag,
-                value,
-            ],
-        );
+        let run = run_tool(None, None, &[
+            "kafka-configs",
+            "--bootstrap-server",
+            &broker.container,
+            "--entity-type",
+            "topics",
+            "--entity-name",
+            CONFIGS_TOPIC,
+            "--alter",
+            flag,
+            value,
+        ]);
         check!(!run.succeeded(), "{label}: must exit non-zero");
         check!(
             run.says(INVALID_CONFIG_EXCEPTION),

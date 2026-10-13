@@ -4,16 +4,17 @@
 //! land here, so a marker that a remote coordinator asks for takes exactly the
 //! batch shape of one this broker placed itself.
 
-use krabka_ids::NodeId;
-use krabka_log::Offset;
-use krabka_verified::{
-    BarrierMarkerFenceDecision, BarrierMarkerFenceFacts, barrier_marker_fence_decision,
-};
-
-use crate::{
-    barrier::marker::{BarrierMarker, build_barrier_batch},
-    error::BrokerError,
-    partition::Partition,
+use {
+    crate::{
+        barrier::marker::{BarrierMarker, build_barrier_batch},
+        error::BrokerError,
+        partition::Partition,
+    },
+    krabka_ids::NodeId,
+    krabka_log::Offset,
+    krabka_verified::{
+        BarrierMarkerFenceDecision, BarrierMarkerFenceFacts, barrier_marker_fence_decision,
+    },
 };
 
 /// A marker append rejected by the leadership fence or by the partition
@@ -69,24 +70,22 @@ pub(crate) async fn append_marker(
 
 #[cfg(test)]
 mod tests {
-    use krabka_ids::PartitionIndex;
-
-    use super::*;
-    use crate::{
-        barrier::test_support::open_partition, coordinator::unified::persistence::MAX_STRING_BYTES,
-        partition_registry::PartitionRegistry, test_support::StandalonePartitionSetup,
+    use {
+        super::*,
+        crate::{
+            barrier::test_support::open_partition,
+            coordinator::unified::persistence::MAX_STRING_BYTES,
+            partition_registry::PartitionRegistry, test_support::StandalonePartitionSetup,
+        },
+        krabka_ids::PartitionIndex,
     };
 
     async fn leader_partition(dir: &std::path::Path) -> std::sync::Arc<Partition> {
         let registry = PartitionRegistry::new();
-        open_partition(
-            &registry,
-            dir,
-            StandalonePartitionSetup {
-                topic: "test-barrier",
-                ..Default::default()
-            },
-        );
+        open_partition(&registry, dir, StandalonePartitionSetup {
+            topic: "test-barrier",
+            ..Default::default()
+        });
         let partition = registry.get("test-barrier", PartitionIndex(0)).unwrap();
         partition.install_leader_change(1, 5).await;
         partition

@@ -6,9 +6,10 @@
 //! client cannot resolve, and the consumer falls back to the full `Metadata`
 //! round-trip that KIP-951 exists to remove.
 
-use krabka_protocol::owned::fetch_response::{FetchableTopicResponse, NodeEndpoint};
-
-use crate::handlers::leader_endpoints;
+use {
+    crate::handlers::leader_endpoints,
+    krabka_protocol::owned::fetch_response::{FetchableTopicResponse, NodeEndpoint},
+};
 
 /// The endpoint of every node named by a `CurrentLeader` hint in `responses`,
 /// one entry per node id and ordered by it.

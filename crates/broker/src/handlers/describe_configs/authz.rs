@@ -6,17 +6,18 @@
 //! entries in the same response. This module holds that decision and nothing
 //! about which configs a resource reports.
 
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::describe_configs_response::DescribeConfigsResult;
-
-use super::wire::{
-    RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
-    RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
-};
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
-    codes,
-    handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+use {
+    super::wire::{
+        RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
+        RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+    },
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+        codes,
+        handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+    },
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::describe_configs_response::DescribeConfigsResult,
 };
 
 /// Per-resource `DescribeConfigs` ACL check.
@@ -57,16 +58,13 @@ pub(super) fn resource_authz_failure(
         ),
         _ => return None,
     };
-    let allow = authorizer.authorize(
-        image,
-        &AuthorizationRequest {
-            principal,
-            host,
-            resource_type: rt,
-            resource_name: name,
-            operation: AclOperation::DescribeConfigs,
-        },
-    );
+    let allow = authorizer.authorize(image, &AuthorizationRequest {
+        principal,
+        host,
+        resource_type: rt,
+        resource_name: name,
+        operation: AclOperation::DescribeConfigs,
+    });
     (allow == AuthorizationResult::Deny).then_some(failure_code)
 }
 
@@ -143,21 +141,20 @@ const fn authorization_failed_message(error_code: i16) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::MetadataImage;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        authorizer::SimpleAclAuthorizer,
-        codes::{CLUSTER_AUTHORIZATION_FAILED, TOPIC_AUTHORIZATION_FAILED},
-        handlers::acl_wire::CLUSTER_RESOURCE_NAME,
-        test_support::{AllowAclSetup, allow_acl, peer, principal},
+    use {
+        super::*,
+        crate::{
+            authorizer::SimpleAclAuthorizer,
+            codes::{CLUSTER_AUTHORIZATION_FAILED, TOPIC_AUTHORIZATION_FAILED},
+            handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+            test_support::{AllowAclSetup, allow_acl, peer, principal},
+        },
+        assert2::assert,
+        krabka_metadata::MetadataImage,
+        uuid::Uuid,
     };
 
-    fn anon() -> krabka_security::Principal {
-        principal("ANONYMOUS")
-    }
+    fn anon() -> krabka_security::Principal { principal("ANONYMOUS") }
 
     macro_rules! empty_acl_resource_check {
         (($authorizer:ident, $image:ident, $peer:ident, $code:ident), $kind:expr, $name:expr) => {

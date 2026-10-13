@@ -5,18 +5,18 @@
 //! share groups and the KIP-1071 streams groups. All three write the same
 //! coordinator layer, and all three validate the durations Kafka bounds.
 
-use std::{ops::RangeInclusive, time::Duration};
-
-use krabka_units::{Time, convert::TimeExt as _};
-
-use super::{
-    FileConfigError, RuntimeFileConfig,
-    validate::{
-        invalid_runtime_value, nonnegative_time, positive_time, positive_usize,
-        whole_millis_i32_time,
+use {
+    super::{
+        FileConfigError, RuntimeFileConfig,
+        validate::{
+            invalid_runtime_value, nonnegative_time, positive_time, positive_usize,
+            whole_millis_i32_time,
+        },
     },
+    crate::{config::BrokerConfig, coordinator::unified::share::config::ShareGroupConfig},
+    krabka_units::{Time, convert::TimeExt as _},
+    std::{ops::RangeInclusive, time::Duration},
 };
-use crate::{config::BrokerConfig, coordinator::unified::share::config::ShareGroupConfig};
 
 impl RuntimeFileConfig {
     pub(super) fn apply_coordinators(
@@ -310,10 +310,11 @@ mod tests {
         Ok(cfg)
     }
 
-    use assert2::assert;
-
-    use super::*;
-    use crate::{config::BrokerConfig, file_config::FileConfig};
+    use {
+        super::*,
+        crate::{config::BrokerConfig, file_config::FileConfig},
+        assert2::assert,
+    };
 
     fn with(change: fn(&mut ShareGroupConfig)) -> Result<ShareGroupConfig, String> {
         let mut config = ShareGroupConfig::default();

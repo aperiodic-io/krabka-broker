@@ -1,21 +1,21 @@
 //! End-to-end tests for the `UpdateFeatures` handler, which drive a live
 //! broker and so are kept out of the module root.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_protocol::owned::update_features_response::UpdatableFeatureResult;
-
-use super::*;
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::Broker,
-    features::{LATEST_PRODUCTION_METADATA_VERSION, METADATA_VERSION},
-    handlers::update_features::test_support::{
-        apply_request, call, call_with, metadata_update, named_update, start_broker, validate_only,
-        wait_for_finalized_feature,
+use {
+    super::*,
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::Broker,
+        features::{LATEST_PRODUCTION_METADATA_VERSION, METADATA_VERSION},
+        handlers::update_features::test_support::{
+            apply_request, call, call_with, metadata_update, named_update, start_broker,
+            validate_only, wait_for_finalized_feature,
+        },
+        test_support::{DenyAll, start_broker_no_audit_with},
     },
-    test_support::{DenyAll, start_broker_no_audit_with},
+    assert2::assert,
+    krabka_protocol::owned::update_features_response::UpdatableFeatureResult,
+    std::sync::Arc,
 };
 
 const PREFIX: &str =

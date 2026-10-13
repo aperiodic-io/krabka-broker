@@ -79,9 +79,8 @@ pub(crate) mod waker;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use krabka_ids::Offset;
-
 pub(crate) use self::{handles::DeliveryHandles, waker::DeliveryWaker};
+use krabka_ids::Offset;
 
 /// One scheduled partition's delivery state, as a recompute left it.
 ///

@@ -1,9 +1,10 @@
 //! Shared deterministic mechanics for the browser and storage simulation harnesses.
 
-use std::collections::{BTreeSet, VecDeque};
-
-use crate::{
-    Action, Epoch, Event, LogEnd, NodeId, QuorumStateMachine, Role, SimInstant, SuccessorRank,
+use {
+    crate::{
+        Action, Epoch, Event, LogEnd, NodeId, QuorumStateMachine, Role, SimInstant, SuccessorRank,
+    },
+    std::collections::{BTreeSet, VecDeque},
 };
 
 /// The endpoints of one queued message, used to clear messages crossing a
@@ -16,9 +17,7 @@ pub trait PartitionMessage<Node> {
 macro_rules! impl_partition_message {
     ($message:ty, $node:ty) => {
         impl $crate::simulation_support::PartitionMessage<$node> for $message {
-            fn touches(&self, node: $node) -> bool {
-                self.src == node || self.dst == node
-            }
+            fn touches(&self, node: $node) -> bool { self.src == node || self.dst == node }
         }
     };
 }
@@ -88,14 +87,11 @@ pub fn action_messages(
         Action::SendVoteRequest { .. } => voters,
         Action::SendBeginQuorumEpoch { .. } | Action::SendEndQuorumEpoch { .. } => peers,
         Action::ReplyVote { to, epoch, granted } => {
-            return Some(vec![(
-                *to,
-                Event::ReceiveVoteResponse {
-                    from: source,
-                    epoch: *epoch,
-                    vote_granted: *granted,
-                },
-            )]);
+            return Some(vec![(*to, Event::ReceiveVoteResponse {
+                from: source,
+                epoch: *epoch,
+                vote_granted: *granted,
+            })]);
         }
         _ => return None,
     };

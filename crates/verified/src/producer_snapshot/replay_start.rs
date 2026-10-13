@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
-use super::{ProducerReloadRange, ProducerSnapshotEntryFacts, producer_snapshot_reload_keeps};
 #[cfg(creusot)]
 use super::{
     kafka_reload_keeps, kafka_replay_start, snapshot_last_record_valid, snapshot_transaction_valid,
+};
+use {
+    super::{ProducerReloadRange, ProducerSnapshotEntryFacts, producer_snapshot_reload_keeps},
+    creusot_std::prelude::*,
 };
 
 open_logic! {

@@ -28,18 +28,18 @@
 //! that names a broker whose directories are all cordoned. That refusal is
 //! KAFKA-20832, which is on Kafka trunk and the 4.3 branch after 4.3.1.
 
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-    sync::Arc,
+use {
+    crate::metadata_source::{MetadataSource, watch_image_loop},
+    arc_swap::ArcSwap,
+    krabka_metadata::{
+        BrokerRegistrationChangeRecord, BrokerRegistrationRecord, MetadataImage, NodeId,
+    },
+    std::{
+        collections::BTreeSet,
+        path::{Path, PathBuf},
+        sync::Arc,
+    },
 };
-
-use arc_swap::ArcSwap;
-use krabka_metadata::{
-    BrokerRegistrationChangeRecord, BrokerRegistrationRecord, MetadataImage, NodeId,
-};
-
-use crate::metadata_source::{MetadataSource, watch_image_loop};
 
 /// Kafka's `ServerLogConfigs.CORDONED_LOG_DIRS_CONFIG`.
 pub(crate) const CORDONED_LOG_DIRS: &str = "cordoned.log.dirs";
@@ -241,9 +241,7 @@ impl CordonedLogDirs {
 
     /// The cordoned directories, in configuration order.
     #[must_use]
-    pub(crate) fn cordoned(&self) -> Vec<PathBuf> {
-        self.inner.current.load().as_ref().clone()
-    }
+    pub(crate) fn cordoned(&self) -> Vec<PathBuf> { self.inner.current.load().as_ref().clone() }
 
     /// The directories of `candidates` a new partition may go to: the
     /// uncordoned ones, or the first candidate when every one is cordoned.
@@ -317,11 +315,12 @@ pub(crate) fn spawn_watcher(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::{BrokerConfigRecord, MetadataRecord};
-
-    use super::*;
-    use crate::test_support::broker_registration;
+    use {
+        super::*,
+        crate::test_support::broker_registration,
+        assert2::{assert, check},
+        krabka_metadata::{BrokerConfigRecord, MetadataRecord},
+    };
 
     /// A label, the registered directory ids, the cordoned ids, and whether
     /// placement may use the broker.
@@ -331,9 +330,7 @@ mod tests {
     /// registration change is written.
     type HeartbeatCase<'a> = (&'a str, Option<&'a [u128]>, Option<Vec<uuid::Uuid>>, bool);
 
-    fn dirs() -> Vec<PathBuf> {
-        vec![PathBuf::from("/d1"), PathBuf::from("/d2")]
-    }
+    fn dirs() -> Vec<PathBuf> { vec![PathBuf::from("/d1"), PathBuf::from("/d2")] }
 
     /// Each message is the one `kafka-configs --alter --entity-name 1
     /// --add-config cordoned.log.dirs=...` printed against `apache/kafka:4.3.1`

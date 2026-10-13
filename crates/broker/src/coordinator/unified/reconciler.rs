@@ -3,16 +3,17 @@
 //! the epoch bump of a fence, and the target assignment that a group whose
 //! epoch is ahead of its target computes.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::assignor::{
-    Assignor, GroupSpec, MemberSubscription, SubscriptionShape, TopicMetadata, subscription_type,
-};
-use crate::coordinator::unified::{
-    consumer_state::{GroupState, MemberState},
-    topic_hash,
+use {
+    super::assignor::{
+        Assignor, GroupSpec, MemberSubscription, SubscriptionShape, TopicMetadata,
+        subscription_type,
+    },
+    crate::coordinator::unified::{
+        consumer_state::{GroupState, MemberState},
+        topic_hash,
+    },
+    krabka_protocol::primitives::uuid::Uuid,
+    std::collections::{BTreeSet, HashMap, HashSet},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -259,16 +260,15 @@ fn membership_topic_ids(group: &GroupState, input: &ReconcileInput) -> HashSet<U
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::{super::assignor::UniformAssignor, *};
-    use crate::coordinator::unified::consumer_state::{
-        MemberState, ResolvedRegularExpression, test_support::subscribed_member,
+    use {
+        super::{super::assignor::UniformAssignor, *},
+        crate::coordinator::unified::consumer_state::{
+            MemberState, ResolvedRegularExpression, test_support::subscribed_member,
+        },
+        assert2::{assert, check},
     };
 
-    fn fresh_member(id: &str, topic: &str) -> MemberState {
-        subscribed_member(id, &[topic])
-    }
+    fn fresh_member(id: &str, topic: &str) -> MemberState { subscribed_member(id, &[topic]) }
 
     fn input(topic_name: &str, partitions: i32) -> (ReconcileInput, Uuid) {
         let t = Uuid([1; 16]);
@@ -378,14 +378,11 @@ mod tests {
     /// Records that `regex` resolved to `topics` in `group`, as a heartbeat
     /// that resolved it does.
     fn resolve(group: &mut GroupState, regex: &str, topics: &[&str]) {
-        group.set_resolved_regex(
-            regex.to_owned(),
-            ResolvedRegularExpression {
-                topics: topics.iter().map(|topic| (*topic).to_owned()).collect(),
-                version: 1,
-                timestamp_ms: 1,
-            },
-        );
+        group.set_resolved_regex(regex.to_owned(), ResolvedRegularExpression {
+            topics: topics.iter().map(|topic| (*topic).to_owned()).collect(),
+            version: 1,
+            timestamp_ms: 1,
+        });
     }
 
     /// The topics that `member_id` is assigned, by name.
@@ -424,26 +421,19 @@ mod tests {
             ("shipments", 1),
         ]);
         let rows: [Row<'_>; 5] = [
-            (
-                "^orders-.*",
-                &[],
-                Some(&["orders-eu", "orders-us"]),
-                &["orders-eu", "orders-us"],
-            ),
+            ("^orders-.*", &[], Some(&["orders-eu", "orders-us"]), &[
+                "orders-eu",
+                "orders-us",
+            ]),
             ("^orders-.*", &[], Some(&["orders-eu"]), &["orders-eu"]),
-            (
-                "^orders-.*",
-                &["audit"],
-                Some(&["orders-eu"]),
-                &["audit", "orders-eu"],
-            ),
+            ("^orders-.*", &["audit"], Some(&["orders-eu"]), &[
+                "audit",
+                "orders-eu",
+            ]),
             // The resolution may name a topic that has been deleted since.
-            (
-                "^orders-.*",
-                &[],
-                Some(&["orders-eu", "orders-gone"]),
-                &["orders-eu"],
-            ),
+            ("^orders-.*", &[], Some(&["orders-eu", "orders-gone"]), &[
+                "orders-eu",
+            ]),
             // No resolution yet: the names still apply.
             ("^orders-.*", &["audit"], None, &["audit"]),
         ];
@@ -523,18 +513,16 @@ mod tests {
             ),
             (
                 "an unsubscribed topic is created",
-                snapshot(
-                    &[base, &[("refunds", 5, 1)][..]].concat(),
-                    &[(1, 0, "rack-a")],
-                ),
+                snapshot(&[base, &[("refunds", 5, 1)][..]].concat(), &[(
+                    1, 0, "rack-a",
+                )]),
                 false,
             ),
             (
                 "an unsubscribed topic grows",
-                snapshot(
-                    &[&base[..3], &[("audit", 4, 2)][..]].concat(),
-                    &[(1, 0, "rack-a")],
-                ),
+                snapshot(&[&base[..3], &[("audit", 4, 2)][..]].concat(), &[(
+                    1, 0, "rack-a",
+                )]),
                 false,
             ),
             (
@@ -547,10 +535,9 @@ mod tests {
             ),
             (
                 "a subscribed topic grows",
-                snapshot(
-                    &[&[("orders", 1, 3)][..], &base[1..]].concat(),
-                    &[(1, 0, "rack-a")],
-                ),
+                snapshot(&[&[("orders", 1, 3)][..], &base[1..]].concat(), &[(
+                    1, 0, "rack-a",
+                )]),
                 true,
             ),
             (
@@ -560,10 +547,9 @@ mod tests {
             ),
             (
                 "a subscribed topic is created again with a new id",
-                snapshot(
-                    &[&[("orders", 9, 2)][..], &base[1..]].concat(),
-                    &[(9, 0, "rack-a")],
-                ),
+                snapshot(&[&[("orders", 9, 2)][..], &base[1..]].concat(), &[(
+                    9, 0, "rack-a",
+                )]),
                 true,
             ),
             (

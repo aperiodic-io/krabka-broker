@@ -14,18 +14,19 @@
 //! runtime is refused. See
 //! [`crate::config_keys::validate_diskless_unchanged`].
 
-use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
-use krabka_protocol::owned::incremental_alter_configs_request::AlterConfigsResource;
-
-use super::{OP_APPEND, OP_DELETE, OP_SET};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    config_keys::{
-        self,
-        registry::{self, ConfigScope, ConfigType},
+use {
+    super::{OP_APPEND, OP_DELETE, OP_SET},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        config_keys::{
+            self,
+            registry::{self, ConfigScope, ConfigType},
+        },
+        topic_policy::{TopicPolicy, check as check_topic_policy},
     },
-    topic_policy::{TopicPolicy, check as check_topic_policy},
+    krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
+    krabka_protocol::owned::incremental_alter_configs_request::AlterConfigsResource,
 };
 
 /// Kafka's `ConfigurationControlManager` APPEND and SUBTRACT: a `LIST` key's
@@ -156,17 +157,19 @@ pub(super) fn topic_config_record(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        handlers::{
-            incremental_alter_configs::test_support::{
-                AlterableConfig, assert, check, image_with_topic_config, make_del_cfg,
-                make_set_cfg, make_topic_resource,
+    use {
+        super::*,
+        crate::{
+            handlers::{
+                incremental_alter_configs::test_support::{
+                    AlterableConfig, assert, check, image_with_topic_config, make_del_cfg,
+                    make_set_cfg, make_topic_resource,
+                },
+                test_support::check_config_result,
             },
-            test_support::check_config_result,
+            test_support::string_pairs,
+            throttle::LEADER_THROTTLED_REPLICAS_KEY,
         },
-        test_support::string_pairs,
-        throttle::LEADER_THROTTLED_REPLICAS_KEY,
     };
 
     /// The record builder under the empty policy, which is the state of a
@@ -206,24 +209,18 @@ mod tests {
                     "a DELETE of the key, which asks to clear the freeze",
                     make_del_cfg(key),
                 ),
-                (
-                    "an APPEND of the key",
-                    AlterableConfig {
-                        name: key.into(),
-                        config_operation: 2,
-                        value: Some("true".into()),
-                        ..Default::default()
-                    },
-                ),
-                (
-                    "a SUBTRACT of the key",
-                    AlterableConfig {
-                        name: key.into(),
-                        config_operation: 3,
-                        value: Some("true".into()),
-                        ..Default::default()
-                    },
-                ),
+                ("an APPEND of the key", AlterableConfig {
+                    name: key.into(),
+                    config_operation: 2,
+                    value: Some("true".into()),
+                    ..Default::default()
+                }),
+                ("a SUBTRACT of the key", AlterableConfig {
+                    name: key.into(),
+                    config_operation: 3,
+                    value: Some("true".into()),
+                    ..Default::default()
+                }),
             ] {
                 let error = topic_config_record(&make_topic_resource("orders", vec![config]), &img)
                     .expect_err("controller-managed key must be rejected");
@@ -243,10 +240,10 @@ mod tests {
         let img = image_with_topic_config("orders", &[(config_keys::RETENTION_MS, "60000")]);
 
         let record = topic_config_record(
-            &make_topic_resource(
-                "orders",
-                vec![make_set_cfg(config_keys::SEGMENT_BYTES, "1048576")],
-            ),
+            &make_topic_resource("orders", vec![make_set_cfg(
+                config_keys::SEGMENT_BYTES,
+                "1048576",
+            )]),
             &img,
         )
         .expect("an ordinary topic config is valid");
@@ -267,10 +264,10 @@ mod tests {
         let img = image_with_topic_config("orders", &[(config_keys::DELIVERY_MODE, "scheduled")]);
 
         let (code, message) = topic_config_record(
-            &make_topic_resource(
-                "orders",
-                vec![make_set_cfg(config_keys::CLEANUP_POLICY, "compact")],
-            ),
+            &make_topic_resource("orders", vec![make_set_cfg(
+                config_keys::CLEANUP_POLICY,
+                "compact",
+            )]),
             &img,
         )
         .expect_err("compaction merged onto a scheduled topic must be rejected");
@@ -291,10 +288,10 @@ mod tests {
         let img = image_with_topic_config("orders", &[(config_keys::CLEANUP_POLICY, "compact")]);
 
         let (code, _) = topic_config_record(
-            &make_topic_resource(
-                "orders",
-                vec![make_set_cfg(config_keys::DELIVERY_MODE, "scheduled")],
-            ),
+            &make_topic_resource("orders", vec![make_set_cfg(
+                config_keys::DELIVERY_MODE,
+                "scheduled",
+            )]),
             &img,
         )
         .expect_err("scheduling a compacted topic must be rejected");
@@ -307,13 +304,10 @@ mod tests {
         let img = image_with_topic_config("orders", &[(config_keys::DELIVERY_MODE, "scheduled")]);
 
         let record = topic_config_record(
-            &make_topic_resource(
-                "orders",
-                vec![
-                    make_del_cfg(config_keys::DELIVERY_MODE),
-                    make_set_cfg(config_keys::CLEANUP_POLICY, "compact"),
-                ],
-            ),
+            &make_topic_resource("orders", vec![
+                make_del_cfg(config_keys::DELIVERY_MODE),
+                make_set_cfg(config_keys::CLEANUP_POLICY, "compact"),
+            ]),
             &img,
         )
         .expect("removing the schedule leaves a plain compacted topic");
@@ -383,10 +377,10 @@ mod tests {
         let img = image_with_topic_config("orders", &[(config_keys::DISKLESS, "true")]);
 
         let (code, message) = topic_config_record(
-            &make_topic_resource(
-                "orders",
-                vec![make_set_cfg("remote.storage.enable", "true")],
-            ),
+            &make_topic_resource("orders", vec![make_set_cfg(
+                "remote.storage.enable",
+                "true",
+            )]),
             &img,
         )
         .expect_err("two object-store data paths on one topic must be rejected");
@@ -401,14 +395,11 @@ mod tests {
         let img = image_with_topic_config("retries", &[(config_keys::RETENTION_MS, "60000")]);
 
         let record = topic_config_record(
-            &make_topic_resource(
-                "retries",
-                vec![
-                    make_set_cfg(config_keys::DELIVERY_MODE, "scheduled"),
-                    make_set_cfg(config_keys::DELIVERY_MAX_DELAY_MS, "3600000"),
-                    make_set_cfg(config_keys::DELIVERY_SCHEDULE_MONOTONIC, "true"),
-                ],
-            ),
+            &make_topic_resource("retries", vec![
+                make_set_cfg(config_keys::DELIVERY_MODE, "scheduled"),
+                make_set_cfg(config_keys::DELIVERY_MAX_DELAY_MS, "3600000"),
+                make_set_cfg(config_keys::DELIVERY_SCHEDULE_MONOTONIC, "true"),
+            ]),
             &img,
         )
         .expect("valid scheduled delivery ops");
@@ -433,10 +424,10 @@ mod tests {
         };
 
         let (code, message) = super::topic_config_record(
-            &make_topic_resource(
-                "orders",
-                vec![make_set_cfg(config_keys::MIN_INSYNC_REPLICAS, "1")],
-            ),
+            &make_topic_resource("orders", vec![make_set_cfg(
+                config_keys::MIN_INSYNC_REPLICAS,
+                "1",
+            )]),
             &img,
             &policy,
             true,
@@ -460,10 +451,10 @@ mod tests {
         };
 
         let record = super::topic_config_record(
-            &make_topic_resource(
-                "orders",
-                vec![make_set_cfg(config_keys::MIN_INSYNC_REPLICAS, "2")],
-            ),
+            &make_topic_resource("orders", vec![make_set_cfg(
+                config_keys::MIN_INSYNC_REPLICAS,
+                "2",
+            )]),
             &img,
             &policy,
             true,

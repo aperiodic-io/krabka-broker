@@ -1,18 +1,18 @@
 //! The cloneable `AuditLog` handle that broker code calls to record events.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
-
-use arc_swap::ArcSwapOption;
-use serde::Deserialize;
-use tokio::sync::{mpsc, oneshot};
-
-use crate::{
-    event::AuditEvent,
-    sink::AuditError,
-    spool::{PendingLosses, Spool},
+use {
+    crate::{
+        event::AuditEvent,
+        sink::AuditError,
+        spool::{PendingLosses, Spool},
+    },
+    arc_swap::ArcSwapOption,
+    serde::Deserialize,
+    std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    tokio::sync::{mpsc, oneshot},
 };
 
 /// Availability policy for privileged audit records.
@@ -58,9 +58,7 @@ impl AuditReceiver {
         self.receiver.recv().await
     }
 
-    pub(super) fn pending_losses(&self) -> Arc<PendingLosses> {
-        Arc::clone(&self.pending_losses)
-    }
+    pub(super) fn pending_losses(&self) -> Arc<PendingLosses> { Arc::clone(&self.pending_losses) }
 }
 
 /// Cloneable, cheap handle that broker code calls to record events.
@@ -185,31 +183,26 @@ impl AuditLog {
 
     /// Whether privileged actions require durable write-ahead audit records.
     #[must_use]
-    pub fn mode(&self) -> AuditMode {
-        self.mode
-    }
+    pub fn mode(&self) -> AuditMode { self.mode }
 
     /// Close the event stream for every clone of this handle.
-    pub fn close(&self) {
-        self.tx.store(None);
-    }
+    pub fn close(&self) { self.tx.store(None); }
 
     /// Count events lost or refused because audit processing was unavailable.
     #[must_use]
-    pub fn dropped(&self) -> u64 {
-        self.dropped.load(Ordering::Relaxed)
-    }
+    pub fn dropped(&self) -> u64 { self.dropped.load(Ordering::Relaxed) }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::{
-        NodeId,
-        log::test_support::{emit_lifecycle, life},
-        spool::FILE_HEADER_LEN,
+    use {
+        super::*,
+        crate::{
+            NodeId,
+            log::test_support::{emit_lifecycle, life},
+            spool::FILE_HEADER_LEN,
+        },
+        assert2::check,
     };
 
     #[tokio::test]

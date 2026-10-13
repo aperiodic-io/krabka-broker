@@ -17,24 +17,25 @@
 //! `RequestContext.parseRequest` fails such a request, and the connection
 //! closes.
 
-use bytes::Bytes;
-use krabka_protocol::owned::{
-    begin_quorum_epoch_request::BeginQuorumEpochRequest,
-    end_quorum_epoch_request::EndQuorumEpochRequest, fetch_snapshot_request::FetchSnapshotRequest,
-    vote_request::VoteRequest,
-};
-
-use super::{
-    Engine,
-    checkpoint::{BOOTSTRAP_SNAPSHOT_ID, load_checkpoint_by_id},
-};
-use crate::{
-    kraft::{
-        event::{Event, LogEnd, SuccessorRank},
-        transport::wire,
-        types::{Epoch, NodeId, ReplicaKey},
+use {
+    super::{
+        Engine,
+        checkpoint::{BOOTSTRAP_SNAPSHOT_ID, load_checkpoint_by_id},
     },
-    snapshot::SnapshotReader,
+    crate::{
+        kraft::{
+            event::{Event, LogEnd, SuccessorRank},
+            transport::wire,
+            types::{Epoch, NodeId, ReplicaKey},
+        },
+        snapshot::SnapshotReader,
+    },
+    bytes::Bytes,
+    krabka_protocol::owned::{
+        begin_quorum_epoch_request::BeginQuorumEpochRequest,
+        end_quorum_epoch_request::EndQuorumEpochRequest,
+        fetch_snapshot_request::FetchSnapshotRequest, vote_request::VoteRequest,
+    },
 };
 
 const UNKNOWN_TOPIC_OR_PARTITION: i16 = 3;
@@ -74,9 +75,8 @@ trait QuorumEpochRequest {
 macro_rules! quorum_epoch_request {
     ($request:ty) => {
         impl QuorumEpochRequest for $request {
-            fn cluster_id(&self) -> Option<&str> {
-                self.cluster_id.as_deref()
-            }
+            fn cluster_id(&self) -> Option<&str> { self.cluster_id.as_deref() }
+
             fn topics(&self) -> impl ExactSizeIterator<Item = (&str, Vec<i32>)> {
                 self.topics.iter().map(|topic| {
                     (
@@ -89,6 +89,7 @@ macro_rules! quorum_epoch_request {
                     )
                 })
             }
+
             fn leader(&self) -> Option<(i32, i32)> {
                 self.topics
                     .first()?
@@ -96,6 +97,7 @@ macro_rules! quorum_epoch_request {
                     .first()
                     .map(|partition| (partition.leader_id, partition.leader_epoch))
             }
+
             fn endpoints(&self) -> impl Iterator<Item = (&str, &str, u16)> {
                 self.leader_endpoints.iter().map(|endpoint| {
                     (

@@ -2,20 +2,20 @@
 //! `(topic, partition)` dir UUIDs moved since the last successful report, and
 //! the reporter that sends `AssignReplicasToDirs` to the controller.
 
-use std::{collections::HashSet, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::assign_replicas_to_dirs_request::AssignReplicasToDirsRequest;
-use tracing::warn;
-
-use super::{ReplicatorSupervisor, TopicPartition};
-use crate::{
-    assign_dirs::{UNKNOWN_BROKER_EPOCH, build_request, send_assignments},
-    controller_endpoint::ControllerDialer,
-    log_dir_id::LogDirIds,
-    metadata_source::MetadataSource,
-    partition_registry::PartitionRegistry,
+use {
+    super::{ReplicatorSupervisor, TopicPartition},
+    crate::{
+        assign_dirs::{UNKNOWN_BROKER_EPOCH, build_request, send_assignments},
+        controller_endpoint::ControllerDialer,
+        log_dir_id::LogDirIds,
+        metadata_source::MetadataSource,
+        partition_registry::PartitionRegistry,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::assign_replicas_to_dirs_request::AssignReplicasToDirsRequest,
+    std::{collections::HashSet, sync::Arc},
+    tracing::warn,
 };
 
 /// Compute the dir-assignment reports that changed since last reported.
@@ -139,18 +139,18 @@ impl ReplicatorSupervisor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
-
-    use assert2::assert;
-    use krabka_raft::NodeId;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        replicator_supervisor::test_support::{
-            materialized_partition, single_partition_image, static_source, supervisor_fixture,
+    use {
+        super::*,
+        crate::{
+            replicator_supervisor::test_support::{
+                materialized_partition, single_partition_image, static_source, supervisor_fixture,
+            },
+            test_support::plaintext_controller_dialer,
         },
-        test_support::plaintext_controller_dialer,
+        assert2::assert,
+        krabka_raft::NodeId,
+        std::sync::atomic::Ordering,
+        uuid::Uuid,
     };
 
     /// A reporter that dials a plaintext controller listener and knows no

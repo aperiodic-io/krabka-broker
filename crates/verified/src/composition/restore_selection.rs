@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
-use super::{
-    RestoreBatchFrame, RestoreExclusions, RestoreFilterDecision, RestoreRecordDeltas,
-    local_append_coordinates, restore_batch_filter_decision, restore_record_coordinates,
-    restore_record_selected,
+use {
+    super::{
+        RestoreBatchFrame, RestoreExclusions, RestoreFilterDecision, RestoreRecordDeltas,
+        local_append_coordinates, restore_batch_filter_decision, restore_record_coordinates,
+        restore_record_selected,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

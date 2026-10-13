@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use super::retention_delete_target;
+use {super::retention_delete_target, creusot_std::prelude::*};
 
 /// Extend a deletion floor through one completed whole-range delete.
 /// A gap, malformed coordinates or an unrepresentable successor closes the

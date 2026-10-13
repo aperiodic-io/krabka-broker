@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::time_index::sparse_timestamp_window_valid;
 #[cfg(creusot)]
 use super::time_index::time_segment_valid;
-use super::{
-    FetchWatermarks, SparseTimestampWindow, committed_fetch_excludes_unstable,
-    constructed_time_range_preserves_first,
+use {
+    super::{
+        FetchWatermarks, SparseTimestampWindow, committed_fetch_excludes_unstable,
+        constructed_time_range_preserves_first,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Consume the derived transaction/HW/delivery prefix and a constructed interval

@@ -6,19 +6,19 @@
 //! The protocol, and the recovery that finishes it after a crash, are
 //! described in [`crate::recovery::swap`].
 
-use std::{fs::OpenOptions, path::Path};
-
-use krabka_ids::Offset;
-use tracing::instrument;
-
-use super::RewriteOutput;
-use crate::{
-    error::LogError,
-    io::{IoTarget, LogIo},
-    recovery::swap::{
-        cleaned_path, promote_log, promote_sidecars, remove_if_present, remove_replaced_segment,
-        swap_path,
+use {
+    super::RewriteOutput,
+    crate::{
+        error::LogError,
+        io::{IoTarget, LogIo},
+        recovery::swap::{
+            cleaned_path, promote_log, promote_sidecars, remove_if_present,
+            remove_replaced_segment, swap_path,
+        },
     },
+    krabka_ids::Offset,
+    std::{fs::OpenOptions, path::Path},
+    tracing::instrument,
 };
 
 /// Promote the survivor files that [`rewrite_segments`] produced to final

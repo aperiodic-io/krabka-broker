@@ -32,11 +32,12 @@
 //! promotion prepares the log, so both must agree before this node answers as
 //! leader.
 
-use std::sync::{Arc, atomic::Ordering};
-
-use crate::{
-    broker::Broker, codes, log_dir_status::LogDirRegistry, partition::Partition,
-    partition_registry::PartitionRegistry,
+use {
+    crate::{
+        broker::Broker, codes, log_dir_status::LogDirRegistry, partition::Partition,
+        partition_registry::PartitionRegistry,
+    },
+    std::sync::{Arc, atomic::Ordering},
 };
 
 /// Kafka's `ListOffsetsRequest.DEBUGGING_REPLICA_ID`: the one `replica_id`
@@ -132,18 +133,19 @@ pub(super) fn resolve_for_broker(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::MetadataImage;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
-        log_dir::partition_dir,
-        log_dir_status::LogDirRegistry,
-        test_support::{
-            StandalonePartitionSetup, spawn_standalone_partition, topic_partition_image,
+    use {
+        super::*,
+        crate::{
+            handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+            log_dir::partition_dir,
+            log_dir_status::LogDirRegistry,
+            test_support::{
+                StandalonePartitionSetup, spawn_standalone_partition, topic_partition_image,
+            },
         },
+        assert2::assert,
+        krabka_metadata::MetadataImage,
+        uuid::Uuid,
     };
 
     fn image_with_topic(topic: &str, leader: u64) -> MetadataImage {

@@ -26,12 +26,7 @@ pub(super) async fn diskless_earliest_candidate(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::diskless::wal_index::WalFlushRecord;
+    use {super::*, crate::diskless::wal_index::WalFlushRecord, assert2::assert, std::sync::Arc};
 
     #[tokio::test]
     async fn diskless_earliest_uses_object_floor_but_leaves_local_floor_visible() {

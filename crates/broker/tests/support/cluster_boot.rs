@@ -7,16 +7,16 @@
 //! [`broker_config`] builds one node's config for the suites that drive
 //! membership changes themselves.
 
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
+use {
+    super::cluster::start_n_node_with,
+    crate::support::{NodeIndex, controller_voters},
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerError, BrokerHandle, NodeId},
+    std::{
+        net::SocketAddr,
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
 };
-
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerError, BrokerHandle, NodeId};
-use tempfile::TempDir;
-
-use super::cluster::start_n_node_with;
-use crate::support::{NodeIndex, controller_voters};
 
 /// Shut brokers down in vector order, retaining the original tuple destructuring.
 pub async fn shutdown_cluster(cluster: Vec<(BrokerHandle, BrokerConfig, TempDir)>) {
@@ -53,14 +53,11 @@ pub struct ClusterNodeSetup<'a> {
 }
 
 pub fn broker_config(log_dir: &std::path::Path, setup: ClusterNodeSetup<'_>) -> BrokerConfig {
-    let mut config = addressed_node_config(
-        log_dir,
-        AddressedNodeSetup {
-            node: NodeId(u64::try_from(setup.index.0 + 1).expect("one-based node id")),
-            client: setup.client_addrs[setup.index.0],
-            controller: setup.controller_addrs[setup.index.0],
-        },
-    );
+    let mut config = addressed_node_config(log_dir, AddressedNodeSetup {
+        node: NodeId(u64::try_from(setup.index.0 + 1).expect("one-based node id")),
+        client: setup.client_addrs[setup.index.0],
+        controller: setup.controller_addrs[setup.index.0],
+    });
     config.controller_quorum_voters = setup.voters;
     config.bootstrap_mode = setup.mode;
     config

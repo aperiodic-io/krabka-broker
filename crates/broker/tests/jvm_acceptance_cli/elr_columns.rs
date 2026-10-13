@@ -14,16 +14,16 @@
 //! renders both sides, so any difference is a difference in what the two
 //! brokers answered.
 
-use std::{
-    process::{Command, Stdio},
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE_ELR, broker0_advertised, docker_run_kafka_tool_with_image, nc_check_connectivity,
-    start_host_broker,
+use {
+    crate::jvm_acceptance::{
+        KAFKA_IMAGE_ELR, broker0_advertised, docker_run_kafka_tool_with_image,
+        nc_check_connectivity, start_host_broker,
+    },
+    assert2::assert,
+    std::{
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    },
 };
 
 /// The topic both brokers get. The name is part of every rendered line, so the
@@ -49,9 +49,7 @@ fn create_args() -> Vec<&'static str> {
     ]
 }
 
-fn describe_args() -> Vec<&'static str> {
-    vec!["--describe", "--topic", TOPIC]
-}
+fn describe_args() -> Vec<&'static str> { vec!["--describe", "--topic", TOPIC] }
 
 /// Run `kafka-topics` inside the JVM broker's own container, against its
 /// loopback listener. Nothing has to be published to the host for this side.

@@ -1,16 +1,17 @@
-use assert2::assert;
-use krabka_protocol::{
-    owned::k_raft_version_record::KRaftVersionRecord, records::metadata::control::ControlRecord,
-};
-
-use super::*;
-use crate::kraft::{
-    controller::{
-        control_state::voter_set_to_wire,
-        records::typed_control_batch,
-        test_support::{EngineSetup, build_engine_only},
+use {
+    super::*,
+    crate::kraft::{
+        controller::{
+            control_state::voter_set_to_wire,
+            records::typed_control_batch,
+            test_support::{EngineSetup, build_engine_only},
+        },
+        types::LogOffsetMetadata,
     },
-    types::LogOffsetMetadata,
+    assert2::assert,
+    krabka_protocol::{
+        owned::k_raft_version_record::KRaftVersionRecord, records::metadata::control::ControlRecord,
+    },
 };
 
 #[tokio::test]
@@ -22,16 +23,13 @@ async fn truncation_restores_histories_at_the_retained_batch_end() {
         });
         let voters = voter_set_to_wire(engine.controls.latest_voters());
         for version in [0, 1] {
-            let mut batch = typed_control_batch(
-                2,
-                &[
-                    ControlRecord::KRaftVersion(KRaftVersionRecord {
-                        k_raft_version: version,
-                        ..Default::default()
-                    }),
-                    ControlRecord::Voters(voters.clone()),
-                ],
-            )
+            let mut batch = typed_control_batch(2, &[
+                ControlRecord::KRaftVersion(KRaftVersionRecord {
+                    k_raft_version: version,
+                    ..Default::default()
+                }),
+                ControlRecord::Voters(voters.clone()),
+            ])
             .unwrap();
             engine.log.append(&mut batch, 0).unwrap();
             engine.apply_control_batch(&batch).unwrap();

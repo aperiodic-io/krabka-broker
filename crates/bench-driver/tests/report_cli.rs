@@ -1,14 +1,15 @@
-use std::{path::Path, process::Command};
-
-use assert2::check;
-use krabka_bench_driver::{
-    ids::{MessageCount, TimeOffsetMs, WallclockMs},
-    scenario::{
-        Acks, Compression, LatencyPercentiles, LoadMode, ModeTag, Resource, RunOutput, Sample,
-        Scenario, Stack, Throughput, Topology,
+use {
+    assert2::check,
+    krabka_bench_driver::{
+        ids::{MessageCount, TimeOffsetMs, WallclockMs},
+        scenario::{
+            Acks, Compression, LatencyPercentiles, LoadMode, ModeTag, Resource, RunOutput, Sample,
+            Scenario, Stack, Throughput, Topology,
+        },
     },
+    krabka_units::prelude::*,
+    std::{path::Path, process::Command},
 };
-use krabka_units::prelude::*;
 
 #[test]
 fn failover_gate_help_names_required_evidence() {

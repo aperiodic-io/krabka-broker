@@ -7,23 +7,23 @@
 //! The checker reads the three files straight from disk, the way the tool
 //! does, and shares nothing with the code that wrote them.
 
-use std::path::Path;
-
-use bytes::BytesMut;
-use krabka_ids::{LeaderEpoch, Offset};
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{ByteSize, bytes};
-use tempfile::tempdir;
-
-use super::{
-    Segment,
-    test_support::{DENSE_INDEX, sample_batch},
-};
-use crate::{
-    name,
-    segment::test_support::{
-        ONE_RECORD_BATCH, RecordCount, RecordTimestamp, SampleBatchSetup, test_segment,
+use {
+    super::{
+        Segment,
+        test_support::{DENSE_INDEX, sample_batch},
     },
+    crate::{
+        name,
+        segment::test_support::{
+            ONE_RECORD_BATCH, RecordCount, RecordTimestamp, SampleBatchSetup, test_segment,
+        },
+    },
+    bytes::BytesMut,
+    krabka_ids::{LeaderEpoch, Offset},
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{ByteSize, bytes},
+    std::path::Path,
+    tempfile::tempdir,
 };
 
 /// The `(relative last offset, position)` entries of a `.index` file.

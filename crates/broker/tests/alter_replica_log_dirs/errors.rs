@@ -5,14 +5,15 @@
 //! Each scenario asserts the Kafka error code per requested partition, because
 //! that per-partition row is what the JVM admin client reads.
 
-use assert2::assert;
-use krabka_broker::Broker;
-
-use crate::{
-    harness::start_two_dir_broker,
-    support::{acl::use_simple_acl_authorizer, storage::two_dir_config},
-    two_dir_topic::{Setup, start},
-    wire::{CLIENT_ID, alter_replica_log_dirs},
+use {
+    crate::{
+        harness::start_two_dir_broker,
+        support::{acl::use_simple_acl_authorizer, storage::two_dir_config},
+        two_dir_topic::{Setup, start},
+        wire::{CLIENT_ID, alter_replica_log_dirs},
+    },
+    assert2::assert,
+    krabka_broker::Broker,
 };
 
 #[tokio::test]

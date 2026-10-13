@@ -38,27 +38,27 @@
 //! authorization live in `owner`, the deadline arithmetic in `lifetime`, and
 //! the response shapes in `wire`.
 
-use std::net::SocketAddr;
-
-use krabka_metadata::{AclOperation, DelegationTokenRecord, MetadataRecord, ResourceType};
-use krabka_protocol::owned::{
-    create_delegation_token_request::CreateDelegationTokenRequest,
-    create_delegation_token_response::CreateDelegationTokenResponse,
-};
-use krabka_security::{KafkaPrincipal, SecretBytes, compute_token_hmac};
-use krabka_verified::delegation_token::{TokenApi, TokenApiAdmission};
-
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
-    codes::{
-        DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_AUTHORIZATION_FAILED,
-        DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, INVALID_PRINCIPAL_TYPE, INVALID_REQUEST,
-        UNKNOWN_SERVER_ERROR, UNSUPPORTED_VERSION,
+use {
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+        codes::{
+            DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_AUTHORIZATION_FAILED,
+            DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, INVALID_PRINCIPAL_TYPE, INVALID_REQUEST,
+            UNKNOWN_SERVER_ERROR, UNSUPPORTED_VERSION,
+        },
+        features::{METADATA_VERSION, require_feature},
+        metadata_source::MetadataSource,
+        network::auth::ConnectionAuth,
+        time_util::now_ms,
     },
-    features::{METADATA_VERSION, require_feature},
-    metadata_source::MetadataSource,
-    network::auth::ConnectionAuth,
-    time_util::now_ms,
+    krabka_metadata::{AclOperation, DelegationTokenRecord, MetadataRecord, ResourceType},
+    krabka_protocol::owned::{
+        create_delegation_token_request::CreateDelegationTokenRequest,
+        create_delegation_token_response::CreateDelegationTokenResponse,
+    },
+    krabka_security::{KafkaPrincipal, SecretBytes, compute_token_hmac},
+    krabka_verified::delegation_token::{TokenApi, TokenApiAdmission},
+    std::net::SocketAddr,
 };
 
 /// What the KIP-373 `CreateTokens` check reads: the broker's authorizer and
@@ -132,16 +132,13 @@ pub(crate) async fn handle(
     let image = controller.current_image();
     let authorize_create_tokens = |resource_name: &str| {
         auth.principal().is_some_and(|principal| {
-            acl.authorizer.authorize(
-                &*image,
-                &AuthorizationRequest {
-                    principal,
-                    host: acl.peer,
-                    resource_type: ResourceType::User,
-                    resource_name,
-                    operation: AclOperation::CreateTokens,
-                },
-            ) == AuthorizationResult::Allow
+            acl.authorizer.authorize(&*image, &AuthorizationRequest {
+                principal,
+                host: acl.peer,
+                resource_type: ResourceType::User,
+                resource_name,
+                operation: AclOperation::CreateTokens,
+            }) == AuthorizationResult::Allow
         })
     };
     if !may_create_for(&owner, &requester, authorize_create_tokens) {

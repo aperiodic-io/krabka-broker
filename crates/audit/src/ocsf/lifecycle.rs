@@ -3,11 +3,12 @@
 //! its TLS material. The record names the broker as the OCSF device rather
 //! than a principal, because no client requested it.
 
-use krabka_ids::NodeId;
-use serde_json::json;
-
-use super::{ProductInfo, envelope::metadata};
-use crate::{event::LifecycleKind, ids::EpochMs};
+use {
+    super::{ProductInfo, envelope::metadata},
+    crate::{event::LifecycleKind, ids::EpochMs},
+    krabka_ids::NodeId,
+    serde_json::json,
+};
 
 pub(super) fn ocsf_lifecycle(
     kind: LifecycleKind,

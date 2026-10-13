@@ -34,12 +34,12 @@
 //! same set as one served by the controller. `DescribeCluster` calls the same
 //! helper for its `is_fenced` column, so the two answers cannot drift apart.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{BrokerRegistrationRecord, MetadataImage, NodeId, PartitionRecord};
-
-use super::metadata::wire_id;
-use crate::{broker::Broker, elr::state::is_leaderless, heartbeat::fencing::fenced_node_ids};
+use {
+    super::metadata::wire_id,
+    crate::{broker::Broker, elr::state::is_leaderless, heartbeat::fencing::fenced_node_ids},
+    krabka_metadata::{BrokerRegistrationRecord, MetadataImage, NodeId, PartitionRecord},
+    std::collections::HashSet,
+};
 
 /// The brokers this node knows to be fenced or past their heartbeat deadline.
 ///

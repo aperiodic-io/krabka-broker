@@ -1,10 +1,11 @@
-use assert2::assert;
-use uuid::Uuid;
-
-use super::*;
-use crate::{
-    codes::{COORDINATOR_LOAD_IN_PROGRESS, NOT_COORDINATOR},
-    txn::coordinator::test_support::{StateImageSetup, state_image},
+use {
+    super::*,
+    crate::{
+        codes::{COORDINATOR_LOAD_IN_PROGRESS, NOT_COORDINATOR},
+        txn::coordinator::test_support::{StateImageSetup, state_image},
+    },
+    assert2::assert,
+    uuid::Uuid,
 };
 
 const THIS_BROKER: NodeId = NodeId(1);
@@ -13,9 +14,7 @@ const P0: PartitionIndex = PartitionIndex(0);
 
 /// An image with no `__transaction_state` topic, as the image before the
 /// topic was created is.
-fn image_without_topic() -> MetadataImage {
-    MetadataImage::new(Uuid::nil())
-}
+fn image_without_topic() -> MetadataImage { MetadataImage::new(Uuid::nil()) }
 
 fn image(topic_id: Uuid, leader: NodeId, leader_epoch: LeaderEpoch) -> MetadataImage {
     state_image(StateImageSetup {
@@ -186,10 +185,10 @@ fn an_election_loads_and_a_resignation_unloads() {
         Step {
             name: "a new term during a load drops the load and starts another",
             image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(3)),
-            changes: changes(
-                &[PartitionIndex(0)],
-                &[(PartitionIndex(0), LoadGeneration(3))],
-            ),
+            changes: changes(&[PartitionIndex(0)], &[(
+                PartitionIndex(0),
+                LoadGeneration(3),
+            )]),
             after: Some(leadership(
                 Uuid::from_u128(1),
                 LeaderEpoch(3),
@@ -211,10 +210,10 @@ fn an_election_loads_and_a_resignation_unloads() {
         Step {
             name: "the next election loads again",
             image: image(Uuid::from_u128(1), THIS_BROKER, LeaderEpoch(4)),
-            changes: changes(
-                &[PartitionIndex(0)],
-                &[(PartitionIndex(0), LoadGeneration(4))],
-            ),
+            changes: changes(&[PartitionIndex(0)], &[(
+                PartitionIndex(0),
+                LoadGeneration(4),
+            )]),
             after: Some(leadership(
                 Uuid::from_u128(1),
                 LeaderEpoch(4),

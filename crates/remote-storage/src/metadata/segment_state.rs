@@ -53,9 +53,7 @@ impl RemoteLogSegmentState {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     krabka_macros::remote_segment_transition_matrix!(expected_transitions);
 

@@ -7,10 +7,11 @@
 //! byte-rate data throttle, with `max`, into one `throttle_time_ms` and one
 //! channel mute (KIP-219).
 
-use krabka_metadata::MetadataImage;
-use krabka_units::{Time, convert::TimeExt};
-
-use super::{QuotaConsumption, buckets::QuotaBuckets, consume_configured_quota};
+use {
+    super::{QuotaConsumption, buckets::QuotaBuckets, consume_configured_quota},
+    krabka_metadata::MetadataImage,
+    krabka_units::{Time, convert::TimeExt},
+};
 
 /// Consumes `elapsed_micros` of request-handler time from the
 /// `request_percentage` bucket for `(principal, client_id)`.
@@ -55,18 +56,17 @@ pub fn consume_request_quota(
 
 /// The token rate of a `request_percentage` bucket: microseconds of handler
 /// time per second, so `100.0` is 1 000 000.
-pub(super) fn request_percentage_token_rate(rate_pct: f64) -> f64 {
-    rate_pct * 10_000.0
-}
+pub(super) fn request_percentage_token_rate(rate_pct: f64) -> f64 { rate_pct * 10_000.0 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{millis, secs};
-
-    use super::*;
-    use crate::quota::test_support::{
-        QuotaRecordSetup, QuotaValue, image_with_quotas, quota_record,
+    use {
+        super::*,
+        crate::quota::test_support::{
+            QuotaRecordSetup, QuotaValue, image_with_quotas, quota_record,
+        },
+        assert2::assert,
+        krabka_units::{millis, secs},
     };
 
     crate::quota::test_support::image_builder!(img_with_quota, "request_percentage");
@@ -159,10 +159,10 @@ mod tests {
     #[test]
     fn a_null_client_id_is_shadowed_by_a_user_default_client_quota() {
         let img = image_with_quotas(
-            [
-                vec![("user", Some("alice"))],
-                vec![("user", Some("alice")), ("client-id", None)],
-            ]
+            [vec![("user", Some("alice"))], vec![
+                ("user", Some("alice")),
+                ("client-id", None),
+            ]]
             .map(|entity| {
                 quota_record(QuotaRecordSetup {
                     entity,

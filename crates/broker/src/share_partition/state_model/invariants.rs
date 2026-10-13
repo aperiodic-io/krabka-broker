@@ -7,14 +7,15 @@
 //! become `Property::always` entries, and `assert_transition` runs inside
 //! `next_state` on the parent and the child.
 
-use assert2::assert;
-use krabka_log::Offset;
-
-use super::{
-    observe::{offset_dc, offset_state},
-    state::ShareAction,
+use {
+    super::{
+        observe::{offset_dc, offset_state},
+        state::ShareAction,
+    },
+    crate::share_partition::state::{AcquisitionState, InFlightBatch, RecordState},
+    assert2::assert,
+    krabka_log::Offset,
 };
-use crate::share_partition::state::{AcquisitionState, InFlightBatch, RecordState};
 
 // ---- state-level invariants (Property::always predicates) ------------------
 

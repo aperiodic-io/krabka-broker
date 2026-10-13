@@ -9,11 +9,12 @@
 //! on the path `PartitionRegistry` avoids them on. `PartitionRegistry::shared_topic_name`
 //! is where a caller gets the `Arc` without allocating one.
 
-use std::sync::Arc;
-
 #[cfg(test)]
 use super::PartitionLabel;
-use super::{BrokerMetrics, TopicLabel};
+use {
+    super::{BrokerMetrics, TopicLabel},
+    std::sync::Arc,
+};
 
 impl BrokerMetrics {
     /// Convenience: record a Produce hit on `topic` with the given
@@ -109,15 +110,14 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use prometheus_client::metrics::{counter::Counter, family::Family};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        prometheus_client::metrics::{counter::Counter, family::Family},
+    };
 
     /// The topic name every case below records under.
-    fn topic(name: &str) -> Arc<str> {
-        Arc::from(name)
-    }
+    fn topic(name: &str) -> Arc<str> { Arc::from(name) }
 
     fn assert_topic_counters(cases: &[(&str, &Family<TopicLabel, Counter>, &TopicLabel, u64)]) {
         for (family_name, family, label, want) in cases {

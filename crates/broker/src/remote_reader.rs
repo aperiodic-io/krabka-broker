@@ -12,11 +12,12 @@
 //! `krabka_log::index::{OffsetIndex,TimeIndex}::lookup` against the Kafka-format
 //! index bytes that the copy path wrote verbatim.
 
-use std::sync::Arc;
-
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{
-    LogOffset, RemoteIndexCache, RemoteLogMetadataManager, RemoteStorageManager,
+use {
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{
+        LogOffset, RemoteIndexCache, RemoteLogMetadataManager, RemoteStorageManager,
+    },
+    std::sync::Arc,
 };
 
 mod aborted_txns;
@@ -30,8 +31,7 @@ pub(crate) mod test_support;
 mod tiered_offsets;
 mod timestamp_lookup;
 
-pub(crate) use delivery::segment_activation_frontier;
-pub(crate) use pool::ReaderPool;
+pub(crate) use {delivery::segment_activation_frontier, pool::ReaderPool};
 
 /// One decoded aborted-transaction entry from a remote segment's `.txnindex`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

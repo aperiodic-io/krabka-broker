@@ -70,10 +70,7 @@ mod history;
 #[path = "diskless_jepsen/readback.rs"]
 mod readback;
 
-use assert2::assert;
-use tempfile::TempDir;
-
-use crate::faults::FaultWitness;
+use {crate::faults::FaultWitness, assert2::assert, tempfile::TempDir};
 
 /// The one diskless topic this suite creates. The name is
 /// `[A-Za-z0-9_-]`-only, so it reaches the filesystem unchanged and

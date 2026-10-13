@@ -6,32 +6,33 @@
 //! Every submodule of `coordinator` needs the same live partition logs, so the
 //! builders live in one place instead of once per test module.
 
-use std::{
-    path::Path,
-    sync::Arc,
-    time::{Duration, UNIX_EPOCH},
-};
-
-use assert2::assert;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig, Offset};
-use qubit_clock::{ManualMonotonicClock, ManualWallClock};
-
-use super::ShareCoordinator;
-use crate::{
-    broker::spawn_partition_with_replication_target,
-    coordinator::test_support::single_replica_partition,
-    log_dir::partition_dir,
-    log_dir_status::LogDirRegistry,
-    partition::ReplicationTarget,
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    share_coordinator::{
-        bootstrap,
-        config::ShareCoordinatorConfig,
-        persistence::{
-            KEY_SHARE_SNAPSHOT, ShareSnapshotValue, ShareUpdateValue, StateBatch, parse_state_key,
+use {
+    super::ShareCoordinator,
+    crate::{
+        broker::spawn_partition_with_replication_target,
+        coordinator::test_support::single_replica_partition,
+        log_dir::partition_dir,
+        log_dir_status::LogDirRegistry,
+        partition::ReplicationTarget,
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        share_coordinator::{
+            bootstrap,
+            config::ShareCoordinatorConfig,
+            persistence::{
+                KEY_SHARE_SNAPSHOT, ShareSnapshotValue, ShareUpdateValue, StateBatch,
+                parse_state_key,
+            },
         },
+    },
+    assert2::assert,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig, Offset},
+    qubit_clock::{ManualMonotonicClock, ManualWallClock},
+    std::{
+        path::Path,
+        sync::Arc,
+        time::{Duration, UNIX_EPOCH},
     },
 };
 

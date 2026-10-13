@@ -11,20 +11,21 @@
 //!    timestamps, and the voters' listeners from v2
 //!    (`RaftUtil.singletonDescribeQuorumResponse`).
 
-use krabka_protocol::{
-    owned::{
-        common::describe_quorum_response::replica_state::ReplicaState,
-        describe_quorum_request::DescribeQuorumRequest,
-        describe_quorum_response::{
-            DescribeQuorumResponse, Listener, Node, PartitionData, TopicData,
-        },
+use {
+    crate::kraft::{
+        transport::{ObserverReplica, QuorumStateSnapshot},
+        types::NodeId,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::kraft::{
-    transport::{ObserverReplica, QuorumStateSnapshot},
-    types::NodeId,
+    krabka_protocol::{
+        owned::{
+            common::describe_quorum_response::replica_state::ReplicaState,
+            describe_quorum_request::DescribeQuorumRequest,
+            describe_quorum_response::{
+                DescribeQuorumResponse, Listener, Node, PartitionData, TopicData,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 const METADATA_TOPIC: &str = "__cluster_metadata";
@@ -38,9 +39,7 @@ const NOT_LEADER_OR_FOLLOWER_MESSAGE: &str = "For requests intended only for the
      replica, this error indicates that the broker is not a replica of the topic partition.";
 
 /// The wire form of a node id, or -1 when it does not fit.
-fn node_to_wire(id: NodeId) -> i32 {
-    i32::try_from(id.0).unwrap_or(-1)
-}
+fn node_to_wire(id: NodeId) -> i32 { i32::try_from(id.0).unwrap_or(-1) }
 
 fn not_leader_or_follower_response() -> DescribeQuorumResponse {
     DescribeQuorumResponse {
@@ -192,15 +191,15 @@ pub fn describe_quorum(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::check;
-    use krabka_protocol::owned::describe_quorum_request::{
-        PartitionData as RequestPartition, TopicData as RequestTopic,
+    use {
+        super::*,
+        crate::server::test_support::voter,
+        assert2::check,
+        krabka_protocol::owned::describe_quorum_request::{
+            PartitionData as RequestPartition, TopicData as RequestTopic,
+        },
+        std::collections::BTreeMap,
     };
-
-    use super::*;
-    use crate::server::test_support::voter;
 
     /// Topic names, each with the partition indexes a request names.
     type RequestedTopics<'a> = &'a [(&'a str, &'a [i32])];

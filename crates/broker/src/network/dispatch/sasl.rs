@@ -3,38 +3,38 @@
 //! which the handler registry cannot reach, so the dispatch loop intercepts
 //! them here before it consults the registry.
 
-use std::net::SocketAddr;
-
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{
-    api_key::ApiKey,
-    owned::{
-        sasl_authenticate_request::SaslAuthenticateRequest,
-        sasl_authenticate_response::SaslAuthenticateResponse,
-        sasl_handshake_request::SaslHandshakeRequest,
-        sasl_handshake_response::SaslHandshakeResponse,
-    },
-};
-use krabka_security::{AuthMethod, Principal, SaslMechanism};
-
-use super::response::encode_response;
 #[cfg(test)]
 use crate::BrokerConfig;
-use crate::{
-    broker::Broker,
-    codes,
-    error::BrokerError,
-    handlers::{ApiKeyCode, api_versions::is_valid_request_body},
-    metrics::{BrokerMetrics, UNKNOWN_LABEL},
-    network::{
-        auth::{
-            ConnectionAuth, ReauthClock, generic_failure_message, handle_authenticate_gssapi,
-            handle_authenticate_oauthbearer_with_jwks_cache, handle_authenticate_plain,
-            handle_authenticate_scram, handle_handshake,
+use {
+    super::response::encode_response,
+    crate::{
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        handlers::{ApiKeyCode, api_versions::is_valid_request_body},
+        metrics::{BrokerMetrics, UNKNOWN_LABEL},
+        network::{
+            auth::{
+                ConnectionAuth, ReauthClock, generic_failure_message, handle_authenticate_gssapi,
+                handle_authenticate_oauthbearer_with_jwks_cache, handle_authenticate_plain,
+                handle_authenticate_scram, handle_handshake,
+            },
+            request::ParsedRequest,
         },
-        request::ParsedRequest,
+        time_util::now_ms,
     },
-    time_util::now_ms,
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{
+        api_key::ApiKey,
+        owned::{
+            sasl_authenticate_request::SaslAuthenticateRequest,
+            sasl_authenticate_response::SaslAuthenticateResponse,
+            sasl_handshake_request::SaslHandshakeRequest,
+            sasl_handshake_response::SaslHandshakeResponse,
+        },
+    },
+    krabka_security::{AuthMethod, Principal, SaslMechanism},
+    std::net::SocketAddr,
 };
 
 /// `SaslHandshake` wire `api_key`. The loop handles it inline, before the
@@ -587,15 +587,10 @@ fn handle_sasl_handshake(
 
     let mut body = parsed.body;
     let request = SaslHandshakeRequest::decode(&mut body, parsed.api_version)?;
-    let outcome = handle_handshake(
-        &request,
-        auth,
-        sasl_mechanisms,
-        &mut ReauthClock {
-            now_ms: now_ms(),
-            last_start_ms: &mut session.last_reauth_start_ms,
-        },
-    );
+    let outcome = handle_handshake(&request, auth, sasl_mechanisms, &mut ReauthClock {
+        now_ms: now_ms(),
+        last_start_ms: &mut session.last_reauth_start_ms,
+    });
     let response = outcome.response;
     let mut encoded = BytesMut::with_capacity(response.encoded_len(parsed.api_version));
     response.encode(&mut encoded, parsed.api_version)?;
@@ -604,13 +599,14 @@ fn handle_sasl_handshake(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::network::{
-        auth::{ConnectionAuth, test_support::plain_request},
-        request::ParsedRequest,
-        test_support::assert_authentication_event,
+    use {
+        super::*,
+        crate::network::{
+            auth::{ConnectionAuth, test_support::plain_request},
+            request::ParsedRequest,
+            test_support::assert_authentication_event,
+        },
+        assert2::{assert, check},
     };
 
     fn request(

@@ -5,43 +5,43 @@
 //! `throttle_time_ms` (KIP-219 throttle-then-respond) instead of silently
 //! stalling the connection.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        add_offsets_to_txn_response::AddOffsetsToTxnResponse,
-        api_versions_response::ApiVersionsResponse,
+use {
+    super::{
+        CLIENT_ID,
+        cluster::{
+            create_topic_as_admin, seed_alice_write_acl, seed_compat_shim_disable_acl,
+            start_single_broker_sasl_plaintext_with_users, wait_partition_exists,
+        },
+        data_plane::{drive_add_offsets_to_txn, drive_fetch_sasl, drive_produce_sasl},
+        quota_admin::drive_alter_client_quotas_sasl,
     },
-};
-use tokio::net::TcpStream;
-
-use super::{
-    CLIENT_ID,
-    cluster::{
-        create_topic_as_admin, seed_alice_write_acl, seed_compat_shim_disable_acl,
-        start_single_broker_sasl_plaintext_with_users, wait_partition_exists,
+    crate::{
+        cluster::wait_alice_quota,
+        kafka_wire::{
+            self, AutomaticTopicSetup, ExchangeSetup as WireExchangeSetup,
+            PlainAuthenticationSetup, ProduceRecordCount, ProduceValueBytes,
+            ResponseHeaderSelection as WireResponseHeaderSelection, ZeroFilledRecordsSetup,
+            quotas::{QuotaAlterSetup, QuotaValue, UserQuotaSetup, alter_user_quota},
+        },
+        support::{
+            acl::{TopicAclSetup, seed_topic_acl},
+            discovery::api_versions_request_for,
+            topics::ConfiguredTopicSetup,
+            wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+        },
     },
-    data_plane::{drive_add_offsets_to_txn, drive_fetch_sasl, drive_produce_sasl},
-    quota_admin::drive_alter_client_quotas_sasl,
-};
-use crate::{
-    cluster::wait_alice_quota,
-    kafka_wire::{
-        self, AutomaticTopicSetup, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup,
-        ProduceRecordCount, ProduceValueBytes,
-        ResponseHeaderSelection as WireResponseHeaderSelection, ZeroFilledRecordsSetup,
-        quotas::{QuotaAlterSetup, QuotaValue, UserQuotaSetup, alter_user_quota},
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            add_offsets_to_txn_response::AddOffsetsToTxnResponse,
+            api_versions_response::ApiVersionsResponse,
+        },
     },
-    support::{
-        acl::{TopicAclSetup, seed_topic_acl},
-        discovery::api_versions_request_for,
-        topics::ConfiguredTopicSetup,
-        wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
-    },
+    std::time::{Duration, Instant},
+    tokio::net::TcpStream,
 };
 
 /// `ApiVersions` is `api_key` 18.
@@ -120,14 +120,11 @@ async fn request_percentage_throttles_produce() {
 
     // Alice produces a single small record. Retry past TOPIC_AUTHORIZATION_FAILED
     // (29) while the alice Write ACL propagates to the handler's image snapshot.
-    let resp = produce_when_acl_applied(
-        addr,
-        ZeroFilledRecordsSetup {
-            topic: ("throttle-request").to_string(),
-            value_bytes: ProduceValueBytes(16),
-            ..Default::default()
-        },
-    )
+    let resp = produce_when_acl_applied(addr, ZeroFilledRecordsSetup {
+        topic: ("throttle-request").to_string(),
+        value_bytes: ProduceValueBytes(16),
+        ..Default::default()
+    })
     .await;
 
     check_successful_produce(&resp);
@@ -191,7 +188,7 @@ async fn producer_byte_rate_throttle_moves_the_throttle_metrics() {
     )
     .await;
     assert!(
-        request_quota < 1e-9,
+        request_quota < 1.0e-9,
         "no request_percentage quota is set, so it must be credited with \
          nothing; got {request_quota}"
     );
@@ -218,15 +215,12 @@ async fn consumer_byte_rate_throttles_fetch() {
     .await;
 
     // Set low consumer quota for alice.
-    let alter_resp = alter_user_quota(
-        addr,
-        UserQuotaSetup {
-            authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
-            key: "consumer_byte_rate",
-            value: QuotaValue(128.0),
-            ..Default::default()
-        },
-    )
+    let alter_resp = alter_user_quota(addr, UserQuotaSetup {
+        authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
+        key: "consumer_byte_rate",
+        value: QuotaValue(128.0),
+        ..Default::default()
+    })
     .await;
     assert!(
         alter_resp[0].1 == 0,
@@ -310,14 +304,11 @@ async fn user_client_tuple_overrides_user_specific() {
     .await;
 
     // Set a lenient user-only quota.
-    let alter_user = alter_user_quota(
-        addr,
-        UserQuotaSetup {
-            authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
-            value: QuotaValue(8192.0),
-            ..Default::default()
-        },
-    )
+    let alter_user = alter_user_quota(addr, UserQuotaSetup {
+        authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
+        value: QuotaValue(8192.0),
+        ..Default::default()
+    })
     .await;
     assert!(alter_user[0].1 == 0, "alter user quota must succeed");
 
@@ -363,14 +354,11 @@ async fn user_client_tuple_overrides_user_specific() {
 
     // Alice produces 8 KB with `krabka-quota-test`. The 128-byte tuple quota
     // throttles it; the 8192-byte user-only quota would fit in the burst window.
-    let resp = produce_when_acl_applied(
-        addr,
-        ZeroFilledRecordsSetup {
-            topic: ("precedence-topic").to_string(),
-            count: ProduceRecordCount(8),
-            ..Default::default()
-        },
-    )
+    let resp = produce_when_acl_applied(addr, ZeroFilledRecordsSetup {
+        topic: ("precedence-topic").to_string(),
+        count: ProduceRecordCount(8),
+        ..Default::default()
+    })
     .await;
 
     check_successful_produce(&resp);
@@ -446,14 +434,11 @@ const API_VERSIONS_VERSION: i16 = 3;
 
 /// Open the fixture's Alice session without charging a second handshake.
 async fn alice_quota_connection(addr: std::net::SocketAddr, context: &str) -> TcpStream {
-    kafka_wire::sasl_plain_authenticate(
-        addr,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            password: b"alice-secret".to_vec(),
-            ..Default::default()
-        },
-    )
+    kafka_wire::sasl_plain_authenticate(addr, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        password: b"alice-secret".to_vec(),
+        ..Default::default()
+    })
     .await
     .expect(context)
 }
@@ -557,15 +542,11 @@ async fn produce_when_acl_applied(
 ) -> krabka_protocol::owned::produce_response::ProduceResponse {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let r = drive_produce_sasl(
-            addr,
-            records.clone(),
-            &PlainAuthenticationSetup {
-                client_id: CLIENT_ID,
-                password: (b"alice-secret").to_vec(),
-                ..Default::default()
-            },
-        )
+        let r = drive_produce_sasl(addr, records.clone(), &PlainAuthenticationSetup {
+            client_id: CLIENT_ID,
+            password: (b"alice-secret").to_vec(),
+            ..Default::default()
+        })
         .await;
         let code = r
             .responses
@@ -588,10 +569,10 @@ async fn quota_fixture() -> (
     tempfile::TempDir,
     std::net::SocketAddr,
 ) {
-    start_single_broker_sasl_plaintext_with_users(
-        "admin",
-        &[("admin", "admin-secret"), ("alice", "alice-secret")],
-    )
+    start_single_broker_sasl_plaintext_with_users("admin", &[
+        ("admin", "admin-secret"),
+        ("alice", "alice-secret"),
+    ])
     .await
 }
 
@@ -602,26 +583,20 @@ async fn prepare_quota_topic(
     operation: krabka_metadata::AclOperation,
 ) {
     seed_compat_shim_disable_acl(broker).await;
-    create_topic_as_admin(
-        addr,
-        AutomaticTopicSetup {
-            client_id: CLIENT_ID,
-            topic: ConfiguredTopicSetup {
-                name: (topic).into(),
-                ..Default::default()
-            },
-        },
-    )
-    .await;
-    wait_partition_exists(broker, topic, 0).await;
-    seed_topic_acl(
-        broker,
-        TopicAclSetup {
-            topic,
-            operation,
+    create_topic_as_admin(addr, AutomaticTopicSetup {
+        client_id: CLIENT_ID,
+        topic: ConfiguredTopicSetup {
+            name: (topic).into(),
             ..Default::default()
         },
-    )
+    })
+    .await;
+    wait_partition_exists(broker, topic, 0).await;
+    seed_topic_acl(broker, TopicAclSetup {
+        topic,
+        operation,
+        ..Default::default()
+    })
     .await;
 }
 
@@ -645,14 +620,11 @@ async fn throttled_producer_fixture(
     let (handle, directory, addr) = quota_fixture().await;
     prepare_quota_topic(&handle, addr, topic, krabka_metadata::AclOperation::Write).await;
     set_alice_quota(&handle, addr, QuotaSettingSetup::low_producer()).await;
-    let response = produce_when_acl_applied(
-        addr,
-        ZeroFilledRecordsSetup {
-            topic: topic.to_string(),
-            count: ProduceRecordCount(8),
-            ..Default::default()
-        },
-    )
+    let response = produce_when_acl_applied(addr, ZeroFilledRecordsSetup {
+        topic: topic.to_string(),
+        count: ProduceRecordCount(8),
+        ..Default::default()
+    })
     .await;
     (handle, directory, response)
 }
@@ -671,6 +643,7 @@ impl QuotaSettingSetup<'_> {
             ..Default::default()
         }
     }
+
     fn request_time() -> Self {
         Self {
             key: "request_percentage",
@@ -684,15 +657,11 @@ async fn set_alice_quota(
     addr: std::net::SocketAddr,
     setup: QuotaSettingSetup<'_>,
 ) {
-    kafka_wire::quotas::set_user_quota(
-        broker,
-        addr,
-        UserQuotaSetup {
-            authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
-            key: setup.key,
-            value: setup.value,
-            ..Default::default()
-        },
-    )
+    kafka_wire::quotas::set_user_quota(broker, addr, UserQuotaSetup {
+        authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
+        key: setup.key,
+        value: setup.value,
+        ..Default::default()
+    })
     .await;
 }

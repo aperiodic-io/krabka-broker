@@ -1,13 +1,14 @@
 //! The two shapes the broker's tasks repeat: asking an actor a question over
 //! its `mpsc` mailbox, and running a body on a fixed cadence until shutdown.
 
-use std::time::Duration;
-
-use tokio::{
-    sync::{mpsc, oneshot},
-    time::{Interval, MissedTickBehavior},
+use {
+    std::time::Duration,
+    tokio::{
+        sync::{mpsc, oneshot},
+        time::{Interval, MissedTickBehavior},
+    },
+    tokio_util::sync::CancellationToken,
 };
-use tokio_util::sync::CancellationToken;
 
 /// Start an actor over a bounded mailbox and retain its task handle.
 pub(crate) fn spawn_mailbox<M, F: Future<Output = ()> + Send + 'static>(
@@ -118,11 +119,7 @@ pub(crate) use scheduled_tasks_type;
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert, std::time::Duration};
 
     #[tokio::test]
     async fn ask_returns_the_reply() {

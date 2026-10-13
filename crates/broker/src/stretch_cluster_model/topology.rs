@@ -5,16 +5,14 @@
 //! The queries are pure reads of the state and the fixed cluster shape, so
 //! they sit apart from the transitions that mutate the state.
 
-use std::collections::{BTreeSet, HashSet};
-
-use krabka_raft::NodeId;
-
-use super::{config::StretchModel, state::StretchState};
+use {
+    super::{config::StretchModel, state::StretchState},
+    krabka_raft::NodeId,
+    std::collections::{BTreeSet, HashSet},
+};
 
 impl StretchModel {
-    pub fn site_of(&self, node: NodeId) -> u8 {
-        self.site_of[&node]
-    }
+    pub fn site_of(&self, node: NodeId) -> u8 { self.site_of[&node] }
 
     pub fn site_count(&self) -> u8 {
         u8::try_from(self.sites.len()).expect("site count fits in u8")

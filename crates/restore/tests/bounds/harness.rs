@@ -8,14 +8,14 @@
 #[path = "../support/args.rs"]
 mod cli_args;
 
-use std::path::{Path, PathBuf};
-
-use clap::Parser as _;
-use krabka_log::{Log, LogConfig, name};
-use krabka_restore::{Cli, RestoreArgs, restore};
-use tempfile::TempDir;
-
-use crate::archive::build_archive;
+use {
+    crate::archive::build_archive,
+    clap::Parser as _,
+    krabka_log::{Log, LogConfig, name},
+    krabka_restore::{Cli, RestoreArgs, restore},
+    std::path::{Path, PathBuf},
+    tempfile::TempDir,
+};
 
 /// Build the `RestoreArgs` every scenario shares -- a local archive, a
 /// fresh target directory, and a standalone node 1, matching the shape
@@ -24,14 +24,10 @@ use crate::archive::build_archive;
 /// binary and the crate's own tests use. `extra` carries the bound flags
 /// under test.
 pub(crate) fn restore_args(archive_dir: &Path, target_dir: &Path, extra: &[&str]) -> RestoreArgs {
-    let argv = cli_args::restore_argv(
-        archive_dir,
-        target_dir,
-        cli_args::RestoreOptions {
-            extra,
-            ..Default::default()
-        },
-    );
+    let argv = cli_args::restore_argv(archive_dir, target_dir, cli_args::RestoreOptions {
+        extra,
+        ..Default::default()
+    });
     Cli::try_parse_from(argv).expect("valid command line").args
 }
 

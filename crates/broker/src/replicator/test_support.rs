@@ -2,27 +2,27 @@
 //! metadata-image builders for the leader and follower-throttle cases, a
 //! `Config` over a temporary log dir, and `Fetch` response builders.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::LogConfig;
-use krabka_metadata::{
-    MetadataImage, MetadataRecord, PartitionRecord, TopicConfigRecord, TopicRecord,
-};
-use krabka_protocol::{
-    owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
-    primitives::uuid::Uuid as WireUuid,
-};
-use krabka_raft::NodeId;
-
-use super::Config;
-use crate::{
-    log_dir_status::LogDirRegistry,
-    metrics::BrokerMetrics,
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    test_support::FakeMetadataSource,
-    throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, ThrottleState},
+use {
+    super::Config,
+    crate::{
+        log_dir_status::LogDirRegistry,
+        metrics::BrokerMetrics,
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        test_support::FakeMetadataSource,
+        throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, ThrottleState},
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::LogConfig,
+    krabka_metadata::{
+        MetadataImage, MetadataRecord, PartitionRecord, TopicConfigRecord, TopicRecord,
+    },
+    krabka_protocol::{
+        owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    krabka_raft::NodeId,
+    std::{collections::BTreeMap, sync::Arc},
 };
 pub(super) const TOPIC: &str = "orders";
 pub(super) const PARTITION: i32 = 0;

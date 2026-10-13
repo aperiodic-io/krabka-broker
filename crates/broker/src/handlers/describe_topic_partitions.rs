@@ -60,29 +60,30 @@
 //! never as null. This is the only API that reports ELR; Kafka's Metadata
 //! schema has no field for it in any version. See [`crate::elr`].
 
-use krabka_log::topic_name::validate_topic_name;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    owned::{
-        describe_topic_partitions_request::DescribeTopicPartitionsRequest,
-        describe_topic_partitions_response::{
-            Cursor as ResponseCursor, DescribeTopicPartitionsResponse,
-            DescribeTopicPartitionsResponsePartition, DescribeTopicPartitionsResponseTopic,
+use {
+    crate::{
+        authorizer::{AuthorizationResult, authorize_topics},
+        broker::Broker,
+        codes,
+        elr::TopicElr,
+        handlers::{
+            RequestContext, authorized_operations::authorized_operations_bits, metadata::wire_id,
+            offline_replicas::partition_availability,
         },
+        internal_topics::is_internal_topic,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    authorizer::{AuthorizationResult, authorize_topics},
-    broker::Broker,
-    codes,
-    elr::TopicElr,
-    handlers::{
-        RequestContext, authorized_operations::authorized_operations_bits, metadata::wire_id,
-        offline_replicas::partition_availability,
+    krabka_log::topic_name::validate_topic_name,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        owned::{
+            describe_topic_partitions_request::DescribeTopicPartitionsRequest,
+            describe_topic_partitions_response::{
+                Cursor as ResponseCursor, DescribeTopicPartitionsResponse,
+                DescribeTopicPartitionsResponsePartition, DescribeTopicPartitionsResponseTopic,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    internal_topics::is_internal_topic,
 };
 
 context_handler! {
@@ -399,27 +400,27 @@ fn resolve_names(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_ids::{LeaderEpoch, PartitionIndex};
-    use krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord};
-    use krabka_protocol::owned::describe_topic_partitions_request::{
-        Cursor as RequestCursor, TopicRequest,
-    };
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        broker::BrokerHandle,
-        elr::state::test_records,
-        handlers::{
-            RequestContext,
-            test_support::{
-                ReplicatedPartitionSetup, replicated_partition, single_replica_partition,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            broker::BrokerHandle,
+            elr::state::test_records,
+            handlers::{
+                RequestContext,
+                test_support::{
+                    ReplicatedPartitionSetup, replicated_partition, single_replica_partition,
+                },
             },
+            test_support::{PartitionCount, TopicSetup},
         },
-        test_support::{PartitionCount, TopicSetup},
+        assert2::assert,
+        krabka_ids::{LeaderEpoch, PartitionIndex},
+        krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord},
+        krabka_protocol::owned::describe_topic_partitions_request::{
+            Cursor as RequestCursor, TopicRequest,
+        },
+        std::sync::Arc,
     };
 
     const VERSION: i16 = krabka_protocol::owned::describe_topic_partitions_response::MAX_VERSION;
@@ -614,8 +615,9 @@ mod tests {
     }
 
     macro_rules! seeded_topics_fixture {
-        (($handle:ident, $dir:ident, $broker:ident, $ctx:ident), $authorizer:expr,
-            $topics:expr) => {
+        (
+            ($handle:ident, $dir:ident, $broker:ident, $ctx:ident), $authorizer:expr, $topics:expr
+        ) => {
             let ($handle, $dir) = start_broker($authorizer).await;
             for setup in $topics {
                 seed_topic(&$handle, setup).await;
@@ -677,23 +679,17 @@ mod tests {
     #[tokio::test]
     async fn cursor_offset_on_a_denied_topic_does_not_leak_onto_the_next_topic() {
         let (broker_handle, _dir) = start_broker(Arc::new(DenyTopics(&["a"]))).await;
-        seed_topic(
-            &broker_handle,
-            TopicSetup {
-                topic: "a",
-                ..TopicSetup::single_replica()
-            },
-        )
+        seed_topic(&broker_handle, TopicSetup {
+            topic: "a",
+            ..TopicSetup::single_replica()
+        })
         .await;
-        seed_topic(
-            &broker_handle,
-            TopicSetup {
-                topic: "b",
-                topic_id: uuid::Uuid::from_u128(2),
-                partitions: PartitionCount(3),
-                ..TopicSetup::single_replica()
-            },
-        )
+        seed_topic(&broker_handle, TopicSetup {
+            topic: "b",
+            topic_id: uuid::Uuid::from_u128(2),
+            partitions: PartitionCount(3),
+            ..TopicSetup::single_replica()
+        })
         .await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "admin");
@@ -871,23 +867,17 @@ mod tests {
     async fn budget_exhausted_at_topic_boundary_emits_no_row_for_the_next_topic() {
         for next_topic_exists in [true, false] {
             let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
-            seed_topic(
-                &broker_handle,
-                TopicSetup {
-                    topic: "a",
-                    ..TopicSetup::single_replica()
-                },
-            )
+            seed_topic(&broker_handle, TopicSetup {
+                topic: "a",
+                ..TopicSetup::single_replica()
+            })
             .await;
             if next_topic_exists {
-                seed_topic(
-                    &broker_handle,
-                    TopicSetup {
-                        topic: "b",
-                        topic_id: uuid::Uuid::from_u128(2),
-                        ..TopicSetup::single_replica()
-                    },
-                )
+                seed_topic(&broker_handle, TopicSetup {
+                    topic: "b",
+                    topic_id: uuid::Uuid::from_u128(2),
+                    ..TopicSetup::single_replica()
+                })
                 .await;
             }
             let broker = broker_handle.broker_arc_for_test();

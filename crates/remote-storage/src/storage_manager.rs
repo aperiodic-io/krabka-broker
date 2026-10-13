@@ -1,15 +1,15 @@
 //! The [`RemoteStorageManager`] SPI: copy / fetch / delete of segment data
 //! and indexes to and from the remote tier.
 
-use std::path::{Path, PathBuf};
-
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bytes::Bytes;
-use uuid::Uuid;
-
-use crate::{
-    error::RemoteStorageError,
-    metadata::{CustomMetadata, RemoteLogSegmentMetadata},
+use {
+    crate::{
+        error::RemoteStorageError,
+        metadata::{CustomMetadata, RemoteLogSegmentMetadata},
+    },
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    bytes::Bytes,
+    std::path::{Path, PathBuf},
+    uuid::Uuid,
 };
 
 /// Trace each storage operation with the same remote-segment identity.
@@ -131,9 +131,7 @@ const BASE_OFFSET_LEN: usize = 20;
 
 /// Kafka renders UUIDs in URL-safe, unpadded Base64 for remote-tier paths.
 #[must_use]
-pub fn kafka_uuid(uuid: Uuid) -> String {
-    URL_SAFE_NO_PAD.encode(uuid.as_bytes())
-}
+pub fn kafka_uuid(uuid: Uuid) -> String { URL_SAFE_NO_PAD.encode(uuid.as_bytes()) }
 
 /// Reads back a UUID that [`kafka_uuid`] rendered.
 ///

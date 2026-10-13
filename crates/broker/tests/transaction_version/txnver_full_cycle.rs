@@ -5,16 +5,17 @@
 //! what proves that the coordinator's encode path for the resolved level runs
 //! and that the transaction commits and reads end to end.
 
-use assert2::assert;
-
-use crate::{
-    support::{
-        self,
-        producer::{string_record as rec, transactional_producer},
-        topics::TopicPartitionCount,
-        transaction_wire::committed_values,
+use {
+    crate::{
+        support::{
+            self,
+            producer::{string_record as rec, transactional_producer},
+            topics::TopicPartitionCount,
+            transaction_wire::committed_values,
+        },
+        txnver_harness::{admin_client, boot_single, create_topic, downgrade_transaction_version},
     },
-    txnver_harness::{admin_client, boot_single, create_topic, downgrade_transaction_version},
+    assert2::assert,
 };
 
 /// Run a full transactional cycle at whatever `transaction.version` the

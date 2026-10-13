@@ -5,8 +5,7 @@
 //! cargo test -p krabka-broker --test kraft_checkpoint_jvm -- --ignored --nocapture
 //! ```
 
-use assert2::assert;
-use krabka_protocol::records::metadata::checkpoint::build_bootstrap_checkpoint;
+use {assert2::assert, krabka_protocol::records::metadata::checkpoint::build_bootstrap_checkpoint};
 
 const KAFKA_IMAGE: &str = "mirror.gcr.io/apache/kafka:4.0.0";
 

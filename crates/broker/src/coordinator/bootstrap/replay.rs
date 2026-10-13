@@ -6,35 +6,35 @@
 //! streams records straight into the coordinator's seed map, and then
 //! classifies each group and spawns its actor.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
-
-use krabka_ids::PartitionIndex;
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_units::{ByteSize, mebibytes};
-use krabka_verified::{ReplayCursorDecision, replay_batch_cursor_decision};
-
-use super::{
-    OFFSETS_TOPIC,
-    apply::{
-        apply_group_metadata, apply_next_gen_record, apply_share_record, apply_streams_record,
-        check_value, settle_classic_group,
-    },
-};
-use crate::{
-    coordinator::{
-        GroupCoordinator,
-        persistence::{self, GroupMetadataValue, Key, OffsetCommitValue, RecordKey},
-        unified::{
-            actor::GroupActorMessage,
-            classic_state::{ClassicGroup as ClassicState, OffsetEntry},
-            group::{CoordinatorGroup, GroupKind},
+use {
+    super::{
+        OFFSETS_TOPIC,
+        apply::{
+            apply_group_metadata, apply_next_gen_record, apply_share_record, apply_streams_record,
+            check_value, settle_classic_group,
         },
     },
-    error::BrokerError,
-    partition_registry::PartitionRegistry,
+    crate::{
+        coordinator::{
+            GroupCoordinator,
+            persistence::{self, GroupMetadataValue, Key, OffsetCommitValue, RecordKey},
+            unified::{
+                actor::GroupActorMessage,
+                classic_state::{ClassicGroup as ClassicState, OffsetEntry},
+                group::{CoordinatorGroup, GroupKind},
+            },
+        },
+        error::BrokerError,
+        partition_registry::PartitionRegistry,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_units::{ByteSize, mebibytes},
+    krabka_verified::{ReplayCursorDecision, replay_batch_cursor_decision},
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    },
 };
 
 /// How much of `__consumer_offsets` one replay read returns before the walk

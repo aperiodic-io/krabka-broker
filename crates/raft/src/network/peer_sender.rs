@@ -6,25 +6,25 @@
 //! node uses before it has learned the voter set, and the eviction on a failed
 //! RPC that makes the next send redial.
 
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, RwLock},
-};
-
-use async_trait::async_trait;
-use bytes::Bytes;
-use dashmap::DashMap;
-use krabka_client_core::{Connection, ConnectionOptions};
-use krabka_ids::ApiKey;
-use krabka_metadata::voters::VoterSet;
-
-use crate::{
-    error::RaftError,
-    kraft::{transport::PeerSender, types::NodeId},
-    network::{
-        addressing::{api_version_for, controller_addr},
-        dialer::OutboundDialer,
-        negotiation::{convert_request, convert_response, negotiated_version},
+use {
+    crate::{
+        error::RaftError,
+        kraft::{transport::PeerSender, types::NodeId},
+        network::{
+            addressing::{api_version_for, controller_addr},
+            dialer::OutboundDialer,
+            negotiation::{convert_request, convert_response, negotiated_version},
+        },
+    },
+    async_trait::async_trait,
+    bytes::Bytes,
+    dashmap::DashMap,
+    krabka_client_core::{Connection, ConnectionOptions},
+    krabka_ids::ApiKey,
+    krabka_metadata::voters::VoterSet,
+    std::{
+        collections::BTreeMap,
+        sync::{Arc, RwLock},
     },
 };
 
@@ -174,16 +174,12 @@ impl PeerSender for RealPeerSender {
 
         let connection = self
             .dialer
-            .dial(
-                NodeId(u64::MAX),
-                address,
-                ConnectionOptions {
-                    client_id: "krabka-voter-probe".into(),
-                    dispatch_queue_capacity: self.dispatch_queue_capacity,
-                    frame_max: self.frame_max,
-                    ..ConnectionOptions::default()
-                },
-            )
+            .dial(NodeId(u64::MAX), address, ConnectionOptions {
+                client_id: "krabka-voter-probe".into(),
+                dispatch_queue_capacity: self.dispatch_queue_capacity,
+                frame_max: self.frame_max,
+                ..ConnectionOptions::default()
+            })
             .await
             .map_err(RaftError::Network)?;
         let response = connection
@@ -232,9 +228,7 @@ impl PeerSender for RealPeerSender {
         }
     }
 
-    fn discovery_peers(&self) -> Vec<NodeId> {
-        self.bootstrap.keys().copied().collect()
-    }
+    fn discovery_peers(&self) -> Vec<NodeId> { self.bootstrap.keys().copied().collect() }
 
     fn remember_leader_endpoint(&self, leader: NodeId, address: String) {
         if let Ok(mut aliases) = self.aliases.write()

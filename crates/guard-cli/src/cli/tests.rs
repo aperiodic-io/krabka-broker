@@ -1,11 +1,12 @@
 //! Tests for the command line: which lines the parser accepts, and what a flag
 //! group resolves to once it has.
 
-use assert2::{assert, check};
-use krabka_protocol::krabka::freeze::PATTERN_TYPE_ANY;
-use krabka_units::convert::TimeExt as _;
-
-use super::*;
+use {
+    super::*,
+    assert2::{assert, check},
+    krabka_protocol::krabka::freeze::PATTERN_TYPE_ANY,
+    krabka_units::convert::TimeExt as _,
+};
 
 krabka_macros::duration_parser_fixture!(
     {
@@ -26,10 +27,13 @@ krabka_macros::duration_parser_fixture!(
     ]
 );
 
-krabka_macros::bootstrap_parser_fixture!(
-    ["krabka-guard", "freeze", "list"],
-    ["krabka-guard", "-b", "localhost:9092", "freeze", "list"]
-);
+krabka_macros::bootstrap_parser_fixture!(["krabka-guard", "freeze", "list"], [
+    "krabka-guard",
+    "-b",
+    "localhost:9092",
+    "freeze",
+    "list"
+]);
 
 /// `--topic` and `--prefix` name the two pattern types, and exactly one of
 /// them is given. A freeze with neither would have no scope, and a freeze

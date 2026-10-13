@@ -3,22 +3,22 @@
 //! handle, and the remote-log-manager copy task. It is its own module because
 //! the backend selection and its WORM layering are self-contained.
 
-use std::sync::Arc;
-
-use krabka_units::convert::{ByteSizeExt as _, TimeExt as _};
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    config::{BrokerConfig, RemoteStorageBackend, RlmmKind},
-    diskless::{read::DisklessReadHandle, wal_index::WalIndexCache},
-    error::BrokerError,
-    metadata_source::MetadataSource,
-    metrics::{BrokerMetrics, RemoteReaderLevels, RemoteReaderTotals},
-    partition_registry::PartitionRegistry,
-    remote_log_manager::{
-        ArchiveMode, RemoteLogManagerConfig, RemoteLogManagerContext, SweepConcurrency, run,
+use {
+    crate::{
+        config::{BrokerConfig, RemoteStorageBackend, RlmmKind},
+        diskless::{read::DisklessReadHandle, wal_index::WalIndexCache},
+        error::BrokerError,
+        metadata_source::MetadataSource,
+        metrics::{BrokerMetrics, RemoteReaderLevels, RemoteReaderTotals},
+        partition_registry::PartitionRegistry,
+        remote_log_manager::{
+            ArchiveMode, RemoteLogManagerConfig, RemoteLogManagerContext, SweepConcurrency, run,
+        },
+        remote_reader::{ReaderPool, RemoteReader, RemoteReaderLimits},
     },
-    remote_reader::{ReaderPool, RemoteReader, RemoteReaderLimits},
+    krabka_units::convert::{ByteSizeExt as _, TimeExt as _},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
 };
 
 #[derive(Default)]
@@ -208,16 +208,12 @@ fn spawn_remote_reader_gauges(
                 index_cache_evictions: stats.evictions,
                 rejected_reads: u64::try_from(reader.pool.rejected()).unwrap_or(u64::MAX),
             };
-            metrics.observe_remote_reader(
-                &reported,
-                current,
-                RemoteReaderLevels {
-                    task_queue_size: u64::try_from(reader.pool.queue_size()).unwrap_or(u64::MAX),
-                    idle_percent: reader.pool.idle_percent(),
-                    index_cache_bytes: stats.bytes,
-                    index_cache_entries: stats.entries,
-                },
-            );
+            metrics.observe_remote_reader(&reported, current, RemoteReaderLevels {
+                task_queue_size: u64::try_from(reader.pool.queue_size()).unwrap_or(u64::MAX),
+                idle_percent: reader.pool.idle_percent(),
+                index_cache_bytes: stats.bytes,
+                index_cache_entries: stats.entries,
+            });
             reported = current;
         }
     });

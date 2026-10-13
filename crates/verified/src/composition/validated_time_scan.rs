@@ -1,10 +1,11 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::timestamp::{time_archive_valid, time_cursor_matches};
-use super::{
-    indexed_timestamp_scan_finds_first, remote_timestamp_scan_preserves_first,
-    validated_remote_and_local_time_starts_agree,
+use {
+    super::{
+        indexed_timestamp_scan_finds_first, remote_timestamp_scan_preserves_first,
+        validated_remote_and_local_time_starts_agree,
+    },
+    creusot_std::prelude::*,
 };
 
 type TimeScanWitness = (usize, u32, u32, Option<usize>);

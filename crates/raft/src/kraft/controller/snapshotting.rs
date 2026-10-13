@@ -6,24 +6,24 @@
 //! keeps the prefix a snapshot covers until its retention limits let the
 //! oldest snapshot go, which the `cleaning` module decides.
 
-use std::sync::Arc;
-
-use krabka_ids::Offset;
-use krabka_metadata::{MetadataImage, MetadataRecord, VotersRecord};
-use krabka_units::prelude::{ByteSizeExt as _, TimeExt as _};
-
-use super::{
-    Engine,
-    checkpoint::{latest_checkpoint_id, retain_recent_checkpoints, write_checkpoint},
-    offsets::{
-        committed_records_since_snapshot, snapshot_bytes_reached, snapshot_interval_reached,
-        snapshot_time_reached,
+use {
+    super::{
+        Engine,
+        checkpoint::{latest_checkpoint_id, retain_recent_checkpoints, write_checkpoint},
+        offsets::{
+            committed_records_since_snapshot, snapshot_bytes_reached, snapshot_interval_reached,
+            snapshot_time_reached,
+        },
+        recovery::replay_committed,
     },
-    recovery::replay_committed,
-};
-use crate::{
-    error::RaftError,
-    snapshot::{SnapshotReader, SnapshotWriter},
+    crate::{
+        error::RaftError,
+        snapshot::{SnapshotReader, SnapshotWriter},
+    },
+    krabka_ids::Offset,
+    krabka_metadata::{MetadataImage, MetadataRecord, VotersRecord},
+    krabka_units::prelude::{ByteSizeExt as _, TimeExt as _},
+    std::sync::Arc,
 };
 
 impl Engine {
@@ -218,9 +218,7 @@ impl Engine {
 
     /// The latest local snapshot id `(end_offset, epoch)`, if any (leader's
     /// `FetchSnapshot` hint).
-    pub fn latest_snapshot_id(&self) -> Option<(i64, i32)> {
-        latest_checkpoint_id(&self.data_dir)
-    }
+    pub fn latest_snapshot_id(&self) -> Option<(i64, i32)> { latest_checkpoint_id(&self.data_dir) }
 
     /// Serialize the current image into a KIP-630 checkpoint under the data dir.
     #[tracing::instrument(

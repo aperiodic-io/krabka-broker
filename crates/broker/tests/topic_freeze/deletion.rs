@@ -5,28 +5,30 @@
 //! `DeleteTopics` destroy exactly that. A freeze that stopped new writes and
 //! let a trim through would be worse than no freeze at all.
 
-use assert2::check;
-use krabka_broker::codes;
-use krabka_client_core::Client;
-use krabka_protocol::{
-    krabka::freeze::PATTERN_TYPE_LITERAL,
-    owned::delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
-};
-
-use crate::{
-    control_plane::freeze_scope,
-    support::offsets::{delete_records_partition, delete_records_request, delete_records_topic},
-    wire::{CONTROL, controlled_fixture, produce},
+use {
+    crate::{
+        control_plane::freeze_scope,
+        support::offsets::{
+            delete_records_partition, delete_records_request, delete_records_topic,
+        },
+        wire::{CONTROL, controlled_fixture, produce},
+    },
+    assert2::check,
+    krabka_broker::codes,
+    krabka_client_core::Client,
+    krabka_protocol::{
+        krabka::freeze::PATTERN_TYPE_LITERAL,
+        owned::delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
+    },
 };
 
 /// Trim `topic` up to `offset`, and hand back the partition row's error code.
 async fn delete_records(client: &Client, topic: &str, offset: i64) -> i16 {
     let response = client
         .send(delete_records_request(
-            vec![delete_records_topic(
-                topic,
-                vec![delete_records_partition(0, offset)],
-            )],
+            vec![delete_records_topic(topic, vec![delete_records_partition(
+                0, offset,
+            )])],
             5_000,
         ))
         .await

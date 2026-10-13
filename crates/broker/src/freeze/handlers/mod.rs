@@ -27,20 +27,21 @@
 pub(crate) mod describe_freezes;
 pub(crate) mod set_freeze;
 
-use krabka_audit::{AuditError, AuditEvent, AuditLog, AuditMode, AuditOutcome, PrivilegedPhase};
-use krabka_metadata::PatternType;
-use krabka_protocol::krabka::freeze::{
-    PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED,
-};
-
 // The `Describe` gate that `describe_freezes` applies. It lives in
 // `crate::handlers` beside its `Alter` twin, so the freeze control plane does
 // not reach into another subsystem for an ACL gate.
 pub(crate) use crate::handlers::cluster_describe_denied;
-use crate::{
-    break_glass::handlers::{PrivilegedAudit, privileged_event},
-    handlers::{DESCRIBE_TOPIC_FREEZES_API_KEY, RequestContext, SET_TOPIC_FREEZE_API_KEY},
-    operator_keys::approver_set_fingerprint,
+use {
+    crate::{
+        break_glass::handlers::{PrivilegedAudit, privileged_event},
+        handlers::{DESCRIBE_TOPIC_FREEZES_API_KEY, RequestContext, SET_TOPIC_FREEZE_API_KEY},
+        operator_keys::approver_set_fingerprint,
+    },
+    krabka_audit::{AuditError, AuditEvent, AuditLog, AuditMode, AuditOutcome, PrivilegedPhase},
+    krabka_metadata::PatternType,
+    krabka_protocol::krabka::freeze::{
+        PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED,
+    },
 };
 
 // The dispatch constant and the codec must name one api key. The registry
@@ -207,9 +208,7 @@ fn freeze_event(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn a_concrete_pattern_type_byte_names_one_pattern_type() {

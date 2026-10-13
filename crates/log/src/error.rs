@@ -1,7 +1,6 @@
 //! Errors returned by `Log` and `Segment`.
 
-use krabka_ids::Offset;
-use thiserror::Error;
+use {krabka_ids::Offset, thiserror::Error};
 
 /// Errors returned by [`Log`](crate::Log) and [`Segment`](crate::Segment).
 #[derive(Debug, Error)]

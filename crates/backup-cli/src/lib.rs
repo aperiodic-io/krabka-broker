@@ -125,15 +125,16 @@ pub async fn run(cli: Cli) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use clap::Parser as _;
-
-    use super::{
-        Cli, Command, EXIT_BAD_ARGUMENT, EXIT_INTEGRITY, EXIT_UNREADABLE, run, run_from_args,
-    };
-    use crate::{
-        capture::capture_key,
-        manifest::{MANIFEST, RLMM_SNAPSHOT},
+    use {
+        super::{
+            Cli, Command, EXIT_BAD_ARGUMENT, EXIT_INTEGRITY, EXIT_UNREADABLE, run, run_from_args,
+        },
+        crate::{
+            capture::capture_key,
+            manifest::{MANIFEST, RLMM_SNAPSHOT},
+        },
+        assert2::check,
+        clap::Parser as _,
     };
 
     // A log directory holding the RLMM snapshot a capture takes off a node.

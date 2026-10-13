@@ -1,9 +1,10 @@
 //! The broker's log directories and the per-log IO policy: where partition
 //! data lands, and the read budgets every hosted log inherits.
 
-use std::path::PathBuf;
-
-use crate::{BrokerError, config::BrokerConfig, cordoned_log_dirs::resolve};
+use {
+    crate::{BrokerError, config::BrokerConfig, cordoned_log_dirs::resolve},
+    std::path::PathBuf,
+};
 
 impl BrokerConfig {
     pub(super) fn validate_log_io_policy(&self) -> Result<(), BrokerError> {
@@ -71,9 +72,7 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn all_log_dirs_keeps_primary_first_and_deduplicates_extras() {

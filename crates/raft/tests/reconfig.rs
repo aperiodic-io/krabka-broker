@@ -1,7 +1,9 @@
-use krabka_metadata::{KRaftVersionRange, Voter, VoterEndpoint};
-use krabka_raft::{
-    NodeId,
-    reconfig::{AddVoter, RemoveVoter, UpdateVoter, VoterChange},
+use {
+    krabka_metadata::{KRaftVersionRange, Voter, VoterEndpoint},
+    krabka_raft::{
+        NodeId,
+        reconfig::{AddVoter, RemoveVoter, UpdateVoter, VoterChange},
+    },
 };
 
 fn voter(id: u64) -> Voter {

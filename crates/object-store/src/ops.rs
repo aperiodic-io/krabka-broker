@@ -7,12 +7,14 @@
 //! multipart-threshold branch and the `object_store::Error` to
 //! [`ObjectStoreError`] mapping.
 
-use bytes::Bytes;
-use futures_util::stream::BoxStream;
 /// Precondition for a write, re-exported so callers need not depend on
 /// `object_store` directly.
 pub use object_store::PutMode;
-use object_store::{GetRange, ObjectMeta, path::Path};
+use {
+    bytes::Bytes,
+    futures_util::stream::BoxStream,
+    object_store::{GetRange, ObjectMeta, path::Path},
+};
 
 mod client;
 

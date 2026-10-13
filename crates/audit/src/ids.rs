@@ -7,8 +7,10 @@
 //!
 //! [newtype guidance]: ../../../docs/style_guides/code_style_guide.md
 
-use derive_more::{Add, AddAssign, Display, From, Into};
-use krabka_macros::PrimitiveCmp;
+use {
+    derive_more::{Add, AddAssign, Display, From, Into},
+    krabka_macros::PrimitiveCmp,
+};
 
 /// Per-broker hash-chain sequence number in each record's `seq` header.
 #[derive(

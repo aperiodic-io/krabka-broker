@@ -1,11 +1,6 @@
 //! The common transport failures, preceding each caller's unchanged protocol-specific errors.
 
-use moxy::{
-    ast::ParseError,
-    token::{Span, TokenStream, TokenTree},
-};
-
-use crate::meta::item_body;
+use crate::{meta::item_body, prelude::*};
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     if meta.into_iter().next().is_some() {

@@ -38,13 +38,14 @@
 //! replay poison, committed-poison cleanup, a marker refused by a full spool,
 //! loss-marker reconciliation, and a concurrent loss carried past a marker.
 
-use krabka_verified::{
-    audit::{AuditLosses as Losses, settle_loss_batch},
-    spool_append_decision,
+use {
+    crate::spool::{ReplayRecovery, add_loss_state, replay_recovery},
+    krabka_verified::{
+        audit::{AuditLosses as Losses, settle_loss_batch},
+        spool_append_decision,
+    },
+    stateright::{Checker, Model, Property},
 };
-use stateright::{Checker, Model, Property};
-
-use crate::spool::{ReplayRecovery, add_loss_state, replay_recovery};
 
 const MAX_DEPTH: usize = 64;
 const MAX_STATES: usize = 4_000_000;
@@ -149,9 +150,7 @@ struct SpoolState {
 impl SpoolState {
     /// Ghost: the losses that durable markers report, whether or not they
     /// have been replayed yet.
-    fn reported(&self) -> u64 {
-        self.durable_markers().map(|marker| marker.count).sum()
-    }
+    fn reported(&self) -> u64 { self.durable_markers().map(|marker| marker.count).sum() }
 
     fn durable_markers(&self) -> impl Iterator<Item = Losses> + '_ {
         self.markers
@@ -198,13 +197,9 @@ impl SpoolModel {
     };
 }
 
-fn bit(record: u8) -> u8 {
-    1 << record
-}
+fn bit(record: u8) -> u8 { 1 << record }
 
-fn pending_mask(state: &SpoolState) -> u8 {
-    state.volatile | state.durable
-}
+fn pending_mask(state: &SpoolState) -> u8 { state.volatile | state.durable }
 
 /// Append one frame through the production admission kernel. It returns the
 /// record id, or `None` when the spool is full.
@@ -246,8 +241,8 @@ fn persist_sidecar(state: &mut SpoolState) {
 }
 
 impl Model for SpoolModel {
-    type State = SpoolState;
     type Action = Action;
+    type State = SpoolState;
 
     fn init_states(&self) -> Vec<Self::State> {
         vec![SpoolState {

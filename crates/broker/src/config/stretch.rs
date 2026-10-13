@@ -126,10 +126,11 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::config::{NodeRole, test_support::witness_roles};
+    use {
+        super::*,
+        crate::config::{NodeRole, test_support::witness_roles},
+        assert2::{assert, check},
+    };
 
     #[test]
     fn rack_and_selector_default_off() {

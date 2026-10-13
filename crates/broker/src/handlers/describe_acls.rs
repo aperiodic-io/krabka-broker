@@ -7,25 +7,26 @@
 //! A cluster with no authorizer configured has no ACLs to project, and says
 //! so with `SECURITY_DISABLED` rather than an empty listing.
 
-use krabka_metadata::AclEntry;
-use krabka_protocol::{
-    ProtocolError,
-    owned::{
-        describe_acls_request::DescribeAclsRequest,
-        describe_acls_response::{AclDescription, DescribeAclsResource, DescribeAclsResponse},
+use {
+    super::acl_wire::{
+        NO_AUTHORIZER_MESSAGE, PatternTypeCode, ResourceTypeCode,
+        binding_filter::{AclBindingFilter, UnknownElement, WireAclBindingFilter},
+        operation_to_wire, pattern_type_to_wire, permission_to_wire, resource_type_to_wire,
     },
-};
-
-use super::acl_wire::{
-    NO_AUTHORIZER_MESSAGE, PatternTypeCode, ResourceTypeCode,
-    binding_filter::{AclBindingFilter, UnknownElement, WireAclBindingFilter},
-    operation_to_wire, pattern_type_to_wire, permission_to_wire, resource_type_to_wire,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    error::BrokerError,
-    handlers::{ErrorResponse as _, RequestContext, cluster_describe_denied},
+    crate::{
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        handlers::{ErrorResponse as _, RequestContext, cluster_describe_denied},
+    },
+    krabka_metadata::AclEntry,
+    krabka_protocol::{
+        ProtocolError,
+        owned::{
+            describe_acls_request::DescribeAclsRequest,
+            describe_acls_response::{AclDescription, DescribeAclsResource, DescribeAclsResponse},
+        },
+    },
 };
 
 /// The message of a cluster-describe refusal. Kafka's `AuthHelper` writes
@@ -151,24 +152,25 @@ fn build_filter(req: &DescribeAclsRequest) -> Result<AclBindingFilter, UnknownEl
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use krabka_metadata::AclOperation;
-
-    use super::*;
-    use crate::{
-        broker::Broker,
-        handlers::{
-            RequestContext,
-            acl_test_support::{
-                OPERATION_ANY, OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_ANY,
-                PATTERN_TYPE_LITERAL, PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED, PERMISSION_ALLOW,
-                PERMISSION_ANY, RESOURCE_TYPE_TOPIC, expected_empty_match_filter,
+    use {
+        super::*,
+        crate::{
+            broker::Broker,
+            handlers::{
+                RequestContext,
+                acl_test_support::{
+                    OPERATION_ANY, OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_ANY,
+                    PATTERN_TYPE_LITERAL, PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED,
+                    PERMISSION_ALLOW, PERMISSION_ANY, RESOURCE_TYPE_TOPIC,
+                    expected_empty_match_filter,
+                },
+                acl_wire::PATTERN_MATCHING_FIXTURE,
             },
-            acl_wire::PATTERN_MATCHING_FIXTURE,
+            test_support::DenyAll,
         },
-        test_support::DenyAll,
+        assert2::{assert, check},
+        krabka_metadata::AclOperation,
+        std::sync::Arc,
     };
     const VERSION: i16 = 3;
 
@@ -428,47 +430,33 @@ mod tests {
         let cases: [PatternRow<'_>; 12] = [
             (PATTERN_TYPE_ANY, None, all),
             (PATTERN_TYPE_ANY, Some(""), &[]),
-            (
-                PATTERN_TYPE_ANY,
-                Some("foo"),
-                &[("foo", PATTERN_TYPE_LITERAL)],
-            ),
+            (PATTERN_TYPE_ANY, Some("foo"), &[(
+                "foo",
+                PATTERN_TYPE_LITERAL,
+            )]),
             (PATTERN_TYPE_MATCH, None, all),
             (PATTERN_TYPE_MATCH, Some(""), &[("*", PATTERN_TYPE_LITERAL)]),
-            (
-                PATTERN_TYPE_MATCH,
-                Some("foo"),
-                &[
-                    ("*", PATTERN_TYPE_LITERAL),
-                    ("f", PATTERN_TYPE_PREFIXED),
-                    ("fo", PATTERN_TYPE_PREFIXED),
-                    ("foo", PATTERN_TYPE_LITERAL),
-                ],
-            ),
-            (
-                PATTERN_TYPE_LITERAL,
-                None,
-                &[
-                    ("*", PATTERN_TYPE_LITERAL),
-                    ("foo", PATTERN_TYPE_LITERAL),
-                    ("food", PATTERN_TYPE_LITERAL),
-                ],
-            ),
+            (PATTERN_TYPE_MATCH, Some("foo"), &[
+                ("*", PATTERN_TYPE_LITERAL),
+                ("f", PATTERN_TYPE_PREFIXED),
+                ("fo", PATTERN_TYPE_PREFIXED),
+                ("foo", PATTERN_TYPE_LITERAL),
+            ]),
+            (PATTERN_TYPE_LITERAL, None, &[
+                ("*", PATTERN_TYPE_LITERAL),
+                ("foo", PATTERN_TYPE_LITERAL),
+                ("food", PATTERN_TYPE_LITERAL),
+            ]),
             (PATTERN_TYPE_LITERAL, Some(""), &[]),
-            (
+            (PATTERN_TYPE_LITERAL, Some("foo"), &[(
+                "foo",
                 PATTERN_TYPE_LITERAL,
-                Some("foo"),
-                &[("foo", PATTERN_TYPE_LITERAL)],
-            ),
-            (
-                PATTERN_TYPE_PREFIXED,
-                None,
-                &[
-                    ("bar", PATTERN_TYPE_PREFIXED),
-                    ("f", PATTERN_TYPE_PREFIXED),
-                    ("fo", PATTERN_TYPE_PREFIXED),
-                ],
-            ),
+            )]),
+            (PATTERN_TYPE_PREFIXED, None, &[
+                ("bar", PATTERN_TYPE_PREFIXED),
+                ("f", PATTERN_TYPE_PREFIXED),
+                ("fo", PATTERN_TYPE_PREFIXED),
+            ]),
             (PATTERN_TYPE_PREFIXED, Some(""), &[]),
             (PATTERN_TYPE_PREFIXED, Some("foo"), &[]),
         ];

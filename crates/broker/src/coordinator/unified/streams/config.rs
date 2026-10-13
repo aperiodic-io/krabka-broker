@@ -1,12 +1,13 @@
 //! KIP-1071 Streams rebalance-protocol configuration.
-use std::{collections::BTreeMap, time::Duration};
-
-use super::description::TopologyDescriptionPlugin;
-use crate::{
-    api_catalog::UnstableApiVersions,
-    coordinator::unified::config::{
-        MAX_ASSIGNMENT_INTERVAL, MIN_ASSIGNMENT_INTERVAL, clamp_to_range,
+use {
+    super::description::TopologyDescriptionPlugin,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        coordinator::unified::config::{
+            MAX_ASSIGNMENT_INTERVAL, MIN_ASSIGNMENT_INTERVAL, clamp_to_range,
+        },
     },
+    std::{collections::BTreeMap, time::Duration},
 };
 
 /// Kafka's `group.streams.max.standby.replicas` default, which krabka does not
@@ -570,9 +571,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn defaults_are_kafka_ga() {
@@ -766,62 +765,34 @@ mod tests {
     fn group_overrides_are_capped_to_the_broker_bounds() {
         let broker = StreamsGroupConfig::default();
         let rows = [
-            (
-                KEY_SESSION_TIMEOUT_MS,
-                "1000",
-                StreamsGroupConfig {
-                    session_timeout: broker.min_session_timeout,
-                    ..broker.clone()
-                },
-            ),
-            (
-                KEY_SESSION_TIMEOUT_MS,
-                "3600000",
-                StreamsGroupConfig {
-                    session_timeout: broker.max_session_timeout,
-                    ..broker.clone()
-                },
-            ),
-            (
-                KEY_HEARTBEAT_INTERVAL_MS,
-                "0",
-                StreamsGroupConfig {
-                    heartbeat_interval: broker.min_heartbeat_interval,
-                    ..broker.clone()
-                },
-            ),
-            (
-                KEY_HEARTBEAT_INTERVAL_MS,
-                "-1",
-                StreamsGroupConfig {
-                    heartbeat_interval: broker.min_heartbeat_interval,
-                    ..broker.clone()
-                },
-            ),
-            (
-                KEY_HEARTBEAT_INTERVAL_MS,
-                "60000",
-                StreamsGroupConfig {
-                    heartbeat_interval: broker.max_heartbeat_interval,
-                    ..broker.clone()
-                },
-            ),
-            (
-                KEY_ASSIGNMENT_INTERVAL_MS,
-                "3600000",
-                StreamsGroupConfig {
-                    assignment_interval: MAX_ASSIGNMENT_INTERVAL,
-                    ..broker.clone()
-                },
-            ),
-            (
-                KEY_NUM_STANDBY_REPLICAS,
-                "5",
-                StreamsGroupConfig {
-                    num_standby_replicas: MAX_NUM_STANDBY_REPLICAS,
-                    ..broker.clone()
-                },
-            ),
+            (KEY_SESSION_TIMEOUT_MS, "1000", StreamsGroupConfig {
+                session_timeout: broker.min_session_timeout,
+                ..broker.clone()
+            }),
+            (KEY_SESSION_TIMEOUT_MS, "3600000", StreamsGroupConfig {
+                session_timeout: broker.max_session_timeout,
+                ..broker.clone()
+            }),
+            (KEY_HEARTBEAT_INTERVAL_MS, "0", StreamsGroupConfig {
+                heartbeat_interval: broker.min_heartbeat_interval,
+                ..broker.clone()
+            }),
+            (KEY_HEARTBEAT_INTERVAL_MS, "-1", StreamsGroupConfig {
+                heartbeat_interval: broker.min_heartbeat_interval,
+                ..broker.clone()
+            }),
+            (KEY_HEARTBEAT_INTERVAL_MS, "60000", StreamsGroupConfig {
+                heartbeat_interval: broker.max_heartbeat_interval,
+                ..broker.clone()
+            }),
+            (KEY_ASSIGNMENT_INTERVAL_MS, "3600000", StreamsGroupConfig {
+                assignment_interval: MAX_ASSIGNMENT_INTERVAL,
+                ..broker.clone()
+            }),
+            (KEY_NUM_STANDBY_REPLICAS, "5", StreamsGroupConfig {
+                num_standby_replicas: MAX_NUM_STANDBY_REPLICAS,
+                ..broker.clone()
+            }),
         ];
         for (key, value, expected) in rows {
             let overrides = maplit::btreemap! {key.into() => value.into()};

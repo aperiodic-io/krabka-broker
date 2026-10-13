@@ -7,17 +7,18 @@
 //! from the admin-RPC surfaces because it asserts on the recovered share-state
 //! summary rather than on a Describe, Alter, or Delete response.
 
-use assert2::assert;
-
-use crate::{
-    harness::{
-        InitializedRestartFixture, acquired_count, fetch_until_acquired,
-        initialized_restart_fixture,
+use {
+    crate::{
+        harness::{
+            InitializedRestartFixture, acquired_count, fetch_until_acquired,
+            initialized_restart_fixture,
+        },
+        support::share::{
+            ShareAck, ShareRecordCount, ShareRecordSeedSetup, ShareSessionSetup,
+            acknowledge_success, rejoin_group,
+        },
     },
-    support::share::{
-        ShareAck, ShareRecordCount, ShareRecordSeedSetup, ShareSessionSetup, acknowledge_success,
-        rejoin_group,
-    },
+    assert2::assert,
 };
 
 async fn assert_share_summary(

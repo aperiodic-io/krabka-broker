@@ -1,7 +1,6 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::{count_ge, count_ge_prefix, hwm_member_at};
+use creusot_std::prelude::*;
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]

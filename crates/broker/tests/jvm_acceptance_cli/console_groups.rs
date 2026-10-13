@@ -5,12 +5,13 @@
 //! All three drive the same coordinator sequence of `JoinGroup`, `SyncGroup`,
 //! `Heartbeat` and `Fetch`, which is why they share a file.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE, KAFKA_IMAGE_TXN, assert_console_values, broker0_advertised,
-    describe_console_group, docker_run_kafka_tool, docker_run_kafka_tool_with_image,
-    nc_check_connectivity, produce_console_checked, start_console_broker, start_host_broker,
+use {
+    crate::jvm_acceptance::{
+        KAFKA_IMAGE, KAFKA_IMAGE_TXN, assert_console_values, broker0_advertised,
+        describe_console_group, docker_run_kafka_tool, docker_run_kafka_tool_with_image,
+        nc_check_connectivity, produce_console_checked, start_console_broker, start_host_broker,
+    },
+    assert2::assert,
 };
 
 // Same multi-thread runtime caveat as `console_producer_round_trip`:
@@ -141,25 +142,22 @@ async fn cooperative_sticky_kafka_console_consumer() {
     // 3. Consume via kafka-console-consumer with CooperativeStickyAssignor.
     //    Use cp-kafka:7.5.0 (Kafka 3.5) — cooperative-sticky in 2.7 had
     //    rebalance races that masked broker correctness issues.
-    let consumer_out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-console-consumer",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--topic",
-            TOPIC,
-            "--group",
-            "coop-jvm-group",
-            "--consumer-property",
-            "partition.assignment.strategy=org.apache.kafka.clients.consumer.CooperativeStickyAssignor",
-            "--from-beginning",
-            "--max-messages",
-            "3",
-            "--timeout-ms",
-            "30000",
-        ],
-    );
+    let consumer_out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-console-consumer",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--topic",
+        TOPIC,
+        "--group",
+        "coop-jvm-group",
+        "--consumer-property",
+        "partition.assignment.strategy=org.apache.kafka.clients.consumer.CooperativeStickyAssignor",
+        "--from-beginning",
+        "--max-messages",
+        "3",
+        "--timeout-ms",
+        "30000",
+    ]);
     let s = String::from_utf8_lossy(&consumer_out.stdout);
     for needle in ["alpha", "bravo", "charlie"] {
         assert!(

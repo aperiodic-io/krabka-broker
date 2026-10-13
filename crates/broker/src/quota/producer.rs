@@ -1,9 +1,10 @@
 //! KIP-13 `producer_byte_rate` enforcement.
 
-use krabka_metadata::MetadataImage;
-use krabka_units::{Time, convert::TimeExt as _};
-
-use super::{QuotaConsumption, buckets::QuotaBuckets, consume_configured_quota};
+use {
+    super::{QuotaConsumption, buckets::QuotaBuckets, consume_configured_quota},
+    krabka_metadata::MetadataImage,
+    krabka_units::{Time, convert::TimeExt as _},
+};
 
 /// Charges `bytes` to the `producer_byte_rate` bucket of the quota entity
 /// that `(principal, client_id)` resolves to.
@@ -39,11 +40,12 @@ pub fn consume_producer_quota(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::{Time, convert::TimeExt, millis, secs};
-
-    use super::consume_producer_quota;
-    use crate::quota::{QuotaBuckets, test_support::check_fractional_bandwidth};
+    use {
+        super::consume_producer_quota,
+        crate::quota::{QuotaBuckets, test_support::check_fractional_bandwidth},
+        assert2::{assert, check},
+        krabka_units::{Time, convert::TimeExt, millis, secs},
+    };
 
     crate::quota::test_support::image_builder!(img_with_quota, "producer_byte_rate");
 

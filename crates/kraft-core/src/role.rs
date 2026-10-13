@@ -1,8 +1,9 @@
 //! The replica's volatile role within the current epoch and its per-role state.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use crate::types::{NodeId, SimInstant};
+use {
+    crate::types::{NodeId, SimInstant},
+    std::collections::{BTreeMap, BTreeSet},
+};
 
 /// How recently a replica must have fetched for `AddRaftVoter` to call it
 /// caught up: Kafka's `LeaderState.isReplicaCaughtUp` window of one hour.
@@ -147,16 +148,12 @@ impl Default for Role {
 
 impl Role {
     #[must_use]
-    pub fn is_leader(&self) -> bool {
-        matches!(self, Role::Leader { .. })
-    }
+    pub fn is_leader(&self) -> bool { matches!(self, Role::Leader { .. }) }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
     /// Every role reports its own name. These strings reach operators through
     /// metrics and logs, so one standing in for another is a real confusion.
     #[test]

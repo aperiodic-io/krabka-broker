@@ -11,11 +11,12 @@
 //! (pre-KIP-516 `Partition`, KIP-516 `Partitions`) must agree on it, so both
 //! are built here.
 
-use krabka_protocol::owned::offset_fetch_response::{
-    OffsetFetchResponsePartition, OffsetFetchResponsePartitions,
+use {
+    crate::codes,
+    krabka_protocol::owned::offset_fetch_response::{
+        OffsetFetchResponsePartition, OffsetFetchResponsePartitions,
+    },
 };
-
-use crate::codes;
 
 /// The unstable row in the pre-KIP-516 (v0–v7) response shape.
 pub(super) fn legacy_row(partition_index: i32) -> OffsetFetchResponsePartition {

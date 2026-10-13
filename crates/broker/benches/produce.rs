@@ -31,36 +31,37 @@
 //! whole request. The difference against the `acks=1` arm at the same
 //! partition count is what that gate costs now.
 
-use std::{
-    cell::RefCell,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use bytes::{Bytes, BytesMut};
-use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
-use krabka_broker::{
-    Broker, BrokerConfig, BrokerHandle,
-    metrics::BrokerMetrics,
-    produce_hot_path::{
-        HotPathSettings, PathChoice, ProducePath, TimestampPolicy, append_one_batch,
+use {
+    assert2::assert,
+    bytes::{Bytes, BytesMut},
+    criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main},
+    krabka_broker::{
+        Broker, BrokerConfig, BrokerHandle,
+        metrics::BrokerMetrics,
+        produce_hot_path::{
+            HotPathSettings, PathChoice, ProducePath, TimestampPolicy, append_one_batch,
+        },
     },
-};
-use krabka_client_core::Client;
-use krabka_compression::RecordDecompressionPolicy;
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{CreatableTopic, CreateTopicsRequest},
-        metadata_request::{MetadataRequest, MetadataRequestTopic},
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+    krabka_client_core::Client,
+    krabka_compression::RecordDecompressionPolicy,
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::{
+        owned::{
+            create_topics_request::{CreatableTopic, CreateTopicsRequest},
+            metadata_request::{MetadataRequest, MetadataRequestTopic},
+            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::{Record, RecordBatch},
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch},
+    krabka_records_legacy::Magic,
+    std::{
+        cell::RefCell,
+        sync::Arc,
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
 };
-use krabka_records_legacy::Magic;
-use tempfile::TempDir;
 
 mod support;
 use support::{BoundedResource, LEADER_EPOCH, LOG_BUDGET, SHAPES, WARMUP, bounded_resource};
@@ -305,7 +306,7 @@ fn bench_ratio(_c: &mut Criterion) {
                 (0..RUNS)
                     .map(|_| {
                         timed_appends(&wire, choice, expected, u64::from(SAMPLES)).as_secs_f64()
-                            * 1e9
+                            * 1.0e9
                             / f64::from(SAMPLES)
                     })
                     .fold(f64::INFINITY, f64::min)

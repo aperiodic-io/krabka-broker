@@ -12,10 +12,11 @@
 //! The group refreshes a resolution when a heartbeat finds it stale; see
 //! `actor::regex_resolution`.
 
-use std::collections::{BTreeSet, HashMap};
-
-use super::{group::GroupState, member::MemberState};
-use crate::coordinator::unified::persistence_next_gen::RegularExpressionValue;
+use {
+    super::{group::GroupState, member::MemberState},
+    crate::coordinator::unified::persistence_next_gen::RegularExpressionValue,
+    std::collections::{BTreeSet, HashMap},
+};
 
 /// Kafka's `ResolvedRegularExpression`: the topics that a regular expression
 /// resolved to, the version of the metadata image they were resolved from, and
@@ -86,9 +87,7 @@ impl GroupState {
 
     /// Kafka's `ConsumerGroup.numResolvedRegularExpressions`.
     #[must_use]
-    pub(crate) fn num_resolved_regexes(&self) -> usize {
-        self.resolved_regexes.len()
-    }
+    pub(crate) fn num_resolved_regexes(&self) -> usize { self.resolved_regexes.len() }
 
     /// The regular expressions that the group holds a resolution of: the keys
     /// of Kafka's `ConsumerGroup.resolvedRegularExpressions`.
@@ -195,11 +194,12 @@ impl GroupState {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::consumer_state::test_support::{
-        regex_group as group_with_regexes, resolved_regex as resolved,
+    use {
+        super::*,
+        crate::coordinator::unified::consumer_state::test_support::{
+            regex_group as group_with_regexes, resolved_regex as resolved,
+        },
+        assert2::assert,
     };
 
     #[test]

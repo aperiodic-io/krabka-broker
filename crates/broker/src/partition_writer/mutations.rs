@@ -5,20 +5,20 @@
 //! whatever derived state the call moved, so they share a module and the
 //! blocking-pool wrapper they all call.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-
-use arc_swap::ArcSwap;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, Offset};
-use tokio::sync::Notify;
-
-use super::storage::{flag_storage_failure, lock_log, run_log_mutation};
-use crate::{
-    error::BrokerError, log_dir_status::LogDirRegistry, producer_state::ProducerState,
-    replica_state::ReplicaState, wal::SharedWal,
+use {
+    super::storage::{flag_storage_failure, lock_log, run_log_mutation},
+    crate::{
+        error::BrokerError, log_dir_status::LogDirRegistry, producer_state::ProducerState,
+        replica_state::ReplicaState, wal::SharedWal,
+    },
+    arc_swap::ArcSwap,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, Offset},
+    std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
+    tokio::sync::Notify,
 };
 
 pub(super) async fn handle_replicate(

@@ -3,16 +3,16 @@
 //! The swap is the only writer message that renames directories and reopens
 //! two logs under one lock, so its filesystem recovery path is isolated here.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
+use {
+    super::storage::lock_log,
+    crate::{error::BrokerError, partition::SwapOutcome},
+    arc_swap::ArcSwap,
+    krabka_log::Log,
+    std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
 };
-
-use arc_swap::ArcSwap;
-use krabka_log::Log;
-
-use super::storage::lock_log;
-use crate::{error::BrokerError, partition::SwapOutcome};
 
 /// KIP-113 intra-broker log-dir swap.
 ///
@@ -116,11 +116,12 @@ pub(super) fn swap_future_log(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::partition_writer::test_support::{FixedStamp, open_log_with_records};
+    use {
+        super::*,
+        crate::partition_writer::test_support::{FixedStamp, open_log_with_records},
+        assert2::check,
+        tempfile::tempdir,
+    };
 
     struct SwapPaths {
         source_dir: PathBuf,

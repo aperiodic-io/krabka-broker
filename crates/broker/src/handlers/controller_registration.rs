@@ -5,16 +5,16 @@
 //! set after it registers), refuses a `metadata.version` below 3.7-IV0 (level
 //! 15) with `UNSUPPORTED_VERSION`, and writes `zkMigrationReady` false.
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::{BrokerEndpoint, ControllerRegistrationRecord, MetadataRecord, NodeId};
-use krabka_protocol::owned::{
-    controller_registration_request::ControllerRegistrationRequest,
-    controller_registration_response::ControllerRegistrationResponse,
+use {
+    crate::codes,
+    krabka_metadata::{BrokerEndpoint, ControllerRegistrationRecord, MetadataRecord, NodeId},
+    krabka_protocol::owned::{
+        controller_registration_request::ControllerRegistrationRequest,
+        controller_registration_response::ControllerRegistrationResponse,
+    },
+    krabka_raft::RaftError,
+    std::collections::BTreeMap,
 };
-use krabka_raft::RaftError;
-
-use crate::codes;
 
 context_handler! {
     ControllerRegistrationRequest => ControllerRegistrationResponse,
@@ -124,9 +124,7 @@ fn decode_listeners(
 /// Kafka's `ControllerApis.handleControllerRegistration` answers success with a
 /// bare `ControllerRegistrationResponseData`, so `ErrorMessage` goes out as the
 /// generated default: the empty string, not null.
-fn success() -> ControllerRegistrationResponse {
-    response(0, Some(String::new()))
-}
+fn success() -> ControllerRegistrationResponse { response(0, Some(String::new())) }
 
 fn response(error_code: i16, error_message: Option<String>) -> ControllerRegistrationResponse {
     ControllerRegistrationResponse {
@@ -139,11 +137,11 @@ fn response(error_code: i16, error_message: Option<String>) -> ControllerRegistr
 
 #[cfg(test)]
 mod tests {
-    use krabka_protocol::owned::controller_registration_request::Listener;
-    use krabka_security::ListenerProtocol;
-
-    use super::*;
-    use crate::test_support::principal;
+    use {
+        super::*, crate::test_support::principal,
+        krabka_protocol::owned::controller_registration_request::Listener,
+        krabka_security::ListenerProtocol,
+    };
 
     crate::test_support::context_helper!(client_id = "controller");
 

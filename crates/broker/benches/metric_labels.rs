@@ -39,17 +39,18 @@
 //! Run it with `cargo bench -p krabka-broker --bench metric_labels`. This
 //! repository has no benchmark CI workflow; nothing runs it for you.
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use krabka_broker::metrics::BrokerMetrics;
-use prometheus_client::{
-    encoding::EncodeLabelSet,
-    metrics::{counter::Counter, family::Family},
+use {
+    assert2::assert,
+    criterion::{Criterion, Throughput, criterion_group, criterion_main},
+    krabka_broker::metrics::BrokerMetrics,
+    prometheus_client::{
+        encoding::EncodeLabelSet,
+        metrics::{counter::Counter, family::Family},
+    },
+    std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    },
 };
 
 /// Observations per measured run.
@@ -196,7 +197,7 @@ fn bench_ratio(_c: &mut Criterion) {
         .into_iter()
         .map(|(_, run)| {
             (0..RUNS)
-                .map(|_| run(u64::from(CALLS)).as_secs_f64() * 1e9 / f64::from(CALLS))
+                .map(|_| run(u64::from(CALLS)).as_secs_f64() * 1.0e9 / f64::from(CALLS))
                 .fold(f64::INFINITY, f64::min)
         })
         .collect();

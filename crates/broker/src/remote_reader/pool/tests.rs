@@ -2,16 +2,12 @@
 //! and a read that arrives with the pending queue already full is refused
 //! rather than queued behind the running ones.
 
-use assert2::check;
-
-use super::*;
+use {super::*, assert2::check};
 
 /// The idle percentage is a ratio of two small integers, so every value these
 /// tests expect is exactly representable. `check!` on `f64` equality is a
 /// clippy error even then, so the comparison names its own tolerance.
-fn is_percent(got: f64, want: f64) -> bool {
-    (got - want).abs() < f64::EPSILON
-}
+fn is_percent(got: f64, want: f64) -> bool { (got - want).abs() < f64::EPSILON }
 
 #[tokio::test]
 async fn only_thread_count_reads_hold_a_permit_at_once() {

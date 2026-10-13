@@ -85,18 +85,19 @@ impl super::InitialLeadership {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, atomic::Ordering};
-
-    use assert2::assert;
-    use krabka_raft::NodeId;
-
-    use super::is_local_leader;
-    use crate::{
-        handlers::{
-            create_topics::InitialLeadership, partition_materialization::should_materialize_locally,
+    use {
+        super::is_local_leader,
+        crate::{
+            handlers::{
+                create_topics::InitialLeadership,
+                partition_materialization::should_materialize_locally,
+            },
+            partition::{Partition, test_support::test_partition},
+            producer_state::ProducerState,
         },
-        partition::{Partition, test_support::test_partition},
-        producer_state::ProducerState,
+        assert2::assert,
+        krabka_raft::NodeId,
+        std::sync::{Arc, atomic::Ordering},
     };
 
     /// What an installed leadership left on a partition.

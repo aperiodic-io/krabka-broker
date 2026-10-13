@@ -6,13 +6,14 @@
 //! `[runtime]` appliers, the `set_runtime_*` macros, and the section appliers
 //! all draw on the same set.
 
-use krabka_units::{
-    ByteSize, Ratio, Time,
-    convert::{ByteSizeExt as _, RatioExt as _, TimeExt as _},
+use {
+    super::FileConfigError,
+    crate::config_value::{PositiveCount, PositiveI32, PositiveI64},
+    krabka_units::{
+        ByteSize, Ratio, Time,
+        convert::{ByteSizeExt as _, RatioExt as _, TimeExt as _},
+    },
 };
-
-use super::FileConfigError;
-use crate::config_value::{PositiveCount, PositiveI32, PositiveI64};
 
 pub(super) fn invalid_runtime_value(name: &str, error: impl std::fmt::Display) -> FileConfigError {
     FileConfigError::InvalidConfig(format!("{name}: {error}"))
@@ -282,14 +283,15 @@ pub(super) fn positive_i16(name: &str, value: i16) -> Result<i16, FileConfigErro
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use crate::{
-        config::{
-            AuthenticationOrigins, BrokerConfig, LogOrigins, StaticConfigOrigins,
-            TopicAdminOrigins, TopicCreationOrigins,
+    use {
+        crate::{
+            config::{
+                AuthenticationOrigins, BrokerConfig, LogOrigins, StaticConfigOrigins,
+                TopicAdminOrigins, TopicCreationOrigins,
+            },
+            file_config::{FileConfig, test_support::configured},
         },
-        file_config::{FileConfig, test_support::configured},
+        assert2::{assert, check},
     };
 
     /// Independent default provenance with the two explicitly varied expiry flags.

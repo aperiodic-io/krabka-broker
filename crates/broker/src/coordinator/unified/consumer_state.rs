@@ -8,9 +8,7 @@
 //! [`TargetAssignment`] stays here: it is a leaf record with no behaviour of
 //! its own.
 
-use std::collections::HashMap;
-
-use krabka_protocol::primitives::uuid::Uuid;
+use {krabka_protocol::primitives::uuid::Uuid, std::collections::HashMap};
 
 mod group;
 mod member;

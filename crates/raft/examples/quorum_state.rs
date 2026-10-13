@@ -1,9 +1,11 @@
 // docs:begin quorum_state
-use assert2::assert;
-use krabka_metadata::{KRaftVersionRange, Voter, VoterEndpoint, VoterSet};
-use krabka_raft::kraft::{NodeId, QuorumState, QuorumStateMachine};
-use krabka_units::prelude::millis;
-use uuid::Uuid;
+use {
+    assert2::assert,
+    krabka_metadata::{KRaftVersionRange, Voter, VoterEndpoint, VoterSet},
+    krabka_raft::kraft::{NodeId, QuorumState, QuorumStateMachine},
+    krabka_units::prelude::millis,
+    uuid::Uuid,
+};
 
 fn main() {
     let node = NodeId(1);

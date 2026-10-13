@@ -1,21 +1,21 @@
 //! The KFC-7 schema-validation gate, which checks every record of a prepared
 //! batch against the registry after the leadership gate and before append.
 
-use std::sync::Arc;
-
-use krabka_compression::RecordDecompressionPolicy;
-use krabka_protocol::{
-    owned::produce_response::BatchIndexAndErrorMessage, records::RecordBatchBorrowed,
-};
-use krabka_verified::{
-    SchemaBatchAdmission, SchemaFieldAction, SchemaFieldRole, schema_batch_admission,
-    schema_field_action,
-};
-
-use super::prepare::{PreparedBatch, PreparedSource};
-use crate::{
-    metrics::BrokerMetrics,
-    schema_validation::{RejectReason, Role, SchemaGate, SchemaValidator},
+use {
+    super::prepare::{PreparedBatch, PreparedSource},
+    crate::{
+        metrics::BrokerMetrics,
+        schema_validation::{RejectReason, Role, SchemaGate, SchemaValidator},
+    },
+    krabka_compression::RecordDecompressionPolicy,
+    krabka_protocol::{
+        owned::produce_response::BatchIndexAndErrorMessage, records::RecordBatchBorrowed,
+    },
+    krabka_verified::{
+        SchemaBatchAdmission, SchemaFieldAction, SchemaFieldRole, schema_batch_admission,
+        schema_field_action,
+    },
+    std::sync::Arc,
 };
 
 /// The KIP-467 `error_message` a schema rejection carries.
@@ -224,15 +224,16 @@ impl SchemaCheck<'_> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::Bytes;
-    use krabka_protocol::records::{Record, RecordBatch};
-    use krabka_units::secs;
-
-    use super::*;
-    use crate::{
-        handlers::produce::test_support::encode_batch,
-        schema_validation::{SchemaGate, ValidationMode},
+    use {
+        super::*,
+        crate::{
+            handlers::produce::test_support::encode_batch,
+            schema_validation::{SchemaGate, ValidationMode},
+        },
+        assert2::{assert, check},
+        bytes::Bytes,
+        krabka_protocol::records::{Record, RecordBatch},
+        krabka_units::secs,
     };
 
     /// A record the broker cannot decode must not be admitted by a validated

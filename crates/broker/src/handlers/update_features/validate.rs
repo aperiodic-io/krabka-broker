@@ -6,24 +6,25 @@
 //! current image. The first entry that fails stops the request and nothing is
 //! written. Otherwise every entry's records form one atomic batch.
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::{
-    FeatureLevelRecord, MetadataRecord,
-    metadata_version::{KRAFT_VERSION_FEATURE, METADATA_VERSION_FEATURE, METADATA_VERSION_MIN},
-};
-use krabka_protocol::owned::update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest};
-use krabka_verified::features::{
-    FeatureKind, FeatureLevels, FeatureUpdateDecision, FeatureUpdateFacts, feature_update_decision,
-};
-
-use super::{
-    java_order::hash_map_order,
-    preconditions::{LocalController, dependency_error, reason_not_supported},
-    upgrade_type::update_type,
-};
-use crate::{
-    codes, config_keys::MIN_INSYNC_REPLICAS, elr::clear_published_elr, features::ELR_VERSION,
+use {
+    super::{
+        java_order::hash_map_order,
+        preconditions::{LocalController, dependency_error, reason_not_supported},
+        upgrade_type::update_type,
+    },
+    crate::{
+        codes, config_keys::MIN_INSYNC_REPLICAS, elr::clear_published_elr, features::ELR_VERSION,
+    },
+    krabka_metadata::{
+        FeatureLevelRecord, MetadataRecord,
+        metadata_version::{KRAFT_VERSION_FEATURE, METADATA_VERSION_FEATURE, METADATA_VERSION_MIN},
+    },
+    krabka_protocol::owned::update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest},
+    krabka_verified::features::{
+        FeatureKind, FeatureLevels, FeatureUpdateDecision, FeatureUpdateFacts,
+        feature_update_decision,
+    },
+    std::collections::BTreeMap,
 };
 
 /// Kafka's `MetadataVersion.MINIMUM_VERSION` name, which

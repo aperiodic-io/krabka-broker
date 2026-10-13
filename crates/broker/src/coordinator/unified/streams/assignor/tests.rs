@@ -5,11 +5,7 @@
 //! expects the one that this port's tie-break on the process id and the member
 //! id gives, and the comment says which of Kafka's results that is.
 
-use std::collections::HashMap;
-
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert, std::collections::HashMap};
 
 /// A member built from `(subtopology, partitions)` lists for each role, and
 /// `(subtopology, partition, offset sum)` reported offsets.
@@ -392,11 +388,10 @@ fn range_assigns_each_member_a_task_of_every_subtopology() {
     // Kafka's `shouldRangeAssignTasksWhenScalingUp`: member2 is new, and each
     // member ends with one active and one standby task of each subtopology.
     let members = [
-        member(&m_active(
-            "member1",
-            "process1",
-            &[("s1", &[0, 1]), ("s2", &[0, 1])],
-        )),
+        member(&m_active("member1", "process1", &[
+            ("s1", &[0, 1]),
+            ("s2", &[0, 1]),
+        ])),
         member(&m("member2", "process2")),
     ];
     let input = AssignorInput {

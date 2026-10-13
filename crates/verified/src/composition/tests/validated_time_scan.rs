@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 pub(super) fn prefix_oracle(entries: &[(i64, u32)], target: i64) -> (usize, u32) {
     let count = entries

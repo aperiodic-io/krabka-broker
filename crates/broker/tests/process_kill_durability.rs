@@ -64,22 +64,22 @@
 //! Half the cycles are a bare `SIGKILL` and half tear the tail as well, so both
 //! recovery paths run several times in one execution.
 
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
-    process::Command,
-};
-
-use assert2::{assert, check};
-use krabka_protocol::records::{CRC_COVERAGE_START, HEADER_LEN, RecordBatchHeader};
-use support::{docker, free_port};
-use zerocopy::FromBytes;
-
-use crate::support::{
-    load_test::*,
-    producer::{ProducerRecordSetup, no_retry_acks_all_producer, producer_record},
-    remove_container_with_volumes,
-    storage::host_directory_user,
+use {
+    crate::support::{
+        load_test::*,
+        producer::{ProducerRecordSetup, no_retry_acks_all_producer, producer_record},
+        remove_container_with_volumes,
+        storage::host_directory_user,
+    },
+    assert2::{assert, check},
+    krabka_protocol::records::{CRC_COVERAGE_START, HEADER_LEN, RecordBatchHeader},
+    std::{
+        collections::BTreeSet,
+        path::{Path, PathBuf},
+        process::Command,
+    },
+    support::{docker, free_port},
+    zerocopy::FromBytes,
 };
 
 mod support;
@@ -144,18 +144,15 @@ impl BrokerProcess {
 
         // Run as whoever owns the host directory. The image's own user is
         // 65532, which cannot write a directory this test created.
-        node.run_tool(
-            "/usr/bin/krabka-format",
-            &[
-                &format!("--log-dir={CONTAINER_LOG_DIR}"),
-                "--standalone",
-                "--node-id=1",
-                // `--listen-addr` is set below, so the broker derives its
-                // controller listener from it: same address, port 9093.
-                "--controller-listener=0.0.0.0:9093",
-                "--ignore-formatted",
-            ],
-        );
+        node.run_tool("/usr/bin/krabka-format", &[
+            &format!("--log-dir={CONTAINER_LOG_DIR}"),
+            "--standalone",
+            "--node-id=1",
+            // `--listen-addr` is set below, so the broker derives its
+            // controller listener from it: same address, port 9093.
+            "--controller-listener=0.0.0.0:9093",
+            "--ignore-formatted",
+        ]);
 
         let mount = format!("{}:{CONTAINER_ROOT}", node.host_root().display());
         let publish = format!("127.0.0.1:{}:9092", node.port);
@@ -188,22 +185,14 @@ impl BrokerProcess {
     }
 
     /// `uid:gid` of the host data directory, for `docker run --user`.
-    fn user(&self) -> String {
-        host_directory_user(self.host_root())
-    }
+    fn user(&self) -> String { host_directory_user(self.host_root()) }
 
-    fn host_root(&self) -> &Path {
-        self.root.path()
-    }
+    fn host_root(&self) -> &Path { self.root.path() }
 
     /// The host-side log directory the container writes into.
-    fn host_log_dir(&self) -> PathBuf {
-        self.host_root().join("data")
-    }
+    fn host_log_dir(&self) -> PathBuf { self.host_root().join("data") }
 
-    fn bootstrap(&self) -> String {
-        format!("127.0.0.1:{}", self.port)
-    }
+    fn bootstrap(&self) -> String { format!("127.0.0.1:{}", self.port) }
 
     /// Run one of the image's other binaries against the same mount.
     fn run_tool(&self, entrypoint: &str, args: &[&str]) {
@@ -226,14 +215,10 @@ impl BrokerProcess {
     }
 
     /// Block until the container has exited, and return its status.
-    fn wait_exit(&self) -> String {
-        docker(&["wait", &self.name])
-    }
+    fn wait_exit(&self) -> String { docker(&["wait", &self.name]) }
 
     /// Boot the same container again, on the log directory it left behind.
-    fn restart(&self) {
-        docker(&["start", &self.name]);
-    }
+    fn restart(&self) { docker(&["start", &self.name]); }
 }
 
 impl Drop for BrokerProcess {

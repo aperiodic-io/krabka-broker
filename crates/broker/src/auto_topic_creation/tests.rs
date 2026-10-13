@@ -1,23 +1,23 @@
-use std::path::PathBuf;
-
-use assert2::{assert, check};
-use krabka_protocol::{
-    UnknownTaggedFields,
-    owned::{
-        create_topics_request::{CreatableTopic, CreatableTopicConfig},
-        create_topics_response::CreatableTopicResult,
+use {
+    super::*,
+    crate::{
+        barrier::STATE_TOPIC,
+        coordinator::bootstrap::OFFSETS_TOPIC,
+        share_coordinator::bootstrap::TOPIC as SHARE_TOPIC,
+        test_support::{PartitionCount, ReplicationFactor, start_broker_no_audit},
+        time_util::now_ms,
+        txn::bootstrap::TOPIC as TXN_TOPIC,
     },
-    primitives::uuid::Uuid as ProtoUuid,
-};
-
-use super::*;
-use crate::{
-    barrier::STATE_TOPIC,
-    coordinator::bootstrap::OFFSETS_TOPIC,
-    share_coordinator::bootstrap::TOPIC as SHARE_TOPIC,
-    test_support::{PartitionCount, ReplicationFactor, start_broker_no_audit},
-    time_util::now_ms,
-    txn::bootstrap::TOPIC as TXN_TOPIC,
+    assert2::{assert, check},
+    krabka_protocol::{
+        UnknownTaggedFields,
+        owned::{
+            create_topics_request::{CreatableTopic, CreatableTopicConfig},
+            create_topics_response::CreatableTopicResult,
+        },
+        primitives::uuid::Uuid as ProtoUuid,
+    },
+    std::path::PathBuf,
 };
 
 fn configs(pairs: &[(&str, &str)]) -> Vec<CreatableTopicConfig> {
@@ -339,19 +339,15 @@ fn a_finished_streams_creation_caches_kafkas_errors() {
     };
     let message = |text: &str| Some(text.to_owned());
     let cases = [
-        (
-            "an answer",
-            Ok(response),
-            [
-                None,
-                message("Topic 'b' already exists."),
-                message("Configuration is invalid."),
-                message(
-                    "Replication factor is below 1 or larger than the number of available \
+        ("an answer", Ok(response), [
+            None,
+            message("Topic 'b' already exists."),
+            message("Configuration is invalid."),
+            message(
+                "Replication factor is below 1 or larger than the number of available \
                      brokers.",
-                ),
-            ],
-        ),
+            ),
+        ]),
         (
             "a timeout",
             Err(TopicCreatorError::Timeout),

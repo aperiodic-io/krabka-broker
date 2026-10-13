@@ -1,8 +1,7 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::remote_coverage_bounds_local_retention;
-use crate::retention::LocalRetentionSegment;
+use {
+    super::remote_coverage_bounds_local_retention, crate::retention::LocalRetentionSegment,
+    assert2::assert, proptest::prelude::*,
+};
 
 fn check(remote: &[(i64, i64)], local: &[(i64, i64, u64, bool)], debt: Option<u64>, active: u64) {
     let anchor = local.first().map_or(0, |row| row.0);

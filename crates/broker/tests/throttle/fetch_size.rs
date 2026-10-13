@@ -8,18 +8,19 @@
 //! the tests that give the suite its name — the config tests only prove the key
 //! round-trips, these prove it is enforced.
 
-use assert2::assert;
-
-use crate::{
-    CLIENT_ID,
-    cluster::{
-        add_follower, add_follower_in_isr, create_topic_plaintext, start_single_broker_plaintext,
-        wait_partition_exists,
+use {
+    crate::{
+        CLIENT_ID,
+        cluster::{
+            add_follower, add_follower_in_isr, create_topic_plaintext,
+            start_single_broker_plaintext, wait_partition_exists,
+        },
+        configs::drive_incremental_alter_configs_plaintext,
+        kafka_wire::AutomaticTopicSetup,
+        records::{fetch_plaintext_replica, produce_plaintext},
+        support::topics::ConfiguredTopicSetup,
     },
-    configs::drive_incremental_alter_configs_plaintext,
-    kafka_wire::AutomaticTopicSetup,
-    records::{fetch_plaintext_replica, produce_plaintext},
-    support::topics::ConfiguredTopicSetup,
+    assert2::assert,
 };
 
 /// Sets a leader throttle rate of 512 bytes/sec and the given
@@ -39,16 +40,13 @@ async fn replica_fetch_bytes(
 
     // Create topic rf=1 so this broker is always the leader, then assign
     // replica 2 as a follower so its fetch is served.
-    create_topic_plaintext(
-        addr,
-        AutomaticTopicSetup {
-            client_id: CLIENT_ID,
-            topic: ConfiguredTopicSetup {
-                name: ("bar").into(),
-                ..Default::default()
-            },
+    create_topic_plaintext(addr, AutomaticTopicSetup {
+        client_id: CLIENT_ID,
+        topic: ConfiguredTopicSetup {
+            name: ("bar").into(),
+            ..Default::default()
         },
-    )
+    })
     .await;
     wait_partition_exists(&handle, "bar", 0).await;
     if follower_in_isr {
@@ -58,34 +56,28 @@ async fn replica_fetch_bytes(
     }
 
     // The token bucket has a one-second burst capacity at the configured rate.
-    let err = drive_incremental_alter_configs_plaintext(
-        addr,
+    let err = drive_incremental_alter_configs_plaintext(addr, vec![(
+        4, // resource_type = Broker
+        node_id.to_string(),
         vec![(
-            4, // resource_type = Broker
-            node_id.to_string(),
-            vec![(
-                "leader.replication.throttled.rate".into(),
-                Some("512".into()),
-                0, // OP_SET
-            )],
+            "leader.replication.throttled.rate".into(),
+            Some("512".into()),
+            0, // OP_SET
         )],
-    )
+    )])
     .await;
     assert!(err == 0, "broker throttle alter failed: error_code={err}");
 
     let list = list(node_id);
-    let err = drive_incremental_alter_configs_plaintext(
-        addr,
+    let err = drive_incremental_alter_configs_plaintext(addr, vec![(
+        2, // resource_type = Topic
+        "bar".into(),
         vec![(
-            2, // resource_type = Topic
-            "bar".into(),
-            vec![(
-                "leader.replication.throttled.replicas".into(),
-                Some(list.clone()),
-                0, // OP_SET
-            )],
+            "leader.replication.throttled.replicas".into(),
+            Some(list.clone()),
+            0, // OP_SET
         )],
-    )
+    )])
     .await;
     assert!(err == 0, "topic throttle alter failed: error_code={err}");
 
@@ -156,16 +148,13 @@ async fn unthrottled_partition_unaffected() {
     let (handle, _dir, addr) = start_single_broker_plaintext().await;
 
     // Create topic rf=1.
-    create_topic_plaintext(
-        addr,
-        AutomaticTopicSetup {
-            client_id: CLIENT_ID,
-            topic: ConfiguredTopicSetup {
-                name: ("baz").into(),
-                ..Default::default()
-            },
+    create_topic_plaintext(addr, AutomaticTopicSetup {
+        client_id: CLIENT_ID,
+        topic: ConfiguredTopicSetup {
+            name: ("baz").into(),
+            ..Default::default()
         },
-    )
+    })
     .await;
     wait_partition_exists(&handle, "baz", 0).await;
     add_follower(&handle, "baz", 2).await;

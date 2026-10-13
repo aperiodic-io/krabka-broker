@@ -1,12 +1,14 @@
 //! Field projection shared by log and snapshot voter records. Admission and
 //! overflow policies remain with the caller that owns the wire format.
 
-use krabka_metadata::{NodeId, Voter, VoterEndpoint, voters::KRaftVersionRange};
-use krabka_protocol::owned::voters_record::{
-    Endpoint as WireVoterEndpoint, KRaftVersionFeature as WireKRaftVersionFeature,
-    Voter as WireVoter, VotersRecord as WireVotersRecord,
+use {
+    krabka_metadata::{NodeId, Voter, VoterEndpoint, voters::KRaftVersionRange},
+    krabka_protocol::owned::voters_record::{
+        Endpoint as WireVoterEndpoint, KRaftVersionFeature as WireKRaftVersionFeature,
+        Voter as WireVoter, VotersRecord as WireVotersRecord,
+    },
+    uuid::Uuid,
 };
-use uuid::Uuid;
 
 pub(crate) fn to_wire(voter: &Voter, id: i32, min: i16, max: i16) -> WireVoter {
     WireVoter {

@@ -1,29 +1,27 @@
 //! Fixtures shared by the WAL quorum unit tests: a synthetic record batch, and
 //! an append that reaches the source log through the real produce path.
 
-use std::{
-    path::Path,
-    sync::{Arc, Mutex},
-};
-
-use krabka_ids::{Offset, PartitionIndex};
-use krabka_kraft_core::NodeId;
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch};
-use uuid::Uuid;
-
-use super::{QuorumWalStore, engine::WalShardEngine};
-use crate::{
-    error::BrokerError, partition::AppendedBatch, partition_writer::run_produce_append_batch,
+use {
+    super::{QuorumWalStore, engine::WalShardEngine},
+    crate::{
+        error::BrokerError, partition::AppendedBatch, partition_writer::run_produce_append_batch,
+    },
+    krabka_ids::{Offset, PartitionIndex},
+    krabka_kraft_core::NodeId,
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch},
+    std::{
+        path::Path,
+        sync::{Arc, Mutex},
+    },
+    uuid::Uuid,
 };
 
 pub(super) fn open_log(path: &Path) -> Arc<Mutex<Log>> {
     Arc::new(Mutex::new(Log::open(path, LogConfig::default()).unwrap()))
 }
 
-pub(super) fn source_log(root: &Path) -> Arc<Mutex<Log>> {
-    open_log(&root.join("source"))
-}
+pub(super) fn source_log(root: &Path) -> Arc<Mutex<Log>> { open_log(&root.join("source")) }
 
 pub(super) fn local_replicas(count: usize) -> (Vec<tempfile::TempDir>, Arc<WalShardEngine>) {
     let dirs = (0..count)

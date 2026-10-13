@@ -4,15 +4,16 @@
 //! the two-person-control evidence -- the proposal, the approvers, and the
 //! signature over the request.
 
-use serde_json::json;
-
-use super::{
-    ProductInfo,
-    envelope::{metadata, status_id},
-};
-use crate::{
-    chain::to_hex,
-    event::{AuditEndpoint, AuditOutcome, AuditPrincipal, AuditResource, PrivilegedPhase},
+use {
+    super::{
+        ProductInfo,
+        envelope::{metadata, status_id},
+    },
+    crate::{
+        chain::to_hex,
+        event::{AuditEndpoint, AuditOutcome, AuditPrincipal, AuditResource, PrivilegedPhase},
+    },
+    serde_json::json,
 };
 
 pub(super) fn ocsf_admin_operation(

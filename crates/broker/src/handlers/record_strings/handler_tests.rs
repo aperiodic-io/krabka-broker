@@ -13,40 +13,40 @@
 //! more is over the bound, and Kafka cannot write it. The join answers with an
 //! error and no member id.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-use krabka_protocol::owned::{
-    consumer_group_heartbeat_request::{self, ConsumerGroupHeartbeatRequest},
-    consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
-    heartbeat_request::{self, HeartbeatRequest},
-    initialize_share_group_state_request::{
-        self, InitializeShareGroupStateRequest, InitializeStateData, PartitionData,
+use {
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::{Broker, BrokerHandle},
+        codes,
+        error::BrokerError,
+        features::STREAMS_VERSION,
+        handlers::RequestContext,
+        test_support::{
+            decode_response, encode_request, peer, principal, request_context, start_broker_with,
+        },
     },
-    initialize_share_group_state_response::InitializeShareGroupStateResponse,
-    join_group_request::{self, JoinGroupRequest, JoinGroupRequestProtocol},
-    join_group_response::JoinGroupResponse,
-    share_group_heartbeat_request::{self, ShareGroupHeartbeatRequest},
-    share_group_heartbeat_response::ShareGroupHeartbeatResponse,
-    streams_group_heartbeat_request::{self, StreamsGroupHeartbeatRequest},
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-    sync_group_request::{self, SyncGroupRequest, SyncGroupRequestAssignment},
-    sync_group_response::SyncGroupResponse,
-};
-use krabka_security::Principal;
-
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::{Broker, BrokerHandle},
-    codes,
-    error::BrokerError,
-    features::STREAMS_VERSION,
-    handlers::RequestContext,
-    test_support::{
-        decode_response, encode_request, peer, principal, request_context, start_broker_with,
+    assert2::assert,
+    bytes::Bytes,
+    krabka_metadata::{FeatureLevelRecord, MetadataRecord},
+    krabka_protocol::owned::{
+        consumer_group_heartbeat_request::{self, ConsumerGroupHeartbeatRequest},
+        consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
+        heartbeat_request::{self, HeartbeatRequest},
+        initialize_share_group_state_request::{
+            self, InitializeShareGroupStateRequest, InitializeStateData, PartitionData,
+        },
+        initialize_share_group_state_response::InitializeShareGroupStateResponse,
+        join_group_request::{self, JoinGroupRequest, JoinGroupRequestProtocol},
+        join_group_response::JoinGroupResponse,
+        share_group_heartbeat_request::{self, ShareGroupHeartbeatRequest},
+        share_group_heartbeat_response::ShareGroupHeartbeatResponse,
+        streams_group_heartbeat_request::{self, StreamsGroupHeartbeatRequest},
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+        sync_group_request::{self, SyncGroupRequest, SyncGroupRequestAssignment},
+        sync_group_response::SyncGroupResponse,
     },
+    krabka_security::Principal,
+    std::{net::SocketAddr, sync::Arc, time::Duration},
 };
 
 /// The longest string a coordinator record carries.
@@ -155,9 +155,7 @@ impl Env {
         request_context(&self.principal, &self.peer, client_id)
     }
 
-    async fn stop(self) {
-        self.handle.shutdown().await;
-    }
+    async fn stop(self) { self.handle.shutdown().await; }
 }
 
 /// Keep encoding and context construction at the call site, before any timeout starts.
@@ -175,7 +173,13 @@ macro_rules! dispatch_record_request {
 
 /// Bind the independently labelled long-id case in the original declaration order.
 macro_rules! long_identity {
-    (($label:ident, $client:ident, $bindings:pat), $case:expr, $long:ident, $length:ident, $member:expr) => {
+    (
+        ($label:ident, $client:ident, $bindings:pat),
+        $case:expr,
+        $long:ident,
+        $length:ident,
+        $member:expr
+    ) => {
         let $label = format!("{:?} of {} bytes", $long, $length);
         let $client = header_client_id($long, $length);
         let $bindings = ids($case, $long, $length, $member);

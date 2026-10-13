@@ -2,20 +2,20 @@
 //! `replica_state` lock once and returns everything the scan loop needs, so
 //! the shrink and expand rules are testable without the surrounding scan.
 
-use std::{
-    collections::{BTreeSet, HashSet},
-    time::Instant,
-};
-
-use krabka_ids::LeaderEpoch;
-use krabka_log::Offset;
-use krabka_metadata::PartitionRecord;
-use krabka_raft::NodeId;
-use krabka_verified::isr::{IsrCandidateFacts, IsrMemberRole};
-
-use crate::{
-    partition::Partition,
-    replica_state::{FollowerStats, LeaderPolicy, ReplicaState},
+use {
+    crate::{
+        partition::Partition,
+        replica_state::{FollowerStats, LeaderPolicy, ReplicaState},
+    },
+    krabka_ids::LeaderEpoch,
+    krabka_log::Offset,
+    krabka_metadata::PartitionRecord,
+    krabka_raft::NodeId,
+    krabka_verified::isr::{IsrCandidateFacts, IsrMemberRole},
+    std::{
+        collections::{BTreeSet, HashSet},
+        time::Instant,
+    },
 };
 
 /// A computed ISR change proposal. `compute_proposal` captures all fields
@@ -163,12 +163,12 @@ fn proposal_at(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, time::Duration};
-
-    use krabka_metadata::PartitionRecord;
-
-    use super::*;
-    use crate::replica_state::{BrokerStanding, FollowerStats};
+    use {
+        super::*,
+        crate::replica_state::{BrokerStanding, FollowerStats},
+        krabka_metadata::PartitionRecord,
+        std::{collections::HashMap, time::Duration},
+    };
 
     /// Every scan below: the leader's log ends at 100, its high watermark is
     /// 90, and its epoch began at offset 80.
@@ -176,9 +176,7 @@ mod tests {
     const HW: Offset = Offset(90);
     const EPOCH_START: Option<Offset> = Some(Offset(80));
 
-    fn nodes(ids: &[u64]) -> Vec<NodeId> {
-        ids.iter().copied().map(NodeId).collect()
-    }
+    fn nodes(ids: &[u64]) -> Vec<NodeId> { ids.iter().copied().map(NodeId).collect() }
 
     /// Partition 0 of "t", led by broker 1 at leader epoch 7 and partition
     /// epoch 3.
@@ -205,14 +203,11 @@ mod tests {
             replica_lag_time_max: Duration::from_millis(1_000),
             brokers: (1..=3)
                 .map(|node| {
-                    (
-                        NodeId(node),
-                        BrokerStanding {
-                            fenced: false,
-                            shutting_down: false,
-                            alive_epoch: Some(5),
-                        },
-                    )
+                    (NodeId(node), BrokerStanding {
+                        fenced: false,
+                        shutting_down: false,
+                        alive_epoch: Some(5),
+                    })
                 })
                 .collect::<HashMap<_, _>>(),
         }
@@ -352,13 +347,10 @@ mod tests {
                 &[1, 2, 3],
                 vec![
                     (2, follower(now, 100, Some(10), Some(10))),
-                    (
-                        3,
-                        FollowerStats {
-                            broker_epoch: Some(4),
-                            ..follower(now, 100, Some(10), Some(10))
-                        },
-                    ),
+                    (3, FollowerStats {
+                        broker_epoch: Some(4),
+                        ..follower(now, 100, Some(10), Some(10))
+                    }),
                 ],
                 None,
             ),
@@ -424,14 +416,11 @@ mod tests {
         let record = record(&[1, 2], &[1, 2, 3]);
         let fenced_3 = || {
             let mut fenced = policy();
-            fenced.brokers.insert(
-                NodeId(3),
-                BrokerStanding {
-                    fenced: true,
-                    shutting_down: false,
-                    alive_epoch: None,
-                },
-            );
+            fenced.brokers.insert(NodeId(3), BrokerStanding {
+                fenced: true,
+                shutting_down: false,
+                alive_epoch: None,
+            });
             fenced
         };
         let joins = Some(proposal(&[1, 2], &[1, 2, 3]));
@@ -476,13 +465,10 @@ mod tests {
         let now = Instant::now() + Duration::from_secs(60);
         let stale = record(&[1, 2], &[1, 2]);
         for (label, image) in [
-            (
-                "the image has a newer leader epoch",
-                PartitionRecord {
-                    leader_epoch: krabka_metadata::LeaderEpoch(8),
-                    ..stale.clone()
-                },
-            ),
+            ("the image has a newer leader epoch", PartitionRecord {
+                leader_epoch: krabka_metadata::LeaderEpoch(8),
+                ..stale.clone()
+            }),
             ("the image has a different ISR", record(&[1], &[1, 2])),
         ] {
             let mut st = installed(&stale, now, policy());

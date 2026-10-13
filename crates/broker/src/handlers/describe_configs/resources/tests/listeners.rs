@@ -3,16 +3,17 @@
 //! `listener.security.protocol.map`, `controller.listener.names` and
 //! `inter.broker.listener.name`.
 
-use krabka_security::ListenerProtocol::{self, Plaintext, SaslPlaintext, SaslSsl, Ssl};
-
-use super::*;
-use crate::{
-    SslPrincipalMapper,
-    config::{
-        BrokerConfig, ListenerSpec,
-        NodeRole::{self, Broker, Controller},
+use {
+    super::*,
+    crate::{
+        SslPrincipalMapper,
+        config::{
+            BrokerConfig, ListenerSpec,
+            NodeRole::{self, Broker, Controller},
+        },
+        file_config::FileConfig,
     },
-    file_config::FileConfig,
+    krabka_security::ListenerProtocol::{self, Plaintext, SaslPlaintext, SaslSsl, Ssl},
 };
 
 /// The five keys, in the name order that `describe_one` reports them in.
@@ -217,7 +218,7 @@ fn inter_broker(value: &str) -> DescribeConfigsResourceResult {
 fn a_named_broker_reports_the_listener_keys_of_its_roles() {
     let advertised_brokers = "CLIENT://broker-1.example:9092,INTERNAL://broker-1.internal:9094";
     let broker_map = "CLIENT:SASL_SSL,INTERNAL:SASL_PLAINTEXT,CONTROLLER:SSL";
-    let cases = [
+    let cases = vec![
         (
             "controller-only",
             two_listener_node(&[Controller], None),

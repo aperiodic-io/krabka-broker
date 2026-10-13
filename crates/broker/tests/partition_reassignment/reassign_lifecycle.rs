@@ -6,18 +6,19 @@
 //! `AlterPartitionReassignments` to the current controller leader, and then
 //! reads the outcome back out of the metadata image.
 
-use assert2::{assert, check};
-
-use crate::{
-    kafka_wire::AutomaticTopicSetup,
-    log_dir_wire::{alter_replica_log_dirs, describe_log_dirs},
-    plaintext_cluster::{
-        broker_id, controller_leader_addr, node_id, start_three_broker_plaintext_cluster,
-        start_three_broker_plaintext_cluster_with_log_dirs, wait_partition_exists,
+use {
+    crate::{
+        kafka_wire::AutomaticTopicSetup,
+        log_dir_wire::{alter_replica_log_dirs, describe_log_dirs},
+        plaintext_cluster::{
+            broker_id, controller_leader_addr, node_id, start_three_broker_plaintext_cluster,
+            start_three_broker_plaintext_cluster_with_log_dirs, wait_partition_exists,
+        },
+        plaintext_wire::{CLIENT_ID, create_topic_plaintext},
+        reassign_rpc::{drive_alter_reassignments, drive_list_reassignments},
+        support::topics::{ConfiguredTopicSetup, TopicReplicationFactor},
     },
-    plaintext_wire::{CLIENT_ID, create_topic_plaintext},
-    reassign_rpc::{drive_alter_reassignments, drive_list_reassignments},
-    support::topics::{ConfiguredTopicSetup, TopicReplicationFactor},
+    assert2::{assert, check},
 };
 
 // Each expansion keeps the same per-test static mutex as the original scenarios.
@@ -38,17 +39,14 @@ async fn preplacement_log_dir_preference_survives_until_reassignment_materialize
     let paths = extras.each_ref().map(|dir| dir.path().to_path_buf());
     let (h1, h2, h3, _d1, _d2, _d3, addr) =
         start_three_broker_plaintext_cluster_with_log_dirs(&paths).await;
-    create_topic_plaintext(
-        addr,
-        AutomaticTopicSetup {
-            client_id: CLIENT_ID,
-            topic: ConfiguredTopicSetup {
-                name: ("preplaced").into(),
-                replicas: TopicReplicationFactor(2),
-                ..Default::default()
-            },
+    create_topic_plaintext(addr, AutomaticTopicSetup {
+        client_id: CLIENT_ID,
+        topic: ConfiguredTopicSetup {
+            name: ("preplaced").into(),
+            replicas: TopicReplicationFactor(2),
+            ..Default::default()
         },
-    )
+    })
     .await;
     wait_partition_exists(&h1, "preplaced", 0).await;
 
@@ -70,10 +68,11 @@ async fn preplacement_log_dir_preference_survives_until_reassignment_materialize
 
     let staying = broker_id(partition.replicas[0]);
     let raft_addr = controller_leader_addr(&handles).await;
-    let response = drive_alter_reassignments(
-        raft_addr,
-        vec![("preplaced", 0, Some(vec![staying, new_replica]))],
-    )
+    let response = drive_alter_reassignments(raft_addr, vec![(
+        "preplaced",
+        0,
+        Some(vec![staying, new_replica]),
+    )])
     .await;
     assert!(response[0].1 == vec![(0, 0)]);
 
@@ -351,17 +350,14 @@ async fn foo_cluster() -> (
     std::net::SocketAddr,
 ) {
     let cluster = start_three_broker_plaintext_cluster().await;
-    create_topic_plaintext(
-        cluster.6,
-        AutomaticTopicSetup {
-            client_id: CLIENT_ID,
-            topic: ConfiguredTopicSetup {
-                name: ("foo").into(),
-                replicas: TopicReplicationFactor(2),
-                ..Default::default()
-            },
+    create_topic_plaintext(cluster.6, AutomaticTopicSetup {
+        client_id: CLIENT_ID,
+        topic: ConfiguredTopicSetup {
+            name: ("foo").into(),
+            replicas: TopicReplicationFactor(2),
+            ..Default::default()
         },
-    )
+    })
     .await;
     wait_partition_exists(&cluster.0, "foo", 0).await;
     cluster

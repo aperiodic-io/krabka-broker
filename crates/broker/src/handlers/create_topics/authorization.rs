@@ -8,14 +8,14 @@
 //! scoped to a literal or prefixed topic ACL (the standard Kafka
 //! Streams/Connect setup) can still create the topics its ACL covers.
 
-use std::collections::HashMap;
-
-use krabka_metadata::AclOperation;
-
-use crate::{
-    authorizer::{AuthorizationResult, authorize_topics},
-    broker::Broker,
-    handlers::{RequestContext, acl_denied_quiet, cluster_shortcut_denied},
+use {
+    crate::{
+        authorizer::{AuthorizationResult, authorize_topics},
+        broker::Broker,
+        handlers::{RequestContext, acl_denied_quiet, cluster_shortcut_denied},
+    },
+    krabka_metadata::AclOperation,
+    std::collections::HashMap,
 };
 
 /// The `Create` decision for a set of candidate topic names: an Allow for

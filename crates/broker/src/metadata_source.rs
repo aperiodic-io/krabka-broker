@@ -6,14 +6,19 @@
 //! `MetadataObserver`, a true `KRaft` observer, plus a write-forwarding
 //! path to the controller quorum. Handlers depend only on this trait.
 
-use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
+use self::prelude::*;
 
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_raft::{
-    AddVoter, DelegationTokenMutation, Node, NodeId, QuorumState, RaftError, ReconfigOutcome,
-    RemoveVoter, SnapshotRange, SubmitChangeResult, UpdateVoter,
-};
-use tokio::sync::watch;
+pub(super) mod prelude {
+    pub(super) use {
+        krabka_metadata::{MetadataImage, MetadataRecord},
+        krabka_raft::{
+            AddVoter, DelegationTokenMutation, Node, NodeId, QuorumState, RaftError,
+            ReconfigOutcome, RemoveVoter, SnapshotRange, SubmitChangeResult, UpdateVoter,
+        },
+        std::{collections::BTreeSet, net::SocketAddr, sync::Arc},
+        tokio::sync::watch,
+    };
+}
 
 mod controller_handle;
 mod fatal_fault;
@@ -45,27 +50,19 @@ pub trait MetadataSource: Send + Sync {
     /// meets an invalid `KRaft` control record. The default is the channel of a
     /// source that has none: it never carries a value, and its sender is
     /// already dropped, so `changed` on it fails at once.
-    fn watch_fatal(&self) -> watch::Receiver<Option<String>> {
-        watch::channel(None).1
-    }
+    fn watch_fatal(&self) -> watch::Receiver<Option<String>> { watch::channel(None).1 }
     /// Committed metadata records this source could not decode and skipped:
     /// Kafka's `metadata-load-error-count`. Only a broker-only observer skips
     /// one; a controller stops on it instead, so the default is zero.
-    fn metadata_load_error_count(&self) -> u64 {
-        0
-    }
+    fn metadata_load_error_count(&self) -> u64 { 0 }
     /// Process-lifetime average and maximum microseconds spent applying a
     /// completed set of pending committed metadata records.
-    fn pending_record_processing_time_us(&self) -> (u64, u64) {
-        (0, 0)
-    }
+    fn pending_record_processing_time_us(&self) -> (u64, u64) { (0, 0) }
     fn quorum_state(&self) -> QuorumState;
     /// Current controller epoch when this source owns a quorum view.
     /// Broker-only observers return `None` because they track the leader id but
     /// do not own the controller's term state.
-    fn current_controller_epoch(&self) -> Option<u64> {
-        Some(self.quorum_state().current_term)
-    }
+    fn current_controller_epoch(&self) -> Option<u64> { Some(self.quorum_state().current_term) }
     /// Highest metadata-log offset applied to the current image, or `-1`
     /// before the first record.
     fn current_metadata_offset(&self) -> i64 {
@@ -75,9 +72,7 @@ pub trait MetadataSource: Send + Sync {
     }
     /// Unix epoch milliseconds of the latest metadata batch applied by this
     /// source, or zero before it has applied one.
-    fn last_applied_record_timestamp_ms(&self) -> i64 {
-        0
-    }
+    fn last_applied_record_timestamp_ms(&self) -> i64 { 0 }
     /// Highest `__cluster_metadata` offset the metadata quorum has committed,
     /// as this node last heard it, or `-1` before it has heard anything.
     ///
@@ -86,17 +81,11 @@ pub trait MetadataSource: Send + Sync {
     /// metadata lag the readiness probe bounds. The default treats the node's
     /// own applied offset as the quorum's, which is what a source with no
     /// separate view of the quorum can honestly report.
-    fn quorum_committed_offset(&self) -> i64 {
-        self.current_metadata_offset()
-    }
+    fn quorum_committed_offset(&self) -> i64 { self.current_metadata_offset() }
     /// Directory identity voted for in the current controller epoch.
-    fn voted_directory_id(&self) -> Option<uuid::Uuid> {
-        None
-    }
+    fn voted_directory_id(&self) -> Option<uuid::Uuid> { None }
     /// Snapshot the full consensus state if this node runs a controller.
-    fn quorum_snapshot(&self) -> Option<krabka_raft::QuorumStateSnapshot> {
-        None
-    }
+    fn quorum_snapshot(&self) -> Option<krabka_raft::QuorumStateSnapshot> { None }
     async fn submit_change(
         &self,
         records: Vec<MetadataRecord>,

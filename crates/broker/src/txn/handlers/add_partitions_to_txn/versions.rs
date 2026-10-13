@@ -10,33 +10,33 @@
 //! the work is identical, so both paths funnel into
 //! [`process_one_txn`](super::registration::process_one_txn).
 
-use std::{
-    collections::{HashMap, HashSet},
-    net::SocketAddr,
-};
-
-use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
-use krabka_protocol::owned::{
-    add_partitions_to_txn_request::AddPartitionsToTxnRequest,
-    add_partitions_to_txn_response::{AddPartitionsToTxnResponse, AddPartitionsToTxnResult},
-    common::{
-        add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
-        add_partitions_to_txn_response::add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
+use {
+    super::{
+        authz::{TopicAuthorization, failed_partitions},
+        registration::{TransactionRequest, process_one_txn},
+        results::{dedup_topics, topic_error},
+        write_freeze::frozen_topics,
     },
-};
-use krabka_security::Principal;
-
-use super::{
-    authz::{TopicAuthorization, failed_partitions},
-    registration::{TransactionRequest, process_one_txn},
-    results::{dedup_topics, topic_error},
-    write_freeze::frozen_topics,
-};
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
-    codes,
-    config::BrokerConfig,
-    txn::{coordinator::TxnCoordinator, version::TxnVersion},
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+        codes,
+        config::BrokerConfig,
+        txn::{coordinator::TxnCoordinator, version::TxnVersion},
+    },
+    krabka_metadata::{AclOperation, MetadataImage, ResourceType},
+    krabka_protocol::owned::{
+        add_partitions_to_txn_request::AddPartitionsToTxnRequest,
+        add_partitions_to_txn_response::{AddPartitionsToTxnResponse, AddPartitionsToTxnResult},
+        common::{
+            add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+            add_partitions_to_txn_response::add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
+        },
+    },
+    krabka_security::Principal,
+    std::{
+        collections::{HashMap, HashSet},
+        net::SocketAddr,
+    },
 };
 
 /// The request-independent collaborators both version paths need: the
@@ -127,21 +127,18 @@ async fn process_transaction(
     }
     let authorized = HashSet::new();
     let frozen = frozen_topics(image, &topics, &authorized);
-    process_one_txn(
-        coord,
-        TransactionRequest {
-            transactional_id: txn.transactional_id,
-            producer_id: krabka_log::ProducerId(txn.producer_id),
-            producer_epoch: txn.producer_epoch,
-            topics: &topics,
-            response_topics: txn.response_topics,
-            denied: &authorized,
-            frozen: &frozen,
-            txnv,
-            verify_only: txn.verify_only,
-            version,
-        },
-    )
+    process_one_txn(coord, TransactionRequest {
+        transactional_id: txn.transactional_id,
+        producer_id: krabka_log::ProducerId(txn.producer_id),
+        producer_epoch: txn.producer_epoch,
+        topics: &topics,
+        response_topics: txn.response_topics,
+        denied: &authorized,
+        frozen: &frozen,
+        txnv,
+        verify_only: txn.verify_only,
+        version,
+    })
     .await
 }
 
@@ -231,21 +228,23 @@ pub(super) async fn handle_v3(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_protocol::owned::add_partitions_to_txn_request::AddPartitionsToTxnTransaction;
-
-    use super::*;
-    use crate::{
-        test_support::{
-            ControllerPeerAllowed, DenyAll, start_broker_with_authorizer_no_audit as start_broker,
-            test_ctx,
+    use {
+        super::*,
+        crate::{
+            test_support::{
+                ControllerPeerAllowed, DenyAll,
+                start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+            },
+            txn::handlers::add_partitions_to_txn::{
+                handle,
+                test_support::{
+                    enlisted, seed_transaction, start_coordinator, topic, topic_result,
+                },
+            },
         },
-        txn::handlers::add_partitions_to_txn::{
-            handle,
-            test_support::{enlisted, seed_transaction, start_coordinator, topic, topic_result},
-        },
+        assert2::assert,
+        krabka_protocol::owned::add_partitions_to_txn_request::AddPartitionsToTxnTransaction,
+        std::sync::Arc,
     };
 
     crate::test_support::context_helper!(client_id = "producer-client");
@@ -441,13 +440,10 @@ mod tests {
             throttle_time_ms: 0,
             error_code: codes::NONE,
             results_by_transaction: vec![],
-            results_by_topic_v3_and_below: vec![topic_result(
-                "alpha",
-                &[
-                    (3, codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED),
-                    (4, codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED),
-                ],
-            )],
+            results_by_topic_v3_and_below: vec![topic_result("alpha", &[
+                (3, codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED),
+                (4, codes::TRANSACTIONAL_ID_AUTHORIZATION_FAILED),
+            ])],
             unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
         };
         assert!(resp == expected);

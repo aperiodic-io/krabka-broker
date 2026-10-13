@@ -4,10 +4,7 @@
 //! This is the record that `krabka-streams-java` and `krabka-streams-go` decode
 //! by hand, so the golden vector that pins the bytes lives beside the codec.
 
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-
-use super::primitives as codec;
+use {super::primitives as codec, krabka_ids::PartitionIndex, krabka_log::Offset};
 
 /// Whether an injection reached every partition of its frozen target set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,12 +139,13 @@ pub(crate) fn decode_cut(bytes: &[u8]) -> Result<CutValue, codec::ProtocolError>
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        barrier::persistence::{RecordKey, decode_key, encode_key, test_support::sample_cut},
-        coordinator::unified::persistence::MAX_STRING_BYTES,
+    use {
+        super::*,
+        crate::{
+            barrier::persistence::{RecordKey, decode_key, encode_key, test_support::sample_cut},
+            coordinator::unified::persistence::MAX_STRING_BYTES,
+        },
+        assert2::assert,
     };
 
     #[test]

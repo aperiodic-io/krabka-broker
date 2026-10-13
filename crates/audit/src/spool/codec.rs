@@ -146,9 +146,7 @@ fn take_bytes(b: &mut &[u8]) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// Four bytes is the boundary: exactly four is a readable `u32`, and fewer
     /// must yield `None` rather than index past the end.

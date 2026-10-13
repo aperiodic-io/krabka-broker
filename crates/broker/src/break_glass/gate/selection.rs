@@ -7,9 +7,7 @@
 //! function of the records alone, so two brokers reading one image spend the
 //! same proposal.
 
-use krabka_metadata::BreakGlassAction;
-
-use crate::break_glass::action_targets_partition;
+use {crate::break_glass::action_targets_partition, krabka_metadata::BreakGlassAction};
 
 /// Whether a proposal on `proposal_target` covers a request for
 /// `request_target`.

@@ -1,33 +1,33 @@
 //! Tests for finding the changed topics of an image and for the refresh
 //! request that goes to the groups this broker coordinates.
 
-use std::collections::BTreeMap;
-
-use assert2::check;
-use krabka_metadata::{
-    BrokerRegistrationRecord, DeleteTopicRecord, MetadataRecord, NodeId, PartitionRecord,
-    TopicConfigRecord, TopicRecord,
-};
-use krabka_protocol::owned::{
-    common::consumer_group_heartbeat_response::topic_partitions::TopicPartitions,
-    consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-    consumer_group_heartbeat_response::{Assignment, ConsumerGroupHeartbeatResponse},
-};
-use uuid::Uuid;
-
-use super::{changed_topics, on_metadata_update, regex_resolution_may_change};
-use crate::{
-    coordinator::{
-        test_support::metadata_delta_image as image,
-        unified::{
-            actor::test_support::rpc::consumer_request_as_client as heartbeat,
-            test_support::{
-                ConsumerJoinSetup, SwitchableMetadata, consumer_join_request,
-                make_coord_with_metadata, snapshot_of,
+use {
+    super::{changed_topics, on_metadata_update, regex_resolution_may_change},
+    crate::{
+        coordinator::{
+            test_support::metadata_delta_image as image,
+            unified::{
+                actor::test_support::rpc::consumer_request_as_client as heartbeat,
+                test_support::{
+                    ConsumerJoinSetup, SwitchableMetadata, consumer_join_request,
+                    make_coord_with_metadata, snapshot_of,
+                },
             },
         },
+        test_support::{AllowAclSetup, allow_acl},
     },
-    test_support::{AllowAclSetup, allow_acl},
+    assert2::check,
+    krabka_metadata::{
+        BrokerRegistrationRecord, DeleteTopicRecord, MetadataRecord, NodeId, PartitionRecord,
+        TopicConfigRecord, TopicRecord,
+    },
+    krabka_protocol::owned::{
+        common::consumer_group_heartbeat_response::topic_partitions::TopicPartitions,
+        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        consumer_group_heartbeat_response::{Assignment, ConsumerGroupHeartbeatResponse},
+    },
+    std::collections::BTreeMap,
+    uuid::Uuid,
 };
 
 fn topic(name: &str, id: u128) -> MetadataRecord {
@@ -70,11 +70,9 @@ fn changed_topics_are_the_created_changed_and_deleted_topics() {
             vec![topic("refunds", 30), partition("refunds", 0, 1)],
             vec!["refunds"],
         ),
-        (
-            "a topic grows",
-            vec![partition("orders", 1, 2)],
-            vec!["orders"],
-        ),
+        ("a topic grows", vec![partition("orders", 1, 2)], vec![
+            "orders",
+        ]),
         (
             "a partition gets a new leader",
             vec![partition("orders", 0, 2)],
@@ -234,26 +232,21 @@ async fn a_metadata_update_refreshes_the_groups_this_broker_coordinates() {
     }
 
     metadata.set(snapshot_of(&[("orders", 1, 2)]));
-    on_metadata_update(
-        &coordinator,
-        |group_id| group_id != "not-owned",
-        &["orders".to_string()],
-    )
+    on_metadata_update(&coordinator, |group_id| group_id != "not-owned", &[
+        "orders".to_string(),
+    ])
     .await;
 
     let mut answers = Vec::new();
     for group_id in groups {
         let handle = coordinator.find(group_id).expect("the group's actor");
-        let answer = heartbeat(
-            &handle,
-            ConsumerGroupHeartbeatRequest {
-                group_id: group_id.into(),
-                member_id: "m1".into(),
-                member_epoch: 2,
-                rebalance_timeout_ms: -1,
-                ..Default::default()
-            },
-        )
+        let answer = heartbeat(&handle, ConsumerGroupHeartbeatRequest {
+            group_id: group_id.into(),
+            member_id: "m1".into(),
+            member_epoch: 2,
+            rebalance_timeout_ms: -1,
+            ..Default::default()
+        })
         .await;
         answers.push((group_id, answer));
     }

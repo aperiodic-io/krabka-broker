@@ -5,27 +5,27 @@
 //! Several sibling modules assert against the same fixtures, so they live in
 //! one module rather than being rebuilt per test file.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use bytes::Bytes;
-
 pub(crate) use super::{
     actor::MetadataProvider, config::NextGenConfig, group_coordinator::GroupCoordinator,
     offsets_log::fake::InMemoryOffsetsLog, reconciler::ReconcileInput,
     share::config::ShareGroupConfig, streams::config::StreamsGroupConfig,
 };
-use super::{persistence_next_gen, reconciler, share, streams};
-use crate::{
-    codes::{COORDINATOR_LOAD_IN_PROGRESS, COORDINATOR_NOT_AVAILABLE, NOT_COORDINATOR},
-    error::BrokerError,
-    metadata_source::MetadataSource,
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    share_coordinator::{
-        config::ShareCoordinatorConfig, coordinator::ShareCoordinator,
-        persister_client::SharePersister,
+use {
+    super::{persistence_next_gen, reconciler, share, streams},
+    crate::{
+        codes::{COORDINATOR_LOAD_IN_PROGRESS, COORDINATOR_NOT_AVAILABLE, NOT_COORDINATOR},
+        error::BrokerError,
+        metadata_source::MetadataSource,
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        share_coordinator::{
+            config::ShareCoordinatorConfig, coordinator::ShareCoordinator,
+            persister_client::SharePersister,
+        },
+        test_support::{FakeMetadataSource, KafkaErrorCode, UnixMillis, string_pairs},
     },
-    test_support::{FakeMetadataSource, KafkaErrorCode, UnixMillis, string_pairs},
+    bytes::Bytes,
+    std::{collections::BTreeMap, sync::Arc},
 };
 
 pub(crate) type AppendedRecords = Vec<(Option<Bytes>, Option<Bytes>)>;
@@ -63,9 +63,7 @@ pub(crate) fn stable_streams_assignment(
     }
 }
 
-pub(crate) fn make_coord() -> Arc<GroupCoordinator> {
-    make_coord_with_log().0
-}
+pub(crate) fn make_coord() -> Arc<GroupCoordinator> { make_coord_with_log().0 }
 
 pub(crate) fn make_coord_with_log() -> (Arc<GroupCoordinator>, Arc<InMemoryOffsetsLog>) {
     use crate::coordinator::unified::offsets_log::fake::InMemoryOffsetsLog;
@@ -84,9 +82,7 @@ pub(crate) fn make_coord_with_log() -> (Arc<GroupCoordinator>, Arc<InMemoryOffse
 #[derive(Debug)]
 pub(super) struct ImageMetadatalessProvider;
 impl MetadataProvider for ImageMetadatalessProvider {
-    fn snapshot(&self) -> reconciler::ReconcileInput {
-        reconciler::ReconcileInput::default()
-    }
+    fn snapshot(&self) -> reconciler::ReconcileInput { reconciler::ReconcileInput::default() }
 }
 
 /// A metadata provider whose snapshot a test replaces, as the controller
@@ -171,9 +167,7 @@ pub(super) fn proto_uuid(byte: u8) -> krabka_protocol::primitives::uuid::Uuid {
     krabka_protocol::primitives::uuid::Uuid([byte; 16])
 }
 
-pub(super) fn real_uuid(byte: u8) -> uuid::Uuid {
-    uuid::Uuid::from_bytes([byte; 16])
-}
+pub(super) fn real_uuid(byte: u8) -> uuid::Uuid { uuid::Uuid::from_bytes([byte; 16]) }
 
 pub(super) fn next_member(client_id: &str) -> persistence_next_gen::MemberMetadataValue {
     persistence_next_gen::MemberMetadataValue {

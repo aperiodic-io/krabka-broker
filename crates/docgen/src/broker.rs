@@ -3,11 +3,11 @@
 //! The pages are the server config, from the `FileConfig` JSON schema, the
 //! topic configs whitelist, and the protocol API catalog.
 
-use std::fmt::Write;
-
-use krabka_broker::api_catalog::{ClientMetricsReceiver, ListenerKind};
-
-use crate::schema_md::render_sectioned_field_table;
+use {
+    crate::schema_md::render_sectioned_field_table,
+    krabka_broker::api_catalog::{ClientMetricsReceiver, ListenerKind},
+    std::fmt::Write,
+};
 
 /// Server-config reference, rendered from the `FileConfig` JSON schema.
 ///
@@ -181,9 +181,7 @@ pub fn protocol_apis_md() -> String {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
     #[test]
     fn server_config_page_has_sectioned_field_tables() {
         let md = server_config_md();

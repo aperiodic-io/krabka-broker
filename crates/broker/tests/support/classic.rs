@@ -5,16 +5,17 @@
 //! `MEMBER_ID_REQUIRED` two-step plus a leader `SyncGroup`, so that sequence is
 //! kept here apart from the streams-side heartbeat drivers.
 
-use std::time::Duration;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
-    sync_group_request::{SyncGroupRequest, SyncGroupRequestAssignment},
+use {
+    assert2::assert,
+    bytes::Bytes,
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
+        sync_group_request::{SyncGroupRequest, SyncGroupRequestAssignment},
+    },
+    krabka_units::{Time, convert::TimeExt, secs},
+    std::time::Duration,
 };
-use krabka_units::{Time, convert::TimeExt, secs};
 
 const ERR_MEMBER_ID_REQUIRED: i16 = 79;
 const ERR_NONE: i16 = 0;
@@ -120,9 +121,7 @@ pub struct ClassicTimeouts {
 pub struct GenerationId(pub i32);
 
 impl Default for GenerationId {
-    fn default() -> Self {
-        Self(1)
-    }
+    fn default() -> Self { Self(1) }
 }
 
 /// A classic join with explicit member identity, timing and protocol proposals.

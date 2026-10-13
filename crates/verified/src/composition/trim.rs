@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
-use super::{
-    DeleteRecordsTrimApplication, DeleteRecordsTrimDecision, DeleteRecordsTrimFacts,
-    ProducerReloadRange, delete_records_trim_application, delete_records_trim_decision,
-    diskless_trim_decision, producer_snapshot_latest_index, producer_snapshot_replay_start,
+use {
+    super::{
+        DeleteRecordsTrimApplication, DeleteRecordsTrimDecision, DeleteRecordsTrimFacts,
+        ProducerReloadRange, delete_records_trim_application, delete_records_trim_decision,
+        diskless_trim_decision, producer_snapshot_latest_index, producer_snapshot_replay_start,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

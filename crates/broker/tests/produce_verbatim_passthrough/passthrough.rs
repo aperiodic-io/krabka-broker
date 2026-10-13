@@ -3,16 +3,17 @@
 //! LZ4 batch, an uncompressed batch checked byte for byte, and a topic whose
 //! `compression.type` forces the broker to recompress.
 
-use assert2::{assert, check};
-use krabka_compression::CompressionType;
-use krabka_protocol::{owned::create_topics_request::CreatableTopicConfig, records::HEADER_LEN};
-
-use crate::{
-    harness::{
-        batch, boot, create_topic, create_topic_with_configs, encode_batch, fetch_first_batch,
-        produce_one, topic_id_for, wait_for_compression,
+use {
+    crate::{
+        harness::{
+            batch, boot, create_topic, create_topic_with_configs, encode_batch, fetch_first_batch,
+            produce_one, topic_id_for, wait_for_compression,
+        },
+        support::client::connect_client,
     },
-    support::client::connect_client,
+    assert2::{assert, check},
+    krabka_compression::CompressionType,
+    krabka_protocol::{owned::create_topics_request::CreatableTopicConfig, records::HEADER_LEN},
 };
 
 /// A producer-LZ4-compressed v2 batch whose DECOMPRESSED form is large
@@ -109,16 +110,11 @@ async fn uncompressed_batch_roundtrips_byte_identically() {
 async fn recompression_config_takes_owned_path() {
     let (broker, bootstrap, _dir) = boot().await;
     // Topic forces zstd; producer sends lz4 → must recompress (owned path).
-    create_topic_with_configs(
-        &broker,
-        &bootstrap,
-        "recmp",
-        vec![CreatableTopicConfig {
-            name: "compression.type".into(),
-            value: Some("zstd".into()),
-            ..Default::default()
-        }],
-    )
+    create_topic_with_configs(&broker, &bootstrap, "recmp", vec![CreatableTopicConfig {
+        name: "compression.type".into(),
+        value: Some("zstd".into()),
+        ..Default::default()
+    }])
     .await;
     wait_for_compression(&broker, "recmp", Some(CompressionType::Zstd)).await;
 

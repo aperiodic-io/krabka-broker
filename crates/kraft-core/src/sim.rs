@@ -23,17 +23,18 @@
 //! applies the resulting actions, `playground` is the interactive control
 //! surface, and `curated` drives the recorded failure scenarios.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-
-use self::{
-    log::SimLog,
-    node::{Message, Node, deadline_millis, election_timeout_of, make_voter_set},
-};
-use crate::{
-    core::QuorumStateMachine,
-    role::Role,
-    simulation_support::partition_node,
-    types::{Epoch, NodeId, QuorumState, SimInstant},
+use {
+    self::{
+        log::SimLog,
+        node::{Message, Node, deadline_millis, election_timeout_of, make_voter_set},
+    },
+    crate::{
+        core::QuorumStateMachine,
+        role::Role,
+        simulation_support::partition_node,
+        types::{Epoch, NodeId, QuorumState, SimInstant},
+    },
+    std::collections::{BTreeMap, BTreeSet, VecDeque},
 };
 
 mod bus;
@@ -82,19 +83,16 @@ impl Sim {
                 QuorumState::bootstrap(uuid::Uuid::nil(), voters.clone()),
                 election_timeout,
             );
-            nodes.insert(
+            nodes.insert(id, Node {
                 id,
-                Node {
-                    id,
-                    machine,
-                    log: SimLog::default(),
-                    high_watermark: 0,
-                    election_deadline: Some(SimInstant(deadline_millis(election_timeout))),
-                    fetch_deadline: None,
-                    heartbeat_deadline: None,
-                    check_quorum_deadline: None,
-                },
-            );
+                machine,
+                log: SimLog::default(),
+                high_watermark: 0,
+                election_deadline: Some(SimInstant(deadline_millis(election_timeout))),
+                fetch_deadline: None,
+                heartbeat_deadline: None,
+                check_quorum_deadline: None,
+            });
         }
         Self {
             nodes,

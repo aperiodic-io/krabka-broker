@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
-use super::{
-    earliest_max_timestamp_index, first_timestamp_index, remote_time_index_candidate_count,
-    restore_time_index_entry_valid, time_index_scan_start,
-};
 #[cfg(creusot)]
 use crate::timestamp::first_timestamp_match;
+use {
+    super::{
+        earliest_max_timestamp_index, first_timestamp_index, remote_time_index_candidate_count,
+        restore_time_index_entry_valid, time_index_scan_start,
+    },
+    creusot_std::prelude::*,
+};
 
 open_logic! {
 /// Record offsets remain strictly increasing even when their timestamps do not.

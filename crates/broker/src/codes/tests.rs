@@ -14,11 +14,12 @@
 
 mod kafka_error_table;
 
-use assert2::assert;
-use kafka_error_table::{KAFKA_ERROR_TABLE, KAFKA_ERROR_TABLE_IMAGE_DIGEST};
-
-use super::*;
-use crate::error::BrokerError;
+use {
+    super::*,
+    crate::error::BrokerError,
+    assert2::assert,
+    kafka_error_table::{KAFKA_ERROR_TABLE, KAFKA_ERROR_TABLE_IMAGE_DIGEST},
+};
 
 /// The digest `//MODULE.bazel` pins for `apache_kafka_4_3_1`.
 ///

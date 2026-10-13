@@ -24,17 +24,17 @@
 //! crash mid-move leaves it behind. Broker startup re-discovers it with
 //! `log_dir::scan_future` and re-spawns the replicator.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+use {
+    crate::{error::BrokerError, log_dir::FUTURE_SUFFIX, throttle::TokenBucket},
+    krabka_log::Log,
+    krabka_units::{ByteSize, Time},
+    std::{
+        path::{Path, PathBuf},
+        sync::{Arc, Mutex},
+    },
+    tokio::task::JoinHandle,
+    tokio_util::sync::CancellationToken,
 };
-
-use krabka_log::Log;
-use krabka_units::{ByteSize, Time};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-
-use crate::{error::BrokerError, log_dir::FUTURE_SUFFIX, throttle::TokenBucket};
 
 mod catch_up;
 mod cleanup;
@@ -171,11 +171,12 @@ fn canonicalize_or_self(p: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{kibibytes, millis};
-
-    use super::*;
-    use crate::throttle::TokenBucket;
+    use {
+        super::*,
+        crate::throttle::TokenBucket,
+        assert2::assert,
+        krabka_units::{kibibytes, millis},
+    };
 
     #[test]
     fn move_policy_preserves_nondefault_values() {

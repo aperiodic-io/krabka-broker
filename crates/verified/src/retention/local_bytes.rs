@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use super::LocalRetentionSegment;
+use {super::LocalRetentionSegment, creusot_std::prelude::*};
 
 open_logic! {
 /// Mathematical bytes in an oldest prefix; totals can exceed `u64::MAX`.

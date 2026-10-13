@@ -4,12 +4,13 @@
 //! A group record is the only record kind whose value carries an interval, so
 //! it is the only one that touches the millisecond conversion for [`Time`].
 
-use krabka_units::{
-    Time,
-    convert::wire::{opt_time_from_millis_i64, opt_time_to_millis_i64},
+use {
+    super::primitives as codec,
+    krabka_units::{
+        Time,
+        convert::wire::{opt_time_from_millis_i64, opt_time_to_millis_i64},
+    },
 };
-
-use super::primitives as codec;
 
 /// A barrier group definition.
 ///
@@ -70,13 +71,14 @@ pub(crate) fn decode_group(bytes: &[u8]) -> Result<GroupValue, codec::ProtocolEr
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::convert::TimeExt;
-
-    use super::*;
-    use crate::{
-        barrier::persistence::test_support::sample_group,
-        coordinator::unified::persistence::MAX_STRING_BYTES,
+    use {
+        super::*,
+        crate::{
+            barrier::persistence::test_support::sample_group,
+            coordinator::unified::persistence::MAX_STRING_BYTES,
+        },
+        assert2::assert,
+        krabka_units::convert::TimeExt,
     };
 
     #[test]

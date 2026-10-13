@@ -15,20 +15,20 @@
 //! stops at the first record of the transaction, and a `read_committed`
 //! consumer reads nothing after it.
 
-use std::{
-    sync::{Arc, atomic::Ordering},
-    time::{Duration, Instant},
-};
-
-use krabka_log::Offset;
-use krabka_metadata::NodeId;
-
-use super::{MarkerAppend, materialize::append_marker_and_materialize};
-use crate::{
-    codes,
-    coordinator::GroupCoordinator,
-    error::BrokerError,
-    partition::{Partition, Uncommitted},
+use {
+    super::{MarkerAppend, materialize::append_marker_and_materialize},
+    crate::{
+        codes,
+        coordinator::GroupCoordinator,
+        error::BrokerError,
+        partition::{Partition, Uncommitted},
+    },
+    krabka_log::Offset,
+    krabka_metadata::NodeId,
+    std::{
+        sync::{Arc, atomic::Ordering},
+        time::{Duration, Instant},
+    },
 };
 
 #[cfg(test)]

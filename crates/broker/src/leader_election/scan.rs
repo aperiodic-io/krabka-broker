@@ -12,19 +12,6 @@
 //! Kafka's `handleBrokerUnfenced` does over `partitionsWithNoLeader`.
 
 #[cfg(test)]
-use krabka_metadata::{
-    LeaderEpoch, LeaderRecoveryState, PartitionElrRecord, PartitionRecoveryRecord,
-    PartitionUpdateRecord,
-};
-use krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord};
-use krabka_raft::NodeId;
-use tracing::warn;
-
-use super::policy::{
-    FailoverDecision, FailoverPlan, Ladder, elect_leaderless_one, failover_one,
-    push_partition_change, unclean_restart_one,
-};
-#[cfg(test)]
 use crate::{
     config_keys::{ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS},
     leader_election::test_support::{
@@ -32,15 +19,29 @@ use crate::{
         img_with_partition,
     },
 };
-use crate::{
-    config_keys::{
-        RecoveryStrategy, resolve_recovery_strategy, resolve_unclean_leader_election_enabled,
-        witness_node_ids,
+#[cfg(test)]
+use krabka_metadata::{
+    LeaderEpoch, LeaderRecoveryState, PartitionElrRecord, PartitionRecoveryRecord,
+    PartitionUpdateRecord,
+};
+use {
+    super::policy::{
+        FailoverDecision, FailoverPlan, Ladder, elect_leaderless_one, failover_one,
+        push_partition_change, unclean_restart_one,
     },
-    elr::{ElrPublisher, TopicElr, state::PartitionElr, withdraw_elr_membership},
-    heartbeat::controller_state::ControllerLivenessState,
-    metadata_epoch::next_partition_change,
-    metrics::BrokerMetrics,
+    crate::{
+        config_keys::{
+            RecoveryStrategy, resolve_recovery_strategy, resolve_unclean_leader_election_enabled,
+            witness_node_ids,
+        },
+        elr::{ElrPublisher, TopicElr, state::PartitionElr, withdraw_elr_membership},
+        heartbeat::controller_state::ControllerLivenessState,
+        metadata_epoch::next_partition_change,
+        metrics::BrokerMetrics,
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord},
+    krabka_raft::NodeId,
+    tracing::warn,
 };
 
 #[cfg(test)]

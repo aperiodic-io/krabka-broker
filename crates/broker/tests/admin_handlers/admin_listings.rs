@@ -3,14 +3,15 @@
 //! `ListGroups` (`api_key` 16). Both check the dispatch glue, the ACL gate's
 //! allow path, and the response encoding, so they share one file.
 
-use assert2::assert;
-use krabka_protocol::owned::{
-    list_config_resources_request::ListConfigResourcesRequest,
-    list_groups_request::ListGroupsRequest,
-};
-
-use crate::{
-    RESOURCE_TYPE_TOPIC, admin_harness::create_topic_helper, support::start_n_node_client,
+use {
+    crate::{
+        RESOURCE_TYPE_TOPIC, admin_harness::create_topic_helper, support::start_n_node_client,
+    },
+    assert2::assert,
+    krabka_protocol::owned::{
+        list_config_resources_request::ListConfigResourcesRequest,
+        list_groups_request::ListGroupsRequest,
+    },
 };
 
 /// `ListConfigResources` v1 with empty `resource_types` returns the default

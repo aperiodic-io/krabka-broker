@@ -9,14 +9,14 @@
 mod java_case;
 mod java_fold;
 
-use std::collections::BTreeMap;
-
-use fancy_regex::Regex;
-
-use self::java_fold::Escape;
-use crate::{
-    codes::{INVALID_CONFIG, INVALID_REQUEST},
-    config_keys::parse::{check_valid_list, int_value, java_trim, list_value, parse_int},
+use {
+    self::java_fold::Escape,
+    crate::{
+        codes::{INVALID_CONFIG, INVALID_REQUEST},
+        config_keys::parse::{check_valid_list, int_value, java_trim, list_value, parse_int},
+    },
+    fancy_regex::Regex,
+    std::collections::BTreeMap,
 };
 
 pub(crate) const KEY_METRICS: &str = "metrics";
@@ -277,9 +277,7 @@ struct Translator<'a> {
 }
 
 impl Translator<'_> {
-    fn in_class(&self) -> bool {
-        self.class_depth > 0
-    }
+    fn in_class(&self) -> bool { self.class_depth > 0 }
 
     /// Copies `len` chars as they are.
     fn copy(&mut self, len: usize) {
@@ -667,16 +665,12 @@ impl Scope {
 
     /// `i` without `u`: Java folds ASCII case only, which `fancy_regex` cannot
     /// do, so the rewrite writes both cases and leaves the fancy `i` off.
-    fn ascii_fold(self) -> bool {
-        self.case.ignore && !self.case.unicode
-    }
+    fn ascii_fold(self) -> bool { self.case.ignore && !self.case.unicode }
 
     /// `i` with `u`: Java folds Unicode case, by a relation other than the
     /// simple case folding of the fancy `i`, so the rewrite writes the code
     /// points that Java accepts and leaves the fancy `i` off.
-    fn unicode_fold(self) -> bool {
-        self.case.ignore && self.case.unicode
-    }
+    fn unicode_fold(self) -> bool { self.case.ignore && self.case.unicode }
 }
 
 /// Whether `source`, the pattern text of one token that [`Translator::atom`]
@@ -811,9 +805,10 @@ impl FlagGroup {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     fn validate_one(key: &str, value: &str) -> Result<(), ConfigError> {
         validate(

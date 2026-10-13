@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 pub(super) fn logical_oracle(
     f: DeleteRecordsTrimFacts,
@@ -195,12 +193,9 @@ fn producer_replay_cursor_cannot_replace_the_logical_read_floor() {
 #[test]
 fn physical_eviction_preserves_remote_matches_and_reports_disabled_state_exactly() {
     let window = constant_time_window(&[1, 3, 9]);
-    for trace in [
-        &[][..],
-        &[false, false],
-        &[true],
-        &[false, true, false, true],
-    ] {
+    for trace in [&[][..], &[false, false], &[true], &[
+        false, true, false, true,
+    ]] {
         check_eviction((10, 10, 2, 2, 2), trace, window, 0, 2, 100);
     }
     assert!(

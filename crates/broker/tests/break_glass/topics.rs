@@ -5,18 +5,18 @@
 //! it answers the row's error code instead of asserting on it. The gate cases
 //! need the refusal, and the setup cases assert on the code themselves.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_broker::codes;
-use krabka_client_core::{Client, ClientError};
-use krabka_protocol::owned::{
-    create_topics_request::{CreatableTopic, CreateTopicsRequest},
-    delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
-    metadata_request::MetadataRequest,
+use {
+    crate::support::discovery::topic_metadata_request,
+    assert2::assert,
+    krabka_broker::codes,
+    krabka_client_core::{Client, ClientError},
+    krabka_protocol::owned::{
+        create_topics_request::{CreatableTopic, CreateTopicsRequest},
+        delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
+        metadata_request::MetadataRequest,
+    },
+    std::time::Duration,
 };
-
-use crate::support::discovery::topic_metadata_request;
 
 /// `retry.backoff.ms`: the first wait of a Kafka admin client before a retry.
 const RETRY_BACKOFF: Duration = Duration::from_millis(100);

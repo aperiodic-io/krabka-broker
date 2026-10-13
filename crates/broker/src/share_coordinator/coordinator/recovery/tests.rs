@@ -2,34 +2,35 @@
 //! the round trip from a written state back into memory, and the per-record
 //! and inter-batch offset arithmetic that the replay cursor depends on.
 
-use arc_swap::ArcSwap;
-use assert2::{assert, check};
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch};
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    codes,
-    handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
-    log_dir_status::LogDirRegistry,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    partition_writer,
-    producer_state::ProducerState,
-    share_coordinator::{
-        config::ShareCoordinatorConfig,
-        coordinator::{
-            ShareStateError, Term, message,
-            persist::AppendError,
-            test_support::{
-                batch, coordinator, image_with_topic, lead_all, open_state_partition,
-                open_state_partitions, share_write,
+use {
+    super::*,
+    crate::{
+        codes,
+        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+        log_dir_status::LogDirRegistry,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        partition_writer,
+        producer_state::ProducerState,
+        share_coordinator::{
+            config::ShareCoordinatorConfig,
+            coordinator::{
+                ShareStateError, Term, message,
+                persist::AppendError,
+                test_support::{
+                    batch, coordinator, image_with_topic, lead_all, open_state_partition,
+                    open_state_partitions, share_write,
+                },
             },
+            partitioner::partition_for_share_key,
+            persistence::{StateBatch, encode_state_key},
         },
-        partitioner::partition_for_share_key,
-        persistence::{StateBatch, encode_state_key},
     },
+    arc_swap::ArcSwap,
+    assert2::{assert, check},
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch},
+    tempfile::tempdir,
 };
 
 /// An accepted Produce stays in the real writer's FIFO while its caller
@@ -511,27 +512,24 @@ async fn refresh_and_wait(coordinator: &Arc<ShareCoordinator>, image: &MetadataI
 /// at `leader_epoch`.
 fn state_partition_image(partition: i32, leader: u64, leader_epoch: i32) -> MetadataImage {
     let node = krabka_metadata::NodeId(leader);
-    MetadataImage::from_records(
-        uuid::Uuid::nil(),
-        &[
-            krabka_metadata::MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
-                name: bootstrap::TOPIC.to_string(),
-                topic_id: uuid::Uuid::from_bytes([44; 16]),
-                partitions: ShareCoordinatorConfig::default().state_topic_num_partitions,
-                replication_factor: 2,
-            }),
-            krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
-                leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
-                partition_epoch: leader_epoch,
-                ..replicated_partition(ReplicatedPartitionSetup {
-                    topic: bootstrap::TOPIC,
-                    partition: krabka_ids::PartitionIndex(partition),
-                    leader: node,
-                    ..Default::default()
-                })
-            }),
-        ],
-    )
+    MetadataImage::from_records(uuid::Uuid::nil(), &[
+        krabka_metadata::MetadataRecord::V1Topic(krabka_metadata::TopicRecord {
+            name: bootstrap::TOPIC.to_string(),
+            topic_id: uuid::Uuid::from_bytes([44; 16]),
+            partitions: ShareCoordinatorConfig::default().state_topic_num_partitions,
+            replication_factor: 2,
+        }),
+        krabka_metadata::MetadataRecord::V1Partition(krabka_metadata::PartitionRecord {
+            leader_epoch: krabka_metadata::LeaderEpoch(leader_epoch),
+            partition_epoch: leader_epoch,
+            ..replicated_partition(ReplicatedPartitionSetup {
+                topic: bootstrap::TOPIC,
+                partition: krabka_ids::PartitionIndex(partition),
+                leader: node,
+                ..Default::default()
+            })
+        }),
+    ])
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -733,11 +731,9 @@ async fn leadership_change_loads_and_unloads_the_state_partition() {
                         "g",
                         topic_id,
                         0,
-                        share_write(
-                            (1, 0),
-                            (start, 0),
-                            vec![batch(Offset(start)..=Offset(start + 9))],
-                        ),
+                        share_write((1, 0), (start, 0), vec![batch(
+                            Offset(start)..=Offset(start + 9),
+                        )]),
                     )
                     .await
                     .map_err(ShareStateError::code);

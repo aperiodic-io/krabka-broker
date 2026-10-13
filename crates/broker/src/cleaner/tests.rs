@@ -2,16 +2,17 @@
 //! the injected interval, returns when the shutdown token is cancelled, and
 //! gives up rather than spinning when its ticker dies.
 
-use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_units::secs;
-use qubit_clock::Timer;
-
-use super::*;
-use crate::{
-    cleaner::test_support::{CompactionSetup, compactable_partition, record_count},
-    partition::Partition,
-    test_support::{BrokenTimer, TimerFailure, park_manual_timer, sweep_registry_fixture},
+use {
+    super::*,
+    crate::{
+        cleaner::test_support::{CompactionSetup, compactable_partition, record_count},
+        partition::Partition,
+        test_support::{BrokenTimer, TimerFailure, park_manual_timer, sweep_registry_fixture},
+    },
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_units::secs,
+    qubit_clock::Timer,
 };
 
 #[tokio::test]
@@ -19,13 +20,10 @@ async fn run_ticks_until_shutdown() {
     use qubit_clock::{ManualMonotonicClock, MonotonicClock as _};
 
     let (dir, registry) = sweep_registry_fixture();
-    let partition = compactable_partition(
-        &dir,
-        CompactionSetup {
-            topic: "run-compact",
-            ..Default::default()
-        },
-    )
+    let partition = compactable_partition(&dir, CompactionSetup {
+        topic: "run-compact",
+        ..Default::default()
+    })
     .await;
     let before = record_count(&partition);
     registry.insert(

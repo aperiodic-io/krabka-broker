@@ -28,16 +28,16 @@
 //! The audit log carries the full history either way, and it is the record that
 //! outlives the image.
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_units::{Time, convert::TimeExt as _, hours, minutes};
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
-use uuid::Uuid;
-
-use crate::{task_util::run_every, time_util::now_ms};
+use {
+    crate::{task_util::run_every, time_util::now_ms},
+    async_trait::async_trait,
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    krabka_units::{Time, convert::TimeExt as _, hours, minutes},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
+    tracing::{debug, info, warn},
+    uuid::Uuid,
+};
 
 /// How long a proposal stays in the image after it expires.
 pub(crate) const PROPOSAL_RETENTION: Time = hours(24);
@@ -111,14 +111,14 @@ fn reapable_ids(image: &MetadataImage, retention: Time, now_ms: i64) -> Vec<Uuid
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Mutex, time::Duration};
-
-    use assert2::check;
-    use krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord};
-    use krabka_units::{days, millis};
-
-    use super::*;
-    use crate::break_glass::gate::tests::{image_of, proposal};
+    use {
+        super::*,
+        crate::break_glass::gate::tests::{image_of, proposal},
+        assert2::check,
+        krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord},
+        krabka_units::{days, millis},
+        std::{sync::Mutex, time::Duration},
+    };
 
     struct MockController {
         image: Mutex<Arc<MetadataImage>>,

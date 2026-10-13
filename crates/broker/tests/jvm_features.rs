@@ -21,10 +21,7 @@
 
 mod support;
 
-use std::process::Command;
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
+use {assert2::assert, krabka_broker::BrokerHandle, std::process::Command};
 
 /// Ports for this test process, allocated once rather than fixed at 9092.
 ///
@@ -34,13 +31,9 @@ use krabka_broker::BrokerHandle;
 /// time. A port per process lets them overlap.
 ///
 /// `&'static str`, so these read as the constants they replaced.
-fn bootstrap_addr() -> &'static str {
-    &support::jvm_listeners().advertised
-}
+fn bootstrap_addr() -> &'static str { &support::jvm_listeners().advertised }
 
-fn controller_listen() -> &'static str {
-    &support::jvm_listeners().controller
-}
+fn controller_listen() -> &'static str { &support::jvm_listeners().controller }
 
 /// The controller as the containers address it.
 fn controller_bootstrap() -> &'static str {

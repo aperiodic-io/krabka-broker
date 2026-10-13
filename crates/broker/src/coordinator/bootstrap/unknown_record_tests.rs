@@ -8,21 +8,21 @@
 //! record when it reads it, before any marker, so a bad value fails the load
 //! even inside a transaction that aborts.
 
-use std::collections::{HashMap, HashSet};
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_log::{Offset, ProducerId};
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-use tempfile::tempdir;
-
-use super::{
-    replay::{PendingTxnKeys, replay_records},
-    test_support::bare_coordinator,
-};
-use crate::{
-    coordinator::{persistence::OffsetCommitValue, unified::classic_state::OffsetEntry},
-    txn::marker::{MarkerType, build_marker_batch},
+use {
+    super::{
+        replay::{PendingTxnKeys, replay_records},
+        test_support::bare_coordinator,
+    },
+    crate::{
+        coordinator::{persistence::OffsetCommitValue, unified::classic_state::OffsetEntry},
+        txn::marker::{MarkerType, build_marker_batch},
+    },
+    assert2::check,
+    bytes::Bytes,
+    krabka_log::{Offset, ProducerId},
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    std::collections::{HashMap, HashSet},
+    tempfile::tempdir,
 };
 
 /// What a replay leaves behind, in the parts these cases can change.

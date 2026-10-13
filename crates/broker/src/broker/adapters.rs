@@ -3,11 +3,12 @@
 //! delegation-token, and break-glass sweeps depend on. Each trait impl is a
 //! mechanical forward of the same handle.
 
-use std::sync::Arc;
-
 #[cfg(test)]
 use crate::test_support::FakeMetadataSource;
-use crate::{delegation_token_cleanup::DelegationTokenController, metadata_source::MetadataSource};
+use {
+    crate::{delegation_token_cleanup::DelegationTokenController, metadata_source::MetadataSource},
+    std::sync::Arc,
+};
 
 /// Wraps a real [`krabka_raft::ControllerHandle`] so it can satisfy the
 /// controller traits of the broker's background tasks:
@@ -59,15 +60,11 @@ macro_rules! controller_adapter {
 
 controller_adapter!(
     crate::leader_rebalance::ControllerLike,
-    fn is_leader(&self) -> bool {
-        self.holds_leadership()
-    }
+    fn is_leader(&self) -> bool { self.holds_leadership() }
 );
 controller_adapter!(
     crate::reassignment::ReassignmentController,
-    fn is_leader(&self) -> bool {
-        self.holds_leadership()
-    },
+    fn is_leader(&self) -> bool { self.holds_leadership() },
     fn watch_image(&self) -> tokio::sync::watch::Receiver<Arc<krabka_metadata::MetadataImage>> {
         self.handle.watch_image()
     }
@@ -75,9 +72,7 @@ controller_adapter!(
 
 #[async_trait::async_trait]
 impl DelegationTokenController for ControllerAdapter {
-    fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> {
-        self.handle.current_image()
-    }
+    fn current_image(&self) -> Arc<krabka_metadata::MetadataImage> { self.handle.current_image() }
 
     async fn submit_mutations(
         &self,
@@ -95,16 +90,17 @@ controller_adapter!(crate::break_glass::sweep::BreakGlassController,);
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        break_glass::sweep::BreakGlassController,
-        broker::test_support::{fake_source, metadata_topic_record},
-        delegation_token_cleanup::DelegationTokenController,
-        leader_rebalance::ControllerLike,
-        metadata_source::MetadataSource,
-        reassignment::ReassignmentController,
+    use {
+        super::*,
+        crate::{
+            break_glass::sweep::BreakGlassController,
+            broker::test_support::{fake_source, metadata_topic_record},
+            delegation_token_cleanup::DelegationTokenController,
+            leader_rebalance::ControllerLike,
+            metadata_source::MetadataSource,
+            reassignment::ReassignmentController,
+        },
+        assert2::assert,
     };
 
     fn adapter(source: &Arc<dyn MetadataSource>, node: u64) -> ControllerAdapter {

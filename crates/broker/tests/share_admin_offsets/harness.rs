@@ -6,20 +6,20 @@
 //! acknowledgement-type constants live here as well, since every admin surface
 //! in this suite asserts on them.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_protocol::owned::share_group_heartbeat_request::ShareGroupHeartbeatRequest;
-
-use crate::support::share::{
-    ConsumptionFixture, ConsumptionSetup, ShareRecordSeedSetup, ShareRecordsSetup,
-    ShareSessionSetup, ShareTopicSetup, consumption_fixture, join as join_share_group,
-    permitted_topic_fixture, start_topic,
-};
 pub use crate::support::share::{
     acquired_count, bootstrap_share_state, broker_config, broker_test_permit, connect,
     create_topic, produce_n,
+};
+use {
+    crate::support::share::{
+        ConsumptionFixture, ConsumptionSetup, ShareRecordSeedSetup, ShareRecordsSetup,
+        ShareSessionSetup, ShareTopicSetup, consumption_fixture, join as join_share_group,
+        permitted_topic_fixture, start_topic,
+    },
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_protocol::owned::share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+    std::time::Duration,
 };
 
 pub const NONE: i16 = 0;
@@ -104,14 +104,10 @@ pub async fn initialized_topic(
 ) {
     let (broker, client, tid) =
         start_topic(broker_config(log_dir), ShareTopicSetup::default()).await;
-    let (member, _) = initialize_consumption(
-        &broker,
-        &client,
-        ConsumptionSetup {
-            topic_id: tid,
-            count: setup.count,
-        },
-    )
+    let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
+        topic_id: tid,
+        count: setup.count,
+    })
     .await;
     (broker, client, tid, member)
 }
@@ -129,14 +125,11 @@ pub async fn seeded_empty_group(
     let (permit, broker, client, dir, tid) =
         permitted_topic_fixture(ShareTopicSetup::default(), |_| {}).await;
     bootstrap_share_state(&broker, &client, "g1").await;
-    produce_n(
-        &client,
-        ShareRecordsSetup {
-            topic_id: tid,
-            count: setup.count,
-            ..Default::default()
-        },
-    )
+    produce_n(&client, ShareRecordsSetup {
+        topic_id: tid,
+        count: setup.count,
+        ..Default::default()
+    })
     .await;
     (permit, broker, client, dir, tid)
 }

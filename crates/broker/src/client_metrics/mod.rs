@@ -6,12 +6,12 @@ pub(crate) mod config;
 pub(crate) mod manager;
 pub(crate) mod otlp_sink;
 pub(crate) mod prometheus_sink;
-use std::sync::Arc;
-
-use krabka_units::{Time, convert::TimeExt as _};
 pub(crate) use manager::ClientMetricsManager;
-
-use self::{otlp_sink::OtlpForwarder, prometheus_sink::ClientMetricsCollector};
+use {
+    self::{otlp_sink::OtlpForwarder, prometheus_sink::ClientMetricsCollector},
+    krabka_units::{Time, convert::TimeExt as _},
+    std::sync::Arc,
+};
 
 /// Broker-held bundle. It holds the manager, which owns the instance state and
 /// the matching, plus the two sinks. The metrics registry shares the Prometheus
@@ -48,7 +48,5 @@ impl ClientMetrics {
         }
     }
 
-    pub(crate) async fn shutdown(&self) {
-        self.otlp.shutdown().await;
-    }
+    pub(crate) async fn shutdown(&self) { self.otlp.shutdown().await; }
 }

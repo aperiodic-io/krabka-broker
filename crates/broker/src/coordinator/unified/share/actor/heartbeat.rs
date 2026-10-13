@@ -2,35 +2,35 @@
 //! subscription and liveness update, and leave. It is the largest single
 //! concern of the share-group actor, so it lives in its own file.
 
-use std::{collections::HashSet, time::Instant};
-
-use krabka_protocol::owned::{
-    share_group_heartbeat_request::ShareGroupHeartbeatRequest,
-    share_group_heartbeat_response::ShareGroupHeartbeatResponse,
-};
-
-use super::{
-    assignment::reconcile,
-    records::{PendingShareRecords, ShareRecorder, chrono_now_ms, flush_pending},
-    response::{build_assignment_resp, error_resp},
-    share_state::{cleanup_deleted_topics, prepare_initialize, start_initialize},
-};
 #[cfg(test)]
 use crate::coordinator::unified::streams::config::StreamsGroupConfig;
-use crate::{
-    codes,
-    coordinator::unified::{
-        ClientIdentity, GroupCoordinator,
-        actor::MetadataProvider,
-        member_helpers::update_present,
-        offsets_log::OffsetsLog,
-        share::{
-            config::ShareGroupConfig,
-            state::{ShareGroupState, ShareMemberState},
-        },
+use {
+    super::{
+        assignment::reconcile,
+        records::{PendingShareRecords, ShareRecorder, chrono_now_ms, flush_pending},
+        response::{build_assignment_resp, error_resp},
+        share_state::{cleanup_deleted_topics, prepare_initialize, start_initialize},
     },
-    error::BrokerError,
-    metadata_epoch::next_i32,
+    crate::{
+        codes,
+        coordinator::unified::{
+            ClientIdentity, GroupCoordinator,
+            actor::MetadataProvider,
+            member_helpers::update_present,
+            offsets_log::OffsetsLog,
+            share::{
+                config::ShareGroupConfig,
+                state::{ShareGroupState, ShareMemberState},
+            },
+        },
+        error::BrokerError,
+        metadata_epoch::next_i32,
+    },
+    krabka_protocol::owned::{
+        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+        share_group_heartbeat_response::ShareGroupHeartbeatResponse,
+    },
+    std::{collections::HashSet, time::Instant},
 };
 
 pub(super) async fn handle_heartbeat(
@@ -218,23 +218,23 @@ fn leave_resp(member_id: &str, member_epoch: i32) -> ShareGroupHeartbeatResponse
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::{
-        config::NextGenConfig,
-        offsets_log::fake::InMemoryOffsetsLog,
-        share::actor::test_support::{
-            InitializedTopicSetup, ShareSubscriptionSetup, TopicMetadataSetup, heartbeat,
-            make_coordinator, metadata_with_topic, seed_initialized, subscribed_group,
-            subscribed_request,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            config::NextGenConfig,
+            offsets_log::fake::InMemoryOffsetsLog,
+            share::actor::test_support::{
+                InitializedTopicSetup, ShareSubscriptionSetup, TopicMetadataSetup, heartbeat,
+                make_coordinator, metadata_with_topic, seed_initialized, subscribed_group,
+                subscribed_request,
+            },
+            test_support::{
+                MemberEpoch, assert_single_member_limit, assignment_interval_fixture,
+                heartbeat_write_failures,
+            },
         },
-        test_support::{
-            MemberEpoch, assert_single_member_limit, assignment_interval_fixture,
-            heartbeat_write_failures,
-        },
+        assert2::{assert, check},
+        std::sync::Arc,
     };
 
     /// Kafka's `shareGroupHeartbeat`: only initialized partitions are
@@ -278,43 +278,34 @@ mod tests {
         };
         // (initialized partitions, [(request, expected response)])
         let scenarios = [
-            (
-                None,
-                vec![
-                    (request("m1", 0, true), response("m1", 2, Some(vec![]))),
-                    (request("m1", 2, false), response("m1", 2, None)),
-                ],
-            ),
-            (
-                Some(vec![0, 1, 2, 3]),
-                vec![
-                    (
-                        request("m1", 0, true),
-                        response("m1", 2, Some(vec![0, 1, 2, 3])),
-                    ),
-                    (request("m1", 2, false), response("m1", 2, None)),
-                    (request("m2", 0, true), response("m2", 3, Some(vec![0, 1]))),
-                    (request("m1", 2, false), response("m1", 3, Some(vec![2, 3]))),
-                    (request("m1", 3, false), response("m1", 3, None)),
-                    (request("m1", 3, true), response("m1", 3, Some(vec![2, 3]))),
-                ],
-            ),
+            (None, vec![
+                (request("m1", 0, true), response("m1", 2, Some(vec![]))),
+                (request("m1", 2, false), response("m1", 2, None)),
+            ]),
+            (Some(vec![0, 1, 2, 3]), vec![
+                (
+                    request("m1", 0, true),
+                    response("m1", 2, Some(vec![0, 1, 2, 3])),
+                ),
+                (request("m1", 2, false), response("m1", 2, None)),
+                (request("m2", 0, true), response("m2", 3, Some(vec![0, 1]))),
+                (request("m1", 2, false), response("m1", 3, Some(vec![2, 3]))),
+                (request("m1", 3, false), response("m1", 3, None)),
+                (request("m1", 3, true), response("m1", 3, Some(vec![2, 3]))),
+            ]),
         ];
         for (index, (initialized, steps)) in scenarios.into_iter().enumerate() {
             let (coord, _log) = make_coordinator(metadata.clone());
             let handle = coord.get_or_create_share("g");
             if let Some(partitions) = initialized {
-                seed_initialized(
-                    &handle,
-                    InitializedTopicSetup {
-                        topic_id: id,
-                        partitions: partitions
-                            .into_iter()
-                            .map(krabka_ids::PartitionIndex)
-                            .collect(),
-                        ..Default::default()
-                    },
-                )
+                seed_initialized(&handle, InitializedTopicSetup {
+                    topic_id: id,
+                    partitions: partitions
+                        .into_iter()
+                        .map(krabka_ids::PartitionIndex)
+                        .collect(),
+                    ..Default::default()
+                })
                 .await;
             }
             for (step, (req, expected)) in steps.into_iter().enumerate() {
@@ -394,15 +385,12 @@ mod tests {
             check!(joined.error_code == codes::NONE);
             let pre_leave = log.batches().await.len();
 
-            let resp = heartbeat(
-                &handle,
-                ShareGroupHeartbeatRequest {
-                    group_id: "g".into(),
-                    member_id: member_id.into(),
-                    member_epoch: -1,
-                    ..Default::default()
-                },
-            )
+            let resp = heartbeat(&handle, ShareGroupHeartbeatRequest {
+                group_id: "g".into(),
+                member_id: member_id.into(),
+                member_epoch: -1,
+                ..Default::default()
+            })
             .await;
 
             check!(resp == expected, "{member_id}");

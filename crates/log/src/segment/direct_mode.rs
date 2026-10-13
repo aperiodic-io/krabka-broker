@@ -15,14 +15,15 @@
 //! leaves it, and tail recovery cuts it as it cuts any bytes that do not
 //! decode as a batch, which is what Kafka's own `preallocate` leaves behind.
 
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-
-use super::{
-    Segment,
-    direct::{DioAlign, DirectWriter, TailCache},
-    io::{read_full_at, seek_to_log_size},
+use {
+    super::{
+        Segment,
+        direct::{DioAlign, DirectWriter, TailCache},
+        io::{read_full_at, seek_to_log_size},
+    },
+    crate::{error::LogError, io::DirectFile, name},
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
 };
-use crate::{error::LogError, io::DirectFile, name};
 
 /// The `O_DIRECT` writer of an active segment and the newest bytes it wrote.
 ///
@@ -46,15 +47,11 @@ impl std::fmt::Debug for DirectMode {
 impl Drop for DirectMode {
     /// Cut the padding past the last batch, so a segment closed cleanly is
     /// exactly as long as its batches. A failure leaves it for recovery.
-    fn drop(&mut self) {
-        let _ = self.writer.file().set_len(self.writer.end());
-    }
+    fn drop(&mut self) { let _ = self.writer.file().set_len(self.writer.end()); }
 }
 
 impl Segment {
-    pub(crate) fn writes_direct(&self) -> bool {
-        self.direct.is_some()
-    }
+    pub(crate) fn writes_direct(&self) -> bool { self.direct.is_some() }
 
     /// Write this segment's appends through `O_DIRECT` from here on, keeping
     /// up to `tail_cache` of the newest bytes in memory for reads.

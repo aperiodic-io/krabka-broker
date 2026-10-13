@@ -20,11 +20,12 @@
 //! `ValidatedBatch::validate_records_with` would make it one pass, at the cost
 //! of a change in krabka-protocol.
 
-use krabka_compression::{CompressionType, RecordDecompressionPolicy};
-use krabka_protocol::records::validate_one_v2_batch;
-
-use super::prepare::{PreparedBatch, PreparedSource};
-use crate::{api_catalog::UnstableApiVersions, config_keys::resolve_max_decompressed_record_bytes};
+use {
+    super::prepare::{PreparedBatch, PreparedSource},
+    crate::{api_catalog::UnstableApiVersions, config_keys::resolve_max_decompressed_record_bytes},
+    krabka_compression::{CompressionType, RecordDecompressionPolicy},
+    krabka_protocol::records::validate_one_v2_batch,
+};
 
 /// Whether `prepared` breaks the topic's `max.decompressed.message.bytes`,
 /// which `(image, node, topic)` resolve: a compressed batch with a record whose
@@ -82,11 +83,12 @@ fn has_oversized_record(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::BytesMut;
-    use krabka_protocol::records::{Attributes, RecordBatch};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        bytes::BytesMut,
+        krabka_protocol::records::{Attributes, RecordBatch},
+    };
 
     krabka_macros::record_limit_fixture!(record);
 

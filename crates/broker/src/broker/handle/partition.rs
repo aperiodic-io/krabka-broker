@@ -3,14 +3,14 @@
 //! direct append and truncate paths that tests use in place of the Kafka wire
 //! protocol.
 
-use std::sync::atomic::Ordering;
-
-use krabka_ids::PartitionIndex;
-use krabka_units::convert::TimeExt;
-
 #[cfg(any(test, feature = "test-helpers"))]
 use crate::error::BrokerError;
-use crate::{broker::BrokerHandle, partition::Partition};
+use {
+    crate::{broker::BrokerHandle, partition::Partition},
+    krabka_ids::PartitionIndex,
+    krabka_units::convert::TimeExt,
+    std::sync::atomic::Ordering,
+};
 
 impl BrokerHandle {
     /// This broker's partition `topic-partition`, or a

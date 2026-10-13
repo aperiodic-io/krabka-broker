@@ -11,16 +11,17 @@
 //! Streams migration is COLD only, because Kafka does not support online
 //! streams migration, so there is no hosted-classic-member translation here.
 
-use krabka_protocol::records::RecordBatch;
-
-use super::persistence::{
-    encode_current_member_assignment_key, encode_group_metadata_key, encode_member_metadata_key,
-    encode_target_assignment_member_key, encode_target_assignment_metadata_key,
-    encode_topology_key,
-};
-use crate::{
-    coordinator::unified::{OffsetRecordBatchBuilder, actor::PendingRecords},
-    error::BrokerError,
+use {
+    super::persistence::{
+        encode_current_member_assignment_key, encode_group_metadata_key,
+        encode_member_metadata_key, encode_target_assignment_member_key,
+        encode_target_assignment_metadata_key, encode_topology_key,
+    },
+    crate::{
+        coordinator::unified::{OffsetRecordBatchBuilder, actor::PendingRecords},
+        error::BrokerError,
+    },
+    krabka_protocol::records::RecordBatch,
 };
 
 /// Result of inspecting a `group_id` for classic→streams conversion.
@@ -195,27 +196,19 @@ mod tests {
     fn streams_tombstone_batch_follows_kafka() {
         let g = "g";
         let rows = [
-            (
-                "no members",
-                vec![],
-                vec![
-                    encode_target_assignment_metadata_key(g).unwrap(),
-                    encode_group_metadata_key(g).unwrap(),
-                    encode_topology_key(g).unwrap(),
-                ],
-            ),
-            (
-                "one member",
-                vec!["m1".to_string()],
-                vec![
-                    encode_current_member_assignment_key(g, "m1").unwrap(),
-                    encode_target_assignment_member_key(g, "m1").unwrap(),
-                    encode_target_assignment_metadata_key(g).unwrap(),
-                    encode_member_metadata_key(g, "m1").unwrap(),
-                    encode_group_metadata_key(g).unwrap(),
-                    encode_topology_key(g).unwrap(),
-                ],
-            ),
+            ("no members", vec![], vec![
+                encode_target_assignment_metadata_key(g).unwrap(),
+                encode_group_metadata_key(g).unwrap(),
+                encode_topology_key(g).unwrap(),
+            ]),
+            ("one member", vec!["m1".to_string()], vec![
+                encode_current_member_assignment_key(g, "m1").unwrap(),
+                encode_target_assignment_member_key(g, "m1").unwrap(),
+                encode_target_assignment_metadata_key(g).unwrap(),
+                encode_member_metadata_key(g, "m1").unwrap(),
+                encode_group_metadata_key(g).unwrap(),
+                encode_topology_key(g).unwrap(),
+            ]),
         ];
         for (name, members, keys) in rows {
             let batch = streams_records_tombstone_batch(g, &members, 123).unwrap();

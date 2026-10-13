@@ -17,16 +17,16 @@
 //! asserts that the broker (`MetadataImage`) and gateway (`AclCache`) decision
 //! paths agree, with no drift.
 
-use std::{collections::HashSet, net::SocketAddr};
-
-use krabka_metadata::{
-    AclEntry, AclOperation, MetadataImage, MetadataRecord, PatternType, PermissionType,
-    ResourceType,
+use {
+    crate::{AclCache, AuthorizationRequest, AuthorizationResult, Authorizer, SimpleAclAuthorizer},
+    krabka_metadata::{
+        AclEntry, AclOperation, MetadataImage, MetadataRecord, PatternType, PermissionType,
+        ResourceType,
+    },
+    krabka_security::{AuthMethod, Principal},
+    std::{collections::HashSet, net::SocketAddr},
+    uuid::Uuid,
 };
-use krabka_security::{AuthMethod, Principal};
-use uuid::Uuid;
-
-use crate::{AclCache, AuthorizationRequest, AuthorizationResult, Authorizer, SimpleAclAuthorizer};
 
 // ----- independent oracle (separate source of truth) -----
 
@@ -176,10 +176,12 @@ const ALICE: &str = "alice";
 /// patterns, the principal `User:alice` and the `User:*` wildcard, the `*` host
 /// and a specific host, and one non-matching decoy.
 fn candidate_pool() -> Vec<AclEntry> {
-    use AclOperation::{All, AlterConfigs, Describe, Read, Write};
-    use PatternType::{Literal, Prefixed};
-    use PermissionType::{Allow, Deny};
-    use ResourceType::Topic;
+    use {
+        AclOperation::{All, AlterConfigs, Describe, Read, Write},
+        PatternType::{Literal, Prefixed},
+        PermissionType::{Allow, Deny},
+        ResourceType::Topic,
+    };
     vec![
         entry(Topic, Literal, "foo", "User:alice", "*", Read, Allow), // E0
         entry(Topic, Literal, "foo", "User:alice", "*", Read, Deny),  // E1 deny-wins vs E0
@@ -263,13 +265,13 @@ fn acl_precedence_exhaustive() {
 
 #[cfg(test)]
 mod fuzz {
-    use std::{collections::HashSet, net::SocketAddr};
-
-    use krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType};
-    use proptest::prelude::*;
-
-    use super::{check, principal};
-    use crate::AuthorizationRequest;
+    use {
+        super::{check, principal},
+        crate::AuthorizationRequest,
+        krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType},
+        proptest::prelude::*,
+        std::{collections::HashSet, net::SocketAddr},
+    };
 
     fn op_of(i: u8) -> AclOperation {
         use AclOperation::{
@@ -297,12 +299,8 @@ mod fuzz {
     fn name_of(i: u8) -> &'static str {
         ["foo", "bar", "team-x", "te", "*", "other"][i as usize % 6]
     }
-    fn princ_of(i: u8) -> &'static str {
-        ["User:alice", "User:bob", "User:*"][i as usize % 3]
-    }
-    fn host_of(i: u8) -> &'static str {
-        ["*", "10.0.0.1", "10.0.0.2"][i as usize % 3]
-    }
+    fn princ_of(i: u8) -> &'static str { ["User:alice", "User:bob", "User:*"][i as usize % 3] }
+    fn host_of(i: u8) -> &'static str { ["*", "10.0.0.1", "10.0.0.2"][i as usize % 3] }
 
     prop_compose! {
         fn arb_entry()(

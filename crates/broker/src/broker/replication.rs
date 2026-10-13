@@ -3,25 +3,25 @@
 //! earlier startup phases produced, which is enough bookkeeping to deserve its
 //! own module.
 
-use std::sync::Arc;
-
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    broker::DisklessRuntime,
-    config::BrokerConfig,
-    log_dir_id::LogDirIds,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    replicator_supervisor::{ReplicatorSupervisor, ReplicatorSupervisorConfig},
-    share_coordinator::coordinator::ShareCoordinator,
-    throttle::ThrottleState,
-    txn::coordinator::TxnCoordinator,
+use {
+    crate::{
+        broker::DisklessRuntime,
+        config::BrokerConfig,
+        log_dir_id::LogDirIds,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        replicator_supervisor::{ReplicatorSupervisor, ReplicatorSupervisorConfig},
+        share_coordinator::coordinator::ShareCoordinator,
+        throttle::ThrottleState,
+        txn::coordinator::TxnCoordinator,
+    },
+    std::sync::Arc,
+    tokio::task::JoinHandle,
+    tokio_util::sync::CancellationToken,
 };
 
 #[derive(Clone, Copy)]

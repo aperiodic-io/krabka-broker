@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::time_index::sparse_timestamp_window_valid;
 #[cfg(creusot)]
 use super::time_index::time_segment_valid;
-use super::{
-    SparseTimestampWindow, constructed_time_index_preserves_first, first_timestamp_index,
-    validated_time_cursors_are_monotone,
+use {
+    super::{
+        SparseTimestampWindow, constructed_time_index_preserves_first, first_timestamp_index,
+        validated_time_cursors_are_monotone,
+    },
+    creusot_std::prelude::*,
 };
 
 type TimeRangeWitness = (i64, i64, i64, Option<usize>);

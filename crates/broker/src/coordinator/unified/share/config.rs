@@ -1,7 +1,5 @@
 //! KIP-932 share-group membership configuration.
-use std::time::Duration;
-
-use crate::coordinator::unified::config::DEFAULT_ASSIGNMENT_INTERVAL;
+use {crate::coordinator::unified::config::DEFAULT_ASSIGNMENT_INTERVAL, std::time::Duration};
 
 /// Kafka's `GroupConfig.SHARE_SESSION_TIMEOUT_MS_CONFIG`.
 const KEY_SHARE_SESSION_TIMEOUT_MS: &str = "share.session.timeout.ms";
@@ -105,13 +103,13 @@ impl ShareGroupConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, collections::BTreeMap};
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        coordinator::unified::config::MAX_ASSIGNMENT_INTERVAL, test_support::string_pairs,
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::config::MAX_ASSIGNMENT_INTERVAL, test_support::string_pairs,
+        },
+        assert2::assert,
+        std::{borrow::Cow, collections::BTreeMap},
     };
 
     /// The defaults of the share keys of Kafka 4.3.1's
@@ -156,13 +154,10 @@ mod tests {
         };
         let rows: Vec<(&[(&str, &str)], ShareGroupConfig)> = vec![
             (&[], broker.clone()),
-            (
-                &[("share.session.timeout.ms", "50000")],
-                ShareGroupConfig {
-                    session_timeout: Duration::from_secs(50),
-                    ..broker.clone()
-                },
-            ),
+            (&[("share.session.timeout.ms", "50000")], ShareGroupConfig {
+                session_timeout: Duration::from_secs(50),
+                ..broker.clone()
+            }),
             (
                 &[("share.heartbeat.interval.ms", "7000")],
                 ShareGroupConfig {
@@ -170,13 +165,10 @@ mod tests {
                     ..broker.clone()
                 },
             ),
-            (
-                &[("share.assignment.interval.ms", "0")],
-                ShareGroupConfig {
-                    assignment_interval: Duration::ZERO,
-                    ..broker.clone()
-                },
-            ),
+            (&[("share.assignment.interval.ms", "0")], ShareGroupConfig {
+                assignment_interval: Duration::ZERO,
+                ..broker.clone()
+            }),
             (
                 &[
                     ("consumer.session.timeout.ms", "50000"),
@@ -185,13 +177,10 @@ mod tests {
                 broker.clone(),
             ),
             // `GroupConfig.evaluate` caps a value to the broker's bounds.
-            (
-                &[("share.session.timeout.ms", "1000")],
-                ShareGroupConfig {
-                    session_timeout: broker.min_session_timeout,
-                    ..broker.clone()
-                },
-            ),
+            (&[("share.session.timeout.ms", "1000")], ShareGroupConfig {
+                session_timeout: broker.min_session_timeout,
+                ..broker.clone()
+            }),
             (
                 &[("share.session.timeout.ms", "3600000")],
                 ShareGroupConfig {
@@ -199,13 +188,10 @@ mod tests {
                     ..broker.clone()
                 },
             ),
-            (
-                &[("share.heartbeat.interval.ms", "0")],
-                ShareGroupConfig {
-                    heartbeat_interval: broker.min_heartbeat_interval,
-                    ..broker.clone()
-                },
-            ),
+            (&[("share.heartbeat.interval.ms", "0")], ShareGroupConfig {
+                heartbeat_interval: broker.min_heartbeat_interval,
+                ..broker.clone()
+            }),
             (
                 &[("share.heartbeat.interval.ms", "60000")],
                 ShareGroupConfig {

@@ -7,24 +7,24 @@
 //! fails the whole request. Each table row is one request, and the tests
 //! compare the whole response as a client decodes it.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{CreatableTopic, CreateTopicsRequest},
-        metadata_request::{MetadataRequest, MetadataRequestTopic},
-        metadata_response::{MetadataResponse, MetadataResponseTopic},
+use {
+    crate::{
+        authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
+        broker::BrokerHandle,
+        codes,
+        test_support::{dispatch_wire, peer, principal, start_broker_no_audit_with},
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
-    broker::BrokerHandle,
-    codes,
-    test_support::{dispatch_wire, peer, principal, start_broker_no_audit_with},
+    assert2::assert,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        owned::{
+            create_topics_request::{CreatableTopic, CreateTopicsRequest},
+            metadata_request::{MetadataRequest, MetadataRequestTopic},
+            metadata_response::{MetadataResponse, MetadataResponseTopic},
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::sync::Arc,
 };
 
 /// An id that no topic in these tests has.

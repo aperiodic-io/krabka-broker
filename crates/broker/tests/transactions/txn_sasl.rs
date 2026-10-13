@@ -5,12 +5,13 @@
 //! must carry the retained `ClientSecurity`, so this test drives the whole flow
 //! with an authenticated producer to keep those secondary connections covered.
 
-use assert2::assert;
-use krabka_client_producer::{ConsumerGroupMetadata, Producer};
-
-use crate::{
-    support::{producer::enqueue_string_values, transaction_wire::committed_values},
-    txn_harness::{boot_single_sasl, create_topic_sasl, sasl_plain_security},
+use {
+    crate::{
+        support::{producer::enqueue_string_values, transaction_wire::committed_values},
+        txn_harness::{boot_single_sasl, create_topic_sasl, sasl_plain_security},
+    },
+    assert2::assert,
+    krabka_client_producer::{ConsumerGroupMetadata, Producer},
 };
 
 /// Full transactional flow over a `SASL_PLAINTEXT`/`PLAIN` listener.

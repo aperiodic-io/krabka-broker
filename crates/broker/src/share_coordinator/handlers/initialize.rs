@@ -3,16 +3,17 @@
 //! `start_offset`. It gates every partition on local leadership of that
 //! partition's `__share_group_state` partition.
 
-use krabka_log::Offset;
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::{
-    initialize_share_group_state_request::InitializeShareGroupStateRequest,
-    initialize_share_group_state_response::{
-        InitializeShareGroupStateResponse, InitializeStateResult, PartitionResult,
+use {
+    crate::share_coordinator::coordinator::ShareCoordinator,
+    krabka_log::Offset,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::{
+        initialize_share_group_state_request::InitializeShareGroupStateRequest,
+        initialize_share_group_state_response::{
+            InitializeShareGroupStateResponse, InitializeStateResult, PartitionResult,
+        },
     },
 };
-
-use crate::share_coordinator::coordinator::ShareCoordinator;
 
 super::share_state_handler!(
     InitializeShareGroupStateRequest,
@@ -62,24 +63,27 @@ async fn initialize_state(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::{
-        owned::initialize_share_group_state_request::{InitializeStateData, PartitionData},
-        primitives::uuid::Uuid as ProtoUuid,
-    };
-
-    use super::*;
-    use crate::{
-        codes,
-        share_coordinator::{
-            config::ShareCoordinatorConfig,
-            coordinator::{
-                ShareStateSummary,
-                test_support::{Logged, NOW_MS, image_with_topic, logged_records, logged_since},
+    use {
+        super::*,
+        crate::{
+            codes,
+            share_coordinator::{
+                config::ShareCoordinatorConfig,
+                coordinator::{
+                    ShareStateSummary,
+                    test_support::{
+                        Logged, NOW_MS, image_with_topic, logged_records, logged_since,
+                    },
+                },
+                persistence::ShareSnapshotValue,
             },
-            persistence::ShareSnapshotValue,
+            test_support::KafkaErrorCode,
         },
-        test_support::KafkaErrorCode,
+        assert2::check,
+        krabka_protocol::{
+            owned::initialize_share_group_state_request::{InitializeStateData, PartitionData},
+            primitives::uuid::Uuid as ProtoUuid,
+        },
     };
 
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([32; 16]);
@@ -377,13 +381,11 @@ mod tests {
         {
             let trunk = matches!(rules, InitializationRules::Trunk);
             let dir = tempfile::TempDir::new().expect("tempdir");
-            let coordinator = super::super::test_support::coordinator_with(
-                dir.path(),
-                ShareCoordinatorConfig {
+            let coordinator =
+                super::super::test_support::coordinator_with(dir.path(), ShareCoordinatorConfig {
                     trunk_rules: trunk,
                     ..ShareCoordinatorConfig::default()
-                },
-            );
+                });
             let image = image_with_topic(TOPIC, 3);
             coordinator.lead_all_partitions_for_test().await;
             coordinator

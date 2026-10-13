@@ -154,12 +154,12 @@ pub(crate) fn validate_audit_topic_name(name: &str) -> Result<(), BrokerError> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::config::DEFAULT_AUDIT_TOPIC;
+    use {
+        super::*,
+        crate::config::DEFAULT_AUDIT_TOPIC,
+        assert2::{assert, check},
+        std::path::PathBuf,
+    };
 
     /// A config whose audit topic is `name`, for driving [`is_internal_topic`].
     fn config_auditing_to(name: &str) -> BrokerConfig {

@@ -5,9 +5,10 @@
 //! 32-byte Ed25519 public key and nothing else. A file of any other length is
 //! a malformed key, so an encoded key or a trailing newline stops the load.
 
-use std::path::{Path, PathBuf};
-
-use super::OperatorKeyError;
+use {
+    super::OperatorKeyError,
+    std::path::{Path, PathBuf},
+};
 
 /// Byte length of a raw Ed25519 public key.
 const ED25519_PUBLIC_KEY_LEN: usize = 32;

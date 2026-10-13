@@ -3,9 +3,10 @@
 //! decides which topic rows short-circuit to `TOPIC_AUTHORIZATION_FAILED` is
 //! [`crate::handlers::denied_topics`].
 
-use krabka_protocol::owned::create_partitions_request::CreatePartitionsTopic;
-
-use crate::handlers::request_names::duplicate_names as find_duplicate_names;
+use {
+    crate::handlers::request_names::duplicate_names as find_duplicate_names,
+    krabka_protocol::owned::create_partitions_request::CreatePartitionsTopic,
+};
 
 /// The names that more than one request row carries, in the order of their
 /// first row. Kafka's `ControllerApis.createPartitions` answers each once

@@ -4,12 +4,13 @@
 //! differ only in the top-level error code and the optional message, which
 //! [`ErrorResponse::error`] builds. Neither throttles.
 
-use krabka_metadata::NodeId;
-use krabka_protocol::owned::unregister_broker_response::UnregisterBrokerResponse;
-
-use crate::{
-    codes::NOT_CONTROLLER,
-    handlers::{ErrorResponse, forward_to_controller::wrong_controller_message},
+use {
+    crate::{
+        codes::NOT_CONTROLLER,
+        handlers::{ErrorResponse, forward_to_controller::wrong_controller_message},
+    },
+    krabka_metadata::NodeId,
+    krabka_protocol::owned::unregister_broker_response::UnregisterBrokerResponse,
 };
 
 /// The refusal of a node that is not the active controller, or `None` when

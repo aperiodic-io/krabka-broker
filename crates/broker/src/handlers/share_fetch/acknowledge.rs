@@ -4,13 +4,13 @@
 //! `ShareAcknowledge` applies the same batches without a fetch, so this step
 //! is shared and not folded into the acquire pass.
 
-use std::time::{Duration, Instant};
-
-use krabka_log::Offset;
-
-use crate::{
-    codes,
-    share_partition::state::{AckType, AcquisitionState},
+use {
+    crate::{
+        codes,
+        share_partition::state::{AckType, AcquisitionState},
+    },
+    krabka_log::Offset,
+    std::time::{Duration, Instant},
 };
 
 /// The KIP-1222 acknowledge type `Renew`.
@@ -193,10 +193,11 @@ fn apply_one_ack(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::share_partition::state::{AcquisitionState, RecordState};
+    use {
+        super::*,
+        crate::share_partition::state::{AcquisitionState, RecordState},
+        assert2::assert,
+    };
 
     #[test]
     fn singleton_ack_type_applies_to_the_whole_range() {

@@ -2,19 +2,20 @@
 //!
 //! These tests carry `#[ignore]`, so `cargo test` does not pull Docker by
 //! default. Run them with `--include-ignored` or `--ignored`.
-use std::{
-    path::Path,
-    process::{Command, Stdio},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+use {
+    bytes::Bytes,
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_units::prelude::gibibytes,
+    std::{
+        path::Path,
+        process::{Command, Stdio},
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    },
+    tempfile::tempdir,
+    testcontainers::{ImageExt, core::Mount, runners::AsyncRunner},
+    testcontainers_modules::kafka::{KAFKA_PORT, Kafka},
 };
-
-use bytes::Bytes;
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_units::prelude::gibibytes;
-use tempfile::tempdir;
-use testcontainers::{ImageExt, core::Mount, runners::AsyncRunner};
-use testcontainers_modules::kafka::{KAFKA_PORT, Kafka};
 
 const TOPIC: &str = "krabka-log-itest";
 const KAFKA_IMAGE: &str = "mirror.gcr.io/confluentinc/cp-kafka";
@@ -104,22 +105,19 @@ async fn read_jvm_produced_log_dir() {
     let bootstrap = "localhost:9092";
 
     // 1. Create the topic.
-    docker_exec(
-        &container_id,
-        &[
-            "kafka-topics",
-            "--create",
-            "--if-not-exists",
-            "--topic",
-            TOPIC,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-            "--bootstrap-server",
-            bootstrap,
-        ],
-    );
+    docker_exec(&container_id, &[
+        "kafka-topics",
+        "--create",
+        "--if-not-exists",
+        "--topic",
+        TOPIC,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+        "--bootstrap-server",
+        bootstrap,
+    ]);
 
     // 2. Produce a handful of keyed records.
     let stdin = b"k1:v1\nk2:v2\nk3:v3\n";
@@ -188,25 +186,24 @@ async fn jvm_consumes_rust_written_log_dir() {
     let container_id = kafka.id().to_string();
     let bootstrap = "localhost:9092";
 
-    docker_exec(
-        &container_id,
-        &[
-            "kafka-topics",
-            "--create",
-            "--topic",
-            TOPIC,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-            "--bootstrap-server",
-            bootstrap,
-        ],
-    );
-    docker_exec(
-        &container_id,
-        &["chmod", "-R", "a+rwX", "/var/lib/kafka/data"],
-    );
+    docker_exec(&container_id, &[
+        "kafka-topics",
+        "--create",
+        "--topic",
+        TOPIC,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+        "--bootstrap-server",
+        bootstrap,
+    ]);
+    docker_exec(&container_id, &[
+        "chmod",
+        "-R",
+        "a+rwX",
+        "/var/lib/kafka/data",
+    ]);
     kafka
         .stop_with_timeout(Some(30))
         .await
@@ -235,13 +232,10 @@ async fn jvm_consumes_rust_written_log_dir() {
         ..RecordBatch::default()
     };
     let partition_dir = host_tmp.path().join(format!("{TOPIC}-0"));
-    let mut log = Log::open(
-        partition_dir,
-        LogConfig {
-            flush_on_append: true,
-            ..LogConfig::default()
-        },
-    )
+    let mut log = Log::open(partition_dir, LogConfig {
+        flush_on_append: true,
+        ..LogConfig::default()
+    })
     .expect("open JVM partition with krabka-log");
     log.append(&mut batch).expect("append Rust-written batch");
     drop(log);
@@ -250,27 +244,24 @@ async fn jvm_consumes_rust_written_log_dir() {
         .await
         .expect("kafka container restart timed out")
         .expect("restart kafka container");
-    let out = docker_exec(
-        &container_id,
-        &[
-            "kafka-console-consumer",
-            "--bootstrap-server",
-            bootstrap,
-            "--topic",
-            TOPIC,
-            "--partition",
-            "0",
-            "--from-beginning",
-            "--max-messages",
-            "3",
-            "--timeout-ms",
-            "20000",
-            "--property",
-            "print.key=true",
-            "--property",
-            "key.separator=:",
-        ],
-    );
+    let out = docker_exec(&container_id, &[
+        "kafka-console-consumer",
+        "--bootstrap-server",
+        bootstrap,
+        "--topic",
+        TOPIC,
+        "--partition",
+        "0",
+        "--from-beginning",
+        "--max-messages",
+        "3",
+        "--timeout-ms",
+        "20000",
+        "--property",
+        "print.key=true",
+        "--property",
+        "key.separator=:",
+    ]);
     assert2::assert!(
         String::from_utf8_lossy(&out.stdout)
             .lines()

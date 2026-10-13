@@ -8,12 +8,13 @@
 //! breaks every tie on the process id or the member id, so that the same
 //! inputs always give the same assignment.
 
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashMap},
+use {
+    super::types::{AssignorMember, Task},
+    std::{
+        cmp::Ordering,
+        collections::{BTreeMap, BTreeSet, HashMap},
+    },
 };
-
-use super::types::{AssignorMember, Task};
 
 /// A member of a process, as Kafka's `StickyTaskAssignor.Member`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,9 +51,7 @@ impl ProcessState {
         self.member_task_counts.get(member_id).copied().unwrap_or(0)
     }
 
-    pub(super) fn has_task(&self, task: &Task) -> bool {
-        self.assigned.contains(task)
-    }
+    pub(super) fn has_task(&self, task: &Task) -> bool { self.assigned.contains(task) }
 
     /// Places `task` on `member_id` and returns the member's new task count.
     pub(super) fn add_task(&mut self, member_id: &str, task: &Task, is_active: bool) -> i64 {

@@ -79,9 +79,10 @@ pub(crate) fn registered_listener_endpoint<'a>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn static_voter_set_keeps_peer_hostnames_for_per_dial_resolution() {

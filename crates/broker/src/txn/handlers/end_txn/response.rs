@@ -2,9 +2,10 @@
 //! identity, the other the wire sentinels that stand in for it when the handler
 //! answers with an error code.
 
-use krabka_protocol::owned::end_txn_response::EndTxnResponse;
-
-use crate::{codes, txn::util::producer_fenced_wire_code};
+use {
+    crate::{codes, txn::util::producer_fenced_wire_code},
+    krabka_protocol::owned::end_txn_response::EndTxnResponse,
+};
 
 /// Kafka wire sentinel: "no producer id" (`RecordBatch.NO_PRODUCER_ID`).
 /// Returned on `EndTxn` error responses, where the identity is meaningless.
@@ -45,11 +46,10 @@ fn response(error_code: i16, producer_id: i64, producer_epoch: i16) -> EndTxnRes
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::UnknownTaggedFields;
-
-    use super::*;
-    use crate::txn::util::producer_fenced_cases;
+    use {
+        super::*, crate::txn::util::producer_fenced_cases, assert2::assert,
+        krabka_protocol::UnknownTaggedFields,
+    };
 
     #[test]
     fn producer_fenced_is_invalid_producer_epoch_below_version_2() {

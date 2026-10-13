@@ -5,17 +5,18 @@
 //! looks revoked across the flip, and builds the atomic record batch that
 //! tombstones the next-gen records and writes the classic one.
 
-use krabka_verified::{
-    GroupMigrationDirection, GroupMigrationRecordAction, consumer_downgrade_epoch,
-    group_migration_record_plan,
-};
-
-use super::assignment::{consumer_assignment_blob, embedded_protocol_version};
-use crate::coordinator::unified::{
-    actor::{GroupTombstone, PendingRecords, classic_group_metadata_record},
-    classic_state::{ClassicGroup as ClassicState, Member as ClassicMember, select_protocol},
-    consumer_state::{GroupState as ConsumerState, MemberState},
-    reconciler::ReconcileInput,
+use {
+    super::assignment::{consumer_assignment_blob, embedded_protocol_version},
+    crate::coordinator::unified::{
+        actor::{GroupTombstone, PendingRecords, classic_group_metadata_record},
+        classic_state::{ClassicGroup as ClassicState, Member as ClassicMember, select_protocol},
+        consumer_state::{GroupState as ConsumerState, MemberState},
+        reconciler::ReconcileInput,
+    },
+    krabka_verified::{
+        GroupMigrationDirection, GroupMigrationRecordAction, consumer_downgrade_epoch,
+        group_migration_record_plan,
+    },
 };
 
 /// Converts a consumer group back into a classic group during a KIP-848
@@ -156,24 +157,26 @@ pub(crate) fn downgrade_pending_records(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::Buf;
-    use krabka_protocol::{
-        Decode, owned::consumer_protocol_assignment::ConsumerProtocolAssignment,
-        primitives::uuid::Uuid,
+    use {
+        super::*,
+        crate::coordinator::unified::persistence_next_gen::{NextGenKey, encode_key},
+        assert2::{assert, check},
+        bytes::Buf,
+        krabka_protocol::{
+            Decode, owned::consumer_protocol_assignment::ConsumerProtocolAssignment,
+            primitives::uuid::Uuid,
+        },
     };
-
-    use super::*;
-    use crate::coordinator::unified::persistence_next_gen::{NextGenKey, encode_key};
 
     #[test]
     fn downgrade_re_expresses_members_as_classic() {
-        use std::time::{Duration, Instant};
-
-        use crate::coordinator::unified::{
-            classic_state::GroupState as ClassicGroupState,
-            consumer_state::{ClassicMemberFacade, GroupState, MemberState},
-            persistence_next_gen::MemberAssignmentState,
+        use {
+            crate::coordinator::unified::{
+                classic_state::GroupState as ClassicGroupState,
+                consumer_state::{ClassicMemberFacade, GroupState, MemberState},
+                persistence_next_gen::MemberAssignmentState,
+            },
+            std::time::{Duration, Instant},
         };
 
         let t1 = Uuid([1; 16]);

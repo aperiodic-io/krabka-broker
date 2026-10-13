@@ -1,22 +1,22 @@
 //! A broker restart reloads a streams group from `__consumer_offsets`, and the
 //! reloaded group goes on assigning its tasks.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    common::streams_group_heartbeat_request::task_ids::TaskIds as ReqTaskIds,
-    streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-};
-
-use crate::{
-    streams_harness::{
-        active_partitions_for, boot, connect, create_topic, finalize_streams_version, first_join,
-        follow_up, join_and_converge, topology,
+use {
+    crate::{
+        streams_harness::{
+            active_partitions_for, boot, connect, create_topic, finalize_streams_version,
+            first_join, follow_up, join_and_converge, topology,
+        },
+        support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
     },
-    support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
+    assert2::assert,
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        common::streams_group_heartbeat_request::task_ids::TaskIds as ReqTaskIds,
+        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+    },
+    std::time::Duration,
 };
 
 const GROUP: &str = "streams-restart";

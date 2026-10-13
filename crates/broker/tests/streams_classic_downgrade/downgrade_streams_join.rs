@@ -3,16 +3,15 @@
 //! a converged task assignment, and the leave heartbeat that drains the group
 //! before a classic `JoinGroup` may convert it.
 
-use krabka_client_core::Client;
-use krabka_protocol::owned::streams_group_heartbeat_request::{
-    StreamsGroupHeartbeatRequest, Topology,
+use {
+    crate::support::streams::topology as build_topology,
+    krabka_client_core::Client,
+    krabka_protocol::owned::streams_group_heartbeat_request::{
+        StreamsGroupHeartbeatRequest, Topology,
+    },
 };
 
-use crate::support::streams::topology as build_topology;
-
-pub(crate) fn topology(source_topic: &str) -> Topology {
-    build_topology(source_topic, vec![])
-}
+pub(crate) fn topology(source_topic: &str) -> Topology { build_topology(source_topic, vec![]) }
 
 /// Drives one streams member to convergence, which means at least
 /// `want_active` active-task partitions. It returns

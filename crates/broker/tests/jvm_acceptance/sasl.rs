@@ -3,9 +3,10 @@
 //! The JVM tools authenticate with a JAAS login-module entry, so the builders
 //! for those entries live beside the brokers that accept them.
 
-use krabka_broker::BrokerConfig;
-
-use super::{broker::HostBroker, ports::broker0_advertised};
+use {
+    super::{broker::HostBroker, ports::broker0_advertised},
+    krabka_broker::BrokerConfig,
+};
 
 pub(crate) const ADMIN: &str = "admin";
 pub(crate) const ADMIN_PASS: &str = "admin-secret";
@@ -119,8 +120,10 @@ pub(crate) fn configure_sasl(
     users: &[(&str, &str)],
     super_user: Option<&str>,
 ) {
-    use krabka_broker::config::ListenerSpec;
-    use krabka_security::{ListenerProtocol, SaslMechanism};
+    use {
+        krabka_broker::config::ListenerSpec,
+        krabka_security::{ListenerProtocol, SaslMechanism},
+    };
 
     config.listeners = vec![ListenerSpec {
         advertised: broker0_advertised().into(),
@@ -156,10 +159,10 @@ pub(crate) async fn start_plain_acl_topic(
     tempfile::TempDir,
     super::docker::ClientPropsFile,
 ) {
-    let (broker, dir) = start_sasl_plaintext_broker_with_super_user(
-        "admin",
-        &[("admin", "admin-secret"), (user, password)],
-    )
+    let (broker, dir) = start_sasl_plaintext_broker_with_super_user("admin", &[
+        ("admin", "admin-secret"),
+        (user, password),
+    ])
     .await;
     super::docker::nc_check_connectivity();
     let props = super::docker::write_plain_props("admin", "admin-secret");

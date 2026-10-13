@@ -13,17 +13,18 @@
 //! that drifts now fails a test, instead of quietly re-weighing a PERF note
 //! whose "keep" the benchmark settled.
 
-use assert2::assert;
-use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::SinkExt as _;
-use krabka_protocol::api_key::ApiKey;
-use tokio::io::AsyncReadExt as _;
-use tokio_util::codec::{Encoder as _, Framed};
-
-use super::{codec, encode_response, response_header_len, response_header_v1};
-use crate::{
-    handlers::{ApiKeyCode, CorrelationId},
-    network::codec::{KafkaCodec, codec as production_codec},
+use {
+    super::{codec, encode_response, response_header_len, response_header_v1},
+    crate::{
+        handlers::{ApiKeyCode, CorrelationId},
+        network::codec::{KafkaCodec, codec as production_codec},
+    },
+    assert2::assert,
+    bytes::{BufMut, Bytes, BytesMut},
+    futures_util::SinkExt as _,
+    krabka_protocol::api_key::ApiKey,
+    tokio::io::AsyncReadExt as _,
+    tokio_util::codec::{Encoder as _, Framed},
 };
 
 /// Kafka's default `socket.request.max.bytes`, the request limit the dispatch
@@ -41,9 +42,7 @@ enum ResponseBodyEncoding {
 }
 
 impl ResponseBodyEncoding {
-    const fn is_flexible(self) -> bool {
-        matches!(self, Self::Flexible)
-    }
+    const fn is_flexible(self) -> bool { matches!(self, Self::Flexible) }
 }
 
 /// One framing case: the api key, the flexibility of the body the handler

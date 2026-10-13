@@ -7,41 +7,39 @@
 //! `LogConfig`, which is what removes the window in which a scheduled topic
 //! would still read as an immediate one.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_broker::{BrokerHandle, NodeId};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::list_offsets_request::ListOffsetsRequest, primitives::uuid::Uuid, records::RecordBatch,
-};
-
-use crate::{
-    dat_fixtures::{Mode, Visible, now_ms},
-    support::{
-        self,
-        client::create_configured_topic,
-        fetch::{
-            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+use {
+    crate::{
+        dat_fixtures::{Mode, Visible, now_ms},
+        support::{
+            self,
+            client::create_configured_topic,
+            fetch::{
+                FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+            },
+            offsets::{list_offset_partition, single_partition_list_offsets},
+            produce::{SinglePartitionProduceSetup, send_batch},
+            topics::CreateTopicSetup,
         },
-        offsets::{list_offset_partition, single_partition_list_offsets},
-        produce::{SinglePartitionProduceSetup, send_batch},
-        topics::CreateTopicSetup,
     },
+    assert2::assert,
+    krabka_broker::{BrokerHandle, NodeId},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::list_offsets_request::ListOffsetsRequest, primitives::uuid::Uuid,
+        records::RecordBatch,
+    },
+    std::time::{Duration, Instant},
 };
 
 /// Ceiling on how long a poll waits for a record to become visible.
 const VISIBILITY_DEADLINE: Duration = Duration::from_secs(30);
 
 pub async fn create_topic(client: &Client, topic: &str, mode: Mode) {
-    create_configured_topic(
-        client,
-        CreateTopicSetup {
-            topic,
-            configs: &[("delivery.mode", mode.value)],
-            ..Default::default()
-        },
-    )
+    create_configured_topic(client, CreateTopicSetup {
+        topic,
+        configs: &[("delivery.mode", mode.value)],
+        ..Default::default()
+    })
     .await;
 }
 
@@ -76,15 +74,11 @@ pub async fn ready_topic(broker: &BrokerHandle, client: &Client, topic: &str, mo
 }
 
 pub async fn produce(client: &Client, topic: &str, topic_id: Uuid, batch: RecordBatch) {
-    let response = send_batch(
-        &client,
-        batch,
-        SinglePartitionProduceSetup {
-            topic: topic.to_owned(),
-            topic_id,
-            ..Default::default()
-        },
-    )
+    let response = send_batch(&client, batch, SinglePartitionProduceSetup {
+        topic: topic.to_owned(),
+        topic_id,
+        ..Default::default()
+    })
     .await;
     let written = response
         .responses

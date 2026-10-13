@@ -5,17 +5,18 @@
 //! of the shared `start_host_broker` harness, so it carries the `BrokerConfig`
 //! that no other file in this suite needs.
 
-use assert2::assert;
-use krabka_broker::{Broker, BrokerConfig};
-
-use crate::{
-    jvm_acceptance::{
-        KAFKA_IMAGE, broker0_advertised, broker0_listen, docker_run_kafka_tool, host_broker_config,
-        nc_check_connectivity, wait_jvm_log_config,
+use {
+    crate::{
+        jvm_acceptance::{
+            KAFKA_IMAGE, broker0_advertised, broker0_listen, docker_run_kafka_tool,
+            host_broker_config, nc_check_connectivity, wait_jvm_log_config,
+        },
+        support::{
+            ContainerInput, JvmDockerSetup, init_jvm_tracing, jvm_docker_command, jvm_stdin_output,
+        },
     },
-    support::{
-        ContainerInput, JvmDockerSetup, init_jvm_tracing, jvm_docker_command, jvm_stdin_output,
-    },
+    assert2::assert,
+    krabka_broker::{Broker, BrokerConfig},
 };
 
 /// `kafka-console-consumer` sees a compacted topic with only

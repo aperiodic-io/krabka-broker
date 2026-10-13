@@ -19,16 +19,16 @@
 //!    partition logs are emptied first. See the comment on that truncation for
 //!    why it is needed and what it does not fully close.
 
-use std::time::Duration;
-
-use assert2::assert;
-
-use crate::{
-    RECORDS, TOPIC,
-    cluster::{start_diskless_cluster, wait_for},
-    topic::seed_workload,
-    voter_dir::{DurableRange, durable_bytes, durable_range, voter_dir},
-    wire::{assert_matches_produced, fetch_log},
+use {
+    crate::{
+        RECORDS, TOPIC,
+        cluster::{start_diskless_cluster, wait_for},
+        topic::seed_workload,
+        voter_dir::{DurableRange, durable_bytes, durable_range, voter_dir},
+        wire::{assert_matches_produced, fetch_log},
+    },
+    assert2::assert,
+    std::time::Duration,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -93,13 +93,10 @@ async fn diskless_acks_all_append_survives_the_acking_broker() {
     // flusher is parked, so nothing is writing into these directories now.
     for node in &followers {
         let dir = voter_dir(cluster.log_dir_for_node(*node), topic_uuid, 0, *node);
-        let bytes = durable_bytes(
-            &dir,
-            DurableRange {
-                start: 0,
-                end: committed,
-            },
-        );
+        let bytes = durable_bytes(&dir, DurableRange {
+            start: 0,
+            end: committed,
+        });
         assert!(
             bytes == from_leader.bytes,
             "broker {}'s WAL replica does not hold the leader's bytes",

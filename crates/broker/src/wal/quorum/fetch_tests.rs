@@ -2,12 +2,13 @@
 //! engine, where the high watermark and the log end offset are separate
 //! frontiers, and an empty read is not an out-of-range read.
 
-use assert2::assert;
-use krabka_ids::Offset;
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use super::test_support::append_source;
-use crate::wal::WalStore;
+use {
+    super::test_support::append_source,
+    crate::wal::WalStore,
+    assert2::assert,
+    krabka_ids::Offset,
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+};
 
 #[tokio::test]
 async fn wal_fetch_serves_the_uncommitted_tail_with_separate_frontiers() {

@@ -8,11 +8,12 @@
 //! `JoinGroup` and v5 for `SyncGroup`, so these tests always exercise the
 //! KIP-559 fields.
 
-use assert2::{assert, check};
-
-use crate::support::classic::{
-    ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
-    classic_sync_request, join_protocol, sync_assignment,
+use {
+    crate::support::classic::{
+        ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
+        classic_sync_request, join_protocol, sync_assignment,
+    },
+    assert2::{assert, check},
 };
 mod support;
 

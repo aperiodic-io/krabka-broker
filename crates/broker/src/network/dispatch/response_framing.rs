@@ -11,13 +11,14 @@
 //! Both functions here are the production ones. The seam exists only because
 //! they are crate-internal and a benchmark is an external crate.
 
-use bytes::Bytes;
-
 pub use crate::network::{codec::KafkaCodec, response_header_len, response_header_v1};
-use crate::{
-    error::BrokerError,
-    handlers::{ApiKeyCode, CorrelationId},
-    network::codec::codec as production_codec,
+use {
+    crate::{
+        error::BrokerError,
+        handlers::{ApiKeyCode, CorrelationId},
+        network::codec::codec as production_codec,
+    },
+    bytes::Bytes,
 };
 
 /// Prepend the response header to `body`, exactly as the dispatch loop does.
@@ -38,9 +39,7 @@ pub fn encode_response(
 /// The Kafka length-delimited codec the connection loop frames its stream
 /// with, for requests of up to `max_request_bytes`.
 #[must_use]
-pub fn codec(max_request_bytes: usize) -> KafkaCodec {
-    production_codec(max_request_bytes)
-}
+pub fn codec(max_request_bytes: usize) -> KafkaCodec { production_codec(max_request_bytes) }
 
 #[cfg(test)]
 mod tests;

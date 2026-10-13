@@ -2,18 +2,18 @@
 //! builders, and the two configuration constants every rewrite test passes
 //! through.
 
-use std::{collections::HashMap, path::Path};
-
-use bytes::Bytes;
-use krabka_ids::{Offset, ProducerId};
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-use krabka_units::prelude::{ByteSize, Time};
-
-use super::{
-    CleanedTransactionMetadata, CleaningRound, ProducerLastRecord, RewriteOutput, RewriteRetention,
-    build_offset_map, rewrite_segments,
+use {
+    super::{
+        CleanedTransactionMetadata, CleaningRound, ProducerLastRecord, RewriteOutput,
+        RewriteRetention, build_offset_map, rewrite_segments,
+    },
+    crate::{io::FileIo, segment::Segment},
+    bytes::Bytes,
+    krabka_ids::{Offset, ProducerId},
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    krabka_units::prelude::{ByteSize, Time},
+    std::{collections::HashMap, path::Path},
 };
-use crate::{io::FileIo, segment::Segment};
 
 /// Kafka's default `index.interval.bytes`. The compaction tests do not
 /// exercise sparse-index density, so they all pass the default value

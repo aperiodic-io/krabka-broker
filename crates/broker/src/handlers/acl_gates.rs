@@ -4,19 +4,19 @@
 //! handler reads as `if <gate>(..) { return <error>; }` and each caller stays
 //! free to choose the error code that its RPC answers with.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_metadata::{AclOperation, ResourceType};
-
-use super::{RequestContext, acl_wire};
-use crate::{
-    authorizer::{AuthorizationResult, Authorizer, authorize_topics},
-    broker::Broker,
-    codes::{self, GROUP_AUTHORIZATION_FAILED, UNSUPPORTED_VERSION},
-    handlers::describe_configs::{
-        RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
-        RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+use {
+    super::{RequestContext, acl_wire},
+    crate::{
+        authorizer::{AuthorizationResult, Authorizer, authorize_topics},
+        broker::Broker,
+        codes::{self, GROUP_AUTHORIZATION_FAILED, UNSUPPORTED_VERSION},
+        handlers::describe_configs::{
+            RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
+            RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+        },
     },
+    krabka_metadata::{AclOperation, ResourceType},
+    std::collections::{HashMap, HashSet},
 };
 
 /// Kafka's resource-specific refusal for the two config mutation APIs.
@@ -343,16 +343,16 @@ pub(crate) fn classic_group_refusal(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use assert2::{assert, check};
-    use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
-
-    use super::*;
-    use crate::{
-        authorizer::SimpleAclAuthorizer,
-        handlers::test_support::operators_principal as principal,
-        test_support::{AllowAclSetup, allow_acl, peer},
+    use {
+        super::*,
+        crate::{
+            authorizer::SimpleAclAuthorizer,
+            handlers::test_support::operators_principal as principal,
+            test_support::{AllowAclSetup, allow_acl, peer},
+        },
+        assert2::{assert, check},
+        krabka_metadata::{AclOperation, MetadataImage, ResourceType},
+        std::collections::HashSet,
     };
 
     #[test]

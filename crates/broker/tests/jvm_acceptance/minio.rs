@@ -3,9 +3,7 @@
 //! The container is owned by a guard that removes it on drop, so an aborted
 //! test does not leave one squatting on the published port.
 
-use assert2::assert;
-
-use super::ports::minio_port;
+use {super::ports::minio_port, assert2::assert};
 
 krabka_macros::minio_fixture!(minio_process);
 
@@ -63,9 +61,7 @@ impl MinioContainer {
 
 /// Poll the published host port until `MinIO`'s HTTP listener answers. This
 /// avoids a race with the first health check of the fast-starting image.
-pub(crate) fn wait_for_minio_ready() {
-    minio_process::wait(minio_port());
-}
+pub(crate) fn wait_for_minio_ready() { minio_process::wait(minio_port()); }
 
 pub(crate) fn minio_make_bucket(bucket: &str) {
     // `mc mb -p` is idempotent and creates parent prefixes; the inner
@@ -130,7 +126,5 @@ pub(crate) fn minio_list_objects(bucket: &str) -> String {
 }
 
 impl Drop for MinioContainer {
-    fn drop(&mut self) {
-        minio_process::remove(&self.name);
-    }
+    fn drop(&mut self) { minio_process::remove(&self.name); }
 }

@@ -5,11 +5,12 @@
 //! [`ClassicGroup::supports_protocols`] is the gate a joining member passes
 //! before the group admits it, so the vote always has a candidate.
 
-use std::collections::{HashMap, HashSet};
-
-use super::{
-    group::{ClassicGroup, GroupState},
-    member::Member,
+use {
+    super::{
+        group::{ClassicGroup, GroupState},
+        member::Member,
+    },
+    std::collections::{HashMap, HashSet},
 };
 
 /// The protocol names every member proposed, Kafka's
@@ -80,10 +81,10 @@ impl ClassicGroup {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::classic_state::test_support::member_with_protocols;
+    use {
+        super::*, crate::coordinator::unified::classic_state::test_support::member_with_protocols,
+        assert2::assert,
+    };
 
     fn one_range_first_member() -> HashMap<String, super::super::member::Member> {
         HashMap::from([(
@@ -161,11 +162,9 @@ mod tests {
             ),
             (
                 "majority of first choices",
-                &[
-                    &["range", "sticky"],
-                    &["range", "sticky"],
-                    &["sticky", "range"],
-                ],
+                &[&["range", "sticky"], &["range", "sticky"], &[
+                    "sticky", "range",
+                ]],
                 Some("range"),
             ),
             ("no shared protocol", &[&["range"], &["sticky"]], None),
@@ -188,10 +187,10 @@ mod tests {
     #[test]
     fn supports_protocols_matches_kafka() {
         let mut stable = ClassicGroup::new("g");
-        stable.add_member(member_with_protocols(
-            "m1",
-            vec![("range", b""), ("sticky", b"")],
-        ));
+        stable.add_member(member_with_protocols("m1", vec![
+            ("range", b""),
+            ("sticky", b""),
+        ]));
         stable.add_member(member_with_protocols("m2", vec![("sticky", b"")]));
         stable.protocol_type = Some("consumer".into());
         stable.state = GroupState::Stable;

@@ -35,21 +35,22 @@
 //! so a broker that disagrees with its peers about the set is visible in the
 //! audit log after the fact.
 
-use krabka_audit::AuditOutcome;
-use krabka_protocol::krabka::break_glass::{ApproveBreakGlassRequest, ApproveBreakGlassResponse};
-
 pub(crate) use self::decision::{Attempt, decide};
-use self::{
-    report::{Report, phase_of, reason},
-    settlement::settle,
-};
-use crate::{
-    break_glass::{
-        config::BreakGlassPolicy,
-        handlers::{PrivilegedAudit, Refusal, audit_privileged, from_wire_uuid},
+use {
+    self::{
+        report::{Report, phase_of, reason},
+        settlement::settle,
     },
-    codes,
-    handlers::{cluster_alter_denied, encode_response},
+    crate::{
+        break_glass::{
+            config::BreakGlassPolicy,
+            handlers::{PrivilegedAudit, Refusal, audit_privileged, from_wire_uuid},
+        },
+        codes,
+        handlers::{cluster_alter_denied, encode_response},
+    },
+    krabka_audit::AuditOutcome,
+    krabka_protocol::krabka::break_glass::{ApproveBreakGlassRequest, ApproveBreakGlassResponse},
 };
 
 mod decision;

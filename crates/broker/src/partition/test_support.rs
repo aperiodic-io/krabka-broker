@@ -8,27 +8,27 @@
 //! [`test_partition_with_writer`] is `pub(crate)` for the same reason: the
 //! group coordinator's offsets log appends through a real writer in its tests.
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicI32, AtomicU64},
-};
-
-use arc_swap::ArcSwap;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig};
-use tempfile::tempdir;
-use tokio::sync::{Notify, mpsc};
-
-use crate::{
-    delivery::DeliveryHandles,
-    log_dir_status::LogDirRegistry,
-    partition::{
-        Partition, WriterMessage, empty_marker_materialization, initial_replication_target,
+use {
+    crate::{
+        delivery::DeliveryHandles,
+        log_dir_status::LogDirRegistry,
+        partition::{
+            Partition, WriterMessage, empty_marker_materialization, initial_replication_target,
+        },
+        partition_writer::run,
+        producer_state::ProducerState,
+        replica_state::ReplicaState,
+        test_support::{PartitionRecordsSetup, partition_records_batch},
     },
-    partition_writer::run,
-    producer_state::ProducerState,
-    replica_state::ReplicaState,
-    test_support::{PartitionRecordsSetup, partition_records_batch},
+    arc_swap::ArcSwap,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig},
+    std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicI32, AtomicU64},
+    },
+    tempfile::tempdir,
+    tokio::sync::{Notify, mpsc},
 };
 
 // Fails leader-epoch checkpoint writes as a full disk would.

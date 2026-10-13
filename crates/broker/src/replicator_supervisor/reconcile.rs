@@ -2,14 +2,15 @@
 //! the WAL voters, prunes what left the image, materializes what joined it, and
 //! retargets the follower replicator tasks.
 
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
-use tracing::warn;
-
-use super::{ReplicatorSupervisor, desired_local_set, desired_wal_placements, push_topic_configs};
-use crate::{
-    config_keys::resolve_diskless,
-    wal::quorum::{prune_orphaned_shard_dirs, registry::ShardId, shard_dir},
+use {
+    super::{ReplicatorSupervisor, desired_local_set, desired_wal_placements, push_topic_configs},
+    crate::{
+        config_keys::resolve_diskless,
+        wal::quorum::{prune_orphaned_shard_dirs, registry::ShardId, shard_dir},
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
+    tracing::warn,
 };
 
 impl ReplicatorSupervisor {

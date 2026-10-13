@@ -96,9 +96,10 @@ pub fn coalesce_delivery_range(last_high: i64, low: i64, high: i64) -> (bool, i6
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{coalesce_delivery_range, delivery_watermark_advance, scheduled_delivery_visible};
+    use {
+        super::{coalesce_delivery_range, delivery_watermark_advance, scheduled_delivery_visible},
+        assert2::assert,
+    };
 
     #[test]
     fn visibility_never_ignores_deadline_or_overflow() {

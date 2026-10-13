@@ -5,10 +5,11 @@
 //! wall-clock time. [`Default`] wires the system wall clock and the system
 //! timer.
 
-use std::sync::Arc;
-
-use krabka_units::{Time, millis, secs};
-use qubit_clock::{StdWallClock, Timer, WallClock};
+use {
+    krabka_units::{Time, millis, secs},
+    qubit_clock::{StdWallClock, Timer, WallClock},
+    std::sync::Arc,
+};
 
 /// How the broker-wide delivery scheduler paces itself, and where it reads
 /// time.
@@ -57,10 +58,7 @@ pub(crate) struct DeliveryConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::convert::TimeExt as _;
-
-    use super::*;
+    use {super::*, assert2::check, krabka_units::convert::TimeExt as _};
 
     #[test]
     fn the_defaults_are_the_documented_values() {

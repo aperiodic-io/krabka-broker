@@ -3,34 +3,37 @@
 //! the typed client, at whatever version it negotiates, must return the key and
 //! value that the test sent.
 
-use assert2::assert;
-
-use crate::{
-    kafka_wire::LegacyExchangeSetup,
-    support::{
-        fetch::{SinglePartitionFetchSetup, single_partition_fetch},
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::{
+        kafka_wire::LegacyExchangeSetup,
+        support::{
+            fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        },
     },
+    assert2::assert,
 };
 mod kafka_wire;
 mod support;
 
-use bytes::{Bytes, BytesMut};
-use krabka_ids::Offset;
-use krabka_protocol::{
-    Decode, Encode,
-    kafka_3_6_2::owned::{
-        produce_request::{
-            PartitionProduceData as LegacyPartitionProduceData,
-            ProduceRequest as LegacyProduceRequest, TopicProduceData as LegacyTopicProduceData,
+use {
+    bytes::{Bytes, BytesMut},
+    krabka_ids::Offset,
+    krabka_protocol::{
+        Decode, Encode,
+        kafka_3_6_2::owned::{
+            produce_request::{
+                PartitionProduceData as LegacyPartitionProduceData,
+                ProduceRequest as LegacyProduceRequest, TopicProduceData as LegacyTopicProduceData,
+            },
+            produce_response::ProduceResponse as LegacyProduceResponse,
         },
-        produce_response::ProduceResponse as LegacyProduceResponse,
+        records::RecordsPayload,
     },
-    records::RecordsPayload,
+    krabka_records_legacy::{Magic, ParsedRecord, encode_flat_message_set},
+    support::topic_id_for,
+    tokio::net::TcpStream,
 };
-use krabka_records_legacy::{Magic, ParsedRecord, encode_flat_message_set};
-use support::topic_id_for;
-use tokio::net::TcpStream;
 
 // ── Raw TCP wire helpers ──────────────────────────────────────────────────────
 

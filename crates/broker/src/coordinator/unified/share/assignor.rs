@@ -16,15 +16,15 @@
 //! Where Kafka's walk order decides between equally balanced results, the
 //! member that gets a partition can differ.
 
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    ops::Bound,
-};
-
-use krabka_protocol::primitives::uuid::Uuid;
-
-use crate::coordinator::unified::assignor::{
-    Assignment, GroupSpec, SubscriptionType, TopicMetadata,
+use {
+    crate::coordinator::unified::assignor::{
+        Assignment, GroupSpec, SubscriptionType, TopicMetadata,
+    },
+    krabka_protocol::primitives::uuid::Uuid,
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+        ops::Bound,
+    },
 };
 
 /// A topic id as an ordered key.
@@ -40,9 +40,7 @@ pub struct ShareGroupAssignor;
 
 impl ShareGroupAssignor {
     #[must_use]
-    pub fn name(&self) -> &'static str {
-        "simple"
-    }
+    pub fn name(&self) -> &'static str { "simple" }
 
     /// The target assignment of `group` over `topics`.
     ///
@@ -396,10 +394,11 @@ fn remove_partition(assignment: &mut MemberAssignment, (topic, partition): Topic
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::assignor::MemberSubscription;
+    use {
+        super::*,
+        crate::coordinator::unified::assignor::MemberSubscription,
+        assert2::{assert, check},
+    };
 
     const T1: Uuid = Uuid([1; 16]);
     const T2: Uuid = Uuid([2; 16]);

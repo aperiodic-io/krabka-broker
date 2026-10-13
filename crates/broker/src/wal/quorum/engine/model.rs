@@ -36,17 +36,17 @@
 //! Filesystem calls are assumed atomic at the successful operation boundaries
 //! exposed by `krabka-log`.
 
-use std::sync::{Arc, Mutex};
-
-use krabka_ids::Offset;
-use krabka_kraft_core::NodeId;
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_units::convert::ByteSizeExt as _;
-use stateright::{Checker, Model, Property};
-
-use super::{OpenMode, WalReplica, WalShardEngine, split_batches};
-use crate::model_check::run_bfs;
+use {
+    super::{OpenMode, WalReplica, WalShardEngine, split_batches},
+    crate::model_check::run_bfs,
+    krabka_ids::Offset,
+    krabka_kraft_core::NodeId,
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_units::convert::ByteSizeExt as _,
+    stateright::{Checker, Model, Property},
+    std::sync::{Arc, Mutex},
+};
 
 fn record_committed_watermark(state: &mut WalState, hwm: usize) {
     assert2::assert!(hwm >= state.committed.len());
@@ -99,51 +99,6 @@ impl Model for WalModel {
     type Action = Action;
     type State = WalState;
 
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![WalState {
-            steps: 0,
-            logs: std::array::from_fn(|_| Vec::new()),
-            leader: 0,
-            leader_epoch: 0,
-            live: 0b111,
-            hwm: 0,
-            committed: Vec::new(),
-            last_ack_failed: false,
-            recovered: false,
-        }]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        if state.steps == MAX_STEPS {
-            return;
-        }
-        if is_live(state, state.leader) {
-            if state.logs[state.leader].len() < MAX_RECORDS {
-                actions.push(Action::Append);
-            }
-            if state.logs[state.leader].len() > state.hwm {
-                actions.push(Action::Acknowledge);
-            }
-        }
-        for voter in 0..VOTERS {
-            if is_live(state, voter) {
-                actions.push(Action::Fail(voter));
-                if !is_live(state, state.leader)
-                    && voter != state.leader
-                    && state.leader_epoch < MAX_EPOCH
-                    && has_committed_prefix(state, voter)
-                {
-                    actions.push(Action::Elect(voter));
-                }
-            } else {
-                actions.push(Action::Revive(voter));
-            }
-        }
-        if state.live == 0b111 && state.logs.iter().any(|log| log != &state.logs[0]) {
-            actions.push(Action::CrashRecover);
-        }
-    }
-
     krabka_macros::model_transition!(last, action, state; {
             state.steps += 1;
             match action {
@@ -190,6 +145,51 @@ impl Model for WalModel {
 
     });
 
+    fn init_states(&self) -> Vec<Self::State> {
+        vec![WalState {
+            steps: 0,
+            logs: std::array::from_fn(|_| Vec::new()),
+            leader: 0,
+            leader_epoch: 0,
+            live: 0b111,
+            hwm: 0,
+            committed: Vec::new(),
+            last_ack_failed: false,
+            recovered: false,
+        }]
+    }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        if state.steps == MAX_STEPS {
+            return;
+        }
+        if is_live(state, state.leader) {
+            if state.logs[state.leader].len() < MAX_RECORDS {
+                actions.push(Action::Append);
+            }
+            if state.logs[state.leader].len() > state.hwm {
+                actions.push(Action::Acknowledge);
+            }
+        }
+        for voter in 0..VOTERS {
+            if is_live(state, voter) {
+                actions.push(Action::Fail(voter));
+                if !is_live(state, state.leader)
+                    && voter != state.leader
+                    && state.leader_epoch < MAX_EPOCH
+                    && has_committed_prefix(state, voter)
+                {
+                    actions.push(Action::Elect(voter));
+                }
+            } else {
+                actions.push(Action::Revive(voter));
+            }
+        }
+        if state.live == 0b111 && state.logs.iter().any(|log| log != &state.logs[0]) {
+            actions.push(Action::CrashRecover);
+        }
+    }
+
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
             Property::always("hwm_is_inside_leader_log", |_, state: &WalState| {
@@ -223,9 +223,7 @@ impl Model for WalModel {
     }
 }
 
-fn is_live(state: &WalState, voter: usize) -> bool {
-    state.live & (1 << voter) != 0
-}
+fn is_live(state: &WalState, voter: usize) -> bool { state.live & (1 << voter) != 0 }
 
 fn has_committed_prefix(state: &WalState, voter: usize) -> bool {
     state.logs[voter].len() >= state.hwm && state.logs[voter][..state.hwm] == state.committed[..]
@@ -338,13 +336,9 @@ fn observe(logs: &[Arc<Mutex<Log>>; VOTERS]) -> [Vec<u8>; VOTERS] {
     })
 }
 
-fn node(voter: usize) -> NodeId {
-    NodeId(u64::try_from(voter).expect("bounded voter fits in u64"))
-}
+fn node(voter: usize) -> NodeId { NodeId(u64::try_from(voter).expect("bounded voter fits in u64")) }
 
-fn model_offset(offset: usize) -> i64 {
-    i64::try_from(offset).expect("bounded offset fits in i64")
-}
+fn model_offset(offset: usize) -> i64 { i64::try_from(offset).expect("bounded offset fits in i64") }
 
 fn model_index(offset: i64) -> usize {
     usize::try_from(offset).expect("nonnegative bounded offset fits in usize")

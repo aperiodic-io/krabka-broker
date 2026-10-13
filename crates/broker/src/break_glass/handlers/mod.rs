@@ -37,22 +37,23 @@ pub(crate) mod batch;
 pub(crate) mod describe;
 pub(crate) mod propose;
 
-use krabka_audit::{
-    AuditEndpoint, AuditError, AuditEvent, AuditLog, AuditMode, AuditOutcome, AuditPrincipal,
-    PrivilegedPhase,
-};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use krabka_raft::RaftError;
-use uuid::Uuid;
-
 // The `Describe` gate that `describe` applies. It lives in `crate::handlers`
 // beside its `Alter` twin, so the break-glass control plane does not reach into
 // another subsystem for an ACL gate.
 pub(crate) use crate::handlers::cluster_describe_denied;
-use crate::{
-    codes::{self, POLICY_VIOLATION},
-    handlers::RequestContext,
-    time_util::now_ms,
+use {
+    crate::{
+        codes::{self, POLICY_VIOLATION},
+        handlers::RequestContext,
+        time_util::now_ms,
+    },
+    krabka_audit::{
+        AuditEndpoint, AuditError, AuditEvent, AuditLog, AuditMode, AuditOutcome, AuditPrincipal,
+        PrivilegedPhase,
+    },
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    krabka_raft::RaftError,
+    uuid::Uuid,
 };
 
 /// The audited action name of a request whose wire action names no transition.
@@ -87,14 +88,10 @@ pub(crate) fn principal_name(ctx: &RequestContext<'_>) -> String {
 }
 
 /// The `uuid` form of a wire id.
-pub(crate) fn from_wire_uuid(id: WireUuid) -> Uuid {
-    Uuid::from_bytes(id.0)
-}
+pub(crate) fn from_wire_uuid(id: WireUuid) -> Uuid { Uuid::from_bytes(id.0) }
 
 /// The wire form of a `uuid` id.
-pub(crate) fn to_wire_uuid(id: Uuid) -> WireUuid {
-    WireUuid(*id.as_bytes())
-}
+pub(crate) fn to_wire_uuid(id: Uuid) -> WireUuid { WireUuid(*id.as_bytes()) }
 
 /// The error code and the text that a failed `submit_change` answers with.
 ///
@@ -266,15 +263,14 @@ pub(crate) fn privileged_event(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use assert2::{assert, check};
-    use krabka_security::Principal;
+    use {
+        super::*,
+        crate::test_support::sasl_principal,
+        assert2::{assert, check},
+        krabka_security::Principal,
+    };
 
-    use super::*;
-    use crate::test_support::sasl_principal;
-
-    pub(crate) fn principal(name: &str) -> Principal {
-        sasl_principal(name)
-    }
+    pub(crate) fn principal(name: &str) -> Principal { sasl_principal(name) }
 
     pub(crate) fn peer() -> std::net::SocketAddr {
         "10.0.0.7:51120".parse().expect("a loopback peer address")
@@ -420,23 +416,18 @@ pub(crate) mod tests {
         let ctx = context(&principal, &peer);
         let (audit_log, mut events) = audit_channel();
 
-        audit_privileged(
-            &audit_log,
-            &ctx,
-            String::new(),
-            &PrivilegedAudit {
-                outcome: AuditOutcome::Failure,
-                phase: PrivilegedPhase::Refused,
-                action: "thaw_topic_freeze",
-                target: "literal:orders",
-                proposal_id: None,
-                counterparties: &[],
-                key_id: "",
-                signature: &[],
-                signature_verified: false,
-                reason: "no approved proposal covers the request",
-            },
-        );
+        audit_privileged(&audit_log, &ctx, String::new(), &PrivilegedAudit {
+            outcome: AuditOutcome::Failure,
+            phase: PrivilegedPhase::Refused,
+            action: "thaw_topic_freeze",
+            target: "literal:orders",
+            proposal_id: None,
+            counterparties: &[],
+            key_id: "",
+            signature: &[],
+            signature_verified: false,
+            reason: "no approved proposal covers the request",
+        });
 
         assert!(let Some(event) = events.recv().await);
         assert!(let

@@ -16,29 +16,29 @@
 //! and never fetches on its own, so only the fetches of a case move the high
 //! watermark. Each case appends two one-record batches, at offsets 0 and 1.
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_log::Offset;
-use krabka_protocol::{
-    Decode,
-    owned::{
-        fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-        fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+use {
+    super::{encode_fetch_response, handle},
+    crate::{
+        broker::BrokerHandle,
+        codes,
+        fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
+        handlers::test_support::{ReplicatedTopicSetup, seed_partition_replicas},
+        partition::Partition,
+        test_support::{encode_request, peer, principal, start_broker_no_audit_with},
     },
-    records::{RecordBatch, RecordsPayload},
-};
-use krabka_units::prelude::mebibytes;
-
-use super::{encode_fetch_response, handle};
-use crate::{
-    broker::BrokerHandle,
-    codes,
-    fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
-    handlers::test_support::{ReplicatedTopicSetup, seed_partition_replicas},
-    partition::Partition,
-    test_support::{encode_request, peer, principal, start_broker_no_audit_with},
+    assert2::assert,
+    bytes::Bytes,
+    krabka_log::Offset,
+    krabka_protocol::{
+        Decode,
+        owned::{
+            fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+            fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+        },
+        records::{RecordBatch, RecordsPayload},
+    },
+    krabka_units::prelude::mebibytes,
+    std::{sync::Arc, time::Duration},
 };
 
 /// The node id of the follower.
@@ -101,14 +101,11 @@ use crate::test_support::single_value_batch as batch;
 /// Create `topic` with replicas 1 and 2, led by this broker, wait until node
 /// 2 is in the ISR, and append two batches.
 async fn partition(broker: &BrokerHandle, topic: &str, topic_id: u128) -> Arc<Partition> {
-    seed_partition_replicas(
-        broker,
-        ReplicatedTopicSetup {
-            topic,
-            topic_id: uuid::Uuid::from_u128(topic_id),
-            ..Default::default()
-        },
-    )
+    seed_partition_replicas(broker, ReplicatedTopicSetup {
+        topic,
+        topic_id: uuid::Uuid::from_u128(topic_id),
+        ..Default::default()
+    })
     .await;
 
     wait_for_local_partition!(

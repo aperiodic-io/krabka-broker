@@ -3,16 +3,16 @@
 //! image with one in-flight reassignment, so the builders live in one place
 //! rather than in either test module.
 
-use std::sync::Arc;
-
-use krabka_metadata::{
-    BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
-};
-use uuid::Uuid;
-
-use crate::{
-    heartbeat::controller_state::ControllerLivenessState,
-    test_support::{ReassignmentSetup, broker_registration, reassignment_partition},
+use {
+    crate::{
+        heartbeat::controller_state::ControllerLivenessState,
+        test_support::{ReassignmentSetup, broker_registration, reassignment_partition},
+    },
+    krabka_metadata::{
+        BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
+    },
+    std::sync::Arc,
+    uuid::Uuid,
 };
 
 pub(super) async fn liveness(alive: &[u64]) -> ControllerLivenessState {

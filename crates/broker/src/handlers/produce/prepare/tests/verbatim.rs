@@ -1,20 +1,21 @@
 //! Tests that drive the zero-copy dispatch end to end, from the verbatim
 //! passthrough predicate to the writer's `ProduceData`.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use bytes::{Bytes, BytesMut};
-use krabka_compression::{CompressionType, RecordDecompressionPolicy};
-use krabka_protocol::records::{
-    Attributes, CRC_COVERAGE_START, HEADER_LEN, Record, RecordBatch, RecordsPayload, TimestampType,
-};
-
-use super::super::{DecodeEnv, PartitionPayload, PreparedSource, prepare_batch};
-use crate::{
-    handlers::produce::{append::build_produce_data, topic_settings::TimestampPolicy},
-    metrics::BrokerMetrics,
-    partition::ProduceData,
+use {
+    super::super::{DecodeEnv, PartitionPayload, PreparedSource, prepare_batch},
+    crate::{
+        handlers::produce::{append::build_produce_data, topic_settings::TimestampPolicy},
+        metrics::BrokerMetrics,
+        partition::ProduceData,
+    },
+    assert2::{assert, check},
+    bytes::{Bytes, BytesMut},
+    krabka_compression::{CompressionType, RecordDecompressionPolicy},
+    krabka_protocol::records::{
+        Attributes, CRC_COVERAGE_START, HEADER_LEN, Record, RecordBatch, RecordsPayload,
+        TimestampType,
+    },
+    std::sync::Arc,
 };
 
 /// Prepare against the fixture topic with the caller's compression, metrics
@@ -38,9 +39,7 @@ macro_rules! prepare_for_topic {
 
 /// The topic name these cases record under, as the shared handle the metric
 /// label sets clone.
-fn topic() -> Arc<str> {
-    Arc::from("t")
-}
+fn topic() -> Arc<str> { Arc::from("t") }
 
 fn encode(b: &RecordBatch) -> Bytes {
     let mut buf = BytesMut::new();

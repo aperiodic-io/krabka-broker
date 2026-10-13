@@ -8,13 +8,14 @@
 //! absolute or relative, are the KIP-32 conventions that differ between v0
 //! and v1.
 
-use bytes::{BufMut, BytesMut};
-use krabka_compression::CompressionType;
-
-use super::ParsedRecord;
-use crate::{
-    error::LegacyRecordsError,
-    message::{Magic, Message, attrs_with_compression},
+use {
+    super::ParsedRecord,
+    crate::{
+        error::LegacyRecordsError,
+        message::{Magic, Message, attrs_with_compression},
+    },
+    bytes::{BufMut, BytesMut},
+    krabka_compression::CompressionType,
 };
 
 fn message_for_record(record: ParsedRecord, magic: Magic) -> Message {
@@ -137,13 +138,14 @@ pub fn encode_compressed_message_set<B: BufMut>(
 
 #[cfg(test)]
 mod tests {
-    use bytes::{Buf, Bytes};
-    use krabka_ids::Offset;
-
-    use super::*;
-    use crate::set::{
-        decode_message_set,
-        test_support::{compressed_bytes, decode_bytes, sample_records_v0, sample_records_v1},
+    use {
+        super::*,
+        crate::set::{
+            decode_message_set,
+            test_support::{compressed_bytes, decode_bytes, sample_records_v0, sample_records_v1},
+        },
+        bytes::{Buf, Bytes},
+        krabka_ids::Offset,
     };
 
     #[test]

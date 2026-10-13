@@ -7,23 +7,23 @@
 //! because each is a whole-broker singleton that `apply_to` writes exactly
 //! once, after the values they may depend on are already resolved.
 
-use std::sync::Arc;
-
-use krabka_units::{
-    ByteSize, Time,
-    convert::{ByteSizeExt as _, TimeExt as _},
-};
-
-use super::{
-    AuthzType, FileAuditConfig, FileAuthorizationConfig, FileConfigError, FileGssapiConfig,
-    FileInterBrokerCredentials, FileProcessConfig, FileSchemaRegistryConfig,
-    gssapi::DEFAULT_KERBEROS_SERVICE_NAME, parse_bootstrap_server, parse_quorum_voter,
-};
-use crate::{
-    authorizer::{AllowAllAuthorizer, SimpleAclAuthorizer},
-    config::{BrokerConfig, InterBrokerCredentials, NodeRole},
-    network::auth::GssapiConfig,
-    schema_validation::SchemaValidator,
+use {
+    super::{
+        AuthzType, FileAuditConfig, FileAuthorizationConfig, FileConfigError, FileGssapiConfig,
+        FileInterBrokerCredentials, FileProcessConfig, FileSchemaRegistryConfig,
+        gssapi::DEFAULT_KERBEROS_SERVICE_NAME, parse_bootstrap_server, parse_quorum_voter,
+    },
+    crate::{
+        authorizer::{AllowAllAuthorizer, SimpleAclAuthorizer},
+        config::{BrokerConfig, InterBrokerCredentials, NodeRole},
+        network::auth::GssapiConfig,
+        schema_validation::SchemaValidator,
+    },
+    krabka_units::{
+        ByteSize, Time,
+        convert::{ByteSizeExt as _, TimeExt as _},
+    },
+    std::sync::Arc,
 };
 
 pub(super) struct FileConfigTail {
@@ -294,9 +294,7 @@ fn gssapi_config(_gssapi: FileGssapiConfig) -> Result<GssapiConfig, FileConfigEr
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use crate::file_config::test_support::configured;
+    use {crate::file_config::test_support::configured, assert2::assert};
 
     #[test]
     fn apply_to_absent_controller_server_name_leaves_default() {

@@ -8,16 +8,16 @@
 //!   sidecars that an interrupted
 //!   [`crate::retention::delete_segment_files`] left behind.
 
-use std::{collections::HashSet, path::Path};
-
-use tracing::instrument;
-
 pub use self::swap::swap_orphan_recover;
-use crate::{
-    error::LogError,
-    io::{IoTarget, LogIo},
-    name,
-    retention::DELETED_SUFFIX,
+use {
+    crate::{
+        error::LogError,
+        io::{IoTarget, LogIo},
+        name,
+        retention::DELETED_SUFFIX,
+    },
+    std::{collections::HashSet, path::Path},
+    tracing::instrument,
 };
 
 pub mod swap;
@@ -120,15 +120,9 @@ fn canonical_base(value: &str, ext: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use tempfile::tempdir;
+    use {super::*, crate::io::FileIo, assert2::check, tempfile::tempdir};
 
-    use super::*;
-    use crate::io::FileIo;
-
-    fn touch(path: &std::path::Path) {
-        std::fs::File::create(path).unwrap();
-    }
+    fn touch(path: &std::path::Path) { std::fs::File::create(path).unwrap(); }
 
     /// The sweep reclaims both shapes an interrupted deletion leaves: a
     /// `.deleted` tombstone, and a sidecar whose `.log` is already gone.

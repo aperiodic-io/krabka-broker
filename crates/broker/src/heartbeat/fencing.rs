@@ -25,14 +25,14 @@
 //! is level-triggered, so a broker that stays dead costs one record, not one
 //! per tick. Only a heartbeat unfences, as in Kafka.
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
-
-use krabka_metadata::{
-    BrokerRegistrationChangeRecord, FencingChange, MetadataImage, MetadataRecord, NodeId,
-};
-
-use crate::{
-    heartbeat::controller_state::ControllerLivenessState, metadata_source::MetadataSource,
+use {
+    crate::{
+        heartbeat::controller_state::ControllerLivenessState, metadata_source::MetadataSource,
+    },
+    krabka_metadata::{
+        BrokerRegistrationChangeRecord, FencingChange, MetadataImage, MetadataRecord, NodeId,
+    },
+    std::{collections::HashSet, sync::Arc, time::Duration},
 };
 
 /// Upper bound on the fencing commit, matching the failover submit the same
@@ -51,6 +51,10 @@ pub(crate) struct RegistrationChange {
 }
 
 impl RegistrationChange {
+    pub(crate) const CONTROLLED_SHUTDOWN: Self = Self {
+        fenced: None,
+        in_controlled_shutdown: true,
+    };
     pub(crate) const FENCE: Self = Self {
         fenced: Some(true),
         in_controlled_shutdown: false,
@@ -58,10 +62,6 @@ impl RegistrationChange {
     pub(crate) const UNFENCE: Self = Self {
         fenced: Some(false),
         in_controlled_shutdown: false,
-    };
-    pub(crate) const CONTROLLED_SHUTDOWN: Self = Self {
-        fenced: None,
-        in_controlled_shutdown: true,
     };
 }
 
@@ -158,11 +158,10 @@ pub(crate) async fn publish_fencing_changes(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::BrokerRegistrationRecord;
-
-    use super::*;
-    use crate::test_support::broker_registration;
+    use {
+        super::*, crate::test_support::broker_registration, assert2::assert,
+        krabka_metadata::BrokerRegistrationRecord,
+    };
 
     fn registration(node: u64, fenced: bool) -> BrokerRegistrationRecord {
         BrokerRegistrationRecord {
@@ -185,9 +184,7 @@ mod tests {
         image
     }
 
-    fn unavailable(ids: &[u64]) -> HashSet<u64> {
-        ids.iter().copied().collect()
-    }
+    fn unavailable(ids: &[u64]) -> HashSet<u64> { ids.iter().copied().collect() }
 
     /// The `BrokerRegistrationChangeRecord` Kafka writes for `node` at its
     /// registered epoch, with `fenced` and `in_controlled_shutdown` set.

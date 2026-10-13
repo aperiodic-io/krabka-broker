@@ -9,23 +9,23 @@
 
 mod support;
 
-use std::net::SocketAddr;
-
-use assert2::check;
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, NodeId, config::NodeRole};
-use krabka_client_core::{Connection, ConnectionOptions};
-use krabka_protocol::{
-    UnknownTaggedFields,
-    owned::{
-        describe_configs_request::DescribeConfigsRequest,
-        describe_configs_response::{
-            DescribeConfigsResourceResult, DescribeConfigsResult, DescribeConfigsSynonym,
+use {
+    crate::support::configs::describe_resource,
+    assert2::check,
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, NodeId, config::NodeRole},
+    krabka_client_core::{Connection, ConnectionOptions},
+    krabka_protocol::{
+        UnknownTaggedFields,
+        owned::{
+            describe_configs_request::DescribeConfigsRequest,
+            describe_configs_response::{
+                DescribeConfigsResourceResult, DescribeConfigsResult, DescribeConfigsSynonym,
+            },
         },
     },
+    std::net::SocketAddr,
+    tempfile::TempDir,
 };
-use tempfile::TempDir;
-
-use crate::support::configs::describe_resource;
 
 /// Kafka's `ConfigResource.Type.BROKER`.
 const RESOURCE_TYPE_BROKER: i8 = 4;
@@ -104,13 +104,10 @@ async fn start_node(node: NodeId, roles: &[NodeRole], controller: Option<&Broker
 // Sends `DescribeConfigs` for the listener keys of `node` to `address`, with
 // the synonyms, the way `kafka-configs --describe --all` asks.
 async fn describe_listener_keys(address: SocketAddr, node: u64) -> DescribeConfigsResult {
-    let connection = Connection::connect(
-        address,
-        ConnectionOptions {
-            client_id: "describe-configs-listeners".to_owned(),
-            ..ConnectionOptions::default()
-        },
-    )
+    let connection = Connection::connect(address, ConnectionOptions {
+        client_id: "describe-configs-listeners".to_owned(),
+        ..ConnectionOptions::default()
+    })
     .await
     .expect("connect");
     let response = connection

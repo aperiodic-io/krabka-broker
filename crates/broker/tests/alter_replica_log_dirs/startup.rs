@@ -6,16 +6,17 @@
 //! broker mid-move, because the planted directory is exactly the state a crash
 //! between the rename and the catch-up leaves behind.
 
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_broker::Broker;
-use krabka_client_producer::Producer;
-
-use crate::{
-    harness::{count_topic_dirs, wait_for_move_complete},
-    support::{producer::enqueue_unkeyed_values, storage::two_dir_config},
-    two_dir_topic::{Setup, create_and_wait},
-    wire::{CLIENT_ID, describe_log_dirs},
+use {
+    crate::{
+        harness::{count_topic_dirs, wait_for_move_complete},
+        support::{producer::enqueue_unkeyed_values, storage::two_dir_config},
+        two_dir_topic::{Setup, create_and_wait},
+        wire::{CLIENT_ID, describe_log_dirs},
+    },
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_broker::Broker,
+    krabka_client_producer::Producer,
 };
 
 /// Boot a broker, create a topic, produce records, shut down, then
@@ -35,14 +36,10 @@ async fn startup_resumes_move_for_existing_partition() {
     let cfg = two_dir_config(primary.path(), extra.path());
     let handle = Broker::start(cfg).await.expect("first boot");
     let addr = handle.listen_addr();
-    create_and_wait(
-        &handle,
-        addr,
-        Setup {
-            client_id: CLIENT_ID,
-            ..Default::default()
-        },
-    )
+    create_and_wait(&handle, addr, Setup {
+        client_id: CLIENT_ID,
+        ..Default::default()
+    })
     .await;
 
     let producer = Producer::builder()

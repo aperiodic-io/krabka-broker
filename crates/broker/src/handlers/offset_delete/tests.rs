@@ -1,45 +1,44 @@
 //! Handler tests for `OffsetDelete`: the group-level refusals, Kafka's check
 //! order and the subscription guard, each as a whole response.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_protocol::owned::offset_delete_response::{self, OffsetDeleteResponse};
-
-use super::{
-    handle,
-    test_support::{expected_row, expected_topic, req_with_topics},
-};
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::BrokerHandle,
-    codes,
-    coordinator::{
-        bootstrap::OFFSETS_TOPIC,
-        partitioner::local_partition_for_group,
-        unified::{
-            classic_state::{ClassicGroup, Member},
-            consumer_state::{
-                GroupState as ConsumerGroup, ResolvedRegularExpression, test_support::member,
-            },
-            group::{CoordinatorGroup, GroupKind},
-        },
+use {
+    super::{
+        handle,
+        test_support::{expected_row, expected_topic, req_with_topics},
     },
-    handlers::test_support::{ClientTopicSetup, create_topic as create_topic_from_test_support},
-    test_support::{DenyAll, peer, start_group_broker_no_audit},
-    time_util::now_ms,
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::BrokerHandle,
+        codes,
+        coordinator::{
+            bootstrap::OFFSETS_TOPIC,
+            partitioner::local_partition_for_group,
+            unified::{
+                classic_state::{ClassicGroup, Member},
+                consumer_state::{
+                    GroupState as ConsumerGroup, ResolvedRegularExpression, test_support::member,
+                },
+                group::{CoordinatorGroup, GroupKind},
+            },
+        },
+        handlers::test_support::{
+            ClientTopicSetup, create_topic as create_topic_from_test_support,
+        },
+        test_support::{DenyAll, peer, start_group_broker_no_audit},
+        time_util::now_ms,
+    },
+    assert2::check,
+    bytes::Bytes,
+    krabka_protocol::owned::offset_delete_response::{self, OffsetDeleteResponse},
+    std::{collections::HashMap, sync::Arc, time::Duration},
 };
 
 async fn create_topic(broker: &BrokerHandle, name: &str) {
-    create_topic_from_test_support(
-        broker,
-        ClientTopicSetup {
-            client_id: "offset-delete-test",
-            name,
-            ..Default::default()
-        },
-    )
+    create_topic_from_test_support(broker, ClientTopicSetup {
+        client_id: "offset-delete-test",
+        name,
+        ..Default::default()
+    })
     .await;
 }
 
@@ -70,14 +69,11 @@ fn consumer_group(group_id: &str, regex: &str, resolved: &[&str]) -> Coordinator
     let mut m = member("m1");
     m.subscribed_topic_regex = Some(regex.into());
     state.add_or_update_member(m);
-    state.set_resolved_regex(
-        regex.into(),
-        ResolvedRegularExpression {
-            topics: resolved.iter().map(|s| (*s).to_string()).collect(),
-            version: 1,
-            timestamp_ms: 1,
-        },
-    );
+    state.set_resolved_regex(regex.into(), ResolvedRegularExpression {
+        topics: resolved.iter().map(|s| (*s).to_string()).collect(),
+        version: 1,
+        timestamp_ms: 1,
+    });
     CoordinatorGroup::seeded(group_id, GroupKind::Consumer(state), HashMap::new())
 }
 
@@ -152,10 +148,10 @@ async fn offset_delete_matches_kafka_whole_responses() {
             "garbled-g",
             &[("u", &[0])],
             OffsetDeleteResponse {
-                topics: vec![expected_topic(
-                    "u",
-                    vec![expected_row(0, codes::GROUP_SUBSCRIBED_TO_TOPIC)],
-                )],
+                topics: vec![expected_topic("u", vec![expected_row(
+                    0,
+                    codes::GROUP_SUBSCRIBED_TO_TOPIC,
+                )])],
                 ..whole(codes::NONE)
             },
         ),
@@ -165,10 +161,10 @@ async fn offset_delete_matches_kafka_whole_responses() {
             "kip848-g",
             &[("t", &[0])],
             OffsetDeleteResponse {
-                topics: vec![expected_topic(
-                    "t",
-                    vec![expected_row(0, codes::GROUP_SUBSCRIBED_TO_TOPIC)],
-                )],
+                topics: vec![expected_topic("t", vec![expected_row(
+                    0,
+                    codes::GROUP_SUBSCRIBED_TO_TOPIC,
+                )])],
                 ..whole(codes::NONE)
             },
         ),
@@ -179,17 +175,14 @@ async fn offset_delete_matches_kafka_whole_responses() {
             &[("t", &[0]), ("ghost", &[0]), ("u", &[0, 5])],
             OffsetDeleteResponse {
                 topics: vec![
-                    expected_topic(
-                        "ghost",
-                        vec![expected_row(0, codes::UNKNOWN_TOPIC_OR_PARTITION)],
-                    ),
-                    expected_topic(
-                        "u",
-                        vec![
-                            expected_row(5, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                            expected_row(0, codes::NONE),
-                        ],
-                    ),
+                    expected_topic("ghost", vec![expected_row(
+                        0,
+                        codes::UNKNOWN_TOPIC_OR_PARTITION,
+                    )]),
+                    expected_topic("u", vec![
+                        expected_row(5, codes::UNKNOWN_TOPIC_OR_PARTITION),
+                        expected_row(0, codes::NONE),
+                    ]),
                     expected_topic("t", vec![expected_row(0, codes::GROUP_SUBSCRIBED_TO_TOPIC)]),
                 ],
                 ..whole(codes::NONE)

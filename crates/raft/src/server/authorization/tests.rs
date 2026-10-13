@@ -1,44 +1,44 @@
-use std::{collections::BTreeSet, sync::Arc};
-
-use assert2::check;
-use bytes::{BufMut as _, Bytes, BytesMut};
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::{
-    Decode as _, Encode as _,
-    owned::{
-        add_raft_voter_response::AddRaftVoterResponse,
-        assign_replicas_to_dirs_response::AssignReplicasToDirsResponse,
-        begin_quorum_epoch_response::BeginQuorumEpochResponse,
-        controller_registration_response::ControllerRegistrationResponse,
-        describe_cluster_request::DescribeClusterRequest,
-        describe_cluster_response::DescribeClusterResponse,
-        describe_quorum_request::{DescribeQuorumRequest, PartitionData, TopicData},
-        describe_quorum_response::DescribeQuorumResponse,
-        end_quorum_epoch_response::EndQuorumEpochResponse,
-        fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-        fetch_response::{self, FetchResponse, FetchableTopicResponse},
-        fetch_snapshot_response::FetchSnapshotResponse,
-        remove_raft_voter_response::RemoveRaftVoterResponse,
-        update_raft_voter_response::UpdateRaftVoterResponse,
-        vote_response::VoteResponse,
+use {
+    super::{refusal, required_operation},
+    crate::{
+        ClusterGrants, ClusterOperation, ListenerLimits,
+        kraft::{KraftController, transport::api_key},
+        server::{
+            ConnectionContext, Unstable, handle_conn,
+            test_support::{encoded, single_voter_engine, wait_for_leader},
+        },
+        wire::{
+            API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
+            KrabkaMetadataFetchResponse, KrabkaSubmitChangeRequest, KrabkaSubmitChangeResponse,
+        },
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use tokio_util::sync::CancellationToken;
-
-use super::{refusal, required_operation};
-use crate::{
-    ClusterGrants, ClusterOperation, ListenerLimits,
-    kraft::{KraftController, transport::api_key},
-    server::{
-        ConnectionContext, Unstable, handle_conn,
-        test_support::{encoded, single_voter_engine, wait_for_leader},
+    assert2::check,
+    bytes::{BufMut as _, Bytes, BytesMut},
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::{
+        Decode as _, Encode as _,
+        owned::{
+            add_raft_voter_response::AddRaftVoterResponse,
+            assign_replicas_to_dirs_response::AssignReplicasToDirsResponse,
+            begin_quorum_epoch_response::BeginQuorumEpochResponse,
+            controller_registration_response::ControllerRegistrationResponse,
+            describe_cluster_request::DescribeClusterRequest,
+            describe_cluster_response::DescribeClusterResponse,
+            describe_quorum_request::{DescribeQuorumRequest, PartitionData, TopicData},
+            describe_quorum_response::DescribeQuorumResponse,
+            end_quorum_epoch_response::EndQuorumEpochResponse,
+            fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+            fetch_response::{self, FetchResponse, FetchableTopicResponse},
+            fetch_snapshot_response::FetchSnapshotResponse,
+            remove_raft_voter_response::RemoveRaftVoterResponse,
+            update_raft_voter_response::UpdateRaftVoterResponse,
+            vote_response::VoteResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    wire::{
-        API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
-        KrabkaMetadataFetchResponse, KrabkaSubmitChangeRequest, KrabkaSubmitChangeResponse,
-    },
+    std::{collections::BTreeSet, sync::Arc},
+    tokio::io::{AsyncReadExt as _, AsyncWriteExt as _},
+    tokio_util::sync::CancellationToken,
 };
 
 const MESSAGE: &str = "Cluster authorization failed.";

@@ -22,21 +22,22 @@
 //!     `DELEGATION_TOKEN_EXPIRED` (66), and a live one gets `now + period`,
 //!     saturated at `i64::MAX` and capped at its `max_timestamp_ms`.
 
-use krabka_metadata::DelegationTokenRecord;
-use krabka_protocol::owned::{
-    expire_delegation_token_request::ExpireDelegationTokenRequest,
-    expire_delegation_token_response::ExpireDelegationTokenResponse,
-};
-use krabka_raft::DelegationTokenMutation;
-use krabka_security::SecretBytes;
-use krabka_verified::{TokenExpireDecision, delegation_token::TokenApi, expire_token_deadline};
-
-use crate::{
-    codes::{DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_OWNER_MISMATCH, INVALID_REQUEST},
-    handlers::{ErrorCodeResponse as _, renew_delegation_token::admit_token_request},
-    metadata_source::MetadataSource,
-    network::auth::ConnectionAuth,
-    time_util::now_ms,
+use {
+    crate::{
+        codes::{DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_OWNER_MISMATCH, INVALID_REQUEST},
+        handlers::{ErrorCodeResponse as _, renew_delegation_token::admit_token_request},
+        metadata_source::MetadataSource,
+        network::auth::ConnectionAuth,
+        time_util::now_ms,
+    },
+    krabka_metadata::DelegationTokenRecord,
+    krabka_protocol::owned::{
+        expire_delegation_token_request::ExpireDelegationTokenRequest,
+        expire_delegation_token_response::ExpireDelegationTokenResponse,
+    },
+    krabka_raft::DelegationTokenMutation,
+    krabka_security::SecretBytes,
+    krabka_verified::{TokenExpireDecision, delegation_token::TokenApi, expire_token_deadline},
 };
 
 #[tracing::instrument(
@@ -115,19 +116,20 @@ pub(crate) async fn handle(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::{
-        codes::{DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_OWNER_MISMATCH},
-        handlers::delegation_token_test_support::{
-            DAY_MS, MutationSeedSetup, TokenExpiryRule, TokenExpirySetup, TokenMutationIndex,
-            TokenMutationRefusalSetup, TokenPeriodMillis, TokenPersistence, authed,
-            in_mutation_window, mutation_credential_refusals, ordinary_ownership_refusals,
-            stored_expiry, test_controller,
+    use {
+        super::*,
+        crate::{
+            codes::{DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_OWNER_MISMATCH},
+            handlers::delegation_token_test_support::{
+                DAY_MS, MutationSeedSetup, TokenExpiryRule, TokenExpirySetup, TokenMutationIndex,
+                TokenMutationRefusalSetup, TokenPeriodMillis, TokenPersistence, authed,
+                in_mutation_window, mutation_credential_refusals, ordinary_ownership_refusals,
+                stored_expiry, test_controller,
+            },
+            test_support::{KafkaErrorCode, UnixMillis},
         },
-        test_support::{KafkaErrorCode, UnixMillis},
+        assert2::assert,
+        tempfile::TempDir,
     };
 
     /// Refusals come in Kafka's order, carry Kafka's expiry, and leave the
@@ -296,14 +298,10 @@ mod tests {
                 &*controller,
             ))
             .await;
-            check_token_expiry!(
-                case,
-                resp,
-                TokenExpirySetup {
-                    window,
-                    expectation: rule.with_cap(UnixMillis(max_timestamp_ms)),
-                }
-            );
+            check_token_expiry!(case, resp, TokenExpirySetup {
+                window,
+                expectation: rule.with_cap(UnixMillis(max_timestamp_ms)),
+            });
             let stored = stored_expiry(&controller, &token_id);
             let want = match persistence {
                 TokenPersistence::Deleted => None,

@@ -22,15 +22,17 @@
 //! snapshot comparison, which is the only part with a second source of truth to
 //! weigh, lives beside it in [`self::reconcile`].
 
-use std::collections::HashMap;
-
-use futures_util::stream::TryStreamExt as _;
-use krabka_ids::Offset;
-use krabka_remote_storage::{
-    IndexType, LOG_FILE_SUFFIX, TopicIdPartition, parse_partition_dir_name, parse_segment_file_name,
+use {
+    futures_util::stream::TryStreamExt as _,
+    krabka_ids::Offset,
+    krabka_remote_storage::{
+        IndexType, LOG_FILE_SUFFIX, TopicIdPartition, parse_partition_dir_name,
+        parse_segment_file_name,
+    },
+    object_store::{ObjectMeta, path::Path},
+    std::collections::HashMap,
+    uuid::Uuid,
 };
-use object_store::{ObjectMeta, path::Path};
-use uuid::Uuid;
 
 mod reconcile;
 
@@ -39,9 +41,11 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::reconcile::reconcile_with_snapshot;
 pub(crate) use self::reconcile::{load_snapshot, reconcile_authenticated_snapshot};
-use crate::{args::RestoreArgs, backend::ArchiveStore, error::RestoreError};
+use {
+    self::reconcile::reconcile_with_snapshot,
+    crate::{args::RestoreArgs, backend::ArchiveStore, error::RestoreError},
+};
 
 /// One artifact of one archived segment, as the scan found it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,15 +139,11 @@ pub struct UnrecognizedKeys {
 impl UnrecognizedKeys {
     /// Whether the scan attributed every key it saw.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.sample.is_empty() && self.omitted == 0
-    }
+    pub fn is_empty(&self) -> bool { self.sample.is_empty() && self.omitted == 0 }
 
     /// Every unattributable key the scan saw, sample and omitted together.
     #[must_use]
-    pub fn total(&self) -> u64 {
-        self.sample.len() as u64 + self.omitted
-    }
+    pub fn total(&self) -> u64 { self.sample.len() as u64 + self.omitted }
 
     /// Record one key, keeping it only while the sample has room.
     fn record(&mut self, key: Path) {

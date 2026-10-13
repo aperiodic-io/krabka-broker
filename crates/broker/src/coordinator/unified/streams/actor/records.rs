@@ -8,26 +8,30 @@
 //! [`StreamsGroupSeed`] handed to the coordinator cache, and
 //! [`apply_seed`] is their inverse for bootstrap replay and respawn.
 
-use super::ActorState;
-use crate::{
-    coordinator::unified::{
-        GroupCoordinator, StreamsGroupSeed,
-        member_records::MemberValues,
-        offsets_log::OffsetsLog,
-        streams::{
-            persistence::{
-                DescriptionEpochs, LastAssignmentConfig, PendingStreamsRecords, StreamsEndpoint,
-                StreamsGroupCurrentMemberAssignmentValue, StreamsGroupMemberMetadataValue,
-                StreamsGroupMetadataValue, StreamsGroupTargetAssignmentMemberValue,
-                StreamsGroupTargetAssignmentMetadataValue,
-            },
-            state::{
-                StoredTopologyHandle, StreamsGroupState, StreamsGroupStatePhase, StreamsMemberState,
+use {
+    super::ActorState,
+    crate::{
+        coordinator::unified::{
+            GroupCoordinator, StreamsGroupSeed,
+            member_records::MemberValues,
+            offsets_log::OffsetsLog,
+            streams::{
+                persistence::{
+                    DescriptionEpochs, LastAssignmentConfig, PendingStreamsRecords,
+                    StreamsEndpoint, StreamsGroupCurrentMemberAssignmentValue,
+                    StreamsGroupMemberMetadataValue, StreamsGroupMetadataValue,
+                    StreamsGroupTargetAssignmentMemberValue,
+                    StreamsGroupTargetAssignmentMetadataValue,
+                },
+                state::{
+                    StoredTopologyHandle, StreamsGroupState, StreamsGroupStatePhase,
+                    StreamsMemberState,
+                },
             },
         },
+        error::BrokerError,
+        metadata_source::MetadataSource,
     },
-    error::BrokerError,
-    metadata_source::MetadataSource,
 };
 
 /// The records of one streams-group transition, as Kafka's
@@ -383,57 +387,45 @@ pub(super) fn apply_seed(actor: &mut ActorState, seed: StreamsGroupSeed) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::check;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        streams::persistence::{StreamsGroupTopologyValue, StreamsMemberWireState},
-        test_support::{plain_streams_member, stable_streams_assignment},
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            streams::persistence::{StreamsGroupTopologyValue, StreamsMemberWireState},
+            test_support::{plain_streams_member, stable_streams_assignment},
+        },
+        assert2::check,
+        std::collections::BTreeMap,
     };
 
     #[test]
     fn seed_hydrates_state() {
         let mut actor = ActorState::new("g".into());
         let mut members = std::collections::HashMap::new();
-        members.insert(
-            "m1".to_string(),
-            StreamsGroupMemberMetadataValue {
-                instance_id: Some("i1".into()),
-                rack_id: Some("r1".into()),
-                client_id: "c1".into(),
-                client_host: "/127.0.0.1".into(),
-                process_id: "p1".into(),
-                user_endpoint: Some(StreamsEndpoint {
-                    host: "h".into(),
-                    port: 9092,
-                }),
-                client_tags: vec![],
-                rebalance_timeout_ms: 60_000,
-                topology_epoch: 2,
-            },
-        );
+        members.insert("m1".to_string(), StreamsGroupMemberMetadataValue {
+            instance_id: Some("i1".into()),
+            rack_id: Some("r1".into()),
+            client_id: "c1".into(),
+            client_host: "/127.0.0.1".into(),
+            process_id: "p1".into(),
+            user_endpoint: Some(StreamsEndpoint {
+                host: "h".into(),
+                port: 9092,
+            }),
+            client_tags: vec![],
+            rebalance_timeout_ms: 60_000,
+            topology_epoch: 2,
+        });
         let mut current = std::collections::HashMap::new();
-        current.insert(
-            "m1".to_string(),
-            StreamsGroupCurrentMemberAssignmentValue {
-                active_epochs: maplit::btreemap! {"0".to_string() => vec![3, 4]},
-                ..stable_streams_assignment(
-                    (4, 3),
-                    maplit::btreemap! {"0".to_string() => vec![0, 1]},
-                )
-            },
-        );
+        current.insert("m1".to_string(), StreamsGroupCurrentMemberAssignmentValue {
+            active_epochs: maplit::btreemap! {"0".to_string() => vec![3, 4]},
+            ..stable_streams_assignment((4, 3), maplit::btreemap! {"0".to_string() => vec![0, 1]})
+        });
         let mut target = std::collections::HashMap::new();
-        target.insert(
-            "m1".to_string(),
-            StreamsGroupTargetAssignmentMemberValue {
-                active: maplit::btreemap! {"0".to_string() => vec![0, 1]},
-                standby: BTreeMap::new(),
-                warmup: BTreeMap::new(),
-            },
-        );
+        target.insert("m1".to_string(), StreamsGroupTargetAssignmentMemberValue {
+            active: maplit::btreemap! {"0".to_string() => vec![0, 1]},
+            standby: BTreeMap::new(),
+            warmup: BTreeMap::new(),
+        });
         let seed = StreamsGroupSeed {
             group_epoch: 4,
             metadata_hash: 11,

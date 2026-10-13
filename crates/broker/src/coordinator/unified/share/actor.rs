@@ -11,15 +11,16 @@
 //! protocol, the handle, and the `tokio::select!` loop — while each request
 //! path and each persistence concern lives in its own submodule.
 
-use std::sync::Arc;
-
-use krabka_protocol::owned::{
-    share_group_heartbeat_request::ShareGroupHeartbeatRequest,
-    share_group_heartbeat_response::ShareGroupHeartbeatResponse,
-};
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
+use {
+    krabka_protocol::owned::{
+        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+        share_group_heartbeat_response::ShareGroupHeartbeatResponse,
+    },
+    std::sync::Arc,
+    tokio::{
+        sync::{mpsc, oneshot},
+        task::JoinHandle,
+    },
 };
 
 mod admin_offsets;
@@ -44,22 +45,26 @@ mod share_group_model;
 
 pub(crate) use self::admin_offsets::{DeleteTopicOutcome, ResetPartition};
 pub use self::describe::{ShareDescribeMember, ShareDescribeView};
-use self::{
-    admin_offsets::{delete_offsets, reset_offsets},
-    describe::build_describe,
-    heartbeat::handle_heartbeat,
-    records::{PendingShareRecords, chrono_now_ms, flush_pending, state_partition_metadata_from},
-    seed::apply_seed,
-    session::handle_session_tick,
-    share_state::apply_initialized,
-};
-use super::{config::ShareGroupConfig, state::ShareGroupState};
-use crate::{
-    coordinator::{
-        DeleteGroupError,
-        unified::{actor::MetadataProvider, offsets_log::write_failure_code},
+use {
+    self::{
+        admin_offsets::{delete_offsets, reset_offsets},
+        describe::build_describe,
+        heartbeat::handle_heartbeat,
+        records::{
+            PendingShareRecords, chrono_now_ms, flush_pending, state_partition_metadata_from,
+        },
+        seed::apply_seed,
+        session::handle_session_tick,
+        share_state::apply_initialized,
     },
-    task_util::spawn_mailbox,
+    super::{config::ShareGroupConfig, state::ShareGroupState},
+    crate::{
+        coordinator::{
+            DeleteGroupError,
+            unified::{actor::MetadataProvider, offsets_log::write_failure_code},
+        },
+        task_util::spawn_mailbox,
+    },
 };
 
 #[derive(Debug)]

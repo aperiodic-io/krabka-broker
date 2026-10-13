@@ -6,18 +6,19 @@
 //! connection is the same anonymous one, so the broker here speaks
 //! `SASL_PLAINTEXT` and each operator dials it with their own credentials.
 
-use assert2::check;
-
-use crate::{
-    control_plane::{approved_unclean_election, create_topics},
-    host_broker::{gate_on, sasl_listener, sasl_props, start_jvm_broker},
-    jvm_acceptance::write_client_props,
-    jvm_tool::jvm_unclean_election,
-    support,
-    vocabulary::{
-        ACTION_UNCLEAN_ELECT_LEADERS, APPROVER_ONE, APPROVER_TWO, ELECT_TOPIC,
-        POLICY_VIOLATION_EXCEPTION, PROPOSER, no_proposal_refusal,
+use {
+    crate::{
+        control_plane::{approved_unclean_election, create_topics},
+        host_broker::{gate_on, sasl_listener, sasl_props, start_jvm_broker},
+        jvm_acceptance::write_client_props,
+        jvm_tool::jvm_unclean_election,
+        support,
+        vocabulary::{
+            ACTION_UNCLEAN_ELECT_LEADERS, APPROVER_ONE, APPROVER_TWO, ELECT_TOPIC,
+            POLICY_VIOLATION_EXCEPTION, PROPOSER, no_proposal_refusal,
+        },
     },
+    assert2::check,
 };
 
 /// `kafka-leader-election --election-type unclean` fails without an approved

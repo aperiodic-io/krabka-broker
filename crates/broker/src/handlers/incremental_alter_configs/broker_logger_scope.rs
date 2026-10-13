@@ -21,14 +21,15 @@
 //! applied, so a request that names one bad level changes nothing. That is
 //! also what makes `--dry-run` (`validate_only`) meaningful here.
 
-use krabka_protocol::owned::{
-    incremental_alter_configs_request::{AlterConfigsResource, AlterableConfig},
-    incremental_alter_configs_response::AlterConfigsResourceResponse,
+use {
+    super::{OP_DELETE, OP_SET},
+    crate::codes,
+    krabka_protocol::owned::{
+        incremental_alter_configs_request::{AlterConfigsResource, AlterableConfig},
+        incremental_alter_configs_response::AlterConfigsResourceResponse,
+    },
+    krabka_telemetry::{LogLevel, LogLevelController, ROOT_LOGGER, VALID_LOG_LEVELS},
 };
-use krabka_telemetry::{LogLevel, LogLevelController, ROOT_LOGGER, VALID_LOG_LEVELS};
-
-use super::{OP_DELETE, OP_SET};
-use crate::codes;
 
 /// `AlterConfigOp.OpType::APPEND`, one of the two list operations a level is
 /// not.

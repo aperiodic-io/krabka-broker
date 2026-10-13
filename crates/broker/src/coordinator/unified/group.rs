@@ -15,12 +15,13 @@
 // The state machines are reused verbatim, relocated under `unified/`. These
 // aliases give the unified surface its types without renaming the moved code
 // (the classic file keeps its internal `Group`/`GroupState` names).
-use std::collections::{HashMap, HashSet};
-
-use crate::codes::{ILLEGAL_GENERATION, STALE_MEMBER_EPOCH, UNKNOWN_MEMBER_ID};
 pub(crate) use crate::coordinator::unified::{
     classic_state::{ClassicGroup as ClassicState, OffsetEntry},
     consumer_state::GroupState as ConsumerState,
+};
+use {
+    crate::codes::{ILLEGAL_GENERATION, STALE_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
+    std::collections::{HashMap, HashSet},
 };
 
 /// Which protocol the members of a [`Group`] speak. The variant carries that
@@ -200,14 +201,10 @@ impl CoordinatorGroup {
     }
 
     /// Returns `true` if this group speaks the classic protocol.
-    pub fn is_classic(&self) -> bool {
-        matches!(self.kind, GroupKind::Classic(_))
-    }
+    pub fn is_classic(&self) -> bool { matches!(self.kind, GroupKind::Classic(_)) }
 
     /// Returns `true` if this group speaks the next-gen protocol.
-    pub fn is_consumer(&self) -> bool {
-        matches!(self.kind, GroupKind::Consumer(_))
-    }
+    pub fn is_consumer(&self) -> bool { matches!(self.kind, GroupKind::Consumer(_)) }
 
     pub fn as_classic(&self) -> Option<&ClassicState> {
         match &self.kind {
@@ -240,9 +237,7 @@ impl CoordinatorGroup {
     /// Gives mutable access to the discriminated `kind`, so that a
     /// live-migration trigger can replace `Classic(..)` with `Consumer(..)` in
     /// place. This is the KIP-848 upgrade.
-    pub fn kind_mut(&mut self) -> &mut GroupKind {
-        &mut self.kind
-    }
+    pub fn kind_mut(&mut self) -> &mut GroupKind { &mut self.kind }
 
     /// Marks `keys` as written by `producer_id`'s open transaction at
     /// offsets-log position `written_at`.
@@ -383,9 +378,7 @@ impl CoordinatorGroup {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn classic_container_exposes_classic_state_only() {
@@ -400,9 +393,7 @@ mod tests {
 
     #[test]
     fn empty_since_stamps_once_and_clears_while_members_are_present() {
-        use std::time::Duration;
-
-        use crate::coordinator::unified::classic_state::Member;
+        use {crate::coordinator::unified::classic_state::Member, std::time::Duration};
 
         let mut group = CoordinatorGroup::new_classic("g");
         check!(!group.has_members());
@@ -454,11 +445,12 @@ mod tests {
             Result<(), i16>,
         );
 
-        use std::time::Duration;
-
-        use crate::{
-            codes,
-            coordinator::unified::consumer_state::{ClassicMemberFacade, test_support::member},
+        use {
+            crate::{
+                codes,
+                coordinator::unified::consumer_state::{ClassicMemberFacade, test_support::member},
+            },
+            std::time::Duration,
         };
 
         let mut consumer = CoordinatorGroup::new_consumer("g");
@@ -541,11 +533,10 @@ mod tests {
         let mut g = CoordinatorGroup::new_classic("g");
         check!(g.offsets().pending_txn.is_empty());
 
-        g.add_pending_txn_offsets(
-            7,
-            10,
-            [("orders".to_string(), 0), ("orders".to_string(), 1)],
-        );
+        g.add_pending_txn_offsets(7, 10, [
+            ("orders".to_string(), 0),
+            ("orders".to_string(), 1),
+        ]);
         g.add_pending_txn_offsets(9, 11, [("payments".to_string(), 3)]);
         check!(
             g.offsets().pending_txn

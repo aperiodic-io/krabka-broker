@@ -1,8 +1,9 @@
 //! Kafka-compatible `__consumer_offsets` partition selection.
 
-use krabka_metadata::MetadataImage;
-
-use super::bootstrap::{OFFSETS_NUM_PARTITIONS, OFFSETS_TOPIC};
+use {
+    super::bootstrap::{OFFSETS_NUM_PARTITIONS, OFFSETS_TOPIC},
+    krabka_metadata::MetadataImage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GroupRoutingError {
@@ -62,9 +63,7 @@ pub(crate) fn local_partition_for_group(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// Goldens from the JVM: `Utils.abs(groupId.hashCode()) % partitionCount`.
     #[test]
@@ -124,8 +123,10 @@ mod tests {
         );
     }
     fn ten_partition_image() -> MetadataImage {
-        use krabka_metadata::{MetadataRecord, PartitionRecord, TopicRecord};
-        use uuid::Uuid;
+        use {
+            krabka_metadata::{MetadataRecord, PartitionRecord, TopicRecord},
+            uuid::Uuid,
+        };
         let mut image = MetadataImage::new(Uuid::nil());
         image.apply(&MetadataRecord::V1Topic(TopicRecord {
             name: OFFSETS_TOPIC.into(),

@@ -5,71 +5,86 @@
 
 #![cfg_attr(creusot, allow(dead_code))] // Theorems are checked without a runtime caller.
 
-use creusot_std::prelude::*;
-use krabka_ids::{LeaderEpoch, Offset};
-
 pub(super) use crate::broker::FetchVisibility;
 #[cfg(creusot)]
 pub(super) use crate::broker::{clamped_fetch_watermarks, committed_fetch_response};
 #[cfg(creusot)]
 pub(super) use crate::leader_epoch::kafka_end_offset_for;
-use crate::{
-    audit::{AuditLosses, settle_loss_batch},
-    authz::{
-        AclDecision, AclDefault, AclFacts, AclOperationKind, AclPatternKind, AclResourceFacts,
-        AclResourceTypeMatch, acl_decision, acl_identity_match, acl_operation_match,
-        acl_resource_match,
+
+pub(super) mod oauth_jwks_prelude {
+    pub(super) use crate::{
+        jwks::{JwksCacheDecision, JwksCacheFacts, jwks_cache_admission},
+        oauth::{
+            OAuthSessionDecision, OAuthSessionFacts, oauth_session_admission,
+            oauth_validation_admission,
+        },
+    };
+}
+
+use {
+    crate::{
+        audit::{AuditLosses, settle_loss_batch},
+        authz::{
+            AclDecision, AclDefault, AclFacts, AclOperationKind, AclPatternKind, AclResourceFacts,
+            AclResourceTypeMatch, acl_decision, acl_identity_match, acl_operation_match,
+            acl_resource_match,
+        },
+        broker::{
+            DeleteRecordsTrimApplication, DeleteRecordsTrimDecision, DeleteRecordsTrimFacts,
+            FetchWatermarks, ReplicaFetchFacts, ReplicaFetchMutation,
+            delete_records_trim_application, delete_records_trim_decision, fetch_visibility,
+            replica_fetch_mutation,
+        },
+        consensus::election_has_quorum,
+        delegation_token::{
+            TokenApi, TokenApiAdmission, token_api_admission, token_describe_visible,
+        },
+        delivery::{delivery_watermark_advance, scheduled_delivery_visible},
+        diskless::diskless_trim_decision,
+        leader_epoch::{EpochEntry, epoch_and_offset_for_entries},
+        local_recovery::local_recovery_batch_step,
+        log_index::{
+            offset_index_lookup, offset_index_position_at_or_after, time_index_lookup,
+            time_index_scan_start,
+        },
+        offset_allocator::{reserve_offsets, wal_reservation_frontier},
+        produce::produce_durability_frontier,
+        producer::{
+            ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, decrement_sequence,
+            increment_sequence, producer_decision,
+        },
+        producer_snapshot::{
+            ProducerReloadRange, ProducerSnapshotEntryFacts, producer_snapshot_entry_valid,
+            producer_snapshot_latest_index, producer_snapshot_replay_start,
+        },
+        quota::{quota_charge, quota_credit, quota_debt_cap, quota_refill, quota_whole_request},
+        raft::{advance_high_watermark, in_half_open_window},
+        remote_read::remote_time_index_candidate_count,
+        restore::{
+            RestoreBatchFrame, RestoreExclusions, RestoreFilterDecision, RestoreRecordDeltas,
+            restore_batch_filter_decision, restore_batch_step, restore_record_coordinates,
+            restore_record_selected,
+        },
+        restore_sidecar::{
+            RestoreAbortedTxn, RestoreSegmentExtent, restore_index_frontier,
+            restore_leader_epoch_entry_valid, restore_offset_index_entry_valid,
+            restore_time_index_entry_valid, restore_txn_index_entry_valid,
+        },
+        retention::RemoteRetentionSegment,
+        storage::{local_append_coordinates, truncation_batch_retained, truncation_frontier},
+        throttle::{AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume},
+        timestamp::{earliest_max_timestamp_index, first_timestamp_index, timestamp_scan_next},
+        transaction::{
+            LogBatchKind, aborted_transaction_interval, aborted_transaction_overlaps,
+            first_unstable_offset, log_batch_kind, transaction_marker_closes,
+        },
+        wal::{
+            select_wal_voters, wal_batch_equal, wal_checkpoint_range_valid,
+            wal_covering_batch_range, wal_voter_set_valid,
+        },
     },
-    broker::{
-        DeleteRecordsTrimApplication, DeleteRecordsTrimDecision, DeleteRecordsTrimFacts,
-        FetchWatermarks, ReplicaFetchFacts, ReplicaFetchMutation, delete_records_trim_application,
-        delete_records_trim_decision, fetch_visibility, replica_fetch_mutation,
-    },
-    consensus::election_has_quorum,
-    delegation_token::{TokenApi, TokenApiAdmission, token_api_admission, token_describe_visible},
-    delivery::{delivery_watermark_advance, scheduled_delivery_visible},
-    diskless::diskless_trim_decision,
-    leader_epoch::{EpochEntry, epoch_and_offset_for_entries},
-    local_recovery::local_recovery_batch_step,
-    log_index::{
-        offset_index_lookup, offset_index_position_at_or_after, time_index_lookup,
-        time_index_scan_start,
-    },
-    offset_allocator::{reserve_offsets, wal_reservation_frontier},
-    produce::produce_durability_frontier,
-    producer::{
-        ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, decrement_sequence,
-        increment_sequence, producer_decision,
-    },
-    producer_snapshot::{
-        ProducerReloadRange, ProducerSnapshotEntryFacts, producer_snapshot_entry_valid,
-        producer_snapshot_latest_index, producer_snapshot_replay_start,
-    },
-    quota::{quota_charge, quota_credit, quota_debt_cap, quota_refill, quota_whole_request},
-    raft::{advance_high_watermark, in_half_open_window},
-    remote_read::remote_time_index_candidate_count,
-    restore::{
-        RestoreBatchFrame, RestoreExclusions, RestoreFilterDecision, RestoreRecordDeltas,
-        restore_batch_filter_decision, restore_batch_step, restore_record_coordinates,
-        restore_record_selected,
-    },
-    restore_sidecar::{
-        RestoreAbortedTxn, RestoreSegmentExtent, restore_index_frontier,
-        restore_leader_epoch_entry_valid, restore_offset_index_entry_valid,
-        restore_time_index_entry_valid, restore_txn_index_entry_valid,
-    },
-    retention::RemoteRetentionSegment,
-    storage::{local_append_coordinates, truncation_batch_retained, truncation_frontier},
-    throttle::{AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume},
-    timestamp::{earliest_max_timestamp_index, first_timestamp_index, timestamp_scan_next},
-    transaction::{
-        LogBatchKind, aborted_transaction_interval, aborted_transaction_overlaps,
-        first_unstable_offset, log_batch_kind, transaction_marker_closes,
-    },
-    wal::{
-        select_wal_voters, wal_batch_equal, wal_checkpoint_range_valid, wal_covering_batch_range,
-        wal_voter_set_valid,
-    },
+    creusot_std::prelude::*,
+    krabka_ids::{LeaderEpoch, Offset},
 };
 
 model_types! {

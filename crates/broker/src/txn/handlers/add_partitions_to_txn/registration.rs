@@ -7,16 +7,17 @@
 //! transaction, and otherwise hand the requested partitions to the coordinator
 //! for registration.
 
-use krabka_ids::PartitionIndex;
-use krabka_protocol::owned::common::{
-    add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
-    add_partitions_to_txn_response::add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
-};
-
-use super::results::{per_topic_with_refusals, verify_partitions};
-use crate::{
-    codes,
-    txn::{coordinator::TxnCoordinator, state::TopicPartition, version::TxnVersion},
+use {
+    super::results::{per_topic_with_refusals, verify_partitions},
+    crate::{
+        codes,
+        txn::{coordinator::TxnCoordinator, state::TopicPartition, version::TxnVersion},
+    },
+    krabka_ids::PartitionIndex,
+    krabka_protocol::owned::common::{
+        add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+        add_partitions_to_txn_response::add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
+    },
 };
 
 /// Processes one `transactional_id`, `producer_id`, and `producer_epoch`

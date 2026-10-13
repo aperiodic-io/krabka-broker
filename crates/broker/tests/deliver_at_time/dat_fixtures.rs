@@ -6,12 +6,13 @@
 //! These are the values a case reasons about rather than the requests it
 //! sends, which is why they live apart from the wire helpers in `dat_wire`.
 
-use bytes::Bytes;
-use krabka_log::DeliveryPolicy;
-use krabka_protocol::records::RecordBatch;
-use qubit_clock::{StdWallClock, WallClock as _};
-
-use crate::support::records::value_record;
+use {
+    crate::support::records::value_record,
+    bytes::Bytes,
+    krabka_log::DeliveryPolicy,
+    krabka_protocol::records::RecordBatch,
+    qubit_clock::{StdWallClock, WallClock as _},
+};
 
 /// How far ahead of produce time a record that must activate during a case is
 /// stamped.

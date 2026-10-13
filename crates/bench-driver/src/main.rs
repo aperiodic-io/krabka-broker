@@ -1,22 +1,23 @@
 //! `krabka-bench-driver` runs one scenario × one stack and writes a
 //! `RunOutput` JSON file.
 
-use std::path::PathBuf;
-
-use anyhow::{Context, Result};
-use clap::Parser;
-use krabka_bench_driver::{
-    scenario::{Scenario, Stack},
-    workload::{
-        self, ConsumerBuildAttempts, ConsumerBuildRetryPolicy, DriverConfig,
-        MAX_CLIENT_REQUEST_TIMEOUT,
+use {
+    anyhow::{Context, Result},
+    clap::Parser,
+    krabka_bench_driver::{
+        scenario::{Scenario, Stack},
+        workload::{
+            self, ConsumerBuildAttempts, ConsumerBuildRetryPolicy, DriverConfig,
+            MAX_CLIENT_REQUEST_TIMEOUT,
+        },
     },
+    krabka_client_core::{
+        ClientFrameMax, ConnectionDispatchQueueCapacity, DEFAULT_CONNECTION_DISPATCH_QUEUE_CAPACITY,
+    },
+    krabka_units::{fmt::Human as _, parse, prelude::*},
+    std::path::PathBuf,
+    tracing_subscriber::EnvFilter,
 };
-use krabka_client_core::{
-    ClientFrameMax, ConnectionDispatchQueueCapacity, DEFAULT_CONNECTION_DISPATCH_QUEUE_CAPACITY,
-};
-use krabka_units::{fmt::Human as _, parse, prelude::*};
-use tracing_subscriber::EnvFilter;
 
 /// The driver's flags. A field without an `#[arg(...)]` of its own gets
 /// `--<field>` and `BENCH_<FIELD>` from `#[krabka_env]`.
@@ -325,11 +326,12 @@ fn hash_str(s: &str) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use clap::Parser;
-
     // `use super::*` already carries this module's `krabka_units` prelude.
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        clap::Parser,
+    };
 
     fn required_args(stack: &'static str) -> Vec<&'static str> {
         vec![

@@ -6,13 +6,14 @@
 //! so the mutex, the key shape, and the time-to-live sit here; `render` only
 //! reads the same state at scrape time.
 
-use std::{
-    collections::HashMap,
-    sync::Mutex,
-    time::{Duration, Instant},
+use {
+    super::{DataPoint, PointValue},
+    std::{
+        collections::HashMap,
+        sync::Mutex,
+        time::{Duration, Instant},
+    },
 };
-
-use super::{DataPoint, PointValue};
 
 #[derive(Debug)]
 pub(super) struct StoredPoint {
@@ -31,9 +32,7 @@ pub(crate) struct ClientMetricsCollector {
 }
 
 impl ClientMetricsCollector {
-    pub(super) fn is_live(age: Duration, ttl: Duration) -> bool {
-        age < ttl
-    }
+    pub(super) fn is_live(age: Duration, ttl: Duration) -> bool { age < ttl }
 
     pub(crate) fn new(ttl: Duration) -> Self {
         Self {
@@ -69,15 +68,12 @@ impl ClientMetricsCollector {
                 stored.at = now;
                 continue;
             }
-            guard.insert(
-                key,
-                StoredPoint {
-                    attributes: p.attributes.clone(),
-                    value: p.value.clone(),
-                    delta_start: p.delta_start,
-                    at: now,
-                },
-            );
+            guard.insert(key, StoredPoint {
+                attributes: p.attributes.clone(),
+                value: p.value.clone(),
+                delta_start: p.delta_start,
+                at: now,
+            });
         }
         guard.retain(|_, sp| Self::is_live(now.duration_since(sp.at), self.ttl));
     }
@@ -95,9 +91,7 @@ impl ClientMetricsCollector {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use super::*;
+    use {super::*, std::time::Duration};
 
     #[test]
     fn delta_points_accumulate_per_series() {

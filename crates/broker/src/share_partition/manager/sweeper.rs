@@ -4,12 +4,12 @@
 //! one that has to snapshot the `DashMap` before it awaits. It sits apart from
 //! the request path because it is the sole detached task the manager spawns.
 
-use std::{sync::Arc, time::Duration};
-
-use tokio::sync::Mutex;
-
-use super::{LeaderKey, SharePartitionLeaderManager};
-use crate::share_partition::{group_settings::GroupShareSettings, state::AcquisitionState};
+use {
+    super::{LeaderKey, SharePartitionLeaderManager},
+    crate::share_partition::{group_settings::GroupShareSettings, state::AcquisitionState},
+    std::{sync::Arc, time::Duration},
+    tokio::sync::Mutex,
+};
 
 impl SharePartitionLeaderManager {
     /// Spawns the background acquisition-lock-timeout sweeper.

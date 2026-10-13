@@ -15,11 +15,11 @@
 //! `(?u)` asks for Unicode case as well, so `(?i)service-` does not match
 //! `ſervice-` (long s).
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use fancy_regex::{Captures, Regex};
-
-use crate::client_metrics::config::java_to_fancy;
+use {
+    crate::client_metrics::config::java_to_fancy,
+    fancy_regex::{Captures, Regex},
+    std::{collections::BTreeMap, sync::Arc},
+};
 
 /// A `java.util.regex.Pattern` compiled for `matches()` and
 /// `replaceAll`/`replaceFirst`.
@@ -66,9 +66,7 @@ impl JavaPattern {
     }
 
     /// The number of capturing groups, `Matcher.groupCount()`.
-    pub(super) fn group_count(&self) -> usize {
-        self.0.search.captures_len() - 1
-    }
+    pub(super) fn group_count(&self) -> usize { self.0.search.captures_len() - 1 }
 
     /// `Matcher.matches()`.
     ///
@@ -201,9 +199,10 @@ impl JavaPattern {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     fn pattern(source: &str) -> JavaPattern {
         JavaPattern::compile(source).unwrap_or_else(|error| panic!("{source}: {error}"))

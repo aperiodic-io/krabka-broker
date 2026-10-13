@@ -1,18 +1,18 @@
 //! Per-request connection metadata threaded through every inline-intercept
 //! handler.
 
-use std::net::SocketAddr;
-
-use krabka_security::Principal;
-
-use super::CorrelationId;
-use crate::{
-    broker::Broker,
-    client_metrics::manager::ClientAttributes,
-    metrics::QuotaCharge,
-    quota::{
-        ControllerMutationQuota, QuotaDelay, QuotaRequest, ThrottleSlot, consume_request_quota,
+use {
+    super::CorrelationId,
+    crate::{
+        broker::Broker,
+        client_metrics::manager::ClientAttributes,
+        metrics::QuotaCharge,
+        quota::{
+            ControllerMutationQuota, QuotaDelay, QuotaRequest, ThrottleSlot, consume_request_quota,
+        },
     },
+    krabka_security::Principal,
+    std::net::SocketAddr,
 };
 
 /// Per-request connection metadata. Constructed once per frame in
@@ -187,15 +187,11 @@ impl<'a> RequestContext<'a> {
     /// Leaves a quota charge for the dispatch loop to resolve with the request
     /// quota in one metrics call, and records its window. See
     /// [`crate::quota::ThrottleSlot::defer`].
-    pub(crate) fn defer_quota_charge(&self, charge: QuotaCharge) {
-        self.throttle.defer(charge);
-    }
+    pub(crate) fn defer_quota_charge(&self, charge: QuotaCharge) { self.throttle.defer(charge); }
 
     /// Drains the recorded KIP-219 window. It returns a zero extent when no
     /// quota charged this request.
-    pub(crate) fn take_throttle(&self) -> krabka_units::Time {
-        self.throttle.take()
-    }
+    pub(crate) fn take_throttle(&self) -> krabka_units::Time { self.throttle.take() }
 
     /// Marks this request's connection to be closed once its (suppressed)
     /// response has been written. Only an `acks=0` `Produce` whose response
@@ -284,10 +280,11 @@ impl<'a> TelemetryContext<'a> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{handlers::test_support::operators_principal as principal, test_support::peer};
+    use {
+        super::*,
+        crate::{handlers::test_support::operators_principal as principal, test_support::peer},
+        assert2::assert,
+    };
 
     #[test]
     fn request_context_new_preserves_connection_fields() {

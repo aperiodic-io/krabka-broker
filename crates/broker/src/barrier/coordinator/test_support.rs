@@ -4,25 +4,25 @@
 //! cluster, and it builds a coordinator over them. Every test module under
 //! this coordinator needs that setup, so it lives in one file.
 
-use std::sync::Arc;
-
-use krabka_metadata::{MetadataRecord, NodeId};
-use krabka_units::{Time, millis};
-use tempfile::{TempDir, tempdir};
-
-use super::BarrierCoordinator;
-use crate::{
-    barrier::{
-        STATE_TOPIC,
-        config::BarrierConfig,
-        metrics::BrokerBarrierMetrics,
-        state::GroupSpec,
-        test_support::{metadata_source, open_partition, topic_records},
+use {
+    super::BarrierCoordinator,
+    crate::{
+        barrier::{
+            STATE_TOPIC,
+            config::BarrierConfig,
+            metrics::BrokerBarrierMetrics,
+            state::GroupSpec,
+            test_support::{metadata_source, open_partition, topic_records},
+        },
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        partition_registry::PartitionRegistry,
+        test_support::{FakeMetadataSource, StandalonePartitionSetup},
     },
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    partition_registry::PartitionRegistry,
-    test_support::{FakeMetadataSource, StandalonePartitionSetup},
+    krabka_metadata::{MetadataRecord, NodeId},
+    krabka_units::{Time, millis},
+    std::sync::Arc,
+    tempfile::{TempDir, tempdir},
 };
 
 pub(crate) const GROUP: &str = "orders-cut";
@@ -78,36 +78,26 @@ pub(crate) struct Fixture {
 impl Fixture {
     // Every partition of the cluster is open here, and this broker leads
     // all of them.
-    pub(crate) fn new() -> Self {
-        Self::with_data_partitions(&[("orders", 2), ("payments", 1)])
-    }
+    pub(crate) fn new() -> Self { Self::with_data_partitions(&[("orders", 2), ("payments", 1)]) }
 
     // Open the state partitions, and only the named data partitions.
     pub(super) fn with_data_partitions(data: &[(&str, i32)]) -> Self {
         let dir = tempdir().expect("tempdir");
         let registry = Arc::new(PartitionRegistry::new());
         for p in 0..4 {
-            open_partition(
-                &registry,
-                dir.path(),
-                StandalonePartitionSetup {
-                    topic: STATE_TOPIC,
-                    partition: krabka_ids::PartitionIndex(p),
-                    ..Default::default()
-                },
-            );
+            open_partition(&registry, dir.path(), StandalonePartitionSetup {
+                topic: STATE_TOPIC,
+                partition: krabka_ids::PartitionIndex(p),
+                ..Default::default()
+            });
         }
         for (topic, count) in data {
             for p in 0..*count {
-                open_partition(
-                    &registry,
-                    dir.path(),
-                    StandalonePartitionSetup {
-                        topic,
-                        partition: krabka_ids::PartitionIndex(p),
-                        ..Default::default()
-                    },
-                );
+                open_partition(&registry, dir.path(), StandalonePartitionSetup {
+                    topic,
+                    partition: krabka_ids::PartitionIndex(p),
+                    ..Default::default()
+                });
             }
         }
         Self {

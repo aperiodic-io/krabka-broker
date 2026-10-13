@@ -1,11 +1,12 @@
 //! Tests for the exit-code vocabulary: the numbers themselves, and the failure
 //! kinds that choose one.
 
-use assert2::check;
-
-use crate::{
-    EXIT_BAD_SIGNATURE, EXIT_MISMATCH, EXIT_NO_APPROVAL, EXIT_REFUSED, EXIT_UNREACHABLE,
-    failure::Failure,
+use {
+    crate::{
+        EXIT_BAD_SIGNATURE, EXIT_MISMATCH, EXIT_NO_APPROVAL, EXIT_REFUSED, EXIT_UNREACHABLE,
+        failure::Failure,
+    },
+    assert2::check,
 };
 
 /// Every exit code is a distinct number, because a runbook that reads two

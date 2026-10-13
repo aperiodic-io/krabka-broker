@@ -3,11 +3,12 @@
 //! the archive side accepts exactly what the broker's reload accepts; this
 //! file only maps each rejection onto the restore error it reports.
 
-use krabka_log::{Offset, SnapshotDecodeError, decode_producer_snapshot};
-use object_store::path::Path;
-
-use super::offset_as_u64;
-use crate::error::RestoreError;
+use {
+    super::offset_as_u64,
+    crate::error::RestoreError,
+    krabka_log::{Offset, SnapshotDecodeError, decode_producer_snapshot},
+    object_store::path::Path,
+};
 
 /// Check a Kafka producer-state `.snapshot` at its exclusive log frontier
 /// `snapshot_offset` with the log's decoder: header, version, length, CRC32C,
@@ -82,6 +83,4 @@ fn snapshot_error(
     }
 }
 
-fn usize_as_u64(value: usize) -> u64 {
-    u64::try_from(value).unwrap_or(u64::MAX)
-}
+fn usize_as_u64(value: usize) -> u64 { u64::try_from(value).unwrap_or(u64::MAX) }

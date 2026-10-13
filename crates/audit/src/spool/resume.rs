@@ -5,14 +5,15 @@
 //! chained record and recomputes the sequence number and the head hash that
 //! follow it. Checkpoints carry no chain headers and are skipped.
 
-use krabka_verified::{ChainStep, chain_step};
-
-use super::Spool;
-use crate::{
-    chain::{chain_hash, from_hex32},
-    event::AuditEventClass,
-    ids::Seq,
-    sink::{AuditError, AuditRecord, HEADER_PREV_HASH, HEADER_SEQ},
+use {
+    super::Spool,
+    crate::{
+        chain::{chain_hash, from_hex32},
+        event::AuditEventClass,
+        ids::Seq,
+        sink::{AuditError, AuditRecord, HEADER_PREV_HASH, HEADER_SEQ},
+    },
+    krabka_verified::{ChainStep, chain_step},
 };
 
 impl Spool {
@@ -78,12 +79,13 @@ fn chain_headers(record: &AuditRecord) -> Result<(u64, [u8; 32]), AuditError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::{
-        chain::{GENESIS_HEAD, to_hex},
-        spool::test_support::{ROOMY_CAP, chained_record},
+    use {
+        super::*,
+        crate::{
+            chain::{GENESIS_HEAD, to_hex},
+            spool::test_support::{ROOMY_CAP, chained_record},
+        },
+        assert2::check,
     };
 
     #[test]

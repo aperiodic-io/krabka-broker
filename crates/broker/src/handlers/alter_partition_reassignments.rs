@@ -23,16 +23,17 @@
 //! answers `POLICY_VIOLATION (44)` with the refusal text, and the gate is
 //! active only when `[break_glass]` names an approver set.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_protocol::owned::{
-    alter_partition_reassignments_request::AlterPartitionReassignmentsRequest,
-    alter_partition_reassignments_response::{
-        AlterPartitionReassignmentsResponse, ReassignablePartitionResponse,
-        ReassignableTopicResponse,
+use {
+    krabka_protocol::owned::{
+        alter_partition_reassignments_request::AlterPartitionReassignmentsRequest,
+        alter_partition_reassignments_response::{
+            AlterPartitionReassignmentsResponse, ReassignablePartitionResponse,
+            ReassignableTopicResponse,
+        },
     },
+    krabka_verified::FreezeMutationKind,
+    std::collections::{HashMap, HashSet},
 };
-use krabka_verified::FreezeMutationKind;
 
 mod cancel_approval;
 mod plan;
@@ -44,14 +45,16 @@ mod test_support;
 mod tests;
 
 pub(crate) use self::plan::process_one_partition;
-use self::{
-    cancel_approval::{ReassignBatch, ReassignEnv, alter_one},
-    response::whole_request_error,
-};
-use crate::{
-    codes::{CLUSTER_AUTHORIZATION_FAILED, COORDINATOR_NOT_AVAILABLE, NONE, POLICY_VIOLATION},
-    freeze::resolve::resolve_freeze_mutation,
-    handlers::{audit_resource, stamp_unset},
+use {
+    self::{
+        cancel_approval::{ReassignBatch, ReassignEnv, alter_one},
+        response::whole_request_error,
+    },
+    crate::{
+        codes::{CLUSTER_AUTHORIZATION_FAILED, COORDINATOR_NOT_AVAILABLE, NONE, POLICY_VIOLATION},
+        freeze::resolve::resolve_freeze_mutation,
+        handlers::{audit_resource, stamp_unset},
+    },
 };
 
 context_handler! {

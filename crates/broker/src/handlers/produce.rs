@@ -10,10 +10,6 @@
 //! native v2 `RecordBatch`. The handler fully supports clients that send a
 //! single v2 batch per partition, which is the typical modern case.
 
-use std::{sync::Arc, time::Duration};
-
-use bytes::Bytes;
-use krabka_protocol::owned::produce_response::{PartitionProduceResponse, TopicProduceResponse};
 #[cfg(test)]
 use krabka_protocol::{
     owned::{
@@ -23,37 +19,41 @@ use krabka_protocol::{
     primitives::uuid::Uuid as WireUuid,
     records::RecordsPayload,
 };
-use krabka_verified::FreezeMutationKind;
-
-use self::{
-    append::PendingAck,
-    authorization::{authorize_produce_topics, is_authorized_transactional},
-    delivery::resolve_delivery_gate,
-    framing::decode_produce_request,
-    leadership::{BrokerProducePolicy, current_effective_min_isr},
-    pipeline::{
-        Admission, AdmittedBatch, PartitionInput, PartitionOutcome, PartitionServices,
-        admit_partition, complete_partition, verify_admitted,
+use {
+    self::{
+        append::PendingAck,
+        authorization::{authorize_produce_topics, is_authorized_transactional},
+        delivery::resolve_delivery_gate,
+        framing::decode_produce_request,
+        leadership::{BrokerProducePolicy, current_effective_min_isr},
+        pipeline::{
+            Admission, AdmittedBatch, PartitionInput, PartitionOutcome, PartitionServices,
+            admit_partition, complete_partition, verify_admitted,
+        },
+        producer_checks::TransactionRequest,
+        response::build_topic_error_response,
+        throttle::finish_produce_response,
+        topic_settings::{
+            broker_default_timestamp_policy, resolve_compacted_topic, resolve_timestamp_policy,
+            resolve_topic_compression,
+        },
     },
-    producer_checks::TransactionRequest,
-    response::build_topic_error_response,
-    throttle::finish_produce_response,
-    topic_settings::{
-        broker_default_timestamp_policy, resolve_compacted_topic, resolve_timestamp_policy,
-        resolve_topic_compression,
+    crate::{
+        broker::Broker,
+        codes,
+        config_keys::{BrokerLogDefaults, resolve_max_message_bytes, resolve_schema_validation},
+        error::BrokerError,
+        freeze::resolve::resolve_freeze_mutation,
+        handlers::{ApiKeyCode, RequestContext},
+        internal_topics::{is_internal_topic, produce_internal_topics_allowed},
+        metrics::RequestPhases,
+        partition::Partition,
+        topic_resolve::resolve,
     },
-};
-use crate::{
-    broker::Broker,
-    codes,
-    config_keys::{BrokerLogDefaults, resolve_max_message_bytes, resolve_schema_validation},
-    error::BrokerError,
-    freeze::resolve::resolve_freeze_mutation,
-    handlers::{ApiKeyCode, RequestContext},
-    internal_topics::{is_internal_topic, produce_internal_topics_allowed},
-    metrics::RequestPhases,
-    partition::Partition,
-    topic_resolve::resolve,
+    bytes::Bytes,
+    krabka_protocol::owned::produce_response::{PartitionProduceResponse, TopicProduceResponse},
+    krabka_verified::FreezeMutationKind,
+    std::{sync::Arc, time::Duration},
 };
 
 mod append;
@@ -302,17 +302,12 @@ pub(crate) async fn handle(
     // order in `KafkaApis.handleProduceRequest`: `hasTransactionalRecords` is
     // checked directly, while `isValidRequiredAcks` is checked later, inside
     // `ReplicaManager.appendRecords`.
-    if let Some(result) = invalid_required_acks_response(
-        broker,
-        &image,
-        ctx,
-        AcksRequest {
-            topic_data: &req.topic_data,
-            acks,
-            version,
-            handler_start,
-        },
-    ) {
+    if let Some(result) = invalid_required_acks_response(broker, &image, ctx, AcksRequest {
+        topic_data: &req.topic_data,
+        acks,
+        version,
+        handler_start,
+    }) {
         return result;
     }
 

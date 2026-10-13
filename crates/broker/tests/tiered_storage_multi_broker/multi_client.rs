@@ -7,18 +7,18 @@
 //! retry loops around a bare `Client`, which is what keeps them together and
 //! away from the produce-side workload.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
 pub(crate) use crate::support::topic_id_for;
-use crate::support::{
-    client::connect_owned,
-    fetch::{
-        FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-        SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+use {
+    crate::support::{
+        client::connect_owned,
+        fetch::{
+            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+        },
     },
+    assert2::assert,
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    std::time::{Duration, Instant},
 };
 
 /// Fetches all records from `(topic, partition)`, starting at `start_offset`,

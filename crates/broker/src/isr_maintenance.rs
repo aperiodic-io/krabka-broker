@@ -12,16 +12,17 @@
 //!
 //! [`LeaderPolicy`]: crate::replica_state::LeaderPolicy
 
-use std::sync::Arc;
-
-use krabka_raft::NodeId;
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
-
-use crate::{
-    controller_endpoint::ControllerDialer, metadata_source::MetadataSource, metrics::BrokerMetrics,
-    partition::Partition, partition_registry::PartitionRegistry, replica_state::LeaderPolicy,
+use {
+    crate::{
+        controller_endpoint::ControllerDialer, metadata_source::MetadataSource,
+        metrics::BrokerMetrics, partition::Partition, partition_registry::PartitionRegistry,
+        replica_state::LeaderPolicy,
+    },
+    krabka_raft::NodeId,
+    krabka_units::{Time, convert::TimeExt as _},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
+    tracing::warn,
 };
 
 mod alter_partition;
@@ -144,20 +145,20 @@ pub(crate) async fn run(cfg: Config) {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::atomic::Ordering, time::Duration};
-
-    use krabka_ids::PartitionIndex;
-    use krabka_metadata::MetadataImage;
-    use krabka_units::{hours, secs};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        isr_maintenance::test_support::{
-            IsrSetup, fake_source, fixture_partition, partition, set_replica_state, topic,
+    use {
+        super::*,
+        crate::{
+            isr_maintenance::test_support::{
+                IsrSetup, fake_source, fixture_partition, partition, set_replica_state, topic,
+            },
+            metadata_source::MetadataSource,
+            test_support::{PartitionEpoch, StandalonePartitionSetup, plaintext_controller_dialer},
         },
-        metadata_source::MetadataSource,
-        test_support::{PartitionEpoch, StandalonePartitionSetup, plaintext_controller_dialer},
+        krabka_ids::PartitionIndex,
+        krabka_metadata::MetadataImage,
+        krabka_units::{hours, secs},
+        std::{sync::atomic::Ordering, time::Duration},
+        tempfile::tempdir,
     };
 
     /// One scan of a leader partition whose only follower last caught up
@@ -174,22 +175,16 @@ mod tests {
     #[tokio::test]
     async fn run_bumps_shrink_metric_for_leader_partition() {
         let log_dir = tempdir().unwrap();
-        let part = fixture_partition(
-            log_dir.path(),
-            StandalonePartitionSetup {
-                topic: "t",
-                ..Default::default()
-            },
-        );
+        let part = fixture_partition(log_dir.path(), StandalonePartitionSetup {
+            topic: "t",
+            ..Default::default()
+        });
         part.current_leader.store(1, Ordering::Release);
-        set_replica_state(
-            &part,
-            IsrSetup {
-                leader_epoch: krabka_ids::LeaderEpoch(10),
-                stale_followers: &[(NodeId(2), Duration::from_secs(30))],
-                ..Default::default()
-            },
-        )
+        set_replica_state(&part, IsrSetup {
+            leader_epoch: krabka_ids::LeaderEpoch(10),
+            stale_followers: &[(NodeId(2), Duration::from_secs(30))],
+            ..Default::default()
+        })
         .await;
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&topic("t", uuid::Uuid::from_u128(1)));

@@ -6,16 +6,16 @@
 //! module produces the listing and answers the one question the listing alone
 //! settles: which objects no manifest accounts for.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
+use {
+    super::manifest_read::KeyedManifest,
+    crate::worm::{error::WormError, manifest::MANIFEST_SUFFIX},
+    futures_util::TryStreamExt as _,
+    object_store::{ObjectStore, path::Path},
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        sync::Arc,
+    },
 };
-
-use futures_util::TryStreamExt as _;
-use object_store::{ObjectStore, path::Path};
-
-use super::manifest_read::KeyedManifest;
-use crate::worm::{error::WormError, manifest::MANIFEST_SUFFIX};
 
 /// One directory's objects: full object-store key to size in bytes.
 pub(super) type DirListing = BTreeMap<String, u64>;

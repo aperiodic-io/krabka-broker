@@ -2,15 +2,16 @@
 //! interval, budget, capacity, count and topic geometry value that must be
 //! inside its bounds before the broker starts.
 
-use krabka_units::{
-    ByteSize, Time,
-    convert::{ByteSizeExt, TimeExt},
-};
-
-use crate::{
-    BrokerError,
-    config::BrokerConfig,
-    config_keys::{SEGMENT_BYTES, validate_topic_config},
+use {
+    crate::{
+        BrokerError,
+        config::BrokerConfig,
+        config_keys::{SEGMENT_BYTES, validate_topic_config},
+    },
+    krabka_units::{
+        ByteSize, Time,
+        convert::{ByteSizeExt, TimeExt},
+    },
 };
 
 #[cfg(test)]

@@ -11,10 +11,9 @@
 //! - `UnifiedLog.rebuildProducerState` replays each local segment from
 //!   `max(segment.baseOffset, mapEndOffset, logStartOffset)`.
 
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use crate::producer::ProducerDecision;
+use creusot_std::prelude::*;
 
 open_logic! {
 /// A physically retained data row is valid and belongs to the requested producer.

@@ -11,17 +11,18 @@ use std::fs::OpenOptions;
 use std::io::{IoSlice, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::FileExt;
-use std::{
-    sync::{Arc, Mutex},
-    time::Instant,
+use {
+    criterion::{Criterion, black_box, criterion_group, criterion_main},
+    krabka_ids::{LeaderEpoch, Offset, ProducerId},
+    krabka_log::{Log, LogConfig, SegmentAllocation, VerbatimBatch},
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{ByteSize, gibibytes, kibibytes, mebibytes},
+    std::{
+        sync::{Arc, Mutex},
+        time::Instant,
+    },
+    tempfile::tempdir,
 };
-
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use krabka_ids::{LeaderEpoch, Offset, ProducerId};
-use krabka_log::{Log, LogConfig, SegmentAllocation, VerbatimBatch};
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{ByteSize, gibibytes, kibibytes, mebibytes};
-use tempfile::tempdir;
 
 /// A read budget larger than the whole benchmark log, so the "unbounded"
 /// case never clips.
@@ -164,13 +165,10 @@ fn bench_append_direct_groups(c: &mut Criterion) {
         let batches = vec![&batch; usize::try_from(count).unwrap()];
         for coalesce in [false, true] {
             let dir = tempfile::tempdir_in(&path).unwrap();
-            let mut log = Log::open(
-                dir.path(),
-                LogConfig {
-                    segment_allocation: SegmentAllocation::Preallocate,
-                    ..LogConfig::default()
-                },
-            )
+            let mut log = Log::open(dir.path(), LogConfig {
+                segment_allocation: SegmentAllocation::Preallocate,
+                ..LogConfig::default()
+            })
             .unwrap();
             log.append_verbatim(&batch).unwrap();
             assert2::assert!(

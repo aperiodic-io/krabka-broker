@@ -6,27 +6,29 @@
 //! function the produce handler resolves it with, so a case fails if the
 //! config key stops reaching the gate as much as if the gate stops applying.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_compression::{CompressionType, RecordDecompressionPolicy};
-use krabka_metadata::{MetadataRecord, TopicConfigRecord};
-use krabka_protocol::records::{Record, RecordBatch};
-
-use crate::{
-    codes,
-    config_keys::{
-        DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, MESSAGE_TIMESTAMP_AFTER_MAX_MS,
-        MESSAGE_TIMESTAMP_BEFORE_MAX_MS, MESSAGE_TIMESTAMP_TYPE,
+use {
+    crate::{
+        codes,
+        config_keys::{
+            DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, MESSAGE_TIMESTAMP_AFTER_MAX_MS,
+            MESSAGE_TIMESTAMP_BEFORE_MAX_MS, MESSAGE_TIMESTAMP_TYPE,
+        },
+        handlers::produce::{
+            framing::PartitionPayload,
+            prepare::{DecodeEnv, prepare_batch},
+            test_support::{encode_batch, image_with_topic},
+            topic_settings::{
+                TimestampPolicy, kafka_stock_broker_default, resolve_timestamp_policy,
+            },
+        },
+        metrics::BrokerMetrics,
     },
-    handlers::produce::{
-        framing::PartitionPayload,
-        prepare::{DecodeEnv, prepare_batch},
-        test_support::{encode_batch, image_with_topic},
-        topic_settings::{TimestampPolicy, kafka_stock_broker_default, resolve_timestamp_policy},
-    },
-    metrics::BrokerMetrics,
+    assert2::check,
+    bytes::Bytes,
+    krabka_compression::{CompressionType, RecordDecompressionPolicy},
+    krabka_metadata::{MetadataRecord, TopicConfigRecord},
+    krabka_protocol::records::{Record, RecordBatch},
+    std::{collections::BTreeMap, sync::Arc},
 };
 
 /// An hour, the window every case configures.

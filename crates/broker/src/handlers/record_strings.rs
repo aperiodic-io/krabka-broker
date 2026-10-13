@@ -37,28 +37,30 @@
 //! requests have their own bound, in `barrier::handlers`, because their
 //! strings go to `__barrier_state` and not to a group coordinator.
 
-use krabka_protocol::{
-    Decode,
-    owned::{
-        alter_share_group_offsets_request::AlterShareGroupOffsetsRequest,
-        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-        delete_groups_request::DeleteGroupsRequest,
-        delete_share_group_offsets_request::DeleteShareGroupOffsetsRequest,
-        delete_share_group_state_request::DeleteShareGroupStateRequest,
-        heartbeat_request::HeartbeatRequest, init_producer_id_request::InitProducerIdRequest,
-        initialize_share_group_state_request::InitializeShareGroupStateRequest,
-        join_group_request::JoinGroupRequest, leave_group_request::LeaveGroupRequest,
-        offset_commit_request::OffsetCommitRequest,
-        read_share_group_state_request::ReadShareGroupStateRequest,
-        read_share_group_state_summary_request::ReadShareGroupStateSummaryRequest,
-        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
-        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-        sync_group_request::SyncGroupRequest, txn_offset_commit_request::TxnOffsetCommitRequest,
-        write_share_group_state_request::WriteShareGroupStateRequest,
+use {
+    crate::{coordinator::unified::persistence::MAX_STRING_BYTES, error::BrokerError},
+    krabka_protocol::{
+        Decode,
+        owned::{
+            alter_share_group_offsets_request::AlterShareGroupOffsetsRequest,
+            consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+            delete_groups_request::DeleteGroupsRequest,
+            delete_share_group_offsets_request::DeleteShareGroupOffsetsRequest,
+            delete_share_group_state_request::DeleteShareGroupStateRequest,
+            heartbeat_request::HeartbeatRequest, init_producer_id_request::InitProducerIdRequest,
+            initialize_share_group_state_request::InitializeShareGroupStateRequest,
+            join_group_request::JoinGroupRequest, leave_group_request::LeaveGroupRequest,
+            offset_commit_request::OffsetCommitRequest,
+            read_share_group_state_request::ReadShareGroupStateRequest,
+            read_share_group_state_summary_request::ReadShareGroupStateSummaryRequest,
+            share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+            streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+            sync_group_request::SyncGroupRequest,
+            txn_offset_commit_request::TxnOffsetCommitRequest,
+            write_share_group_state_request::WriteShareGroupStateRequest,
+        },
     },
 };
-
-use crate::{coordinator::unified::persistence::MAX_STRING_BYTES, error::BrokerError};
 
 /// A group request whose strings a coordinator record can carry.
 pub(crate) trait RecordStrings {

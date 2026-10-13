@@ -17,9 +17,7 @@ pub const MANIFEST_BODY_DOMAIN: &[u8] = b"krabka-worm-manifest-body-v1\0";
 /// and "a field that large cannot occur" is a claim about callers, not a
 /// property of the encoding. A canonical encoding that a chain head depends on
 /// should not rest on one, and four bytes per field is not worth the argument.
-fn push_len(out: &mut Vec<u8>, len: usize) {
-    out.extend_from_slice(&(len as u64).to_be_bytes());
-}
+fn push_len(out: &mut Vec<u8>, len: usize) { out.extend_from_slice(&(len as u64).to_be_bytes()); }
 
 /// Appends a length-prefixed byte string.
 pub(super) fn push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
@@ -110,13 +108,14 @@ pub fn canonical_manifest_bytes(body: &ManifestBody) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::worm::manifest::{
-        ChainHead, EpochId, ManifestSeq, ObjectEntry, Sha256Digest, manifest_head,
-        test_support::{bare_object, sample_body},
+    use {
+        super::*,
+        crate::worm::manifest::{
+            ChainHead, EpochId, ManifestSeq, ObjectEntry, Sha256Digest, manifest_head,
+            test_support::{bare_object, sample_body},
+        },
+        assert2::check,
+        uuid::Uuid,
     };
 
     /// One labelled edit to a manifest body, for the preimage-coverage table.

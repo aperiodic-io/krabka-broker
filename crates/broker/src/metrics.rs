@@ -14,14 +14,15 @@
 //! per-second gauges to monotonic counters per Prometheus best practice
 //! — operators compute rates with `rate()` at scrape time.
 
-use std::sync::{Arc, atomic::AtomicU64};
-
-use krabka_macros::RegisterMetrics;
-use prometheus_client::{
-    metrics::{counter::Counter, family::Family, gauge::Gauge, histogram::Histogram},
-    registry::Registry,
+use {
+    krabka_macros::RegisterMetrics,
+    prometheus_client::{
+        metrics::{counter::Counter, family::Family, gauge::Gauge, histogram::Histogram},
+        registry::Registry,
+    },
+    std::sync::{Arc, atomic::AtomicU64},
+    tokio::sync::Mutex,
 };
-use tokio::sync::Mutex;
 
 mod auth;
 mod break_glass;

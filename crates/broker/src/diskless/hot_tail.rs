@@ -1,17 +1,17 @@
 //! In-memory cache for quorum-committed diskless WAL tail batches.
 
-use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
-    sync::Mutex,
+use {
+    crate::config::DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE,
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_protocol::records::RecordBatch,
+    krabka_units::convert::ByteSizeExt as _,
+    std::{
+        collections::{BTreeMap, HashMap, VecDeque},
+        sync::Mutex,
+    },
+    uuid::Uuid,
 };
-
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_protocol::records::RecordBatch;
-use krabka_units::convert::ByteSizeExt as _;
-use uuid::Uuid;
-
-use crate::config::DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE;
 
 /// Advisory cache of recently quorum-committed diskless WAL batches.
 #[derive(Debug)]
@@ -185,11 +185,7 @@ struct HotTailEntry {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::BytesMut;
-    use krabka_protocol::records::Record;
-
-    use super::*;
+    use {super::*, assert2::check, bytes::BytesMut, krabka_protocol::records::Record};
 
     /// An offset above every cached batch, for a lookup the window does not
     /// bound.

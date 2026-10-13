@@ -1,16 +1,19 @@
 //! KIP-368 scenarios shared by the PLAIN and SCRAM wire drivers.
 
-use std::ops::RangeInclusive;
-
-use crate::{
-    harness,
-    harness::common_imports::*,
-    kafka_wire::{
-        ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup, ScramAuthenticationSetup,
-        exchange,
+use {
+    crate::{
+        harness,
+        harness::common_imports::*,
+        kafka_wire::{
+            ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup, ScramAuthenticationSetup,
+            exchange,
+        },
+        plain, scram,
+        support::wire::{
+            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+        },
     },
-    plain, scram,
-    support::wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+    std::ops::RangeInclusive,
 };
 
 pub struct Session {

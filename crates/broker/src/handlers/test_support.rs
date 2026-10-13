@@ -1,55 +1,57 @@
 //! Shared live-broker and local-partition fixtures for handler tests.
 
-use std::{future::Future, path::Path, sync::Arc};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        produce_response::ProduceResponse,
+use {
+    crate::{
+        api_catalog::UnstableApiVersions,
+        authorizer::AllowAllAuthorizer,
+        broker::{Broker, BrokerHandle, spawn_partition as spawn_broker_partition},
+        codes,
+        config::BrokerConfig,
+        config_keys::broker_dynamic::BrokerConfigContext,
+        error::BrokerError,
+        features::{METADATA_VERSION, STREAMS_VERSION, require_feature},
+        handlers::{
+            acl_wire::CLUSTER_RESOURCE_NAME, decode_request, encode_response, produce::handle,
+        },
+        log_dir::partition_dir,
+        log_dir_status::LogDirRegistry,
+        partition::Partition,
+        producer_state::ProducerState,
+        share_partition::state::RecordState,
+        test_support::{
+            StandalonePartitionSetup, StorageMode, broker_registration, decode_response,
+            encode_request, initialize_share_state, peer, principal, request_context,
+            sasl_principal, start_broker_no_audit_with,
+            start_broker_with as start_test_broker_with, try_dispatch_context,
+        },
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch, RecordsPayload},
-};
-
-use crate::{
-    api_catalog::UnstableApiVersions,
-    authorizer::AllowAllAuthorizer,
-    broker::{Broker, BrokerHandle, spawn_partition as spawn_broker_partition},
-    codes,
-    config::BrokerConfig,
-    config_keys::broker_dynamic::BrokerConfigContext,
-    error::BrokerError,
-    features::{METADATA_VERSION, STREAMS_VERSION, require_feature},
-    handlers::{acl_wire::CLUSTER_RESOURCE_NAME, decode_request, encode_response, produce::handle},
-    log_dir::partition_dir,
-    log_dir_status::LogDirRegistry,
-    partition::Partition,
-    producer_state::ProducerState,
-    share_partition::state::RecordState,
-    test_support::{
-        StandalonePartitionSetup, StorageMode, broker_registration, decode_response,
-        encode_request, initialize_share_state, peer, principal, request_context, sasl_principal,
-        start_broker_no_audit_with, start_broker_with as start_test_broker_with,
-        try_dispatch_context,
+    assert2::assert,
+    bytes::Bytes,
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+            produce_response::ProduceResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::{Record, RecordBatch, RecordsPayload},
     },
+    std::{future::Future, path::Path, sync::Arc},
 };
 
 pub(crate) mod transaction_admin_tests {
-    pub(crate) use std::sync::Arc;
-
     #[allow(unused_imports)]
     pub(crate) use assert2::assert;
-
-    pub(crate) use crate::{
-        test_support::{
-            lead_transaction_state_partitions,
-            start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+    pub(crate) use {
+        crate::{
+            test_support::{
+                lead_transaction_state_partitions,
+                start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+            },
+            txn::version::TxnVersion,
         },
-        txn::version::TxnVersion,
+        std::sync::Arc,
     };
 }
 
@@ -236,7 +238,9 @@ macro_rules! share_refusal_cases {
 /// Bind a request principal, peer, and optional context in the caller's scope.
 /// Explicit expressions retain the caller's authentication and context policy.
 macro_rules! request_identity {
-    (($principal:ident, $peer:ident, $context:ident), $identity:expr, client_id = $client_id:expr) => {
+    (
+        ($principal:ident, $peer:ident, $context:ident), $identity:expr,client_id = $client_id:expr
+    ) => {
         request_identity!(
             ($principal, $peer, $context),
             $identity,
@@ -244,7 +248,12 @@ macro_rules! request_identity {
             address = peer()
         );
     };
-    (($principal:ident, $peer:ident, $context:ident), $identity:expr, client_id = $client_id:expr, address = $address:expr) => {
+    (
+        ($principal:ident, $peer:ident, $context:ident),
+        $identity:expr,client_id =
+        $client_id:expr,address =
+        $address:expr
+    ) => {
         request_identity!(($principal, $peer), $identity, $address);
         let $context = crate::test_support::request_context(&$principal, &$peer, $client_id);
     };
@@ -258,7 +267,12 @@ macro_rules! request_identity {
     (($principal:ident, $peer:ident, $context:ident), $identity:expr, $builder:path) => {
         request_identity!(($principal, $peer, $context), $identity, $builder, peer());
     };
-    (($principal:ident, $peer:ident, $context:ident), $identity:expr, $builder:path, $address:expr) => {
+    (
+        ($principal:ident, $peer:ident, $context:ident),
+        $identity:expr,
+        $builder:path,
+        $address:expr
+    ) => {
         request_identity!(($principal, $peer), $identity, $address);
         let $context = $builder(&$principal, &$peer);
     };
@@ -541,16 +555,12 @@ pub(crate) async fn send_acknowledgements(
     setup: AcknowledgementSetup<'_>,
 ) -> krabka_protocol::owned::share_acknowledge_response::ShareAcknowledgeResponse {
     let request = acknowledge_batches_request(setup);
-    share_acknowledge_wire(
-        broker,
-        &request,
-        ShareWireSetup {
-            version: krabka_ids::ApiVersion(
-                krabka_protocol::owned::share_acknowledge_request::MAX_VERSION,
-            ),
-            ..Default::default()
-        },
-    )
+    share_acknowledge_wire(broker, &request, ShareWireSetup {
+        version: krabka_ids::ApiVersion(
+            krabka_protocol::owned::share_acknowledge_request::MAX_VERSION,
+        ),
+        ..Default::default()
+    })
     .await
 }
 
@@ -567,14 +577,10 @@ pub(crate) async fn share_acknowledge_wire(
     request: &krabka_protocol::owned::share_acknowledge_request::ShareAcknowledgeRequest,
     setup: ShareWireSetup<'_>,
 ) -> krabka_protocol::owned::share_acknowledge_response::ShareAcknowledgeResponse {
-    context_wire(
-        broker,
-        request,
-        ContextWireSetup {
-            operation: ShareOperation::Acknowledge,
-            wire: setup,
-        },
-    )
+    context_wire(broker, request, ContextWireSetup {
+        operation: ShareOperation::Acknowledge,
+        wire: setup,
+    })
     .await
 }
 
@@ -660,9 +666,7 @@ pub(crate) use crate::test_support::default_value_records_batch as default_recor
 pub(crate) struct ShareSessionEpoch(pub i32);
 
 impl Default for ShareSessionEpoch {
-    fn default() -> Self {
-        Self(1)
-    }
+    fn default() -> Self { Self(1) }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -818,14 +822,10 @@ pub(crate) async fn share_fetch_wire(
     request: &krabka_protocol::owned::share_fetch_request::ShareFetchRequest,
     setup: ShareWireSetup<'_>,
 ) -> krabka_protocol::owned::share_fetch_response::ShareFetchResponse {
-    context_wire(
-        broker,
-        request,
-        ContextWireSetup {
-            operation: ShareOperation::Fetch,
-            wire: setup,
-        },
-    )
+    context_wire(broker, request, ContextWireSetup {
+        operation: ShareOperation::Fetch,
+        wire: setup,
+    })
     .await
 }
 
@@ -1015,14 +1015,10 @@ pub(crate) fn record_batch(count: i32) -> RecordBatch {
 }
 
 pub(crate) fn local_partition(broker: &Broker, root: &Path, topic: &str) -> Arc<Partition> {
-    partition(
-        broker,
-        root,
-        StandalonePartitionSetup {
-            topic,
-            ..Default::default()
-        },
-    )
+    partition(broker, root, StandalonePartitionSetup {
+        topic,
+        ..Default::default()
+    })
 }
 
 pub(crate) fn partition(
@@ -1035,17 +1031,14 @@ pub(crate) fn partition(
         partition: index,
         storage,
     } = setup;
-    spawn_partition(
-        root,
-        PartitionSpawnSetup {
-            topic,
-            index,
-            log_dir_status: broker.log_dir_status.clone(),
-            producer_state: Arc::clone(&broker.producer_state),
-            storage,
-            ..Default::default()
-        },
-    )
+    spawn_partition(root, PartitionSpawnSetup {
+        topic,
+        index,
+        log_dir_status: broker.log_dir_status.clone(),
+        producer_state: Arc::clone(&broker.producer_state),
+        storage,
+        ..Default::default()
+    })
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -1305,7 +1298,14 @@ macro_rules! known_cluster_fixture {
 
 /// Bind the shared runtime before waiting for a candidate that satisfies the caller's predicate.
 macro_rules! wait_for_local_partition {
-    (($shared:ident, $partition:ident), $broker:expr, $topic:expr, $candidate:ident, $condition:expr, $expect:literal) => {
+    (
+        ($shared:ident, $partition:ident),
+        $broker:expr,
+        $topic:expr,
+        $candidate:ident,
+        $condition:expr,
+        $expect:literal
+    ) => {
         let $shared = $broker.broker_arc_for_test();
         wait_for_bound_partition!(
             ($shared, $partition),
@@ -1318,7 +1318,13 @@ macro_rules! wait_for_local_partition {
 }
 
 macro_rules! wait_for_bound_partition {
-    (($shared:ident, $partition:ident), $topic:expr, $candidate:ident, $condition:expr, $expect:literal) => {
+    (
+        ($shared:ident, $partition:ident),
+        $topic:expr,
+        $candidate:ident,
+        $condition:expr,
+        $expect:literal
+    ) => {
         let $partition = tokio::time::timeout(std::time::Duration::from_secs(10), async {
             loop {
                 if let Some($candidate) = $shared

@@ -6,31 +6,34 @@
 //! holds `Alter` on a topic is the producing team, and a freeze has to hold
 //! against exactly that team, so neither alter path may set the key or clear it.
 
-use assert2::check;
-use krabka_broker::codes;
-use krabka_client_core::Client;
-use krabka_protocol::{
-    krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED},
-    owned::{
-        alter_configs_request::{
-            AlterConfigsRequest, AlterConfigsResource as AlterResource,
-            AlterableConfig as AlterConfig,
+use {
+    crate::{
+        control_plane::freeze_scope,
+        support::{
+            self,
+            configs::{
+                ConfigOperation, TopicConfigMutationSetup, alter_topic_config, topic_config,
+            },
         },
-        describe_configs_response::DescribeConfigsResourceResult,
-        incremental_alter_configs_request::{
-            AlterConfigsResource as IncrementalResource, AlterableConfig as IncrementalConfig,
-            IncrementalAlterConfigsRequest,
+        wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
+    },
+    assert2::check,
+    krabka_broker::codes,
+    krabka_client_core::Client,
+    krabka_protocol::{
+        krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED},
+        owned::{
+            alter_configs_request::{
+                AlterConfigsRequest, AlterConfigsResource as AlterResource,
+                AlterableConfig as AlterConfig,
+            },
+            describe_configs_response::DescribeConfigsResourceResult,
+            incremental_alter_configs_request::{
+                AlterConfigsResource as IncrementalResource, AlterableConfig as IncrementalConfig,
+                IncrementalAlterConfigsRequest,
+            },
         },
     },
-};
-
-use crate::{
-    control_plane::freeze_scope,
-    support::{
-        self,
-        configs::{ConfigOperation, TopicConfigMutationSetup, alter_topic_config, topic_config},
-    },
-    wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
 };
 
 /// Kafka's `RESOURCE_TYPE` for a topic, which both config paths take.
@@ -99,15 +102,12 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
         "AlterConfigs set"
     );
     check!(
-        alter_topic_config(
-            &p.client,
-            TopicConfigMutationSetup {
-                topic: CONTROL,
-                name: WRITE_FREEZE,
-                value: Some("true"),
-                ..Default::default()
-            }
-        )
+        alter_topic_config(&p.client, TopicConfigMutationSetup {
+            topic: CONTROL,
+            name: WRITE_FREEZE,
+            value: Some("true"),
+            ..Default::default()
+        })
         .await
             == refusal,
         "IncrementalAlterConfigs set"
@@ -118,14 +118,11 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
         "AlterConfigs clear"
     );
     check!(
-        alter_topic_config(
-            &p.client,
-            TopicConfigMutationSetup {
-                name: WRITE_FREEZE,
-                operation: ConfigOperation::Delete,
-                ..Default::default()
-            }
-        )
+        alter_topic_config(&p.client, TopicConfigMutationSetup {
+            name: WRITE_FREEZE,
+            operation: ConfigOperation::Delete,
+            ..Default::default()
+        })
         .await
             == refusal,
         "IncrementalAlterConfigs delete"

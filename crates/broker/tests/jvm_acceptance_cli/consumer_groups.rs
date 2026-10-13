@@ -4,16 +4,16 @@
 //! These runs exercise the JVM `AdminClient` group APIs rather than a consumer,
 //! so they stay apart from the `kafka-console-consumer` suites.
 
-use std::io::Write as _;
-
-use assert2::assert;
-
-use crate::{
-    jvm_acceptance::{
-        KAFKA_IMAGE, broker0_advertised, describe_console_group, docker_run_kafka_tool,
-        start_console_group,
+use {
+    crate::{
+        jvm_acceptance::{
+            KAFKA_IMAGE, broker0_advertised, describe_console_group, docker_run_kafka_tool,
+            start_console_group,
+        },
+        oracle::OracleComparison,
     },
-    oracle::OracleComparison,
+    assert2::assert,
+    std::io::Write as _,
 };
 
 /// `kafka-consumer-groups --list` and `--describe` round-trip after a
@@ -189,21 +189,18 @@ fn consumer_groups_with_file(side: &Side<'_>, csv: &str, args: &[&str]) -> CliRu
 /// Create [`RESET_TOPIC`] on `side` and fill it with [`RESET_RECORDS`]
 /// records.
 fn seed_topic(side: &Side<'_>) {
-    side.run(
-        "kafka-topics",
-        &[
-            "--bootstrap-server",
-            side.bootstrap(),
-            "--create",
-            "--if-not-exists",
-            "--topic",
-            RESET_TOPIC,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-        ],
-    )
+    side.run("kafka-topics", &[
+        "--bootstrap-server",
+        side.bootstrap(),
+        "--create",
+        "--if-not-exists",
+        "--topic",
+        RESET_TOPIC,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+    ])
     .expect_success();
 
     let mut records = String::new();
@@ -233,37 +230,31 @@ fn seed_topic(side: &Side<'_>) {
 /// reset that follows moves the commit off the end of the log, so the three
 /// interesting positions are three different numbers.
 fn seed_group(side: &Side<'_>, group: &str) {
-    side.run(
-        "kafka-console-consumer",
-        &[
-            "--bootstrap-server",
-            side.bootstrap(),
-            "--topic",
-            RESET_TOPIC,
-            "--group",
-            group,
-            "--from-beginning",
-            "--max-messages",
-            &RESET_RECORDS.to_string(),
-            "--timeout-ms",
-            "30000",
-        ],
-    )
+    side.run("kafka-console-consumer", &[
+        "--bootstrap-server",
+        side.bootstrap(),
+        "--topic",
+        RESET_TOPIC,
+        "--group",
+        group,
+        "--from-beginning",
+        "--max-messages",
+        &RESET_RECORDS.to_string(),
+        "--timeout-ms",
+        "30000",
+    ])
     .expect_success();
 
-    consumer_groups(
-        side,
-        &[
-            "--group",
-            group,
-            "--topic",
-            RESET_TOPIC,
-            "--reset-offsets",
-            "--to-offset",
-            &RESET_CURRENT.to_string(),
-            "--execute",
-        ],
-    )
+    consumer_groups(side, &[
+        "--group",
+        group,
+        "--topic",
+        RESET_TOPIC,
+        "--reset-offsets",
+        "--to-offset",
+        &RESET_CURRENT.to_string(),
+        "--execute",
+    ])
     .expect_success();
 }
 
@@ -419,18 +410,15 @@ async fn reset_offsets_modes_match_apache_kafka() {
     // `--execute` is the same command with the other verb, and it must move
     // the commit the dry run described.
     for side in [&oracle_side, &krabka_side] {
-        let run = consumer_groups(
-            side,
-            &[
-                "--group",
-                EXECUTE_GROUP,
-                "--topic",
-                RESET_TOPIC,
-                "--reset-offsets",
-                "--to-earliest",
-                "--execute",
-            ],
-        )
+        let run = consumer_groups(side, &[
+            "--group",
+            EXECUTE_GROUP,
+            "--topic",
+            RESET_TOPIC,
+            "--reset-offsets",
+            "--to-earliest",
+            "--execute",
+        ])
         .expect_success();
         let rows = parse_reset_table(&run.stdout);
         assert!(
@@ -451,18 +439,15 @@ async fn reset_offsets_modes_match_apache_kafka() {
     // file and land back where the export was taken.
     let mut exports = Vec::new();
     for side in [&oracle_side, &krabka_side] {
-        let exported = consumer_groups(
-            side,
-            &[
-                "--group",
-                FILE_GROUP,
-                "--topic",
-                RESET_TOPIC,
-                "--reset-offsets",
-                "--to-current",
-                "--export",
-            ],
-        )
+        let exported = consumer_groups(side, &[
+            "--group",
+            FILE_GROUP,
+            "--topic",
+            RESET_TOPIC,
+            "--reset-offsets",
+            "--to-current",
+            "--export",
+        ])
         .expect_success();
         let rows = parse_export_csv(&exported.stdout);
         assert!(
@@ -479,31 +464,24 @@ async fn reset_offsets_modes_match_apache_kafka() {
     );
 
     for (side, (_, csv)) in [&oracle_side, &krabka_side].into_iter().zip(&exports) {
-        consumer_groups(
-            side,
-            &[
-                "--group",
-                FILE_GROUP,
-                "--topic",
-                RESET_TOPIC,
-                "--reset-offsets",
-                "--to-earliest",
-                "--execute",
-            ],
-        )
+        consumer_groups(side, &[
+            "--group",
+            FILE_GROUP,
+            "--topic",
+            RESET_TOPIC,
+            "--reset-offsets",
+            "--to-earliest",
+            "--execute",
+        ])
         .expect_success();
-        let restored = consumer_groups_with_file(
-            side,
-            csv,
-            &[
-                "--group",
-                FILE_GROUP,
-                "--reset-offsets",
-                "--from-file",
-                OFFSETS_CSV,
-                "--execute",
-            ],
-        )
+        let restored = consumer_groups_with_file(side, csv, &[
+            "--group",
+            FILE_GROUP,
+            "--reset-offsets",
+            "--from-file",
+            OFFSETS_CSV,
+            "--execute",
+        ])
         .expect_success();
         let rows = parse_reset_table(&restored.stdout);
         assert!(
@@ -548,32 +526,26 @@ async fn group_delete_and_reset_refusals_match_apache_kafka() {
         // A consumer that stays. `--timeout-ms` is deliberately absent: the
         // consumer must still be in the group when the two refusals below run,
         // and the container is removed when the handle is dropped.
-        let _consumer = side.run_detached(
-            "kafka-console-consumer",
-            &[
-                "--bootstrap-server",
-                side.bootstrap(),
-                "--topic",
-                RESET_TOPIC,
-                "--group",
-                LIVE_GROUP,
-                "--from-beginning",
-            ],
-        );
+        let _consumer = side.run_detached("kafka-console-consumer", &[
+            "--bootstrap-server",
+            side.bootstrap(),
+            "--topic",
+            RESET_TOPIC,
+            "--group",
+            LIVE_GROUP,
+            "--from-beginning",
+        ]);
         wait_until_group_is_live(side, LIVE_GROUP);
 
-        let reset = consumer_groups(
-            side,
-            &[
-                "--group",
-                LIVE_GROUP,
-                "--topic",
-                RESET_TOPIC,
-                "--reset-offsets",
-                "--to-earliest",
-                "--dry-run",
-            ],
-        );
+        let reset = consumer_groups(side, &[
+            "--group",
+            LIVE_GROUP,
+            "--topic",
+            RESET_TOPIC,
+            "--reset-offsets",
+            "--to-earliest",
+            "--dry-run",
+        ]);
         // The exit status is not the signal here: apache/kafka:4.3.1 prints
         // this refusal, then prints the empty NEW-OFFSET header and exits 0.
         // What the tool does promise is that it names the state it refused on

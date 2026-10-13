@@ -1,10 +1,11 @@
 //! Manifest fixtures that the unit tests of several submodules share.
 
-use uuid::Uuid;
-
-use super::{
-    ChainHead, ChainStamp, EpochId, MANIFEST_FORMAT_VERSION, ManifestBody, ManifestSeq,
-    ObjectEntry, SegmentIdentity, Sha256Digest,
+use {
+    super::{
+        ChainHead, ChainStamp, EpochId, MANIFEST_FORMAT_VERSION, ManifestBody, ManifestSeq,
+        ObjectEntry, SegmentIdentity, Sha256Digest,
+    },
+    uuid::Uuid,
 };
 
 pub(super) const KEY_ID: &str = "worm-key-1";

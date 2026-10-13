@@ -10,9 +10,10 @@
 //! does not see a zero minimum (`alterFeatureLevel0`), and no finalized row
 //! is at level 0, `kraft.version` included.
 
-use krabka_protocol::owned::api_versions_response::{FinalizedFeatureKey, SupportedFeatureKey};
-
-use crate::features::supported_features;
+use {
+    crate::features::supported_features,
+    krabka_protocol::owned::api_versions_response::{FinalizedFeatureKey, SupportedFeatureKey},
+};
 
 /// The supported-feature rows of this broker's feature table at `api_version`,
 /// under `unstable`.
@@ -42,11 +43,12 @@ pub(super) fn finalized_feature_keys(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{FeatureLevelRecord, KRaftVersionRecord, MetadataRecord};
-
-    use super::*;
-    use crate::features::{LATEST_PRODUCTION_METADATA_VERSION, METADATA_VERSION_MIN};
+    use {
+        super::*,
+        crate::features::{LATEST_PRODUCTION_METADATA_VERSION, METADATA_VERSION_MIN},
+        assert2::check,
+        krabka_metadata::{FeatureLevelRecord, KRaftVersionRecord, MetadataRecord},
+    };
 
     krabka_macros::supported_feature_fixture!(supported);
     krabka_macros::supported_features_fixture!(modern_supported, supported);

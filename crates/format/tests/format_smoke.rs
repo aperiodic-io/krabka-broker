@@ -4,9 +4,7 @@
 //! code and on the on-disk output. These tests show that the clap surface and
 //! the bootstrap-write path work end-to-end without a broker.
 
-use std::process::Command;
-
-use krabka_metadata::MetadataRecord;
+use {krabka_metadata::MetadataRecord, std::process::Command};
 
 fn run_format(dir: &tempfile::TempDir, args: &[&str]) -> std::process::Output {
     // The monorepo spells this `krabka format`; here the command is its own
@@ -61,15 +59,12 @@ fn formatted_directory_id(dir: &tempfile::TempDir, args: &[&str]) -> uuid::Uuid 
 #[test]
 fn format_with_add_scram_writes_credential_record() {
     let dir = tempfile::tempdir().unwrap();
-    let out = run_format(
-        &dir,
-        &[
-            "--node-id",
-            "1",
-            "--add-scram",
-            "SCRAM-SHA-512=[name=admin,password=admin-secret,iterations=4096]",
-        ],
-    );
+    let out = run_format(&dir, &[
+        "--node-id",
+        "1",
+        "--add-scram",
+        "SCRAM-SHA-512=[name=admin,password=admin-secret,iterations=4096]",
+    ]);
     assert2::assert!(out.status.success());
     let bin_meta = std::fs::metadata(dir.path().join("bootstrap.records.bin"))
         .expect("bootstrap.records.bin must exist");
@@ -136,15 +131,12 @@ fn format_seeds_krabka_version_only_when_overridden() {
 #[test]
 fn format_low_iterations_fails() {
     let dir = tempfile::tempdir().unwrap();
-    let out = run_format(
-        &dir,
-        &[
-            "--node-id",
-            "1",
-            "--add-scram",
-            "SCRAM-SHA-512=[name=admin,password=p,iterations=1]",
-        ],
-    );
+    let out = run_format(&dir, &[
+        "--node-id",
+        "1",
+        "--add-scram",
+        "SCRAM-SHA-512=[name=admin,password=p,iterations=1]",
+    ]);
     assert2::assert!(!out.status.success());
     assert2::assert!(out.status.code() == Some(2));
 }
@@ -163,16 +155,13 @@ fn no_initial_controllers_writes_offset_zero_checkpoint() {
 #[test]
 fn standalone_writes_offset_zero_checkpoint_for_local_voter() {
     let dir = tempfile::tempdir().unwrap();
-    let directory_id = formatted_directory_id(
-        &dir,
-        &[
-            "--standalone",
-            "--node-id",
-            "7",
-            "--controller-listener",
-            "controller.example:9093",
-        ],
-    );
+    let directory_id = formatted_directory_id(&dir, &[
+        "--standalone",
+        "--node-id",
+        "7",
+        "--controller-listener",
+        "controller.example:9093",
+    ]);
     let records = bootstrap_records(&dir);
     assert2::assert!(!directory_id.is_nil());
     check_dynamic_checkpoint(&dir, &records);
@@ -182,17 +171,14 @@ fn standalone_writes_offset_zero_checkpoint_for_local_voter() {
 fn initial_controllers_persists_the_local_listed_directory_id() {
     let dir = tempfile::tempdir().unwrap();
     let local_directory_id = "00000000-0000-0000-0000-000000000003";
-    let directory_id = formatted_directory_id(
-        &dir,
-        &[
-            "--node-id",
-            "3",
-            "--initial-controllers",
-            &format!(
-                "2@two.example:9093:00000000-0000-0000-0000-000000000002,3@three.example:9093:{local_directory_id}"
-            ),
-        ],
-    );
+    let directory_id = formatted_directory_id(&dir, &[
+        "--node-id",
+        "3",
+        "--initial-controllers",
+        &format!(
+            "2@two.example:9093:00000000-0000-0000-0000-000000000002,3@three.example:9093:{local_directory_id}"
+        ),
+    ]);
     assert2::assert!(directory_id.to_string() == local_directory_id);
     let records = bootstrap_records(&dir);
     check_dynamic_checkpoint(&dir, &records);
@@ -267,10 +253,12 @@ fn kraft_version_must_match_the_selected_format_mode() {
     );
 
     let static_dir = tempfile::tempdir().unwrap();
-    let out = run_format(
-        &static_dir,
-        &["--node-id", "1", "--feature", "kraft.version=0"],
-    );
+    let out = run_format(&static_dir, &[
+        "--node-id",
+        "1",
+        "--feature",
+        "kraft.version=0",
+    ]);
     assert2::assert!(out.status.success());
     assert2::assert!(bootstrap_records(&static_dir).iter().all(|record| {
         !matches!(

@@ -4,29 +4,29 @@
 //! build their manager from here, so every test runs against the same mock
 //! metadata source and the same lock duration.
 
-use std::{path::Path, sync::Arc, time::Duration};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_protocol::records::RecordBatch;
-use krabka_security::ListenerProtocol;
-
-use super::SharePartitionLeaderManager;
-use crate::{
-    coordinator::unified::share::config::ShareGroupConfig,
-    metadata_source::MetadataSource,
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    share_coordinator::{
-        config::ShareCoordinatorConfig, coordinator::ShareCoordinator,
-        persister_client::SharePersister,
+use {
+    super::SharePartitionLeaderManager,
+    crate::{
+        coordinator::unified::share::config::ShareGroupConfig,
+        metadata_source::MetadataSource,
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        share_coordinator::{
+            config::ShareCoordinatorConfig, coordinator::ShareCoordinator,
+            persister_client::SharePersister,
+        },
+        share_partition::dlq::{DlqSink, test_support::RecordingDlq},
+        test_support::{
+            FakeMetadataSource, StandalonePartitionSetup, UnixMillis, open_partition,
+            static_records_batch,
+        },
     },
-    share_partition::dlq::{DlqSink, test_support::RecordingDlq},
-    test_support::{
-        FakeMetadataSource, StandalonePartitionSetup, UnixMillis, open_partition,
-        static_records_batch,
-    },
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_protocol::records::RecordBatch,
+    krabka_security::ListenerProtocol,
+    std::{path::Path, sync::Arc, time::Duration},
 };
 
 pub(crate) const LOCK: Duration = Duration::from_secs(30);
@@ -103,14 +103,10 @@ pub(super) fn manager_with_unlimited_fallback(
 ) -> Arc<SharePartitionLeaderManager> {
     let source = fake_source(Arc::new(MetadataImage::new(uuid::Uuid::nil())));
     let reg = Arc::new(PartitionRegistry::new());
-    build(
-        source,
-        reg,
-        ManagerSetup {
-            capacity: fallback,
-            ..Default::default()
-        },
-    )
+    build(source, reg, ManagerSetup {
+        capacity: fallback,
+        ..Default::default()
+    })
 }
 
 /// A manager whose dead-letter records go to `dlq`.
@@ -186,14 +182,11 @@ pub(crate) async fn open_data_partition(
         batches,
         high_watermark,
     } = setup;
-    let part = open_partition(
-        log_dir,
-        StandalonePartitionSetup {
-            topic,
-            partition,
-            ..Default::default()
-        },
-    );
+    let part = open_partition(log_dir, StandalonePartitionSetup {
+        topic,
+        partition,
+        ..Default::default()
+    });
     for TimedValues { timestamp, values } in batches {
         let mut batch = RecordBatch {
             partition_leader_epoch: 0,

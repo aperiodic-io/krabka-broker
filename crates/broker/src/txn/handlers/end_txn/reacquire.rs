@@ -3,12 +3,13 @@
 //! the coordinator's current entry and asks this module whether that entry is
 //! still the one it prepared.
 
-use krabka_log::ProducerId;
 /// Decision for the Phase-3 (Complete) re-acquire re-validation. See
 /// [`validate_complete_reacquire`].
 pub(crate) use krabka_verified::transaction::TransactionCompletionDecision as ReacquireDecision;
-
-use crate::txn::state::{TxnEntry, TxnState};
+use {
+    crate::txn::state::{TxnEntry, TxnState},
+    krabka_log::ProducerId,
+};
 
 /// Re-validate, after re-acquiring the coordinator's *current* entry for a
 /// transactional-id, that it is safe to finalise the transaction.
@@ -64,10 +65,7 @@ pub(crate) fn validate_complete_reacquire(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::txn::handlers::end_txn::test_support::entry;
+    use {super::*, crate::txn::handlers::end_txn::test_support::entry, assert2::assert};
 
     #[test]
     fn commit_reacquire_decision_matrix() {

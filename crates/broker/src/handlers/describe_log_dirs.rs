@@ -15,28 +15,31 @@
 //! two lag readings in `lag`, and everything the handler reports about a
 //! directory itself in `dirs`.
 
-use std::collections::BTreeMap;
-
-use krabka_protocol::owned::{
-    describe_log_dirs_request::DescribeLogDirsRequest,
-    describe_log_dirs_response::{
-        DescribeLogDirsPartition, DescribeLogDirsResponse, DescribeLogDirsResult,
-        DescribeLogDirsTopic,
+use {
+    krabka_protocol::owned::{
+        describe_log_dirs_request::DescribeLogDirsRequest,
+        describe_log_dirs_response::{
+            DescribeLogDirsPartition, DescribeLogDirsResponse, DescribeLogDirsResult,
+            DescribeLogDirsTopic,
+        },
     },
+    krabka_units::prelude::ByteSizeExt,
+    std::collections::BTreeMap,
 };
-use krabka_units::prelude::ByteSizeExt;
 
 mod dirs;
 mod filter;
 mod lag;
 
-use self::{
-    dirs::{absolute_path, cordoned_log_dirs_reported, log_dir_capacity, offline_result},
-    filter::request_filter,
-    lag::{future_offset_lag, offset_lag_for},
-};
-use crate::{
-    codes, disk_scanner::scan::sum_log_segments, handlers::cluster_describe_denied, log_dir,
+use {
+    self::{
+        dirs::{absolute_path, cordoned_log_dirs_reported, log_dir_capacity, offline_result},
+        filter::request_filter,
+        lag::{future_offset_lag, offset_lag_for},
+    },
+    crate::{
+        codes, disk_scanner::scan::sum_log_segments, handlers::cluster_describe_denied, log_dir,
+    },
 };
 
 context_handler! {
@@ -187,13 +190,13 @@ context_handler! {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_protocol::owned::describe_log_dirs_response;
-
-    use super::*;
-    use crate::test_support::{DenyAll, start_broker_with_authorizer, test_ctx};
+    use {
+        super::*,
+        crate::test_support::{DenyAll, start_broker_with_authorizer, test_ctx},
+        assert2::assert,
+        krabka_protocol::owned::describe_log_dirs_response,
+        std::sync::Arc,
+    };
 
     crate::test_support::context_helper!(client_id = "client-a");
 

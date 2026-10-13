@@ -22,20 +22,20 @@
 //! The pure walk that picks the deletion target and the roll sits beside the
 //! pass that applies them, because they share one contiguous-prefix rule.
 
-use std::sync::Arc;
-
-use krabka_log::{ActiveSegmentExport, DeliveryPolicy, LogConfig, Offset, SegmentExport};
-use krabka_remote_storage::{RemoteLogMetadataManager, RemoteLogSegmentState, TopicIdPartition};
-use krabka_units::{
-    ByteSize, Time,
-    convert::{ByteSizeExt as _, TimeExt as _},
+use {
+    crate::{api_catalog::UnstableApiVersions, partition::Partition},
+    krabka_log::{ActiveSegmentExport, DeliveryPolicy, LogConfig, Offset, SegmentExport},
+    krabka_remote_storage::{RemoteLogMetadataManager, RemoteLogSegmentState, TopicIdPartition},
+    krabka_units::{
+        ByteSize, Time,
+        convert::{ByteSizeExt as _, TimeExt as _},
+    },
+    krabka_verified::retention::{
+        LocalRetentionSegment, local_retention_prefix, retention_delete_target,
+    },
+    std::sync::Arc,
+    tracing::{debug, info, warn},
 };
-use krabka_verified::retention::{
-    LocalRetentionSegment, local_retention_prefix, retention_delete_target,
-};
-use tracing::{debug, info, warn};
-
-use crate::{api_catalog::UnstableApiVersions, partition::Partition};
 
 /// The offset through which the remote tier holds an unbroken copy of this
 /// partition, given the `(start, end)` range of every `CopySegmentFinished`

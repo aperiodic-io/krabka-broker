@@ -5,34 +5,34 @@
 //! reported SPSO and lag of an initialized partition, an unknown topic, and a
 //! broker with share groups disabled.
 
-use std::time::Duration;
-
-use assert2::{assert, check};
-use krabka_broker::Broker;
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::{
-        describe_share_group_offsets_request::{
-            DescribeShareGroupOffsetsRequest, DescribeShareGroupOffsetsRequestGroup,
-            DescribeShareGroupOffsetsRequestTopic,
+use {
+    crate::{
+        harness::{
+            NONE, UNSUPPORTED_VERSION, acquired_count, acquired_topic, bootstrap_share_state,
+            broker_config, broker_test_permit, connect, create_topic,
         },
-        describe_share_group_offsets_response::{
-            DescribeShareGroupOffsetsResponsePartition, DescribeShareGroupOffsetsResponseTopic,
+        support::{
+            configs::feature_update,
+            share::{ShareAck, ShareTopicSetup, acknowledge_success},
         },
-        update_features_request::UpdateFeaturesRequest,
     },
-    primitives::uuid::Uuid,
-};
-
-use crate::{
-    harness::{
-        NONE, UNSUPPORTED_VERSION, acquired_count, acquired_topic, bootstrap_share_state,
-        broker_config, broker_test_permit, connect, create_topic,
+    assert2::{assert, check},
+    krabka_broker::Broker,
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::{
+            describe_share_group_offsets_request::{
+                DescribeShareGroupOffsetsRequest, DescribeShareGroupOffsetsRequestGroup,
+                DescribeShareGroupOffsetsRequestTopic,
+            },
+            describe_share_group_offsets_response::{
+                DescribeShareGroupOffsetsResponsePartition, DescribeShareGroupOffsetsResponseTopic,
+            },
+            update_features_request::UpdateFeaturesRequest,
+        },
+        primitives::uuid::Uuid,
     },
-    support::{
-        configs::feature_update,
-        share::{ShareAck, ShareTopicSetup, acknowledge_success},
-    },
+    std::time::Duration,
 };
 
 /// `UpdateFeatures` `UpgradeType` 2, `SAFE_DOWNGRADE`.

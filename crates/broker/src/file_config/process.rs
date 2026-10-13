@@ -5,8 +5,7 @@
 //! table is all-or-nothing: a half-written profile would let the broker start
 //! with a site layout no other node agrees on.
 
-use super::FileConfigError;
-use crate::config::StretchProfile;
+use {super::FileConfigError, crate::config::StretchProfile};
 
 /// `[process]` TOML section — `KRaft` `process.roles`.
 #[krabka_macros::config_table(strict)]
@@ -64,9 +63,10 @@ fn missing_stretch_field(name: &str) -> FileConfigError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use crate::file_config::{FileConfigError, test_support::configured};
+    use {
+        crate::file_config::{FileConfigError, test_support::configured},
+        assert2::assert,
+    };
 
     #[test]
     fn process_roles_controller_only_from_toml() {

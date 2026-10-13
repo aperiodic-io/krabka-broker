@@ -4,19 +4,20 @@
 //! histogram keyed by quota, and the resolution of a wire `api_key` to the
 //! bounded label those families share.
 
-use krabka_units::{Time, convert::TimeExt};
-
-use super::{
-    ApiKeyLabel, BrokerMetrics, ConnectionCloseReason, ConnectionCloseReasonLabel, QuotaType,
-    QuotaTypeLabel, UNKNOWN_LABEL,
-};
-use crate::{
-    handlers::{
-        ALTER_BARRIER_GROUPS_API_KEY, ApiKeyCode, DESCRIBE_BARRIER_GROUPS_API_KEY,
-        KRABKA_PRIVATE_API_KEY_FLOOR, LIST_BARRIER_CUTS_API_KEY, TRIGGER_BARRIER_API_KEY,
-        WRITE_BARRIER_MARKERS_API_KEY,
+use {
+    super::{
+        ApiKeyLabel, BrokerMetrics, ConnectionCloseReason, ConnectionCloseReasonLabel, QuotaType,
+        QuotaTypeLabel, UNKNOWN_LABEL,
     },
-    quota::QuotaDelay,
+    crate::{
+        handlers::{
+            ALTER_BARRIER_GROUPS_API_KEY, ApiKeyCode, DESCRIBE_BARRIER_GROUPS_API_KEY,
+            KRABKA_PRIVATE_API_KEY_FLOOR, LIST_BARRIER_CUTS_API_KEY, TRIGGER_BARRIER_API_KEY,
+            WRITE_BARRIER_MARKERS_API_KEY,
+        },
+        quota::QuotaDelay,
+    },
+    krabka_units::{Time, convert::TimeExt},
 };
 
 /// The `api_key` label every per-API family in this module shares.
@@ -252,14 +253,15 @@ fn krabka_private_api_key_label_name(api_key: ApiKeyCode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{micros, millis};
-
-    use super::*;
-    use crate::handlers::{
-        ALTER_BARRIER_GROUPS_API_KEY, DESCRIBE_BARRIER_GROUPS_API_KEY,
-        KRABKA_PRIVATE_API_KEY_FLOOR, LIST_BARRIER_CUTS_API_KEY, TRIGGER_BARRIER_API_KEY,
-        WRITE_BARRIER_MARKERS_API_KEY,
+    use {
+        super::*,
+        crate::handlers::{
+            ALTER_BARRIER_GROUPS_API_KEY, DESCRIBE_BARRIER_GROUPS_API_KEY,
+            KRABKA_PRIVATE_API_KEY_FLOOR, LIST_BARRIER_CUTS_API_KEY, TRIGGER_BARRIER_API_KEY,
+            WRITE_BARRIER_MARKERS_API_KEY,
+        },
+        assert2::assert,
+        krabka_units::{micros, millis},
     };
 
     /// The applied throttle is the largest delay charged, and it is attributed

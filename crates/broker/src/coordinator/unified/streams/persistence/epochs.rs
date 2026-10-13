@@ -27,18 +27,19 @@
 //!   then the tagged `AssignmentTimestamp` (int64, tag 0, default 0) from
 //!   KIP-1263, which Kafka's generated writer omits when it is 0.
 
-use bytes::{BufMut, Bytes, BytesMut};
-
 pub use crate::coordinator::unified::streams::description::DescriptionEpochs;
-use crate::{
-    coordinator::unified::persistence::{
-        flex::{
-            epoch_value, get_value_version, put_compact_array_len, put_compact_string,
-            put_empty_tagged_fields, put_tagged_fields, read_tagged,
+use {
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{
+                epoch_value, get_value_version, put_compact_array_len, put_compact_string,
+                put_empty_tagged_fields, put_tagged_fields, read_tagged,
+            },
+            get_i32, get_i64,
         },
-        get_i32, get_i64,
+        error::BrokerError,
     },
-    error::BrokerError,
+    bytes::{BufMut, Bytes, BytesMut},
 };
 
 /// The tag of `ValidatedTopologyEpoch`.
@@ -123,6 +124,7 @@ impl StreamsGroupMetadataValue {
         put_tagged_fields(&mut buf, tags);
         buf.freeze()
     }
+
     /// # Errors
     /// Returns an error when `buf` ends before a field, when the value version
     /// is not 0, or when a tagged field does not decode.
@@ -196,15 +198,17 @@ epoch_value!(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        streams::persistence::{
-            KEY_STREAMS_GROUP_METADATA, KEY_STREAMS_TARGET_ASSIGNMENT_METADATA, StreamsGroupKey,
-            encode_group_metadata_key, encode_target_assignment_metadata_key, parse_streams_key,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            streams::persistence::{
+                KEY_STREAMS_GROUP_METADATA, KEY_STREAMS_TARGET_ASSIGNMENT_METADATA,
+                StreamsGroupKey, encode_group_metadata_key, encode_target_assignment_metadata_key,
+                parse_streams_key,
+            },
+            test_support::peek_version,
         },
-        test_support::peek_version,
+        assert2::assert,
     };
 
     /// Kafka 4.3.1's generated writer puts a tagged field only when it is not

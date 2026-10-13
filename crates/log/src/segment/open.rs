@@ -5,24 +5,24 @@
 //! and active segments recover their tail. Log recovery also uses a private
 //! no-scan loader before it supplies the sealed segment bounds.
 
-use std::{
-    fs::{File, OpenOptions},
-    path::Path,
-    sync::Arc,
-};
-
-use krabka_ids::Offset;
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{ByteSize, ByteSizeExt};
-use tracing::instrument;
-
-use super::{Segment, io::seek_to_log_size};
-use crate::{
-    config::DEFAULT_INDEX_INTERVAL,
-    error::LogError,
-    index::{OffsetIndex, TimeIndex},
-    io::FileIo,
-    name,
+use {
+    super::{Segment, io::seek_to_log_size},
+    crate::{
+        config::DEFAULT_INDEX_INTERVAL,
+        error::LogError,
+        index::{OffsetIndex, TimeIndex},
+        io::FileIo,
+        name,
+    },
+    krabka_ids::Offset,
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{ByteSize, ByteSizeExt},
+    std::{
+        fs::{File, OpenOptions},
+        path::Path,
+        sync::Arc,
+    },
+    tracing::instrument,
 };
 
 /// One sparse-index point the tail scan found, as Kafka's `LogSegment.recover`
@@ -307,28 +307,25 @@ fn allocated_bytes(metadata: &std::fs::Metadata) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
-    use krabka_units::prelude::kibibytes;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::segment::test_support::{
-        DENSE_INDEX, FIVE_OFFSET_TIMESTAMP_BATCHES, NO_LIMIT, ONE_RECORD_BATCH, RecordTimestamp,
-        SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup, SeededSegmentSetup,
-        THIRD_SINGLE_RECORD_BATCH, sample_batch, seeded_segment,
+    use {
+        super::*,
+        crate::segment::test_support::{
+            DENSE_INDEX, FIVE_OFFSET_TIMESTAMP_BATCHES, NO_LIMIT, ONE_RECORD_BATCH,
+            RecordTimestamp, SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup, SeededSegmentSetup,
+            THIRD_SINGLE_RECORD_BATCH, sample_batch, seeded_segment,
+        },
+        krabka_units::prelude::kibibytes,
+        std::io::Write,
+        tempfile::tempdir,
     };
 
     #[test]
     fn append_after_open_active_writes_at_eof() {
         let dir = tempdir().unwrap();
-        drop(seeded_segment(
-            dir.path(),
-            SeededSegmentSetup {
-                batches: &[ONE_RECORD_BATCH, SECOND_SINGLE_RECORD_BATCH],
-                ..Default::default()
-            },
-        ));
+        drop(seeded_segment(dir.path(), SeededSegmentSetup {
+            batches: &[ONE_RECORD_BATCH, SECOND_SINGLE_RECORD_BATCH],
+            ..Default::default()
+        }));
 
         let mut seg = Segment::open_active(dir.path(), Offset(0), true).unwrap();
         let position = seg
@@ -347,13 +344,10 @@ mod tests {
     fn recover_active_tail_truncates_trailing_garbage() {
         let dir = tempdir().unwrap();
         let valid_size = {
-            let mut seg = seeded_segment(
-                dir.path(),
-                SeededSegmentSetup {
-                    batches: FIVE_OFFSET_TIMESTAMP_BATCHES,
-                    ..Default::default()
-                },
-            );
+            let mut seg = seeded_segment(dir.path(), SeededSegmentSetup {
+                batches: FIVE_OFFSET_TIMESTAMP_BATCHES,
+                ..Default::default()
+            });
             seg.flush().unwrap();
             let valid_size = seg.log_size;
             let stale_position = u32::try_from(valid_size).unwrap();

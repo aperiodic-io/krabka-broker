@@ -5,24 +5,27 @@
 //! so they exercise the exact `session_id` / `session_epoch` paths
 //! end-to-end.
 
-use assert2::{assert, check};
-
-use crate::support::{
-    client::create_topic as create_support_topic,
-    fetch::{
-        FetchByteLimit, FetchLimits, FetchSessionEpoch, FetchSessionId, FetchSessionSetup,
-        RequestWaitMillis, default_fetch_limits, empty_session_fetch, fetch_request_for,
-        fetch_topic_row, session_fetch_request,
+use {
+    crate::support::{
+        client::create_topic as create_support_topic,
+        fetch::{
+            FetchByteLimit, FetchLimits, FetchSessionEpoch, FetchSessionId, FetchSessionSetup,
+            RequestWaitMillis, default_fetch_limits, empty_session_fetch, fetch_request_for,
+            fetch_topic_row, session_fetch_request,
+        },
+        produce::{SinglePartitionProduceSetup, batch_request},
     },
-    produce::{SinglePartitionProduceSetup, batch_request},
+    assert2::{assert, check},
 };
 mod support;
 
-use krabka_protocol::{
-    owned::fetch_request::{FetchPartition, FetchTopic, ForgottenTopic},
-    primitives::uuid::Uuid as WireUuid,
+use {
+    krabka_protocol::{
+        owned::fetch_request::{FetchPartition, FetchTopic, ForgottenTopic},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    support::topic_id_for,
 };
-use support::topic_id_for;
 
 const FETCH_SESSION_ID_NOT_FOUND: i16 = 70;
 const INVALID_FETCH_SESSION_EPOCH: i16 = 71;
@@ -49,15 +52,12 @@ async fn create_topic(p: &support::InProcess, name: &str, num_partitions: i32) {
 
 async fn produce(p: &support::InProcess, topic: &str, partition: i32, records: i32) {
     let topic_id = topic_id_for(&p.client, topic).await;
-    let req = batch_request(
-        one_record_batch(records),
-        SinglePartitionProduceSetup {
-            topic: (topic).into(),
-            topic_id,
-            partition: krabka_ids::PartitionIndex(partition),
-            ..Default::default()
-        },
-    );
+    let req = batch_request(one_record_batch(records), SinglePartitionProduceSetup {
+        topic: (topic).into(),
+        topic_id,
+        partition: krabka_ids::PartitionIndex(partition),
+        ..Default::default()
+    });
     let resp = p.client.send(req).await.expect("Produce");
     assert!(
         resp.responses[0].partition_responses[0].error_code == 0,

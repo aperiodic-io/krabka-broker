@@ -39,14 +39,15 @@ pub fn topic_config_docs() -> Vec<TopicConfigDoc> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::{
+    use {
         super::{
-            RETENTION_MS, WRITE_FREEZE,
-            validation::{is_recognized, validate_topic_config},
+            super::{
+                RETENTION_MS, WRITE_FREEZE,
+                validation::{is_recognized, validate_topic_config},
+            },
+            *,
         },
-        *,
+        assert2::{assert, check},
     };
 
     #[test]

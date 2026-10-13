@@ -1,11 +1,12 @@
 //! Held-listener broker startup and its exact single-voter configuration.
 
-use moxy::{
-    ast::ParseError,
-    token::{Span, TokenStream, TokenTree},
+use {
+    crate::fixtures::{CommaArguments, name as fixture_name},
+    moxy::{
+        ast::ParseError,
+        token::{Span, TokenStream, TokenTree},
+    },
 };
-
-use crate::fixtures::{CommaArguments, name as fixture_name};
 
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
     let arguments = CommaArguments::new(input);

@@ -70,26 +70,26 @@
 //! You MUST run each config under the host memory watchdog while you tune the
 //! bounds.
 
-use std::collections::BTreeSet;
-
-use krabka_log::ProducerId;
-use stateright::Model;
-
-use super::{
+use {
     super::{
-        handlers::end_txn::{
-            completion_producer_identity, prepare_completion_identities_with_fresh,
+        super::{
+            handlers::end_txn::{
+                completion_producer_identity, prepare_completion_identities_with_fresh,
+            },
+            state::{TxnEntry, TxnState},
+            version::TxnVersion,
         },
-        state::{TxnEntry, TxnState},
-        version::TxnVersion,
+        CompletionDecision, decide_end_txn_completion, decide_phase1_transition,
     },
-    CompletionDecision, decide_end_txn_completion, decide_phase1_transition,
-};
-use crate::{
-    coordinator::unified::actor::reconciliation_model_support::{
-        model_properties, pinned_model_runner,
+    crate::{
+        coordinator::unified::actor::reconciliation_model_support::{
+            model_properties, pinned_model_runner,
+        },
+        txn::decision_model_support::{begin_transaction, complete_prepared, initialize},
     },
-    txn::decision_model_support::{begin_transaction, complete_prepared, initialize},
+    krabka_log::ProducerId,
+    stateright::Model,
+    std::collections::BTreeSet,
 };
 
 const MAX_STATES: usize = 200_000;
@@ -191,9 +191,7 @@ enum TxnAction {
     Complete,
 }
 
-fn st(id: i8) -> TxnState {
-    TxnState::from_kafka_status(id).expect("valid TxnState id in model")
-}
+fn st(id: i8) -> TxnState { TxnState::from_kafka_status(id).expect("valid TxnState id in model") }
 
 /// Reconstructs the real `TxnEntry` from the projection, so the real decision
 /// fns behave as in a live run.
@@ -312,34 +310,8 @@ impl TxnModel {
 }
 
 impl Model for TxnModel {
-    type State = TxnProj;
     type Action = TxnAction;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        // A tid that has completed its first InitProducerId: epoch 0, Empty.
-        vec![TxnProj {
-            pid: PID.get(),
-            epoch: 0,
-            state: TxnState::Empty.to_kafka_status(),
-            generation: 0,
-            pending: None,
-            finalized: vec![],
-            violations: BTreeSet::new(),
-        }]
-    }
-
-    fn actions(&self, _: &Self::State, actions: &mut Vec<Self::Action>) {
-        // Every action is offered in every state; the production decisions
-        // in `next_state` refuse the ones that do not apply.
-        actions.extend([
-            TxnAction::Init,
-            TxnAction::BeginTxn,
-            TxnAction::EndTxnPhase1(true),
-            TxnAction::EndTxnPhase1(false),
-            TxnAction::EndTxnPhase3,
-            TxnAction::Complete,
-        ]);
-    }
+    type State = TxnProj;
 
     krabka_macros::model_transition! { last, action, s; {
         match action {
@@ -403,9 +375,33 @@ impl Model for TxnModel {
         },
     }
 
-    fn within_boundary(&self, state: &Self::State) -> bool {
-        state.epoch <= self.max_epoch
+    fn init_states(&self) -> Vec<Self::State> {
+        // A tid that has completed its first InitProducerId: epoch 0, Empty.
+        vec![TxnProj {
+            pid: PID.get(),
+            epoch: 0,
+            state: TxnState::Empty.to_kafka_status(),
+            generation: 0,
+            pending: None,
+            finalized: vec![],
+            violations: BTreeSet::new(),
+        }]
     }
+
+    fn actions(&self, _: &Self::State, actions: &mut Vec<Self::Action>) {
+        // Every action is offered in every state; the production decisions
+        // in `next_state` refuse the ones that do not apply.
+        actions.extend([
+            TxnAction::Init,
+            TxnAction::BeginTxn,
+            TxnAction::EndTxnPhase1(true),
+            TxnAction::EndTxnPhase1(false),
+            TxnAction::EndTxnPhase3,
+            TxnAction::Complete,
+        ]);
+    }
+
+    fn within_boundary(&self, state: &Self::State) -> bool { state.epoch <= self.max_epoch }
 }
 
 pinned_model_runner! {

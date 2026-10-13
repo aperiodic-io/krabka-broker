@@ -4,10 +4,11 @@
 //! metric registry. A unit test binds [`NoDeliveryMetrics`], so no test needs a
 //! live registry.
 
-use krabka_ids::PartitionIndex;
-use krabka_units::{Time, convert::TimeExt as _};
-
-use crate::{delivery::PartitionDelivery, metrics::BrokerMetrics};
+use {
+    crate::{delivery::PartitionDelivery, metrics::BrokerMetrics},
+    krabka_ids::PartitionIndex,
+    krabka_units::{Time, convert::TimeExt as _},
+};
 
 /// The gauges, the histogram, and the counter that the delivery scheduler
 /// feeds.
@@ -47,9 +48,7 @@ pub(crate) struct BrokerDeliveryMetrics {
 }
 
 impl BrokerDeliveryMetrics {
-    pub(crate) const fn new(metrics: BrokerMetrics) -> Self {
-        Self { metrics }
-    }
+    pub(crate) const fn new(metrics: BrokerMetrics) -> Self { Self { metrics } }
 }
 
 impl DeliveryMetrics for BrokerDeliveryMetrics {
@@ -73,9 +72,7 @@ impl DeliveryMetrics for BrokerDeliveryMetrics {
             .observe(lateness.secs_f64());
     }
 
-    fn scheduler_woke(&self) {
-        self.metrics.delivery_scheduler_wakeups_total.inc();
-    }
+    fn scheduler_woke(&self) { self.metrics.delivery_scheduler_wakeups_total.inc(); }
 }
 
 /// A [`DeliveryMetrics`] that records nothing.
@@ -94,6 +91,8 @@ impl DeliveryMetrics for NoDeliveryMetrics {
         _delivery: PartitionDelivery,
     ) {
     }
+
     fn activation_late(&self, _lateness: Time) {}
+
     fn scheduler_woke(&self) {}
 }

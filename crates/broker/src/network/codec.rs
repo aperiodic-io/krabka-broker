@@ -2,12 +2,14 @@
 //! Both directions of every connection share this framing, but the two
 //! directions do not share a size limit: see [`KafkaCodec`].
 
-use bytes::{BufMut, Bytes, BytesMut};
 #[cfg(test)]
 use tokio::net::TcpStream;
 #[cfg(test)]
 use tokio_util::codec::Framed;
-use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
+use {
+    bytes::{BufMut, Bytes, BytesMut},
+    tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec},
+};
 
 pub(crate) fn validate_frame_length(
     frame_body_len: usize,
@@ -64,8 +66,8 @@ impl KafkaCodec {
 }
 
 impl Decoder for KafkaCodec {
-    type Item = BytesMut;
     type Error = std::io::Error;
+    type Item = BytesMut;
 
     fn decode(&mut self, src: &mut BytesMut) -> std::io::Result<Option<BytesMut>> {
         self.requests.decode(src)
@@ -111,15 +113,16 @@ pub fn frame(stream: TcpStream, max_request_bytes: usize) -> Framed<TcpStream, K
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::{BufMut, Bytes, BytesMut};
-    use futures_util::{SinkExt, StreamExt};
-    use tokio::{
-        io::AsyncWriteExt,
-        net::{TcpListener, TcpStream},
+    use {
+        super::*,
+        assert2::{assert, check},
+        bytes::{BufMut, Bytes, BytesMut},
+        futures_util::{SinkExt, StreamExt},
+        tokio::{
+            io::AsyncWriteExt,
+            net::{TcpListener, TcpStream},
+        },
     };
-
-    use super::*;
 
     const DEFAULT_MAX_FRAME_BYTES: usize = 100 * 1024 * 1024;
 

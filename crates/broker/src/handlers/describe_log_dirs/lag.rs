@@ -70,16 +70,17 @@ pub(super) fn future_offset_lag(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        future_log::FutureLogState,
-        partition::Partition,
-        test_support::{
-            RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup, UnixMillis,
-            open_partition, repeated_records_batch,
+    use {
+        super::*,
+        crate::{
+            future_log::FutureLogState,
+            partition::Partition,
+            test_support::{
+                RecordCount, RepeatedRecordsSetup, StandalonePartitionSetup, UnixMillis,
+                open_partition, repeated_records_batch,
+            },
         },
+        assert2::assert,
     };
 
     /// Builds a `Partition` rooted at `<log_dir>/<topic>-<partition>`.
@@ -105,14 +106,11 @@ mod tests {
             partition,
             count,
         } = setup;
-        let part = open_partition(
-            log_dir,
-            StandalonePartitionSetup {
-                topic,
-                partition: krabka_ids::PartitionIndex(partition.get()),
-                ..Default::default()
-            },
-        );
+        let part = open_partition(log_dir, StandalonePartitionSetup {
+            topic,
+            partition: krabka_ids::PartitionIndex(partition.get()),
+            ..Default::default()
+        });
         if count.0 > 0 {
             append_n(&part.log, count);
         }
@@ -140,14 +138,11 @@ mod tests {
     async fn offset_lag_matches_kafka() {
         let dir = tempfile::tempdir().unwrap();
         let reg = PartitionRegistry::new();
-        let part = partition_with_leo(
-            dir.path(),
-            PartitionLogSetup {
-                topic: "t",
-                count: RecordCount(5),
-                ..Default::default()
-            },
-        );
+        let part = partition_with_leo(dir.path(), PartitionLogSetup {
+            topic: "t",
+            count: RecordCount(5),
+            ..Default::default()
+        });
         assert!(part.log_end_offset() == krabka_log::Offset(5));
         reg.insert("t".into(), krabka_ids::PartitionIndex(0), part);
         for (topic, expected) in [("ghost", INVALID_OFFSET_LAG), ("t", 0)] {
@@ -183,14 +178,11 @@ mod tests {
     async fn future_offset_lag_matches_kafka() {
         let cur_dir = tempfile::tempdir().unwrap();
         let reg = PartitionRegistry::new();
-        let part = partition_with_leo(
-            cur_dir.path(),
-            PartitionLogSetup {
-                topic: "t",
-                partition: krabka_ids::PartitionIndex(3),
-                count: RecordCount(5),
-            },
-        );
+        let part = partition_with_leo(cur_dir.path(), PartitionLogSetup {
+            topic: "t",
+            partition: krabka_ids::PartitionIndex(3),
+            count: RecordCount(5),
+        });
         assert!(part.log_end_offset() == krabka_log::Offset(5));
         reg.insert("t".into(), krabka_ids::PartitionIndex(3), part);
 

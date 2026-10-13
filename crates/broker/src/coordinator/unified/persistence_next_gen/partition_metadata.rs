@@ -20,18 +20,19 @@
 //! `Racks` strings), every struct and the message ending with a tagged-field
 //! count.
 
-use bytes::{BufMut, Bytes, BytesMut};
-
-use crate::{
-    coordinator::unified::persistence::{
-        flex::{
-            get_compact_array_len, get_compact_string, get_string_array, get_uuid,
-            get_value_version, put_compact_array_len, put_compact_string, put_empty_tagged_fields,
-            put_string_array, put_uuid, skip_tagged_fields,
+use {
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{
+                get_compact_array_len, get_compact_string, get_string_array, get_uuid,
+                get_value_version, put_compact_array_len, put_compact_string,
+                put_empty_tagged_fields, put_string_array, put_uuid, skip_tagged_fields,
+            },
+            get_i32,
         },
-        get_i32,
+        error::BrokerError,
     },
-    error::BrokerError,
+    bytes::{BufMut, Bytes, BytesMut},
 };
 
 /// Kafka's `ConsumerGroupPartitionMetadataValue.PartitionMetadata`, the racks
@@ -119,9 +120,10 @@ impl PartitionMetadataValue {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     /// Golden bytes of the value Kafka's generated
     /// `ConsumerGroupPartitionMetadataValue` writer produces at version 0 for

@@ -1,11 +1,12 @@
 //! `#[derive(FieldDefaults)]`: see the crate documentation.
 
-use moxy::{
-    ast::{Attributed, Field, ItemStruct, ParseError},
-    token::{Spanner, TokenStream},
+use {
+    crate::meta::{field_ident, impl_block, named_fields},
+    moxy::{
+        ast::{Attributed, Field, ItemStruct, ParseError},
+        token::{Spanner, TokenStream},
+    },
 };
-
-use crate::meta::{field_ident, impl_block, named_fields};
 
 /// The expression inside a field's `#[default(...)]`.
 struct DefaultExpr(TokenStream);

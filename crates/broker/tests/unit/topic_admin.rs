@@ -4,15 +4,18 @@
 //! refuses: no partition, a name that already exists, and a replication factor
 //! above the number of brokers.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    create_topics_request::{CreatableTopic, CreateTopicsRequest},
-    delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
-};
-
-use crate::support::{
-    self,
-    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        self,
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        },
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        create_topics_request::{CreatableTopic, CreateTopicsRequest},
+        delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
+    },
 };
 
 #[tokio::test]

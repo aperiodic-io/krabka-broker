@@ -3,16 +3,16 @@
 //! the fail-closed placeholder for a live manager, and the watcher and
 //! reconciler that keep the manager's metadata-partition assignment current.
 
-use std::sync::Arc;
-
-use krabka_units::convert::TimeExt as _;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    config::{BrokerConfig, KafkaRlmmConfig, RlmmKind},
-    host_port::parse_advertised_host_port,
-    metrics::BrokerMetrics,
-    network::client::to_client_creds,
+use {
+    crate::{
+        config::{BrokerConfig, KafkaRlmmConfig, RlmmKind},
+        host_port::parse_advertised_host_port,
+        metrics::BrokerMetrics,
+        network::client::to_client_creds,
+    },
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
 };
 
 #[derive(Debug, Clone)]

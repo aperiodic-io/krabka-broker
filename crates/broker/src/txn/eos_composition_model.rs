@@ -48,18 +48,19 @@
 //!
 //! See the design spec.
 
-use krabka_log::{Offset, ProducerId};
-use stateright::{Checker, Model, Property};
-
-use super::{
-    decision::{CompletionDecision, decide_end_txn_completion, decide_phase1_transition},
-    state::{TxnEntry, TxnState},
-    version::TxnVersion,
-};
-use crate::{
-    coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
-    handlers::fetch::{FetchWatermarks, compute_visibility_window},
-    model_check::run_bfs,
+use {
+    super::{
+        decision::{CompletionDecision, decide_end_txn_completion, decide_phase1_transition},
+        state::{TxnEntry, TxnState},
+        version::TxnVersion,
+    },
+    crate::{
+        coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
+        handlers::fetch::{FetchWatermarks, compute_visibility_window},
+        model_check::run_bfs,
+    },
+    krabka_log::{Offset, ProducerId},
+    stateright::{Checker, Model, Property},
 };
 
 const TARGET_STATE_COUNT: usize = 20_000_000;
@@ -146,9 +147,7 @@ struct EosModel {
     max_log: usize,
 }
 
-fn tstate(id: i8) -> TxnState {
-    TxnState::from_kafka_status(id).expect("valid TxnState id")
-}
+fn tstate(id: i8) -> TxnState { TxnState::from_kafka_status(id).expect("valid TxnState id") }
 
 /// Rebuild a real `TxnEntry` for producer `p` so the real decision cores behave
 /// exactly as in a live run. Partitions and timestamps do not change the
@@ -287,61 +286,8 @@ enum Act {
 }
 
 impl Model for EosModel {
-    type State = EosState;
     type Action = Act;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![EosState {
-            log: vec![],
-            prod: (0..self.producers)
-                .map(|_| Prod {
-                    state: TxnState::Empty.to_kafka_status(),
-                    epoch: 0,
-                    generation: 0,
-                })
-                .collect(),
-            hw: Offset(0),
-            violations: Violations::default(),
-        }]
-    }
-
-    fn actions(&self, s: &Self::State, acts: &mut Vec<Self::Action>) {
-        // A follower replicating: advance the HWM toward the log end.
-        if s.hw < model_offset(s.log.len()) {
-            acts.push(Act::Ack);
-        }
-        if s.log.len() >= self.max_log {
-            return;
-        }
-        for p in 0..self.producers {
-            let pr = s.prod[usize::from(p)];
-            // `AddPartitionsToTxn` opens a NEW transaction only from a state
-            // that is not already `Ongoing`; on an `Ongoing` one it extends
-            // the open transaction, which `Append` covers.
-            if pr.generation < self.max_gen
-                && pr.state != TxnState::Ongoing.to_kafka_status()
-                && tstate(pr.state).can_transition_to(TxnState::Ongoing)
-            {
-                acts.push(Act::Begin(p));
-            }
-            if pr.state == TxnState::Ongoing.to_kafka_status() {
-                let n = s
-                    .log
-                    .iter()
-                    .filter(|b| {
-                        b.producer == p && b.generation == pr.generation && b.kind == Kind::Data
-                    })
-                    .count();
-                if n < self.max_data_per_txn {
-                    acts.push(Act::Append(p));
-                }
-                if n >= 1 {
-                    acts.push(Act::End(p, true));
-                    acts.push(Act::End(p, false));
-                }
-            }
-        }
-    }
+    type State = EosState;
 
     krabka_macros::model_transition! { last, a, s; {
         match a {
@@ -419,6 +365,59 @@ impl Model for EosModel {
         }
         Some(s)
     }}
+
+    fn init_states(&self) -> Vec<Self::State> {
+        vec![EosState {
+            log: vec![],
+            prod: (0..self.producers)
+                .map(|_| Prod {
+                    state: TxnState::Empty.to_kafka_status(),
+                    epoch: 0,
+                    generation: 0,
+                })
+                .collect(),
+            hw: Offset(0),
+            violations: Violations::default(),
+        }]
+    }
+
+    fn actions(&self, s: &Self::State, acts: &mut Vec<Self::Action>) {
+        // A follower replicating: advance the HWM toward the log end.
+        if s.hw < model_offset(s.log.len()) {
+            acts.push(Act::Ack);
+        }
+        if s.log.len() >= self.max_log {
+            return;
+        }
+        for p in 0..self.producers {
+            let pr = s.prod[usize::from(p)];
+            // `AddPartitionsToTxn` opens a NEW transaction only from a state
+            // that is not already `Ongoing`; on an `Ongoing` one it extends
+            // the open transaction, which `Append` covers.
+            if pr.generation < self.max_gen
+                && pr.state != TxnState::Ongoing.to_kafka_status()
+                && tstate(pr.state).can_transition_to(TxnState::Ongoing)
+            {
+                acts.push(Act::Begin(p));
+            }
+            if pr.state == TxnState::Ongoing.to_kafka_status() {
+                let n = s
+                    .log
+                    .iter()
+                    .filter(|b| {
+                        b.producer == p && b.generation == pr.generation && b.kind == Kind::Data
+                    })
+                    .count();
+                if n < self.max_data_per_txn {
+                    acts.push(Act::Append(p));
+                }
+                if n >= 1 {
+                    acts.push(Act::End(p, true));
+                    acts.push(Act::End(p, false));
+                }
+            }
+        }
+    }
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
@@ -505,9 +504,7 @@ impl Model for EosModel {
         ]
     }
 
-    fn within_boundary(&self, s: &Self::State) -> bool {
-        s.log.len() <= self.max_log
-    }
+    fn within_boundary(&self, s: &Self::State) -> bool { s.log.len() <= self.max_log }
 }
 
 pinned_model_runner! {

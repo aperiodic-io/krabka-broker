@@ -12,8 +12,10 @@
 
 mod sim_harness;
 
-use krabka_ids::NodeId;
-use sim_harness::{cluster::Sim, sim_log::SimLog};
+use {
+    krabka_ids::NodeId,
+    sim_harness::{cluster::Sim, sim_log::SimLog},
+};
 
 /// A cluster whose nodes use the in-memory fake log.
 fn new_sim(voter_ids: &[NodeId]) -> Sim<SimLog> {

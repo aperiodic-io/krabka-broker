@@ -1,17 +1,18 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::delivery::{
     scheduled_activation_due, scheduled_batches_valid, scheduled_inputs_coherent,
     scheduled_prefix_covers_pending,
 };
-use super::{
-    FetchWatermarks, committed_fetch_excludes_unstable, fetch_visibility,
-    scheduled_prefix_bounds_fetch,
-};
-use crate::broker::FetchVisibility;
 #[cfg(creusot)]
 use crate::transaction::pending_starts_bound_fetch;
+use {
+    super::{
+        FetchWatermarks, committed_fetch_excludes_unstable, fetch_visibility,
+        scheduled_prefix_bounds_fetch,
+    },
+    crate::broker::FetchVisibility,
+    creusot_std::prelude::*,
+};
 
 type ScheduledStablePrefix = (i64, i64, FetchVisibility, FetchVisibility);
 
@@ -59,13 +60,10 @@ pub(super) fn scheduled_stable_prefix_bounds_fetch(
 ) -> Option<ScheduledStablePrefix> {
     let (delivery, _, _) =
         scheduled_prefix_bounds_fetch(batches, activations, uncertainty, now, w)?;
-    let (lso, consumer) = committed_fetch_excludes_unstable(
-        starts,
-        FetchWatermarks {
-            deliverable: delivery,
-            ..w
-        },
-    )?;
+    let (lso, consumer) = committed_fetch_excludes_unstable(starts, FetchWatermarks {
+        deliverable: delivery,
+        ..w
+    })?;
     let follower = fetch_visibility(
         true,
         true,

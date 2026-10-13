@@ -71,23 +71,23 @@
 
 mod support;
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_client_consumer::{AutoOffsetReset, ConsumerError};
-use krabka_client_core::Client;
-use krabka_metadata::{MetadataRecord, PartitionRecord};
-use krabka_protocol::records::RecordBatch;
-use support::topic_id_for;
-
-use crate::support::{
-    client::connect_client,
-    consumer_groups::routing_consumer,
-    produce::{SinglePartitionProduceSetup, batch_request},
-    records::value_record,
-    standalone_broker,
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        client::connect_client,
+        consumer_groups::routing_consumer,
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::value_record,
+        standalone_broker,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_client_consumer::{AutoOffsetReset, ConsumerError},
+    krabka_client_core::Client,
+    krabka_metadata::{MetadataRecord, PartitionRecord},
+    krabka_protocol::records::RecordBatch,
+    std::time::{Duration, Instant},
+    support::topic_id_for,
 };
 
 /// Produces each value as its OWN single-record batch, one batch per offset,
@@ -109,14 +109,11 @@ async fn produce(client: &Client, topic: &str, values: &[&str]) {
         let mut produced = false;
         for attempt in 1..=5 {
             let resp = client
-                .send(batch_request(
-                    batch.clone(),
-                    SinglePartitionProduceSetup {
-                        topic: (topic).into(),
-                        topic_id,
-                        ..Default::default()
-                    },
-                ))
+                .send(batch_request(batch.clone(), SinglePartitionProduceSetup {
+                    topic: (topic).into(),
+                    topic_id,
+                    ..Default::default()
+                }))
                 .await
                 .expect("produce");
             let err = resp.responses[0].partition_responses[0].error_code;

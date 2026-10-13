@@ -31,12 +31,13 @@
 //! old one: an older build that cannot parse it regenerates the id, which is
 //! exactly what a Kafka broker does on every start.
 
-use std::{
-    io::{Read, Write},
-    path::Path,
+use {
+    std::{
+        io::{Read, Write},
+        path::Path,
+    },
+    uuid::Uuid,
 };
-
-use uuid::Uuid;
 
 const FILE_NAME: &str = "incarnation_id";
 

@@ -1,11 +1,11 @@
 //! Static broker config for the KIP-848 next-gen consumer group protocol.
 
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
-
-use qubit_clock::Timer;
-
-use super::assignor::{Assignor, RangeAssignor, UniformAssignor};
-use crate::time_util::system_timer;
+use {
+    super::assignor::{Assignor, RangeAssignor, UniformAssignor},
+    crate::time_util::system_timer,
+    qubit_clock::Timer,
+    std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration},
+};
 
 /// `group.consumer.migration.policy` governs classic ↔ next-gen consumer
 /// group conversion. The default is `Bidirectional`, which matches Apache
@@ -28,19 +28,16 @@ pub enum ConsumerGroupMigrationPolicy {
 impl ConsumerGroupMigrationPolicy {
     /// `true` if a classic group may be upgraded to a consumer group.
     #[must_use]
-    pub fn allows_upgrade(self) -> bool {
-        matches!(self, Self::Upgrade | Self::Bidirectional)
-    }
+    pub fn allows_upgrade(self) -> bool { matches!(self, Self::Upgrade | Self::Bidirectional) }
 
     /// `true` if a consumer group may be downgraded to a classic group.
     #[must_use]
-    pub fn allows_downgrade(self) -> bool {
-        matches!(self, Self::Downgrade | Self::Bidirectional)
-    }
+    pub fn allows_downgrade(self) -> bool { matches!(self, Self::Downgrade | Self::Bidirectional) }
 }
 
 impl FromStr for ConsumerGroupMigrationPolicy {
     type Err = String;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let lower = s.to_ascii_lowercase();
         Self::parse(&lower)
@@ -366,6 +363,20 @@ impl Default for NextGenConfig {
 }
 
 impl NextGenConfig {
+    membership_config_methods! {
+    /// The settings a consumer group runs with: each `consumer.*` override in
+    /// the group's stored config over the broker value, clamped to the
+    /// broker's `group.consumer.min.*` and `group.consumer.max.*` bounds.
+    ///
+    /// This is Kafka's `GroupMetadataManager.consumerGroupSessionTimeoutMs`,
+    /// `consumerGroupHeartbeatIntervalMs` and
+    /// `consumerGroupAssignmentIntervalMs`: `GroupConfigManager.groupConfig`
+    /// over `GroupCoordinatorConfig`, with the stored config evaluated against
+    /// the bounds (`GroupConfig.evaluate`). A group with no override borrows
+    /// the broker value.
+        KEY_CONSUMER_SESSION_TIMEOUT_MS, KEY_CONSUMER_HEARTBEAT_INTERVAL_MS, KEY_CONSUMER_ASSIGNMENT_INTERVAL_MS
+    }
+
     #[must_use]
     pub fn next_gen_enabled(&self) -> bool {
         self.rebalance_protocols
@@ -399,23 +410,7 @@ impl NextGenConfig {
     /// `true` when a client may legally request this name in
     /// `ConsumerGroupHeartbeatRequest::server_assignor`.
     #[must_use]
-    pub fn assignor_enabled(&self, name: &str) -> bool {
-        self.find_assignor(name).is_some()
-    }
-
-    membership_config_methods! {
-    /// The settings a consumer group runs with: each `consumer.*` override in
-    /// the group's stored config over the broker value, clamped to the
-    /// broker's `group.consumer.min.*` and `group.consumer.max.*` bounds.
-    ///
-    /// This is Kafka's `GroupMetadataManager.consumerGroupSessionTimeoutMs`,
-    /// `consumerGroupHeartbeatIntervalMs` and
-    /// `consumerGroupAssignmentIntervalMs`: `GroupConfigManager.groupConfig`
-    /// over `GroupCoordinatorConfig`, with the stored config evaluated against
-    /// the bounds (`GroupConfig.evaluate`). A group with no override borrows
-    /// the broker value.
-        KEY_CONSUMER_SESSION_TIMEOUT_MS, KEY_CONSUMER_HEARTBEAT_INTERVAL_MS, KEY_CONSUMER_ASSIGNMENT_INTERVAL_MS
-    }
+    pub fn assignor_enabled(&self, name: &str) -> bool { self.find_assignor(name).is_some() }
 }
 
 /// Kafka's `GroupConfig.CONSUMER_SESSION_TIMEOUT_MS_CONFIG`.
@@ -427,19 +422,18 @@ const KEY_CONSUMER_ASSIGNMENT_INTERVAL_MS: &str = "consumer.assignment.interval.
 
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, collections::HashMap};
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::assignor::{Assignment, GroupSpec, TopicMetadata};
+    use {
+        super::*,
+        crate::coordinator::unified::assignor::{Assignment, GroupSpec, TopicMetadata},
+        assert2::assert,
+        std::{borrow::Cow, collections::HashMap},
+    };
 
     #[derive(Debug)]
     struct TestAssignor(&'static str);
     impl Assignor for TestAssignor {
-        fn name(&self) -> &'static str {
-            self.0
-        }
+        fn name(&self) -> &'static str { self.0 }
+
         fn assign(&self, _group: &GroupSpec, _topics: &TopicMetadata) -> Assignment {
             HashMap::new()
         }

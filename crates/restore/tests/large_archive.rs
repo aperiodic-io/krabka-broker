@@ -11,16 +11,18 @@
 //! do, and reads the process's own peak resident set to show the scan did not
 //! grow with the listing.
 
-use assert2::check;
-use futures_util::stream::StreamExt as _;
-use krabka_ids::Offset;
-use krabka_remote_storage::{TopicIdPartition, kafka_uuid};
-use krabka_restore::{
-    ArchiveInventory, ArchiveObject, ArchiveStore, Cli, PartitionInventory, RestoreArgs,
-    SegmentInventory, UNRECOGNIZED_SAMPLE_LIMIT, UnrecognizedKeys, inventory,
+use {
+    assert2::check,
+    futures_util::stream::StreamExt as _,
+    krabka_ids::Offset,
+    krabka_remote_storage::{TopicIdPartition, kafka_uuid},
+    krabka_restore::{
+        ArchiveInventory, ArchiveObject, ArchiveStore, Cli, PartitionInventory, RestoreArgs,
+        SegmentInventory, UNRECOGNIZED_SAMPLE_LIMIT, UnrecognizedKeys, inventory,
+    },
+    object_store::{ObjectMeta, path::Path},
+    uuid::Uuid,
 };
-use object_store::{ObjectMeta, path::Path};
-use uuid::Uuid;
 
 /// Partitions the synthetic archive holds, all of topic `orders`.
 const PARTITIONS: i32 = 4;
@@ -51,9 +53,7 @@ const SUFFIXES: [&str; 6] = [
 const OBJECT_SIZE: u64 = 4;
 
 /// The topic id every synthetic partition directory encodes.
-fn topic_id() -> Uuid {
-    Uuid::from_u128(0x5eed)
-}
+fn topic_id() -> Uuid { Uuid::from_u128(0x5eed) }
 
 /// The segment id of segment `index` of `partition`, distinct per segment so
 /// the scan has to key its accumulator by more than the partition.
@@ -65,9 +65,7 @@ fn segment_id(partition: i32, index: i64) -> Uuid {
 
 /// The base offset of segment `index`, spaced so the offsets are not the
 /// segment indexes.
-fn base_offset(index: i64) -> i64 {
-    index * 1_000
-}
+fn base_offset(index: i64) -> i64 { index * 1_000 }
 
 /// The archive key of one artifact, at the exact KIP-405 layout.
 fn artifact_key(partition: i32, index: i64, suffix: &str) -> Path {
@@ -81,9 +79,7 @@ fn artifact_key(partition: i32, index: i64, suffix: &str) -> Path {
 
 /// The key of junk object `index`, zero-padded so the synthetic listing is in
 /// lexicographic order the way a real store's listing is.
-fn junk_key(index: u64) -> Path {
-    Path::from(format!("junk/{index:09}"))
-}
+fn junk_key(index: u64) -> Path { Path::from(format!("junk/{index:09}")) }
 
 /// Every key the synthetic store lists, in order: the junk keys first (`j`
 /// sorts before `o`), then one complete copy of every segment.

@@ -17,25 +17,25 @@
 //! whereas Fetch reads every negative epoch that way. See
 //! `Partition::list_offsets_leader_epoch_fence`.
 
-use std::{sync::atomic::Ordering, time::Duration};
-
-use krabka_protocol::owned::list_offsets_response::ListOffsetsPartitionResponse;
-use krabka_verified::{
-    ListOffsetsEarliestFacts, ListOffsetsKind, ListOffsetsSelectionDecision,
-    ListOffsetsSelectionFacts, list_offsets_earliest, list_offsets_selection_decision,
+use {
+    super::{
+        bound::{FetchBound, fetchable_offsets},
+        diskless::diskless_earliest_candidate,
+        leadership::resolve_for_broker,
+        local::{leader_epoch_for_offset, scheduled_latest_offset},
+        remote::await_remote,
+        response::error_response,
+        sentinels::{UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP, timestamp_kind},
+        timestamp::resolve_timestamp_offset,
+    },
+    crate::{broker::Broker, codes, partition::Partition},
+    krabka_protocol::owned::list_offsets_response::ListOffsetsPartitionResponse,
+    krabka_verified::{
+        ListOffsetsEarliestFacts, ListOffsetsKind, ListOffsetsSelectionDecision,
+        ListOffsetsSelectionFacts, list_offsets_earliest, list_offsets_selection_decision,
+    },
+    std::{sync::atomic::Ordering, time::Duration},
 };
-
-use super::{
-    bound::{FetchBound, fetchable_offsets},
-    diskless::diskless_earliest_candidate,
-    leadership::resolve_for_broker,
-    local::{leader_epoch_for_offset, scheduled_latest_offset},
-    remote::await_remote,
-    response::error_response,
-    sentinels::{UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP, timestamp_kind},
-    timestamp::resolve_timestamp_offset,
-};
-use crate::{broker::Broker, codes, partition::Partition};
 
 fn earliest_pending_upload_offset(tiered_offset: i64) -> Option<i64> {
     tiered_offset.checked_add(1)
@@ -639,23 +639,24 @@ mod tests {
     };
     mod timestamp_visibility;
 
-    use assert2::assert;
-    use krabka_protocol::owned::create_topics_request::CreatableTopicConfig;
-
-    use super::*;
-    use crate::{
-        handlers::list_offsets::{
-            handle,
-            sentinels::{
-                EARLIEST_LOCAL_TIMESTAMP, EARLIEST_PENDING_UPLOAD_TIMESTAMP, EARLIEST_TIMESTAMP,
-                LATEST_TIERED_TIMESTAMP, LATEST_TIMESTAMP, MAX_TIMESTAMP,
+    use {
+        super::*,
+        crate::{
+            handlers::list_offsets::{
+                handle,
+                sentinels::{
+                    EARLIEST_LOCAL_TIMESTAMP, EARLIEST_PENDING_UPLOAD_TIMESTAMP,
+                    EARLIEST_TIMESTAMP, LATEST_TIERED_TIMESTAMP, LATEST_TIMESTAMP, MAX_TIMESTAMP,
+                },
+                test_support::{
+                    client_for, create_topic, decode_response, encode_request, list_one,
+                    list_one_at_epoch,
+                },
             },
-            test_support::{
-                client_for, create_topic, decode_response, encode_request, list_one,
-                list_one_at_epoch,
-            },
+            test_support::test_ctx,
         },
-        test_support::test_ctx,
+        assert2::assert,
+        krabka_protocol::owned::create_topics_request::CreatableTopicConfig,
     };
 
     #[test]
@@ -780,10 +781,12 @@ mod tests {
 
     #[tokio::test]
     async fn tiered_sentinels_return_finished_remote_frontier_and_pending_epoch() {
-        use krabka_ids::LeaderEpoch;
-        use krabka_remote_storage::{
-            RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
-            RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, TopicIdPartition,
+        use {
+            krabka_ids::LeaderEpoch,
+            krabka_remote_storage::{
+                RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+                RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, TopicIdPartition,
+            },
         };
 
         const TOPIC: &str = "list-offsets-tiered";
@@ -932,14 +935,11 @@ mod tests {
     async fn earliest_pending_upload_stays_unknown_when_local_segments_outrun_the_rlmm() {
         const TOPIC: &str = "list-offsets-pending-upload-unconfirmed";
 
-        let (broker, client, _dirs) = remote_topic(
-            TOPIC,
-            vec![CreatableTopicConfig {
-                name: "internal.segment.bytes".into(),
-                value: Some("1".into()),
-                ..Default::default()
-            }],
-        )
+        let (broker, client, _dirs) = remote_topic(TOPIC, vec![CreatableTopicConfig {
+            name: "internal.segment.bytes".into(),
+            value: Some("1".into()),
+            ..Default::default()
+        }])
         .await;
         broker
             .produce_records_for_test(TOPIC, 0, 6)

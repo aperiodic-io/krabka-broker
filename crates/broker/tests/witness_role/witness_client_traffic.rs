@@ -12,15 +12,15 @@
 //! never the leader, so the `NodeEndpoints` entry has to come out of the
 //! metadata image rather than out of the answering broker's own config.
 
-use std::collections::BTreeSet;
-
-use assert2::check;
-use krabka_broker::codes;
-
-use crate::{
-    N_RECORDS, SITE_C, TOPIC, cluster_lock, within,
-    witness_cluster::{client_at, shutdown, start_stretch_cluster, wait_for_witness_isr},
-    witness_wire::{consumer_fetch, create_topic, produce_error, produce_response},
+use {
+    crate::{
+        N_RECORDS, SITE_C, TOPIC, cluster_lock, within,
+        witness_cluster::{client_at, shutdown, start_stretch_cluster, wait_for_witness_isr},
+        witness_wire::{consumer_fetch, create_topic, produce_error, produce_response},
+    },
+    assert2::check,
+    krabka_broker::codes,
+    std::collections::BTreeSet,
 };
 
 /// The listener every client in this suite connects on. A KIP-951

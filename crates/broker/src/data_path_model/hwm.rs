@@ -9,15 +9,15 @@
 //! the replicated answer is sound, since a follower that has not reconciled a
 //! divergence must not count toward the watermark.
 
-use std::{collections::HashMap, time::Instant};
-
-use krabka_log::Offset;
-
-use super::{
-    bounds::{NB_U8, has, node},
-    state::DpState,
+use {
+    super::{
+        bounds::{NB_U8, has, node},
+        state::DpState,
+    },
+    crate::replica_state::{LeaderPolicy, ReplicaState},
+    krabka_log::Offset,
+    std::{collections::HashMap, time::Instant},
 };
-use crate::replica_state::{LeaderPolicy, ReplicaState};
 
 /// The follower's effective LEO *as seen by the leader*. It is the length of
 /// the longest epoch-consistent common prefix with the leader's log. A real

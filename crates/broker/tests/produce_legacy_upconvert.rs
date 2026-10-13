@@ -10,22 +10,25 @@
 //! stores the up-converted records, and then fetch those records back in the
 //! modern v2 form.
 
-use assert2::assert;
-
-use crate::support::{
-    client::create_topic,
-    discovery::named_topic_metadata,
-    fetch::{SinglePartitionFetchSetup, single_partition_fetch},
-    produce::{SinglePartitionProduceSetup, single_partition_produce},
+use {
+    crate::support::{
+        client::create_topic,
+        discovery::named_topic_metadata,
+        fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+        produce::{SinglePartitionProduceSetup, single_partition_produce},
+    },
+    assert2::assert,
 };
 mod support;
 
-use bytes::{Bytes, BytesMut};
-use krabka_ids::Offset;
-use krabka_protocol::{
-    owned::fetch_request::FetchRequest, primitives::uuid::Uuid, records::RecordsPayload,
+use {
+    bytes::{Bytes, BytesMut},
+    krabka_ids::Offset,
+    krabka_protocol::{
+        owned::fetch_request::FetchRequest, primitives::uuid::Uuid, records::RecordsPayload,
+    },
+    krabka_records_legacy::{Magic, ParsedRecord, encode_flat_message_set},
 };
-use krabka_records_legacy::{Magic, ParsedRecord, encode_flat_message_set};
 
 async fn topic_id_for(p: &support::InProcess, name: &str) -> Uuid {
     let resp = p

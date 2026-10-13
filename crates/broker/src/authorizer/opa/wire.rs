@@ -5,11 +5,12 @@
 //! available here and are omitted from `requestContext`. Policies may use
 //! the supplied context fields and the complete single-resource action.
 
-use krabka_authz::{AuthorizationRequest, AuthorizationResult, jdk_host_address};
-use krabka_metadata::{AclOperation, ResourceType};
-use serde::{Deserialize, Serialize};
-
-use super::OpaAuthorizer;
+use {
+    super::OpaAuthorizer,
+    krabka_authz::{AuthorizationRequest, AuthorizationResult, jdk_host_address},
+    krabka_metadata::{AclOperation, ResourceType},
+    serde::{Deserialize, Serialize},
+};
 
 /// Outer envelope accepted by OPA's REST decision API.
 #[derive(Debug, Serialize)]
@@ -160,9 +161,7 @@ fn resource_type_str(t: ResourceType) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// The OPA input's `operation` string must be the Kafka enum name,
     /// including KIP-939's `TWO_PHASE_COMMIT`. This pins the mapping, so the

@@ -4,9 +4,7 @@
 //! It is its own module because it is a container of buckets rather than part
 //! of the bucket itself.
 
-use std::sync::Arc;
-
-use super::TokenBucket;
+use {super::TokenBucket, std::sync::Arc};
 
 /// Broker-wide throttle state for replica traffic and intra-broker log moves.
 #[derive(Debug)]
@@ -28,7 +26,5 @@ impl ThrottleState {
 }
 
 impl Default for ThrottleState {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }

@@ -97,16 +97,16 @@
 //! at Kafka's default of 1 can never have a non-empty ELR, because an ISR that
 //! reached zero members has no partition record to reach it with.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use krabka_metadata::{MetadataImage, MetadataRecord, PartitionElrRecord, PartitionRecord};
-
-use super::state::{
-    PartitionElr, TopicElr, legacy_elr, metadata_node_ids, wire_node_ids, without_legacy_elr,
-};
-use crate::{
-    config_keys::effective_min_insync_replicas,
-    features::{ELR_VERSION, feature_enabled},
+use {
+    super::state::{
+        PartitionElr, TopicElr, legacy_elr, metadata_node_ids, wire_node_ids, without_legacy_elr,
+    },
+    crate::{
+        config_keys::effective_min_insync_replicas,
+        features::{ELR_VERSION, feature_enabled},
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord, PartitionElrRecord, PartitionRecord},
+    std::collections::{BTreeMap, BTreeSet},
 };
 
 /// Appends the ELR state implied by a batch of controller changes to that

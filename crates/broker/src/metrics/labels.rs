@@ -4,16 +4,16 @@
 //! live together because cardinality is a property of the whole set, not of
 //! any one family that uses it.
 
-use std::{
-    fmt,
-    hash::{Hash, Hasher},
-    sync::Arc,
+use {
+    crate::break_glass::action_name,
+    krabka_metadata::BreakGlassAction as GatedAction,
+    prometheus_client::encoding::{EncodeLabelSet, EncodeLabelValue, LabelValueEncoder},
+    std::{
+        fmt,
+        hash::{Hash, Hasher},
+        sync::Arc,
+    },
 };
-
-use krabka_metadata::BreakGlassAction as GatedAction;
-use prometheus_client::encoding::{EncodeLabelSet, EncodeLabelValue, LabelValueEncoder};
-
-use crate::break_glass::action_name;
 
 /// Sentinel label value that folds unbounded inputs (unrecognised
 /// `api_key`s, `SaslAuthenticate` without a prior handshake) into one
@@ -256,18 +256,14 @@ pub struct BreakGlassAction(pub GatedAction);
 impl BreakGlassAction {
     /// The `action` label value this transition renders as.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
-        action_name(self.0)
-    }
+    pub fn as_str(self) -> &'static str { action_name(self.0) }
 }
 
 /// Hashing the label text rather than the wrapped enum, which carries no
 /// `Hash` of its own. Two actions are equal exactly when their names are, so
 /// the hash agrees with `Eq`.
 impl Hash for BreakGlassAction {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_str().hash(state);
-    }
+    fn hash<H: Hasher>(&self, state: &mut H) { self.as_str().hash(state); }
 }
 
 impl EncodeLabelValue for BreakGlassAction {
@@ -457,16 +453,16 @@ pub struct RaftStateLabel {
 }
 
 impl RaftStateLabel {
-    pub const LEADER: Self = Self { state: "leader" };
-    pub const FOLLOWER: Self = Self { state: "follower" };
-    pub const CANDIDATE: Self = Self { state: "candidate" };
-    pub const OBSERVER: Self = Self { state: "observer" };
     pub const ALL: [Self; 4] = [
         Self::LEADER,
         Self::FOLLOWER,
         Self::CANDIDATE,
         Self::OBSERVER,
     ];
+    pub const CANDIDATE: Self = Self { state: "candidate" };
+    pub const FOLLOWER: Self = Self { state: "follower" };
+    pub const LEADER: Self = Self { state: "leader" };
+    pub const OBSERVER: Self = Self { state: "observer" };
 }
 
 /// Per-entity client quota label set, paired with
@@ -520,14 +516,15 @@ pub struct FetchDrainPathLabel {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use prometheus_client::{
-        encoding::{EncodeLabelSet, text::encode},
-        metrics::{counter::Counter, family::Family},
-        registry::Registry,
+    use {
+        super::{PartitionLabel, TopicLabel},
+        assert2::assert,
+        prometheus_client::{
+            encoding::{EncodeLabelSet, text::encode},
+            metrics::{counter::Counter, family::Family},
+            registry::Registry,
+        },
     };
-
-    use super::{PartitionLabel, TopicLabel};
 
     /// [`TopicLabel`] exactly as it read before its `topic` became an
     /// `Arc<str>`.

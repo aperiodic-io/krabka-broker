@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
-use super::{
-    RestoreBatchFrame, RestoreLayout, RestoreProducer, RestoreRecordDeltas,
-    restore_record_coordinates,
-};
 #[cfg(creusot)]
 use super::{kafka_record_timestamp, restore_record_placeable};
+use {
+    super::{
+        RestoreBatchFrame, RestoreLayout, RestoreProducer, RestoreRecordDeltas,
+        restore_record_coordinates,
+    },
+    creusot_std::prelude::*,
+};
 
 open_logic! {
 /// Kafka's legal producer identities (`RecordBatch.NO_PRODUCER_ID`,

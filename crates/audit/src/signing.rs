@@ -3,13 +3,13 @@
 //! `checkpoint_signing_bytes` defines the canonical signed payload. The writer
 //! calls it to sign, and the verifier calls it to verify. Never reimplement it.
 
-use std::path::Path;
-
-use ring::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
-
-use crate::{
-    ids::{EpochMs, Seq},
-    sink::AuditError,
+use {
+    crate::{
+        ids::{EpochMs, Seq},
+        sink::AuditError,
+    },
+    ring::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey},
+    std::path::Path,
 };
 
 /// Versioned domain-separation prefix for checkpoint signatures.
@@ -57,21 +57,15 @@ impl FileEd25519Signer {
     /// Stable identifier for the key. Every checkpoint records it, so chains
     /// span key-rotation epochs verifiably.
     #[must_use]
-    pub fn key_id(&self) -> &str {
-        &self.key_id
-    }
+    pub fn key_id(&self) -> &str { &self.key_id }
 
     /// Ed25519 signature over `msg`.
     #[must_use]
-    pub fn sign(&self, msg: &[u8]) -> Vec<u8> {
-        self.key_pair.sign(msg).as_ref().to_vec()
-    }
+    pub fn sign(&self, msg: &[u8]) -> Vec<u8> { self.key_pair.sign(msg).as_ref().to_vec() }
 
     /// Raw 32-byte Ed25519 public key.
     #[must_use]
-    pub fn public_key(&self) -> Vec<u8> {
-        self.public_key.clone()
-    }
+    pub fn public_key(&self) -> Vec<u8> { self.public_key.clone() }
 }
 
 /// Canonical checkpoint signed payload.
@@ -113,13 +107,14 @@ pub fn verify_signature(public_key: &[u8], msg: &[u8], sig: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use ring::{
-        rand::SystemRandom,
-        signature::{Ed25519KeyPair, KeyPair},
+    use {
+        super::*,
+        assert2::check,
+        ring::{
+            rand::SystemRandom,
+            signature::{Ed25519KeyPair, KeyPair},
+        },
     };
-
-    use super::*;
 
     fn fresh_signer(key_id: &str) -> (FileEd25519Signer, Vec<u8>) {
         let rng = SystemRandom::new();

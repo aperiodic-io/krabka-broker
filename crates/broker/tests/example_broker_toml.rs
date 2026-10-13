@@ -14,10 +14,12 @@
 //! plain TOML and checks every key, at every depth, against
 //! `docs/config-schema.json`, which is the schema `FileConfig` generates.
 
-use assert2::{assert, check};
-use krabka_broker::{config::BrokerConfig, file_config::FileConfig};
-use serde_json::Value as Json;
-use toml::Value as Toml;
+use {
+    assert2::{assert, check},
+    krabka_broker::{config::BrokerConfig, file_config::FileConfig},
+    serde_json::Value as Json,
+    toml::Value as Toml,
+};
 
 const EXAMPLES: [&str; 2] = [
     "docs/examples/broker-single-node.toml",

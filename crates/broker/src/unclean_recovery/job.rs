@@ -5,12 +5,13 @@
 //! admin path also keeps the reply channel that carries the `RecoveryOutcome`
 //! back.
 
-use krabka_raft::NodeId;
-use tokio::sync::{mpsc, oneshot};
-use tracing::warn;
-use uuid::Uuid;
-
-use crate::config_keys::RecoveryStrategy;
+use {
+    crate::config_keys::RecoveryStrategy,
+    krabka_raft::NodeId,
+    tokio::sync::{mpsc, oneshot},
+    tracing::warn,
+    uuid::Uuid,
+};
 
 /// A request to run unclean recovery for one partition, if it is needed. The
 /// failover path and the `ElectLeaders` handler enqueue it, and the URM
@@ -66,9 +67,7 @@ pub(crate) struct UncleanRecoveryHandle {
 
 impl UncleanRecoveryHandle {
     #[cfg(test)]
-    pub(crate) fn for_tests(tx: mpsc::Sender<RecoveryJob>) -> Self {
-        Self { tx }
-    }
+    pub(crate) fn for_tests(tx: mpsc::Sender<RecoveryJob>) -> Self { Self { tx } }
 
     /// Enqueues a recovery job. It logs a message, and does not panic, if the
     /// manager has shut down.

@@ -85,10 +85,11 @@ pub fn producer_id_block_allocation(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{
-        ProducerIdBlockAllocationDecision, ProducerIdBlockPlan, producer_id_block_allocation,
+    use {
+        super::{
+            ProducerIdBlockAllocationDecision, ProducerIdBlockPlan, producer_id_block_allocation,
+        },
+        assert2::assert,
     };
 
     #[test]

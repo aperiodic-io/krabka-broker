@@ -3,10 +3,12 @@
 //! It covers the whole `freeze set` and `freeze list` loop, signed and
 //! unsigned, and the one scope the broker will not accept at all.
 
-use assert2::check;
-
-use crate::support::{
-    PREFIX, PRINCIPAL, REFUSED, TOPIC, cli, cluster, set_signed_freeze, signed_as, verify_registry,
+use {
+    crate::support::{
+        PREFIX, PRINCIPAL, REFUSED, TOPIC, cli, cluster, set_signed_freeze, signed_as,
+        verify_registry,
+    },
+    assert2::check,
 };
 
 /// The whole freeze loop: sign a freeze here, send it, read the registry back,
@@ -38,17 +40,14 @@ async fn the_freeze_loop_runs_end_to_end() {
     // A prefix freeze needs no signature, because a freeze is the safe
     // direction and an incident can start on a cluster with no key material.
     check!(
-        cli(
-            &bootstrap,
-            &[
-                "freeze",
-                "set",
-                "--prefix",
-                PREFIX,
-                "--reason",
-                "tenant offboarding",
-            ],
-        )
+        cli(&bootstrap, &[
+            "freeze",
+            "set",
+            "--prefix",
+            PREFIX,
+            "--reason",
+            "tenant offboarding",
+        ],)
         .await
             == 0,
         "an unsigned prefix freeze"
@@ -70,10 +69,9 @@ async fn a_scope_that_reaches_an_internal_topic_is_an_ordinary_refusal() {
     let (_broker, _dir, bootstrap, _key) = cluster().await;
 
     check!(
-        cli(
-            &bootstrap,
-            &["freeze", "set", "--prefix", "__", "--reason", "no"],
-        )
+        cli(&bootstrap, &[
+            "freeze", "set", "--prefix", "__", "--reason", "no"
+        ],)
         .await
             == REFUSED
     );

@@ -15,17 +15,18 @@
 //! Authorization: `Describe` on `Cluster("kafka-cluster")`. On a deny the
 //! response carries `CLUSTER_AUTHORIZATION_FAILED` (31).
 
-use krabka_protocol::krabka::barrier::{
-    BarrierCut, ListBarrierCutsRequest, ListBarrierCutsResponse,
-};
-
-use crate::{
-    barrier::{
-        coordinator::RetainedCut,
-        handlers::{cluster_describe_denied, cut_missing, cut_topics, error_code, error_text},
+use {
+    crate::{
+        barrier::{
+            coordinator::RetainedCut,
+            handlers::{cluster_describe_denied, cut_missing, cut_topics, error_code, error_text},
+        },
+        codes,
+        handlers::{ErrorResponse as _, encode_response},
     },
-    codes,
-    handlers::{ErrorResponse as _, encode_response},
+    krabka_protocol::krabka::barrier::{
+        BarrierCut, ListBarrierCutsRequest, ListBarrierCutsResponse,
+    },
 };
 
 wire_handler!(
@@ -103,17 +104,18 @@ fn select(cuts: &[RetainedCut], from_epoch: i64, max_results: i32) -> Vec<Barrie
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::Offset;
-    use krabka_protocol::krabka::barrier::{
-        BarrierCutPartition, BarrierCutTopic, CUT_STATUS_COMPLETE,
-    };
-
-    use super::*;
-    use crate::barrier::{
-        error::BarrierError,
-        persistence::{CutStatus, CutValue, PartitionOffset, TopicOffsets},
+    use {
+        super::*,
+        crate::barrier::{
+            error::BarrierError,
+            persistence::{CutStatus, CutValue, PartitionOffset, TopicOffsets},
+        },
+        assert2::check,
+        krabka_ids::PartitionIndex,
+        krabka_log::Offset,
+        krabka_protocol::krabka::barrier::{
+            BarrierCutPartition, BarrierCutTopic, CUT_STATUS_COMPLETE,
+        },
     };
 
     fn retained(epoch: i64, offset: i64) -> RetainedCut {
@@ -155,9 +157,7 @@ mod tests {
         }
     }
 
-    fn three_cuts() -> Vec<RetainedCut> {
-        vec![retained(4, 40), retained(5, 50), retained(6, 60)]
-    }
+    fn three_cuts() -> Vec<RetainedCut> { vec![retained(4, 40), retained(5, 50), retained(6, 60)] }
 
     #[test]
     fn a_selection_applies_the_epoch_floor_and_the_cap() {

@@ -2,16 +2,16 @@
 //! updates the throttle bucket rates. The task runs unconditionally on
 //! every broker. The bucket itself handles the unthrottled fast path.
 
-use std::sync::Arc;
-
-use krabka_metadata::{MetadataImage, NodeId, ThrottleKind};
-use krabka_units::{ByteRate, convert::ByteRateExt};
-use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
-use tracing::debug;
-
-use super::ThrottleState;
-use crate::metadata_source::watch_image_loop;
+use {
+    super::ThrottleState,
+    crate::metadata_source::watch_image_loop,
+    krabka_metadata::{MetadataImage, NodeId, ThrottleKind},
+    krabka_units::{ByteRate, convert::ByteRateExt},
+    std::sync::Arc,
+    tokio::sync::watch,
+    tokio_util::sync::CancellationToken,
+    tracing::debug,
+};
 
 pub async fn run(
     images: watch::Receiver<Arc<MetadataImage>>,
@@ -67,12 +67,13 @@ pub(crate) fn apply_image(image: &MetadataImage, node_id: NodeId, throttle: &Thr
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{BrokerConfigRecord, MetadataRecord};
-    use krabka_units::bytes_per_sec;
-    use uuid::Uuid;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_metadata::{BrokerConfigRecord, MetadataRecord},
+        krabka_units::bytes_per_sec,
+        uuid::Uuid,
+    };
 
     fn set_broker_rate(image: &mut MetadataImage, name: &str, value: Option<&str>) {
         image.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {

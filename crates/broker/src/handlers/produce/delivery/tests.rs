@@ -1,27 +1,29 @@
 //! Tests for the KFC-1 scheduled-delivery gate, including one that drives a
 //! real scheduled partition end to end through the per-partition pipeline.
 
-use std::sync::Arc;
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_ids::Offset;
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_units::{bytes, millis};
-
-use super::*;
-use crate::{
-    codes::{INVALID_TIMESTAMP, NONE},
-    config_keys::{DELIVERY_MAX_DELAY_MS, DELIVERY_MODE_IMMEDIATE, DELIVERY_SCHEDULE_MONOTONIC},
-    handlers::produce::{
-        framing::PartitionPayload,
-        pipeline::{PartitionInput, process_partition},
-        test_support::{
-            PipelineFixture, PipelinePartitionSetup, encode_batch,
-            image_with_overrides as image_with_delivery, pipeline_input,
+use {
+    super::*,
+    crate::{
+        codes::{INVALID_TIMESTAMP, NONE},
+        config_keys::{
+            DELIVERY_MAX_DELAY_MS, DELIVERY_MODE_IMMEDIATE, DELIVERY_SCHEDULE_MONOTONIC,
         },
-        topic_settings::TimestampPolicy,
+        handlers::produce::{
+            framing::PartitionPayload,
+            pipeline::{PartitionInput, process_partition},
+            test_support::{
+                PipelineFixture, PipelinePartitionSetup, encode_batch,
+                image_with_overrides as image_with_delivery, pipeline_input,
+            },
+            topic_settings::TimestampPolicy,
+        },
     },
+    assert2::check,
+    bytes::Bytes,
+    krabka_ids::Offset,
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_units::{bytes, millis},
+    std::sync::Arc,
 };
 
 // ── KFC-1 scheduled delivery ─────────────────────────────────────
@@ -175,32 +177,25 @@ async fn a_scheduled_partition_rejects_and_appends_by_delivery_time() {
     use krabka_protocol::owned::produce_response::PartitionProduceResponse;
 
     let dir = tempfile::tempdir().unwrap();
-    let image = Arc::new(image_with_delivery(
-        "sched",
-        &[
-            (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
-            (DELIVERY_MAX_DELAY_MS, "3600000"),
-            (DELIVERY_SCHEDULE_MONOTONIC, "true"),
-        ],
-    ));
+    let image = Arc::new(image_with_delivery("sched", &[
+        (DELIVERY_MODE, DELIVERY_MODE_SCHEDULED),
+        (DELIVERY_MAX_DELAY_MS, "3600000"),
+        (DELIVERY_SCHEDULE_MONOTONIC, "true"),
+    ]));
     let delivery = resolve_delivery_gate(&image, "sched");
     let fixture = PipelineFixture::new(krabka_ids::NodeId(1));
 
     let part = fixture
-        .partition_with_config(
-            dir.path(),
-            &image,
-            PipelinePartitionSetup {
-                topic: "sched",
-                log_config: krabka_log::LogConfig {
-                    delivery_policy: krabka_log::DeliveryPolicy::Scheduled,
-                    // The log enforces `delivery.schedule.monotonic`, so its
-                    // configuration must match the topic's delivery settings.
-                    schedule_order: krabka_log::ScheduleOrder::Monotonic,
-                    ..krabka_log::LogConfig::default()
-                },
+        .partition_with_config(dir.path(), &image, PipelinePartitionSetup {
+            topic: "sched",
+            log_config: krabka_log::LogConfig {
+                delivery_policy: krabka_log::DeliveryPolicy::Scheduled,
+                // The log enforces `delivery.schedule.monotonic`, so its
+                // configuration must match the topic's delivery settings.
+                schedule_order: krabka_log::ScheduleOrder::Monotonic,
+                ..krabka_log::LogConfig::default()
             },
-        )
+        })
         .await;
 
     // Seed offset 0 with a batch that comes due in ten minutes, so the

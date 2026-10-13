@@ -5,19 +5,20 @@
 //! `consumerGroupFenceMembers` does: the flip replaces the fence's records
 //! with one atomic batch of the conversion's.
 
-use std::time::Instant;
-
-use super::{MetadataProvider, chrono_now_ms};
-use crate::{
-    coordinator::unified::{
-        GroupCoordinator,
-        config::NextGenConfig,
-        consumer_state::GroupState,
-        group::{CoordinatorGroup, GroupKind},
-        migration,
-        offsets_log::OffsetsLog,
+use {
+    super::{MetadataProvider, chrono_now_ms},
+    crate::{
+        coordinator::unified::{
+            GroupCoordinator,
+            config::NextGenConfig,
+            consumer_state::GroupState,
+            group::{CoordinatorGroup, GroupKind},
+            migration,
+            offsets_log::OffsetsLog,
+        },
+        error::BrokerError,
     },
-    error::BrokerError,
+    std::time::Instant,
 };
 
 #[cfg(test)]

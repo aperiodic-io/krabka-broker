@@ -19,20 +19,21 @@
 //! vocabulary onto the OPA wire strings, live in the private `wire` module. The
 //! decision cache's key and entry types live in the private `cache` module.
 
-use std::{
-    collections::HashSet,
-    num::NonZeroUsize,
-    sync::{Arc, Mutex},
+use {
+    krabka_authz::{AclSource, AuthorizationRequest, AuthorizationResult, Authorizer},
+    krabka_units::{Time, convert::TimeExt as _, fmt::Human as _},
+    krabka_verified::{
+        OpaAuthorizationDecision, OpaCacheAdmission, OpaCacheExpiry, opa_cache_admission,
+        opa_cache_expiry, opa_error_decision,
+    },
+    lru::LruCache,
+    qubit_clock::MonotonicClock,
+    std::{
+        collections::HashSet,
+        num::NonZeroUsize,
+        sync::{Arc, Mutex},
+    },
 };
-
-use krabka_authz::{AclSource, AuthorizationRequest, AuthorizationResult, Authorizer};
-use krabka_units::{Time, convert::TimeExt as _, fmt::Human as _};
-use krabka_verified::{
-    OpaAuthorizationDecision, OpaCacheAdmission, OpaCacheExpiry, opa_cache_admission,
-    opa_cache_expiry, opa_error_decision,
-};
-use lru::LruCache;
-use qubit_clock::MonotonicClock;
 
 mod cache;
 #[cfg(test)]
@@ -240,13 +241,10 @@ impl Authorizer for OpaAuthorizer {
             opa_cache_expiry(completed_at_ms, self.expire_after.millis_i64())
         {
             let mut cache = self.cache.lock().expect("OPA cache mutex poisoned");
-            cache.put(
-                key,
-                CachedDecision {
-                    decision,
-                    expires_at_ms,
-                },
-            );
+            cache.put(key, CachedDecision {
+                decision,
+                expires_at_ms,
+            });
         }
         decision
     }
@@ -258,9 +256,7 @@ impl Authorizer for OpaAuthorizer {
     /// this authorizer's own decision-cache TTL lets such a cache bound
     /// itself to it, matching the staleness window OPA itself already
     /// accepts.
-    fn decision_ttl(&self) -> Option<std::time::Duration> {
-        Some(self.expire_after.to_std())
-    }
+    fn decision_ttl(&self) -> Option<std::time::Duration> { Some(self.expire_after.to_std()) }
 }
 
 /// Constructor-time failures for [`OpaAuthorizer::new`]. They travel

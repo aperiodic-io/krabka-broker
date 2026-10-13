@@ -1,10 +1,7 @@
 //! Tests for the exit code one broker error code becomes, and for the words the
 //! tool prints beside it.
 
-use assert2::check;
-use krabka_broker::codes;
-
-use super::*;
+use {super::*, assert2::check, krabka_broker::codes};
 
 /// A runbook branches on `$?`, so each number has to mean one thing. The
 /// three codes that get their own number are the three an operator acts on

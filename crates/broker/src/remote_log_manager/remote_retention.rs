@@ -4,20 +4,21 @@
 //!
 //! A write-once archive evicts nothing, so the pass ends before it lists.
 
-use krabka_ids::LeaderEpoch;
-use krabka_log::{DeliveryPolicy, LogConfig, Offset, SegmentExport};
-use krabka_remote_storage::{RemoteLogSegmentMetadata, RemoteLogSegmentState, TopicIdPartition};
-use krabka_units::{
-    ByteSize, Time,
-    convert::{ByteSizeExt as _, TimeExt as _},
+use {
+    super::{NO_BYTES, archive::ArchiveMode, delete::delete_one_segment},
+    crate::metrics::RemoteTierPath,
+    krabka_ids::LeaderEpoch,
+    krabka_log::{DeliveryPolicy, LogConfig, Offset, SegmentExport},
+    krabka_remote_storage::{RemoteLogSegmentMetadata, RemoteLogSegmentState, TopicIdPartition},
+    krabka_units::{
+        ByteSize, Time,
+        convert::{ByteSizeExt as _, TimeExt as _},
+    },
+    krabka_verified::retention::{
+        RemoteRetentionSegment, remote_retention_floor_step, remote_retention_prefix,
+    },
+    tracing::warn,
 };
-use krabka_verified::retention::{
-    RemoteRetentionSegment, remote_retention_floor_step, remote_retention_prefix,
-};
-use tracing::warn;
-
-use super::{NO_BYTES, archive::ArchiveMode, delete::delete_one_segment};
-use crate::metrics::RemoteTierPath;
 
 /// The archive's delete policy and the first segment whose activation scan
 /// did not prove it due. Its identity bounds every retention axis.

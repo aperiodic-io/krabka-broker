@@ -1,23 +1,23 @@
 //! WAL shard registry.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use krabka_verified::wal::{WalFetchAdmission, wal_fetch_admission};
-
-use super::{
-    engine::WalShardEngine,
-    wire::{
-        FENCED_LEADER_EPOCH, OFFSET_OUT_OF_RANGE, QuorumGroup, UNKNOWN_LEADER_EPOCH,
-        WalFetchRequest, decode_fetch, decode_fetch_request, encode_fetch_response_struct,
-        fetch_response, unknown_shard_fetch_response,
+use {
+    super::{
+        engine::WalShardEngine,
+        wire::{
+            FENCED_LEADER_EPOCH, OFFSET_OUT_OF_RANGE, QuorumGroup, UNKNOWN_LEADER_EPOCH,
+            WalFetchRequest, decode_fetch, decode_fetch_request, encode_fetch_response_struct,
+            fetch_response, unknown_shard_fetch_response,
+        },
+    },
+    crate::{BrokerError, metrics::BrokerMetrics},
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    krabka_verified::wal::{WalFetchAdmission, wal_fetch_admission},
+    std::{
+        collections::HashMap,
+        sync::{Arc, RwLock},
     },
 };
-use crate::{BrokerError, metrics::BrokerMetrics};
 
 /// Per-partition WAL shard identity for distributed WAL registry work stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -152,9 +152,7 @@ impl WalShardRegistry {
     }
 
     #[must_use]
-    pub(crate) fn local_node_id(&self) -> krabka_raft::NodeId {
-        self.local_node_id
-    }
+    pub(crate) fn local_node_id(&self) -> krabka_raft::NodeId { self.local_node_id }
 
     #[must_use]
     pub(crate) fn local_is_leader(&self, shard_id: ShardId) -> bool {
@@ -301,9 +299,7 @@ pub(crate) struct WalShardRouter {
 
 impl WalShardRouter {
     #[must_use]
-    pub(crate) fn new(registry: Arc<WalShardRegistry>) -> Self {
-        Self { registry }
-    }
+    pub(crate) fn new(registry: Arc<WalShardRegistry>) -> Self { Self { registry } }
 }
 
 impl krabka_raft::RaftShardRouter for WalShardRouter {
@@ -339,24 +335,25 @@ impl krabka_raft::RaftShardRouter for WalShardRouter {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use krabka_ids::Offset;
-    use krabka_protocol::{
-        Decode,
-        owned::fetch_response::FetchResponse,
-        records::{Record, RecordBatch},
-    };
-    use krabka_raft::RaftShardRouter;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        test_support::sasl_principal,
-        wal::quorum::{
-            engine::WalShardEngine,
-            test_support::open_log,
-            wire::{encode_fetch_for_group, fetch_request},
+    use {
+        super::*,
+        crate::{
+            test_support::sasl_principal,
+            wal::quorum::{
+                engine::WalShardEngine,
+                test_support::open_log,
+                wire::{encode_fetch_for_group, fetch_request},
+            },
         },
+        bytes::Bytes,
+        krabka_ids::Offset,
+        krabka_protocol::{
+            Decode,
+            owned::fetch_response::FetchResponse,
+            records::{Record, RecordBatch},
+        },
+        krabka_raft::RaftShardRouter,
+        tempfile::tempdir,
     };
 
     fn value_batch() -> RecordBatch {

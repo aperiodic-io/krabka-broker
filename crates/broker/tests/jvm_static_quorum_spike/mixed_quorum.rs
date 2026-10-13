@@ -5,17 +5,17 @@
 //! This is the leader-to-follower direction of the cross-implementation goal,
 //! and it needs no KIP-853 dynamic voters.
 
-use std::time::Duration;
-
-use assert2::check;
-use uuid::Uuid;
-
-use crate::{
-    static_quorum_harness::{
-        MixedQuorum, docker_rm, jvm_controller_properties, kafka_cluster_id_string,
-        start_jvm_controller,
+use {
+    crate::{
+        static_quorum_harness::{
+            MixedQuorum, docker_rm, jvm_controller_properties, kafka_cluster_id_string,
+            start_jvm_controller,
+        },
+        support,
     },
-    support,
+    assert2::check,
+    std::time::Duration,
+    uuid::Uuid,
 };
 
 const CONTAINER: &str = "krabka-kip595-slice5-spike";

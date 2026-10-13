@@ -8,15 +8,15 @@
 //! - [`send_assignments`], an async sender that mirrors the pattern in
 //!   `isr_maintenance::send_alter_partition`.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_protocol::owned::assign_replicas_to_dirs_request::{
-    AssignReplicasToDirsRequest, DirectoryData, PartitionData, TopicData,
-};
-
-use crate::{
-    controller_endpoint::{ControllerDialer, current_leader_endpoint},
-    metadata_source::MetadataSource,
+use {
+    crate::{
+        controller_endpoint::{ControllerDialer, current_leader_endpoint},
+        metadata_source::MetadataSource,
+    },
+    krabka_protocol::owned::assign_replicas_to_dirs_request::{
+        AssignReplicasToDirsRequest, DirectoryData, PartitionData, TopicData,
+    },
+    std::{collections::BTreeMap, sync::Arc},
 };
 
 /// Kafka sentinel for "broker epoch unknown" in `AssignReplicasToDirs`, sent
@@ -175,16 +175,16 @@ fn validate_assign_response(
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-
-    use assert2::{assert, check};
-    use krabka_metadata::MetadataImage;
-    use krabka_protocol::{Decode, Encode};
-    use krabka_raft::NodeId;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{BrokerHandle, metadata_source::MetadataSource, test_support::FakeMetadataSource};
+    use {
+        super::*,
+        crate::{BrokerHandle, metadata_source::MetadataSource, test_support::FakeMetadataSource},
+        assert2::{assert, check},
+        krabka_metadata::MetadataImage,
+        krabka_protocol::{Decode, Encode},
+        krabka_raft::NodeId,
+        std::net::SocketAddr,
+        uuid::Uuid,
+    };
 
     #[test]
     fn build_request_groups_correctly() {

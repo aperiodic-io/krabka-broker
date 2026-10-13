@@ -54,25 +54,25 @@
 //! one of them therefore fails against krabka exactly as it fails against a
 //! stock 4.3.1 broker, until the target opts in to trunk behaviour.
 
-use std::collections::BTreeMap;
-
-use assert2::{assert, check};
-
-use super::{
-    delivery::{DELIVERY_MAX_DELAY_MS, DELIVERY_MODE, DELIVERY_SCHEDULE_MONOTONIC},
-    diskless::DISKLESS,
-    docs::topic_config_docs,
-    kafka_broker::roster,
-    recovery::UNCLEAN_RECOVERY_STRATEGY,
-    registry::{self, ConfigScope, ConfigType},
-    schema::{SCHEMA_VALIDATION_KEY, SCHEMA_VALIDATION_MODE, SCHEMA_VALIDATION_VALUE},
-    topic_scope::WRITE_FREEZE,
-    validation::{
-        TopicDefaults, canonical_topic_config, canonical_topic_config_map, validate_topic_config,
-        validate_topic_config_map,
+use {
+    super::{
+        delivery::{DELIVERY_MAX_DELAY_MS, DELIVERY_MODE, DELIVERY_SCHEDULE_MONOTONIC},
+        diskless::DISKLESS,
+        docs::topic_config_docs,
+        kafka_broker::roster,
+        recovery::UNCLEAN_RECOVERY_STRATEGY,
+        registry::{self, ConfigScope, ConfigType},
+        schema::{SCHEMA_VALIDATION_KEY, SCHEMA_VALIDATION_MODE, SCHEMA_VALIDATION_VALUE},
+        topic_scope::WRITE_FREEZE,
+        validation::{
+            TopicDefaults, canonical_topic_config, canonical_topic_config_map,
+            validate_topic_config, validate_topic_config_map,
+        },
     },
+    crate::api_catalog::UnstableApiVersions,
+    assert2::{assert, check},
+    std::collections::BTreeMap,
 };
-use crate::api_catalog::UnstableApiVersions;
 
 /// One row of Kafka 4.3.1's `LogConfig.configKeys()`.
 struct KafkaTopicConfig {

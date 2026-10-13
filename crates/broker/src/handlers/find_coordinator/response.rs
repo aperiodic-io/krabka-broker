@@ -12,9 +12,10 @@
 //! as a whole goes through `FindCoordinatorRequest.getErrorResponse`, which
 //! puts `Errors.message()` on the top-level answer or on every v4+ row.
 
-use krabka_protocol::owned::find_coordinator_response::{Coordinator, FindCoordinatorResponse};
-
-use crate::codes;
+use {
+    crate::codes,
+    krabka_protocol::owned::find_coordinator_response::{Coordinator, FindCoordinatorResponse},
+};
 
 /// Kafka's `Errors.message()` for the codes `FindCoordinator` answers.
 pub(super) fn error_message(error_code: i16) -> Option<String> {

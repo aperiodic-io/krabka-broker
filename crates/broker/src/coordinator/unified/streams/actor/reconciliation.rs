@@ -9,27 +9,27 @@
 //!
 //! [`MetadataImage`]: krabka_metadata::MetadataImage
 
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    sync::Arc,
-};
-
-use tokio::time::Instant;
-
-use super::ActorState;
-use crate::{
-    coordinator::unified::{
-        can_compute_next_target_assignment,
-        streams::{
-            assignor::{self, AssignorInput, AssignorMember},
-            config::StreamsGroupConfig,
-            persistence::{NO_VALIDATED_TOPOLOGY_EPOCH, StreamsGroupTopologyValue},
-            state::{StreamsGroupStatePhase, StreamsTargetAssignment},
-            topology,
+use {
+    super::ActorState,
+    crate::{
+        coordinator::unified::{
+            can_compute_next_target_assignment,
+            streams::{
+                assignor::{self, AssignorInput, AssignorMember},
+                config::StreamsGroupConfig,
+                persistence::{NO_VALIDATED_TOPOLOGY_EPOCH, StreamsGroupTopologyValue},
+                state::{StreamsGroupStatePhase, StreamsTargetAssignment},
+                topology,
+            },
+            wall_clock_ms,
         },
-        wall_clock_ms,
+        metadata_source::MetadataSource,
     },
-    metadata_source::MetadataSource,
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap},
+        sync::Arc,
+    },
+    tokio::time::Instant,
 };
 
 /// Kafka's status detail while the initial rebalance delay holds the first

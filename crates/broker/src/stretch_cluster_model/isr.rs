@@ -4,11 +4,12 @@
 //! The rejoin rule is the one place where the model states a behaviour that
 //! `isr_maintenance` performs in production, so it is worth its own file.
 
-use krabka_raft::NodeId;
-
-use super::{
-    config::StretchModel,
-    state::{StretchState, same_component},
+use {
+    super::{
+        config::StretchModel,
+        state::{StretchState, same_component},
+    },
+    krabka_raft::NodeId,
 };
 
 impl StretchModel {

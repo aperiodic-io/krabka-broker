@@ -6,18 +6,26 @@
 //! appends, truncations, and timer arms, and it holds the two replay faults
 //! that deliver the queue back-to-front or deliver one message twice.
 
-use super::{
-    Sim,
-    node::Message,
-    trace::{TraceAction, event_label},
-};
-use crate::{
-    event::Event,
-    role::Role,
-    types::{LogView, NodeId},
+use {
+    super::{
+        Sim,
+        node::Message,
+        trace::{TraceAction, event_label},
+    },
+    crate::{
+        event::Event,
+        role::Role,
+        types::{LogView, NodeId},
+    },
 };
 
 impl Sim {
+    krabka_macros::simulation_step!(crate);
+
+    krabka_macros::simulation_actions!(crate);
+
+    krabka_macros::simulation_transport!(crate);
+
     pub(super) fn deliver(&mut self, msg: &Message) {
         let blocked = self.partitioned.contains(&msg.src) || self.partitioned.contains(&msg.dst);
         if blocked || !self.nodes.contains_key(&msg.dst) {
@@ -36,10 +44,6 @@ impl Sim {
         );
         self.record_new_leaders();
     }
-
-    krabka_macros::simulation_step!(crate);
-
-    krabka_macros::simulation_actions!(crate);
 
     fn advance_simulated_watermark(&mut self, id: NodeId, hwm: i64) {
         let node = self.nodes.get_mut(&id).unwrap();
@@ -69,8 +73,6 @@ impl Sim {
         follower_node.high_watermark = leader_hwm.min(follower_node.log.end_offset());
         self.nodes.insert(follower, follower_node);
     }
-
-    krabka_macros::simulation_transport!(crate);
 
     /// Drain and deliver the queued messages back-to-front, a deliberately
     /// non-FIFO but deterministic order.

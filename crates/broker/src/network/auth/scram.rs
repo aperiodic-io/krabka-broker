@@ -5,21 +5,22 @@
 //! one concern: the client-first `tokenauth` extension picks the token store
 //! inside SCRAM round 1, and cannot be read apart from it.
 
-use krabka_protocol::owned::{
-    sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
+use {
+    super::{
+        response::{fail_authenticate, fail_authenticate_with, sasl_ok},
+        state::{ConnectionAuth, SaslExchange, session_expiry},
+    },
+    crate::{metadata_source::MetadataSource, time_util::now_ms},
+    krabka_protocol::owned::{
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+    },
+    krabka_security::{
+        Principal, SaslMechanism, ScramServerExchange, SecretBytes, compute_token_hmac,
+    },
+    krabka_units::Time,
+    krabka_verified::delegation_token::{ScramCredentialSource, scram_credential_source},
 };
-use krabka_security::{
-    Principal, SaslMechanism, ScramServerExchange, SecretBytes, compute_token_hmac,
-};
-use krabka_units::Time;
-use krabka_verified::delegation_token::{ScramCredentialSource, scram_credential_source};
-
-use super::{
-    response::{fail_authenticate, fail_authenticate_with, sasl_ok},
-    state::{ConnectionAuth, SaslExchange, session_expiry},
-};
-use crate::{metadata_source::MetadataSource, time_util::now_ms};
 
 /// SCRAM-SHA-256 and SCRAM-SHA-512 `SaslAuthenticate` handler. It runs the two RFC 5802 rounds
 /// over Kafka's `SaslAuthenticate` (`api_key` 36) wire envelope.

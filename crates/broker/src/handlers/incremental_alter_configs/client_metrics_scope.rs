@@ -3,14 +3,15 @@
 //! subscription's current override map and stages a `V1ClientMetricsConfig`
 //! record with the merged map.
 
-use krabka_metadata::{ClientMetricsConfigRecord, MetadataImage, MetadataRecord};
-use krabka_protocol::owned::{
-    incremental_alter_configs_request::AlterConfigsResource,
-    incremental_alter_configs_response::AlterConfigsResourceResponse,
+use {
+    super::{OP_APPEND, OP_DELETE, OP_SET, OP_SUBTRACT},
+    crate::{client_metrics::config::validate, codes},
+    krabka_metadata::{ClientMetricsConfigRecord, MetadataImage, MetadataRecord},
+    krabka_protocol::owned::{
+        incremental_alter_configs_request::AlterConfigsResource,
+        incremental_alter_configs_response::AlterConfigsResourceResponse,
+    },
 };
-
-use super::{OP_APPEND, OP_DELETE, OP_SET, OP_SUBTRACT};
-use crate::{client_metrics::config::validate, codes};
 
 /// Merge per-key ops into a client-metrics subscription's override map and
 /// stage a `V1ClientMetricsConfig` record, as Kafka's
@@ -77,11 +78,10 @@ pub(super) fn handle_client_metrics_scoped(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
-
-    use super::*;
-    use crate::handlers::incremental_alter_configs::RESOURCE_TYPE_CLIENT_METRICS;
+    use {
+        super::*, crate::handlers::incremental_alter_configs::RESOURCE_TYPE_CLIENT_METRICS,
+        assert2::check, krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig,
+    };
 
     /// One alteration: key, operation and value.
     type Op<'a> = (&'a str, i8, Option<&'a str>);

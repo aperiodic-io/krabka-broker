@@ -10,19 +10,19 @@
 //! `Replica.updateFetchStateOrThrow` and lets the `isr_maintenance` task
 //! shrink and expand the ISR.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::{Duration, Instant},
+use {
+    crate::config_keys::node_min_insync_replicas,
+    krabka_ids::LeaderEpoch,
+    krabka_log::Offset,
+    krabka_raft::NodeId,
+    krabka_verified::isr::{
+        CaughtUpCredit, HighWatermarkFacts, HwmReplica, IsrEligibilityFacts, leader_high_watermark,
+    },
+    std::{
+        collections::{HashMap, HashSet},
+        time::{Duration, Instant},
+    },
 };
-
-use krabka_ids::LeaderEpoch;
-use krabka_log::Offset;
-use krabka_raft::NodeId;
-use krabka_verified::isr::{
-    CaughtUpCredit, HighWatermarkFacts, HwmReplica, IsrEligibilityFacts, leader_high_watermark,
-};
-
-use crate::config_keys::node_min_insync_replicas;
 
 /// What the leader knows of one follower's progress, Kafka's `ReplicaState`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -167,17 +167,13 @@ impl LeaderPolicy {
             .map(|&replica| {
                 let registration = image.broker(replica);
                 let fenced = registration.is_some_and(|broker| broker.fenced);
-                (
-                    replica,
-                    BrokerStanding {
-                        fenced,
-                        shutting_down: registration
-                            .is_some_and(|broker| broker.in_controlled_shutdown),
-                        alive_epoch: registration
-                            .filter(|broker| !broker.fenced)
-                            .map(|broker| broker.broker_epoch),
-                    },
-                )
+                (replica, BrokerStanding {
+                    fenced,
+                    shutting_down: registration.is_some_and(|broker| broker.in_controlled_shutdown),
+                    alive_epoch: registration
+                        .filter(|broker| !broker.fenced)
+                        .map(|broker| broker.broker_epoch),
+                })
             })
             .collect();
         let configured = node_min_insync_replicas(image, node, &record.topic)
@@ -304,16 +300,12 @@ impl ReplicaState {
 
     /// Replace what the high-watermark and ISR rules read from the metadata
     /// image and the broker's configuration.
-    pub(crate) fn set_policy(&mut self, policy: LeaderPolicy) {
-        self.policy = policy;
-    }
+    pub(crate) fn set_policy(&mut self, policy: LeaderPolicy) { self.policy = policy; }
 
     /// Whether the ISR is smaller than the effective `min.insync.replicas`,
     /// Kafka's `partitionState.isr.size < effectiveMinIsr`. The high
     /// watermark does not move while this holds.
-    pub(crate) fn under_min_isr(&self) -> bool {
-        self.isr_size() < self.policy.effective_min_isr
-    }
+    pub(crate) fn under_min_isr(&self) -> bool { self.isr_size() < self.policy.effective_min_isr }
 
     /// Kafka's `Partition.isReplicaIsrEligible` facts for `replica`.
     pub(crate) fn eligibility(&self, replica: NodeId) -> IsrEligibilityFacts {
@@ -495,28 +487,24 @@ impl ReplicaState {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
-
-    use assert2::{assert, check};
-    use krabka_metadata::{
-        BrokerConfigRecord, BrokerRegistrationRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage,
-        MetadataRecord, PartitionRecord, TopicConfigRecord,
-    };
-
-    use super::*;
-    use crate::{
-        config_keys::MIN_INSYNC_REPLICAS,
-        test_support::{TopicSetup, broker_registration, topic_image},
+    use {
+        super::*,
+        crate::{
+            config_keys::MIN_INSYNC_REPLICAS,
+            test_support::{TopicSetup, broker_registration, topic_image},
+        },
+        assert2::{assert, check},
+        krabka_metadata::{
+            BrokerConfigRecord, BrokerRegistrationRecord, DEFAULT_BROKER_CONFIG_NODE_ID,
+            MetadataImage, MetadataRecord, PartitionRecord, TopicConfigRecord,
+        },
+        std::time::{Duration, Instant},
     };
 
     /// Shorthand for wrapping a raw offset in the test asserts below.
-    fn o(v: i64) -> Offset {
-        Offset(v)
-    }
+    fn o(v: i64) -> Offset { Offset(v) }
 
-    fn fresh() -> ReplicaState {
-        ReplicaState::new()
-    }
+    fn fresh() -> ReplicaState { ReplicaState::new() }
 
     fn fresh_with_isr(nodes: &[u64], at: Instant) -> ReplicaState {
         let mut state = fresh();
@@ -525,9 +513,7 @@ mod tests {
         state
     }
 
-    fn now() -> Instant {
-        Instant::now()
-    }
+    fn now() -> Instant { Instant::now() }
 
     #[test]
     fn new_state_has_zero_hw_and_empty_membership() {
@@ -935,14 +921,11 @@ mod tests {
             brokers: [1, 2, 3]
                 .into_iter()
                 .map(|node| {
-                    (
-                        NodeId(node),
-                        BrokerStanding {
-                            fenced: false,
-                            shutting_down: false,
-                            alive_epoch: Some(7),
-                        },
-                    )
+                    (NodeId(node), BrokerStanding {
+                        fenced: false,
+                        shutting_down: false,
+                        alive_epoch: Some(7),
+                    })
                 })
                 .collect(),
         }
@@ -1018,14 +1001,11 @@ mod tests {
                 "a fenced follower does not",
                 Some(7),
                 LeaderPolicy {
-                    brokers: [(
-                        NodeId(3),
-                        BrokerStanding {
-                            fenced: true,
-                            shutting_down: false,
-                            alive_epoch: None,
-                        },
-                    )]
+                    brokers: [(NodeId(3), BrokerStanding {
+                        fenced: true,
+                        shutting_down: false,
+                        alive_epoch: None,
+                    })]
                     .into_iter()
                     .collect(),
                     ..policy(1)

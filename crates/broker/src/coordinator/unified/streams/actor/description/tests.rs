@@ -2,36 +2,38 @@
 //! connected `MetadataSource`: a joining member installs the topology, which
 //! is all the solicitation needs.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_protocol::owned::{
-    common::streams_group_topology_description_update_request::{
-        topology_description_node::TopologyDescriptionNode,
-        topology_description_subtopology::TopologyDescriptionSubtopology,
-    },
-    streams_group_heartbeat_request::{Subtopology as WireSubtopology, Topology},
-};
-
-use super::*;
-use crate::{
-    coordinator::unified::{
-        StreamsGroupSeed,
-        offsets_log::fake::InMemoryOffsetsLog,
-        persistence::{Key, parse_key},
-        streams::{
-            actor::{
-                StreamsGroupActorHandle, StreamsGroupActorMessage,
-                test_support::{coordinator_with_log, describe, heartbeat_result_at, undelayed},
+use {
+    super::*,
+    crate::{
+        coordinator::unified::{
+            StreamsGroupSeed,
+            offsets_log::fake::InMemoryOffsetsLog,
+            persistence::{Key, parse_key},
+            streams::{
+                actor::{
+                    StreamsGroupActorHandle, StreamsGroupActorMessage,
+                    test_support::{
+                        coordinator_with_log, describe, heartbeat_result_at, undelayed,
+                    },
+                },
+                description::{
+                    DescriptionEpochs, Node, NodeKind, Subtopology, TopologyDescriptionPlugin,
+                },
+                persistence::{StreamsGroupKey, StreamsGroupMetadataValue},
+                topology::to_stored_topology,
             },
-            description::{
-                DescriptionEpochs, Node, NodeKind, Subtopology, TopologyDescriptionPlugin,
-            },
-            persistence::{StreamsGroupKey, StreamsGroupMetadataValue},
-            topology::to_stored_topology,
         },
+        task_util::ask,
     },
-    task_util::ask,
+    assert2::assert,
+    krabka_protocol::owned::{
+        common::streams_group_topology_description_update_request::{
+            topology_description_node::TopologyDescriptionNode,
+            topology_description_subtopology::TopologyDescriptionSubtopology,
+        },
+        streams_group_heartbeat_request::{Subtopology as WireSubtopology, Topology},
+    },
+    std::sync::Arc,
 };
 
 fn coordinator(plugin: TopologyDescriptionPlugin) -> Arc<GroupCoordinator> {
@@ -156,18 +158,12 @@ fn description_push(member_id: &str, topology_epoch: i32, node_type: i8) -> Desc
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn one_member_of_a_group_is_asked_for_the_description() {
     let rows = [
-        (
-            "no plugin",
-            TopologyDescriptionPlugin::None,
-            1,
-            [false, false, false],
-        ),
-        (
-            "version 0",
-            TopologyDescriptionPlugin::InMemory,
-            0,
-            [false, false, false],
-        ),
+        ("no plugin", TopologyDescriptionPlugin::None, 1, [
+            false, false, false,
+        ]),
+        ("version 0", TopologyDescriptionPlugin::InMemory, 0, [
+            false, false, false,
+        ]),
         (
             "in-memory plugin",
             TopologyDescriptionPlugin::InMemory,

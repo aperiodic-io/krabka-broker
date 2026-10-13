@@ -21,9 +21,8 @@ pub(crate) mod persistence {
     pub(crate) use crate::coordinator::unified::persistence::*;
 }
 
-pub(crate) use unified::GroupCoordinator;
-
 use crate::coordinator::unified::classic_state::GroupState;
+pub(crate) use unified::GroupCoordinator;
 
 /// Result of [`GroupCoordinator::delete_group`].
 #[derive(Debug, PartialEq, Eq)]

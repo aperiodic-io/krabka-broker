@@ -1,14 +1,15 @@
 //! The [`RemoteLogMetadataManager`] SPI, which stores and queries
 //! remote-segment metadata.
 
-use krabka_ids::LeaderEpoch;
-
-use crate::{
-    error::RemoteStorageError,
-    metadata::{
-        RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemotePartitionDeleteMetadata,
-        TopicIdPartition,
+use {
+    crate::{
+        error::RemoteStorageError,
+        metadata::{
+            RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
+            RemotePartitionDeleteMetadata, TopicIdPartition,
+        },
     },
+    krabka_ids::LeaderEpoch,
 };
 
 /// SPI for the store that holds metadata about remote log segments.

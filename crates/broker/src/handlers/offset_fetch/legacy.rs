@@ -7,24 +7,25 @@
 //! and above `groups[]` shape lives in `groups` and shares nothing but the
 //! group gate and the offset read.
 
-use krabka_protocol::owned::{
-    offset_fetch_request::{OffsetFetchRequest, OffsetFetchRequestTopic},
-    offset_fetch_response::{
-        OffsetFetchResponse, OffsetFetchResponsePartition, OffsetFetchResponseTopic,
+use {
+    super::{
+        authz::{group_error, topic_decisions, visible_topics},
+        committed::{
+            committed_topics, fetch_offsets, missing_legacy_row as missing_offset_row,
+            stable_legacy_row,
+        },
+        unstable,
     },
-};
-
-use super::{
-    authz::{group_error, topic_decisions, visible_topics},
-    committed::{
-        committed_topics, fetch_offsets, missing_legacy_row as missing_offset_row,
-        stable_legacy_row,
+    crate::{
+        authorizer::AuthorizationResult, broker::Broker, codes,
+        coordinator::unified::group::GroupOffsets, handlers::RequestContext,
     },
-    unstable,
-};
-use crate::{
-    authorizer::AuthorizationResult, broker::Broker, codes,
-    coordinator::unified::group::GroupOffsets, handlers::RequestContext,
+    krabka_protocol::owned::{
+        offset_fetch_request::{OffsetFetchRequest, OffsetFetchRequestTopic},
+        offset_fetch_response::{
+            OffsetFetchResponse, OffsetFetchResponsePartition, OffsetFetchResponseTopic,
+        },
+    },
 };
 
 /// Serves an `OffsetFetch` request in the pre-KIP-516 single-group shape.

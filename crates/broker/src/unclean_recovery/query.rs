@@ -5,22 +5,22 @@
 //! that the fan-out and its partial-result contract can be tested without a
 //! controller.
 
-use std::time::Duration;
-
-use bytes::BytesMut;
-use futures_util::stream::{FuturesUnordered, StreamExt};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        get_replica_log_info_request::{self, GetReplicaLogInfoRequest, TopicPartitions},
-        get_replica_log_info_response::GetReplicaLogInfoResponse,
+use {
+    super::ReplicaLogInfo,
+    crate::network::client::InterBrokerClient,
+    bytes::BytesMut,
+    futures_util::stream::{FuturesUnordered, StreamExt},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            get_replica_log_info_request::{self, GetReplicaLogInfoRequest, TopicPartitions},
+            get_replica_log_info_response::GetReplicaLogInfoResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
+    krabka_raft::NodeId,
+    std::time::Duration,
 };
-use krabka_raft::NodeId;
-
-use super::ReplicaLogInfo;
-use crate::network::client::InterBrokerClient;
 
 /// Queries one replica for its log-end-offset and leader-epoch state with
 /// `GetReplicaLogInfo` (`api_key` 93). Returns `None` on any connect, send, or
@@ -142,13 +142,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-    use futures_util::FutureExt as _;
-
-    use super::*;
-    use crate::unclean_recovery::selection::select_best_replica;
+    use {
+        super::*, crate::unclean_recovery::selection::select_best_replica, assert2::assert,
+        futures_util::FutureExt as _, std::time::Duration,
+    };
 
     fn info(id: u64, leo: i64) -> ReplicaLogInfo {
         ReplicaLogInfo {

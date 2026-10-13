@@ -35,18 +35,12 @@
 //! `DescribeTopicPartitions` field, and [`crate::elr::maintain`]'s own tests
 //! are where it is checked.
 
-use std::collections::BTreeSet;
-
-use krabka_metadata::{MetadataImage, PartitionRecord};
-
-use super::{
-    bounds::{NB, NB_U8, has, model_broker, node},
-    state::DpState,
-};
-use crate::{
-    config_keys::effective_min_insync_replicas,
-    elr::{maintain::next_partition_elr, state::PartitionElr},
-    test_support::elr_model_image,
+use {
+    super::{
+        bounds::{NB, NB_U8, has, model_broker, node},
+        state::DpState,
+    },
+    crate::test_support::elr_model_prelude::*,
 };
 
 /// The one topic the modelled cluster holds.

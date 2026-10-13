@@ -2,12 +2,14 @@
 
 mod support;
 
-use krabka_ids::Offset;
-use krabka_log::{Log, LogConfig};
-use krabka_units::prelude::{ByteSize, gibibytes};
-use proptest::prelude::*;
-use support::strategies::arb_batches;
-use tempfile::tempdir;
+use {
+    krabka_ids::Offset,
+    krabka_log::{Log, LogConfig},
+    krabka_units::prelude::{ByteSize, gibibytes},
+    proptest::prelude::*,
+    support::strategies::arb_batches,
+    tempfile::tempdir,
+};
 
 /// A read budget larger than anything these properties generate, so the byte
 /// budget never clips the result.

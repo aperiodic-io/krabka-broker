@@ -4,38 +4,39 @@
 //!
 //! Each of them drives a live broker, so they are kept out of the module root.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    alter_configs_request::{AlterConfigsRequest, AlterableConfig},
-    alter_configs_response::{AlterConfigsResourceResponse, AlterConfigsResponse},
-};
-
-use super::{
-    RESOURCE_TYPE_BROKER, RESOURCE_TYPE_CLIENT_METRICS, RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
-    dispatch,
-    test_support::{
-        broker_resource, client_metrics_resource, drive_many, drive_one, group_resource, resource,
-    },
-};
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    codes,
-    coordinator::unified::streams::config::{
-        KEY_NUM_STANDBY_REPLICAS, KEY_TASK_OFFSET_INTERVAL_MS,
-    },
-    handlers::{
-        alter_configs::test_support::{
-            image_with_client_metrics_config, image_with_group_config, image_with_topic_config,
-            topic_resource,
+use {
+    super::{
+        RESOURCE_TYPE_BROKER, RESOURCE_TYPE_CLIENT_METRICS, RESOURCE_TYPE_GROUP,
+        RESOURCE_TYPE_TOPIC, dispatch,
+        test_support::{
+            broker_resource, client_metrics_resource, drive_many, drive_one, group_resource,
+            resource,
         },
-        test_support::{assert_dispatch_response, ordered_rows},
     },
-    test_support::{
-        DenyAll, context_helper, start_broker_with_authorizer as start_broker, test_ctx,
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        codes,
+        coordinator::unified::streams::config::{
+            KEY_NUM_STANDBY_REPLICAS, KEY_TASK_OFFSET_INTERVAL_MS,
+        },
+        handlers::{
+            alter_configs::test_support::{
+                image_with_client_metrics_config, image_with_group_config, image_with_topic_config,
+                topic_resource,
+            },
+            test_support::{assert_dispatch_response, ordered_rows},
+        },
+        test_support::{
+            DenyAll, context_helper, start_broker_with_authorizer as start_broker, test_ctx,
+        },
+        throttle::LEADER_THROTTLED_RATE_KEY,
     },
-    throttle::LEADER_THROTTLED_RATE_KEY,
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        alter_configs_request::{AlterConfigsRequest, AlterableConfig},
+        alter_configs_response::{AlterConfigsResourceResponse, AlterConfigsResponse},
+    },
+    std::sync::Arc,
 };
 
 context_helper!(client_id = "admin-client");
@@ -245,13 +246,10 @@ async fn authorized_client_metrics_resource_is_applied() {
 /// the validate-before-authorize ordering the legacy handler now matches.
 #[tokio::test]
 async fn duplicate_resource_reference_is_a_validation_error_even_when_unauthorized() {
-    let resp = Box::pin(drive_many(
-        Arc::new(DenyAll),
-        vec![
-            resource(RESOURCE_TYPE_TOPIC, "orders"),
-            resource(RESOURCE_TYPE_TOPIC, "orders"),
-        ],
-    ))
+    let resp = Box::pin(drive_many(Arc::new(DenyAll), vec![
+        resource(RESOURCE_TYPE_TOPIC, "orders"),
+        resource(RESOURCE_TYPE_TOPIC, "orders"),
+    ]))
     .await;
 
     assert!(resp.responses.len() == 2);
@@ -441,13 +439,10 @@ fn a_topic_replacement_audits_every_key_whose_value_moves() {
 fn a_group_or_client_metrics_replacement_audits_a_key_it_drops_by_omission() {
     use crate::handlers::audit_resource;
 
-    let group_image = image_with_group_config(
-        "streams-app",
-        &[
-            (KEY_NUM_STANDBY_REPLICAS, "1"),
-            (KEY_TASK_OFFSET_INTERVAL_MS, "5000"),
-        ],
-    );
+    let group_image = image_with_group_config("streams-app", &[
+        (KEY_NUM_STANDBY_REPLICAS, "1"),
+        (KEY_TASK_OFFSET_INTERVAL_MS, "5000"),
+    ]);
     let group_audited = super::audit_resources_for(
         &group_resource("streams-app", &[(KEY_NUM_STANDBY_REPLICAS, "1")]),
         &group_image,

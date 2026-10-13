@@ -5,13 +5,16 @@
 //! broker back to the caller. The first group lookup finds no
 //! `__consumer_offsets`, so it asks for the topic and the client retries.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest;
-
-use crate::support::{
-    self,
-    discovery::{api_versions, topic_metadata_request},
-    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        self,
+        discovery::{api_versions, topic_metadata_request},
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        },
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest,
 };
 
 #[tokio::test]

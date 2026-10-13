@@ -6,27 +6,28 @@
 //! registered at all. `produce` hands back the whole partition response rather
 //! than an error code, because a case has to assert on `record_errors` as well.
 
-use assert2::assert;
-use bytes::Bytes;
-use krabka_broker::{BrokerConfig, BrokerHandle, file_config::FileConfig};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::{
-        create_topics_request::CreateTopicsRequest, produce_response::PartitionProduceResponse,
+use {
+    crate::support::{
+        client::{BrokerClientSetup, start_broker_client},
+        produce::{SinglePartitionProduceSetup, send_batch},
+        records::value_record,
+        topics::{ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, topic_configs},
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-use wiremock::{
-    Mock, MockServer, ResponseTemplate,
-    matchers::{method, path},
-};
-
-use crate::support::{
-    client::{BrokerClientSetup, start_broker_client},
-    produce::{SinglePartitionProduceSetup, send_batch},
-    records::value_record,
-    topics::{ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, topic_configs},
+    assert2::assert,
+    bytes::Bytes,
+    krabka_broker::{BrokerConfig, BrokerHandle, file_config::FileConfig},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::{
+            create_topics_request::CreateTopicsRequest, produce_response::PartitionProduceResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
+    },
+    wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    },
 };
 
 /// Kafka error 87. KIP-467 added it for "one or more records in the batch were
@@ -59,14 +60,10 @@ pub fn framed(id: u32, body: &[u8]) -> Bytes {
 /// Hand-encoded rather than pulled from an Avro library, so this test does not
 /// depend on one: a `string` is a zig-zag varint length then the bytes, and
 /// `1` zig-zag encodes to `0x02`.
-pub fn order_avro_body() -> Vec<u8> {
-    vec![0x02, b'a']
-}
+pub fn order_avro_body() -> Vec<u8> { vec![0x02, b'a'] }
 
 /// A single-record batch carrying `value`. `None` is a tombstone.
-pub fn batch_with_value(value: Option<Bytes>) -> RecordBatch {
-    batch_with_values(vec![value])
-}
+pub fn batch_with_value(value: Option<Bytes>) -> RecordBatch { batch_with_values(vec![value]) }
 
 /// A two-record batch: the first record is fine, the second is not.
 pub fn batch_with_values(values: Vec<Option<Bytes>>) -> RecordBatch {
@@ -174,15 +171,11 @@ pub fn mock_topic_fixture(
     Box::pin(async move {
         let registry = registry().await;
         let (broker, client, dir) = boot(&registry.uri()).await;
-        let id = create_topic(
-            &broker,
-            &client,
-            SchemaTopicSetup {
-                name: topic,
-                configs,
-                ..Default::default()
-            },
-        )
+        let id = create_topic(&broker, &client, SchemaTopicSetup {
+            name: topic,
+            configs,
+            ..Default::default()
+        })
         .await;
         (registry, broker, client, dir, id)
     })
@@ -254,15 +247,11 @@ pub async fn produce(
     topic_id: WireUuid,
     batch: RecordBatch,
 ) -> PartitionProduceResponse {
-    let resp = send_batch(
-        &client,
-        batch,
-        SinglePartitionProduceSetup {
-            topic: (topic).into(),
-            topic_id,
-            ..Default::default()
-        },
-    )
+    let resp = send_batch(&client, batch, SinglePartitionProduceSetup {
+        topic: (topic).into(),
+        topic_id,
+        ..Default::default()
+    })
     .await;
     resp.responses[0].partition_responses[0].clone()
 }
@@ -274,13 +263,10 @@ pub fn boot_config(
     config: BrokerConfig,
 ) -> impl std::future::Future<Output = (BrokerHandle, Client)> {
     Box::pin(async move {
-        start_broker_client(
-            config,
-            BrokerClientSetup {
-                client_id: "schema-validation-test",
-                ..Default::default()
-            },
-        )
+        start_broker_client(config, BrokerClientSetup {
+            client_id: "schema-validation-test",
+            ..Default::default()
+        })
         .await
     })
 }

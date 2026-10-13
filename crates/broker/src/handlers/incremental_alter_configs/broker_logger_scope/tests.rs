@@ -1,15 +1,16 @@
 //! What a `BROKER_LOGGER` alter accepts, what it refuses, and what it does to
 //! the live filter.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    incremental_alter_configs_request::{AlterConfigsResource, AlterableConfig},
-    incremental_alter_configs_response::AlterConfigsResourceResponse,
+use {
+    super::handle_broker_logger_scoped,
+    crate::{codes, config::DEFAULT_LOG_FILTER},
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        incremental_alter_configs_request::{AlterConfigsResource, AlterableConfig},
+        incremental_alter_configs_response::AlterConfigsResourceResponse,
+    },
+    krabka_telemetry::{LogLevel, LogLevelController},
 };
-use krabka_telemetry::{LogLevel, LogLevelController};
-
-use super::handle_broker_logger_scoped;
-use crate::{codes, config::DEFAULT_LOG_FILTER};
 
 /// This node's id in every case below.
 const NODE_ID: i32 = 3;

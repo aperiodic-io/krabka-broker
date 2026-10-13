@@ -21,22 +21,22 @@
 //! string on the wire can carry one. The entry that names it answers
 //! `INVALID_REQUEST` (42), and nothing reaches the coordinator.
 
-use std::slice;
-
-use krabka_protocol::krabka::barrier::{
-    AlterBarrierGroupResult, AlterBarrierGroupsRequest, AlterBarrierGroupsResponse,
-    AlterableBarrierGroup,
-};
-
-use crate::{
-    barrier::{
-        coordinator::BarrierCoordinator,
-        handlers::{error_code, error_text, interval_from_wire},
-        state::GroupSpec,
+use {
+    crate::{
+        barrier::{
+            coordinator::BarrierCoordinator,
+            handlers::{error_code, error_text, interval_from_wire},
+            state::GroupSpec,
+        },
+        codes,
+        coordinator::unified::persistence::MAX_STRING_BYTES,
+        handlers::{cluster_alter_denied, encode_response},
     },
-    codes,
-    coordinator::unified::persistence::MAX_STRING_BYTES,
-    handlers::{cluster_alter_denied, encode_response},
+    krabka_protocol::krabka::barrier::{
+        AlterBarrierGroupResult, AlterBarrierGroupsRequest, AlterBarrierGroupsResponse,
+        AlterableBarrierGroup,
+    },
+    std::slice,
 };
 
 wire_handler!(
@@ -163,11 +163,12 @@ fn row(group: &str, error_code: i16, error_message: Option<String>) -> AlterBarr
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::barrier::{coordinator::test_support::Fixture, error::BarrierError};
+    use {
+        super::*,
+        crate::barrier::{coordinator::test_support::Fixture, error::BarrierError},
+        assert2::check,
+        krabka_units::millis,
+    };
 
     fn entry(topics: &[&str], interval_ms: i64, retained_cuts: i32) -> AlterableBarrierGroup {
         AlterableBarrierGroup {
@@ -246,21 +247,15 @@ mod tests {
         let coordinator = fixture.coordinator().await;
         let long = "n".repeat(MAX_STRING_BYTES + 1);
         let cases = [
-            (
-                "a group name to create",
-                AlterableBarrierGroup {
-                    group: long.clone(),
-                    ..entry(&["orders"], 30_000, 5)
-                },
-            ),
-            (
-                "a group name to delete",
-                AlterableBarrierGroup {
-                    group: long.clone(),
-                    delete: true,
-                    ..entry(&["orders"], 30_000, 5)
-                },
-            ),
+            ("a group name to create", AlterableBarrierGroup {
+                group: long.clone(),
+                ..entry(&["orders"], 30_000, 5)
+            }),
+            ("a group name to delete", AlterableBarrierGroup {
+                group: long.clone(),
+                delete: true,
+                ..entry(&["orders"], 30_000, 5)
+            }),
             ("a topic name", entry(&["orders", &long], 30_000, 5)),
         ];
         for (case, entry) in cases {

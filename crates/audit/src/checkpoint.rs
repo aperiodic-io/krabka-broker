@@ -5,14 +5,15 @@
 //! position, so an attacker without the signing key cannot forge a consistent
 //! rewrite of the records before it.
 
-use serde_json::json;
-
-use crate::{
-    chain::{from_hex32, to_hex},
-    event::AuditEventClass,
-    ids::{EpochMs, Seq},
-    signing::{FileEd25519Signer, checkpoint_signing_bytes, verify_signature},
-    sink::AuditRecord,
+use {
+    crate::{
+        chain::{from_hex32, to_hex},
+        event::AuditEventClass,
+        ids::{EpochMs, Seq},
+        signing::{FileEd25519Signer, checkpoint_signing_bytes, verify_signature},
+        sink::AuditRecord,
+    },
+    serde_json::json,
 };
 
 /// `event_class` header value that identifies a checkpoint record.
@@ -114,10 +115,7 @@ impl Checkpoint {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::test_support::signer;
+    use {super::*, crate::test_support::signer, assert2::check};
 
     #[test]
     fn signed_checkpoint_round_trips_through_record_and_verifies() {

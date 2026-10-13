@@ -17,23 +17,24 @@
 //! and a record is tombstoned when its last subscriber goes, so a coordinator
 //! failover restores what every pattern resolved to.
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    time::Duration,
-};
-
-use super::pending_records::PendingRecords;
 #[cfg(test)]
 use crate::coordinator::unified::regex_resolver::{NoTopicRegexResolver, TEST_NOW_MS};
-use crate::{
-    coordinator::unified::{
-        config::NextGenConfig,
-        consumer_state::{GroupState, ResolvedRegularExpression},
-        persistence_next_gen::{GroupMetadataValue, RegularExpressionValue},
-        reconciler::{self, ReconcileInput},
-        regex_resolver::TopicRegexResolver,
+use {
+    super::pending_records::PendingRecords,
+    crate::{
+        coordinator::unified::{
+            config::NextGenConfig,
+            consumer_state::{GroupState, ResolvedRegularExpression},
+            persistence_next_gen::{GroupMetadataValue, RegularExpressionValue},
+            reconciler::{self, ReconcileInput},
+            regex_resolver::TopicRegexResolver,
+        },
+        time_util::duration_millis,
     },
-    time_util::duration_millis,
+    std::{
+        collections::{BTreeSet, HashMap},
+        time::Duration,
+    },
 };
 
 /// What a resolution of a group's regular expressions found, by regular
@@ -132,9 +133,7 @@ pub(crate) enum RegexUpdate {
 impl RegexUpdate {
     /// Kafka's `UpdateRegularExpressionStatus.regexUpdated`.
     #[must_use]
-    pub(crate) fn regex_updated(self) -> bool {
-        self != Self::NoChange
-    }
+    pub(crate) fn regex_updated(self) -> bool { self != Self::NoChange }
 }
 
 /// Kafka's `maybeUpdateRegularExpressions`, for a heartbeat of a member whose
@@ -319,16 +318,16 @@ pub(crate) fn delete_unsubscribed_regexes(state: &mut GroupState) -> Vec<RegexRe
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{BTreeSet, HashMap},
-        sync::Mutex,
-    };
-
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::consumer_state::test_support::{
-        member, regex_group as group, resolved_regex as resolution,
+    use {
+        super::*,
+        crate::coordinator::unified::consumer_state::test_support::{
+            member, regex_group as group, resolved_regex as resolution,
+        },
+        assert2::{assert, check},
+        std::{
+            collections::{BTreeSet, HashMap},
+            sync::Mutex,
+        },
     };
 
     /// A resolver that answers from a table of what each pattern selects, and
@@ -348,20 +347,17 @@ mod tests {
             regexes
                 .iter()
                 .map(|regex| {
-                    (
-                        regex.clone(),
-                        ResolvedRegularExpression {
-                            topics: self
-                                .topics
-                                .get(regex.as_str())
-                                .into_iter()
-                                .flatten()
-                                .map(|topic| (*topic).to_owned())
-                                .collect(),
-                            version: 100,
-                            timestamp_ms: NOW_MS,
-                        },
-                    )
+                    (regex.clone(), ResolvedRegularExpression {
+                        topics: self
+                            .topics
+                            .get(regex.as_str())
+                            .into_iter()
+                            .flatten()
+                            .map(|topic| (*topic).to_owned())
+                            .collect(),
+                        version: 100,
+                        timestamp_ms: NOW_MS,
+                    })
                 })
                 .collect()
         }
@@ -439,27 +435,21 @@ mod tests {
     fn a_new_pattern_is_resolved_and_written_in_its_own_batch() {
         // (what the pattern selects, the resolution's batch)
         let rows: [(&[&str], PendingRecords); 2] = [
-            (
-                &["a1", "a2"],
-                PendingRecords {
-                    resolved_regexes: vec![(
-                        "a.*".to_owned(),
-                        Some(written(&["a1", "a2"], 100, NOW_MS)),
-                    )],
-                    group_metadata: Some(GroupMetadataValue {
-                        epoch: 2,
-                        metadata_hash: 0,
-                    }),
-                    ..PendingRecords::default()
-                },
-            ),
-            (
-                &[],
-                PendingRecords {
-                    resolved_regexes: vec![("a.*".to_owned(), Some(written(&[], 100, NOW_MS)))],
-                    ..PendingRecords::default()
-                },
-            ),
+            (&["a1", "a2"], PendingRecords {
+                resolved_regexes: vec![(
+                    "a.*".to_owned(),
+                    Some(written(&["a1", "a2"], 100, NOW_MS)),
+                )],
+                group_metadata: Some(GroupMetadataValue {
+                    epoch: 2,
+                    metadata_hash: 0,
+                }),
+                ..PendingRecords::default()
+            }),
+            (&[], PendingRecords {
+                resolved_regexes: vec![("a.*".to_owned(), Some(written(&[], 100, NOW_MS)))],
+                ..PendingRecords::default()
+            }),
         ];
         for (selects, batch) in rows {
             let mut state = group(&[]);

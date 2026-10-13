@@ -3,22 +3,24 @@
 //! them back, a targeted filter deletes exactly one of them, and a
 //! non-super principal is refused once per binding.
 
-use assert2::{assert, check};
-use krabka_broker::Broker;
-use krabka_protocol::owned::{
-    create_acls_request::CreateAclsRequest,
-    delete_acls_request::{DeleteAclsFilter, DeleteAclsRequest},
-};
-
-use crate::{
-    OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_LITERAL, PERMISSION_ALLOW, RESOURCE_TYPE_TOPIC,
-    acl_admin::{
-        describe_all_topic_acls, drive_create_acls_as_plain, drive_delete_acls_as_plain,
-        drive_describe_acls_as_plain, topic_allow_creation,
+use {
+    crate::{
+        OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_LITERAL, PERMISSION_ALLOW,
+        RESOURCE_TYPE_TOPIC,
+        acl_admin::{
+            describe_all_topic_acls, drive_create_acls_as_plain, drive_delete_acls_as_plain,
+            drive_describe_acls_as_plain, topic_allow_creation,
+        },
+        framing::CLIENT_ID,
+        kafka_wire::PlainAuthenticationSetup,
+        sasl_cluster::{sasl_plain_broker_config, start_admin_with},
     },
-    framing::CLIENT_ID,
-    kafka_wire::PlainAuthenticationSetup,
-    sasl_cluster::{sasl_plain_broker_config, start_admin_with},
+    assert2::{assert, check},
+    krabka_broker::Broker,
+    krabka_protocol::owned::{
+        create_acls_request::CreateAclsRequest,
+        delete_acls_request::{DeleteAclsFilter, DeleteAclsRequest},
+    },
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -105,14 +107,10 @@ async fn create_acls_non_super_user_rejected() {
         ],
         ..Default::default()
     };
-    let resp = drive_create_acls_as_plain(
-        addr,
-        req,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            ..Default::default()
-        },
-    )
+    let resp = drive_create_acls_as_plain(addr, req, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        ..Default::default()
+    })
     .await
     .expect("CreateAcls request must round-trip even when denied");
     handle.shutdown().await;

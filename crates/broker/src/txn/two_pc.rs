@@ -24,10 +24,11 @@
 //! guarantees bind production behaviour. The callers are the idle-transaction
 //! reaper in [`super::expiration`] and the `InitProducerId` handler.
 
-use krabka_verified::transaction::{IdleTransactionState, should_abort_idle_transaction};
-
-use super::state::TxnState;
-use crate::codes::INVALID_TRANSACTION_TIMEOUT;
+use {
+    super::state::TxnState,
+    crate::codes::INVALID_TRANSACTION_TIMEOUT,
+    krabka_verified::transaction::{IdleTransactionState, should_abort_idle_transaction},
+};
 
 /// Persisted 2PC timeout sentinel.
 pub(crate) const NO_TIMEOUT_MS: i32 = krabka_verified::transaction::NO_TRANSACTION_TIMEOUT_MS;
@@ -70,9 +71,7 @@ pub(crate) fn resolve_txn_timeout(
 /// Kafka's `isDistributedTwoPhaseCommitTxn`.
 #[must_use]
 #[cfg(test)]
-pub(crate) fn is_two_phase_commit(txn_timeout_ms: i32) -> bool {
-    txn_timeout_ms == NO_TIMEOUT_MS
-}
+pub(crate) fn is_two_phase_commit(txn_timeout_ms: i32) -> bool { txn_timeout_ms == NO_TIMEOUT_MS }
 
 /// THE safety-critical decision: should the idle-transaction reaper abort the
 /// transaction in `state` as of `now_ms`? The transaction carries the persisted
@@ -116,10 +115,7 @@ pub(crate) fn should_abort_idle_txn(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::codes::INVALID_TRANSACTION_TIMEOUT;
+    use {super::*, crate::codes::INVALID_TRANSACTION_TIMEOUT, assert2::assert};
 
     #[test]
     fn resolve_timeout_2pc_is_sentinel_regardless_of_request() {

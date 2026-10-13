@@ -7,31 +7,31 @@
 //! directory must hold either every pre-compaction segment or the compacted
 //! one, and the compacted one once the swap has committed.
 
-use std::{
-    collections::HashMap,
-    fs::File,
-    path::{Path, PathBuf},
-    sync::Mutex,
-};
-
-use assert2::check;
-use krabka_ids::Offset;
-
-use super::atomic_swap;
-use crate::{
-    compact::{
-        CleanedTransactionMetadata, RewriteOutput, RewriteRetention, build_offset_map,
-        rewrite_segments,
-        test_support::{RETENTION, make_record, round_over, write_sealed_segment},
+use {
+    super::atomic_swap,
+    crate::{
+        compact::{
+            CleanedTransactionMetadata, RewriteOutput, RewriteRetention, build_offset_map,
+            rewrite_segments,
+            test_support::{RETENTION, make_record, round_over, write_sealed_segment},
+        },
+        error::LogError,
+        io::{FileIo, IoTarget, LogIo},
+        name,
+        recovery::{
+            deleted_orphan_recover,
+            swap::{cleaned_path, recover_swaps, swap_path},
+        },
+        test_support::{Files, directory_files},
     },
-    error::LogError,
-    io::{FileIo, IoTarget, LogIo},
-    name,
-    recovery::{
-        deleted_orphan_recover,
-        swap::{cleaned_path, recover_swaps, swap_path},
+    assert2::check,
+    krabka_ids::Offset,
+    std::{
+        collections::HashMap,
+        fs::File,
+        path::{Path, PathBuf},
+        sync::Mutex,
     },
-    test_support::{Files, directory_files},
 };
 
 /// A directory operation a crash may lose, with what undoing it restores.
@@ -82,13 +82,9 @@ impl CrashingIo {
         }
     }
 
-    fn pending_len(&self) -> usize {
-        self.state.lock().unwrap().pending.len()
-    }
+    fn pending_len(&self) -> usize { self.state.lock().unwrap().pending.len() }
 
-    fn ops(&self) -> Vec<String> {
-        self.state.lock().unwrap().ops.clone()
-    }
+    fn ops(&self) -> Vec<String> { self.state.lock().unwrap().ops.clone() }
 
     /// Undo the pending directory operations whose bit is set in `lost`, the
     /// newest first.
@@ -122,9 +118,7 @@ fn has_extension(file: &str, extensions: &[&str]) -> bool {
         .is_some_and(|ext| extensions.iter().any(|wanted| ext == *wanted))
 }
 
-fn file_name(path: &Path) -> String {
-    path.file_name().unwrap().to_string_lossy().into_owned()
-}
+fn file_name(path: &Path) -> String { path.file_name().unwrap().to_string_lossy().into_owned() }
 
 impl LogIo for CrashingIo {
     fn sync_file(&self, _target: IoTarget, file: &File) -> std::io::Result<()> {
@@ -173,27 +167,19 @@ impl LogIo for CrashingIo {
 /// it, with a synthetic survivor `.txnindex` when `survivor_txnindex` is set.
 fn compactable(dir: &Path, survivor_txnindex: bool) -> RewriteOutput {
     let rewrite = {
-        let first = write_sealed_segment(
-            dir,
+        let first = write_sealed_segment(dir, 0, vec![
+            make_record(0, Some(b"k1"), Some(b"v1")),
+            make_record(1, Some(b"k2"), Some(b"v1")),
+        ]);
+        let second = write_sealed_segment(dir, 10, vec![
+            make_record(0, Some(b"k1"), Some(b"v2")),
+            make_record(1, Some(b"k3"), Some(b"v1")),
+        ]);
+        drop(write_sealed_segment(dir, 20, vec![make_record(
             0,
-            vec![
-                make_record(0, Some(b"k1"), Some(b"v1")),
-                make_record(1, Some(b"k2"), Some(b"v1")),
-            ],
-        );
-        let second = write_sealed_segment(
-            dir,
-            10,
-            vec![
-                make_record(0, Some(b"k1"), Some(b"v2")),
-                make_record(1, Some(b"k3"), Some(b"v1")),
-            ],
-        );
-        drop(write_sealed_segment(
-            dir,
-            20,
-            vec![make_record(0, Some(b"k1"), Some(b"v3"))],
-        ));
+            Some(b"k1"),
+            Some(b"v3"),
+        )]));
         let segments = vec![&first, &second];
         let map = build_offset_map(&segments, vec![], None).unwrap();
         let mut txn = CleanedTransactionMetadata::default();

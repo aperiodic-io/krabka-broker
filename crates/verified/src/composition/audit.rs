@@ -1,7 +1,8 @@
-use creusot_std::prelude::*;
-
-use super::{AuditLosses, settle_loss_batch};
-use crate::audit::{AuditLossMarkerAdmission, audit_loss_marker_admission};
+use {
+    super::{AuditLosses, settle_loss_batch},
+    crate::audit::{AuditLossMarkerAdmission, audit_loss_marker_admission},
+    creusot_std::prelude::*,
+};
 
 /// Replaying a durable loss marker cannot subtract pending losses twice.
 /// Return both actual states so a consumer can use the conservation law.

@@ -146,9 +146,7 @@ pub(crate) fn has_member_tombstone<V>(records: &[(String, Option<V>)], member_id
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// A batch whose member-metadata and current values are plain numbers.
     #[derive(Debug, Default, PartialEq)]
@@ -159,9 +157,9 @@ mod tests {
     }
 
     impl MemberRecordFamilies for Batch {
+        type Current = u8;
         type Metadata = u8;
         type Target = u8;
-        type Current = u8;
 
         fn member_record_families(&mut self) -> MemberRecordLists<'_, Self> {
             (

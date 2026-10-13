@@ -18,10 +18,11 @@
 //! is what makes a disagreement visible after the fact: every break-glass audit
 //! event carries it.
 
-use krabka_metadata::BreakGlassAction;
-use krabka_units::Time;
-
-use crate::{break_glass::action_name, config::BreakGlassConfig, operator_keys};
+use {
+    crate::{break_glass::action_name, config::BreakGlassConfig, operator_keys},
+    krabka_metadata::BreakGlassAction,
+    krabka_units::Time,
+};
 
 /// A borrowed view of `[break_glass]`, with the questions the workflow asks.
 #[derive(Debug, Clone, Copy)]
@@ -31,9 +32,7 @@ pub(crate) struct BreakGlassPolicy<'a> {
 
 impl<'a> BreakGlassPolicy<'a> {
     /// Read `config` as a break-glass policy.
-    pub(crate) fn new(config: &'a BreakGlassConfig) -> Self {
-        Self { config }
-    }
+    pub(crate) fn new(config: &'a BreakGlassConfig) -> Self { Self { config } }
 
     /// Whether this broker runs the break-glass workflow.
     ///
@@ -45,9 +44,7 @@ impl<'a> BreakGlassPolicy<'a> {
     /// caller to refuse, and
     /// [`BackgroundUncleanRecovery`](crate::config::BackgroundUncleanRecovery)
     /// governs it on the recovery path.
-    pub(crate) fn is_enabled(self) -> bool {
-        !self.config.approvers.is_empty()
-    }
+    pub(crate) fn is_enabled(self) -> bool { !self.config.approvers.is_empty() }
 
     /// Whether `principal` may approve a proposal on this broker.
     ///
@@ -79,17 +76,13 @@ impl<'a> BreakGlassPolicy<'a> {
     ///
     /// The file-config layer refuses a value below two, so a two-person rule
     /// cannot be configured down to one person.
-    pub(crate) fn required_approvals(self) -> usize {
-        self.config.required_approvals
-    }
+    pub(crate) fn required_approvals(self) -> usize { self.config.required_approvals }
 
     /// How long a new proposal stays usable.
     ///
     /// The lifetime is also the safety bound on removing an approver. Wait it
     /// out, and every pending approval by that principal is dead.
-    pub(crate) fn proposal_ttl(self) -> Time {
-        self.config.proposal_ttl
-    }
+    pub(crate) fn proposal_ttl(self) -> Time { self.config.proposal_ttl }
 
     /// The SHA-256 fingerprint of this broker's approver set.
     ///
@@ -102,11 +95,12 @@ impl<'a> BreakGlassPolicy<'a> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::minutes;
-
-    use super::*;
-    use crate::{break_glass::ALL_ACTIONS, operator_keys::approver_set_fingerprint};
+    use {
+        super::*,
+        crate::{break_glass::ALL_ACTIONS, operator_keys::approver_set_fingerprint},
+        assert2::check,
+        krabka_units::minutes,
+    };
 
     fn config() -> BreakGlassConfig {
         BreakGlassConfig {

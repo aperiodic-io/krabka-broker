@@ -32,6 +32,4 @@ mod witness;
 use self::runner::run_model;
 
 #[test]
-fn client_server_failover_preserves_acked_batch() {
-    run_model();
-}
+fn client_server_failover_preserves_acked_batch() { run_model(); }

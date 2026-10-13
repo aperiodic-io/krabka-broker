@@ -1,9 +1,7 @@
 //! Each path's counters land on their own series, a zero-byte move records
 //! nothing, and the lag gauges are set rather than accumulated.
 
-use assert2::check;
-
-use super::*;
+use {super::*, assert2::check};
 
 /// The `krabka_broker_*` sample lines a fresh registry renders.
 fn body(metrics: &BrokerMetrics) -> String {

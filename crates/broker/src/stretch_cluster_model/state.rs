@@ -5,9 +5,7 @@
 //! The types live apart from the transitions so that a reader can see the
 //! whole search space, including the sticky violation flags, on one screen.
 
-use std::collections::BTreeSet;
-
-use krabka_raft::NodeId;
+use {krabka_raft::NodeId, std::collections::BTreeSet};
 
 /// The outcome of one `acks=all` produce.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -60,9 +58,7 @@ pub enum StretchAction {
 }
 
 /// The count of sites that are down or isolated. The two sets are disjoint.
-pub fn impaired(state: &StretchState) -> usize {
-    state.down.len() + state.isolated.len()
-}
+pub fn impaired(state: &StretchState) -> usize { state.down.len() + state.isolated.len() }
 
 /// `true` when sites `left` and `right` both run and can reach each other. An
 /// isolated site reaches only itself.

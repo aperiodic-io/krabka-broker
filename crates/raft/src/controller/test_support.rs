@@ -3,20 +3,20 @@
 //! retrying listener bind that proves a port was released, and the recording
 //! dialer that observes the client id an outbound fetch goes out with.
 
-use std::sync::Arc;
-
-use krabka_units::prelude::{ByteSize, Time, TimeExt as _, gibibytes, millis, secs};
-use uuid::Uuid;
-
-use crate::{
-    SubmitChangeResult,
-    config::{BootstrapMode, ControllerConfig},
-    controller::{Controller, ControllerHandle},
-    error::RaftError,
-    network::OutboundDialer,
-    test_support::single_partition_topic,
-    types::NodeId,
-    wire::KrabkaSubmitChangeResponse,
+use {
+    crate::{
+        SubmitChangeResult,
+        config::{BootstrapMode, ControllerConfig},
+        controller::{Controller, ControllerHandle},
+        error::RaftError,
+        network::OutboundDialer,
+        test_support::single_partition_topic,
+        types::NodeId,
+        wire::KrabkaSubmitChangeResponse,
+    },
+    krabka_units::prelude::{ByteSize, Time, TimeExt as _, gibibytes, millis, secs},
+    std::sync::Arc,
+    uuid::Uuid,
 };
 
 pub(super) const TEST_OP_TIMEOUT: Time = secs(2);

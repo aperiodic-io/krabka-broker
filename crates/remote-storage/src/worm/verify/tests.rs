@@ -2,13 +2,14 @@
 //! grades one attacker edit per row at both depths, and the reports a clean and
 //! an empty archive produce.
 
-use assert2::check;
-use object_store::{ObjectStoreExt as _, PutPayload, memory::InMemory, path::Path};
-
-use super::*;
-use crate::worm::{
-    manifest::ManifestSeq,
-    verify::test_support::{Archive, SEGMENT_SPAN, STRAY, Tamper},
+use {
+    super::*,
+    crate::worm::{
+        manifest::ManifestSeq,
+        verify::test_support::{Archive, SEGMENT_SPAN, STRAY, Tamper},
+    },
+    assert2::check,
+    object_store::{ObjectStoreExt as _, PutPayload, memory::InMemory, path::Path},
 };
 
 #[tokio::test]

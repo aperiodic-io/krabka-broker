@@ -19,16 +19,17 @@
 //! as one `int8`: -1 for null, or 1 followed by the struct and the struct's own
 //! tagged-field count. The port is a `uint16`, two bytes, not four.
 
-use bytes::BufMut;
-
-use super::codec::{decode_key_value_list, encode_key_value_list};
-use crate::coordinator::unified::persistence::{
-    flex::{
-        get_compact_nullable_string, get_compact_string, get_i8, get_member_client, get_u16,
-        put_compact_nullable_string, put_compact_string, put_empty_tagged_fields,
-        put_member_client, skip_tagged_fields, value_codec,
+use {
+    super::codec::{decode_key_value_list, encode_key_value_list},
+    crate::coordinator::unified::persistence::{
+        flex::{
+            get_compact_nullable_string, get_compact_string, get_i8, get_member_client, get_u16,
+            put_compact_nullable_string, put_compact_string, put_empty_tagged_fields,
+            put_member_client, skip_tagged_fields, value_codec,
+        },
+        get_i32,
     },
-    get_i32,
+    bytes::BufMut,
 };
 
 /// A member's advertised host and port endpoint, for interactive-query
@@ -105,15 +106,16 @@ value_codec! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        streams::persistence::{
-            KEY_STREAMS_MEMBER_METADATA, StreamsGroupKey, encode_member_metadata_key,
-            parse_streams_key,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            streams::persistence::{
+                KEY_STREAMS_MEMBER_METADATA, StreamsGroupKey, encode_member_metadata_key,
+                parse_streams_key,
+            },
+            test_support::{peek_version, wire_bytes},
         },
-        test_support::{peek_version, wire_bytes},
+        assert2::assert,
     };
 
     fn sample() -> StreamsGroupMemberMetadataValue {

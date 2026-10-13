@@ -11,18 +11,18 @@
 //! record carries the classic metadata, and its k7 target and k8 current
 //! assignment are everything its `SyncGroup` and `Heartbeat` read.
 
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
-
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::{FALLBACK_REBALANCE_TIMEOUT_MS, FALLBACK_SESSION_TIMEOUT_MS};
-use crate::coordinator::unified::{
-    GroupSeed,
-    consumer_state::{ClassicMemberFacade, GroupState, MemberState},
-    persistence_next_gen::AssignedTopicPartitions,
+use {
+    super::{FALLBACK_REBALANCE_TIMEOUT_MS, FALLBACK_SESSION_TIMEOUT_MS},
+    crate::coordinator::unified::{
+        GroupSeed,
+        consumer_state::{ClassicMemberFacade, GroupState, MemberState},
+        persistence_next_gen::AssignedTopicPartitions,
+    },
+    krabka_protocol::primitives::uuid::Uuid,
+    std::{
+        collections::HashMap,
+        time::{Duration, Instant},
+    },
 };
 
 fn topic_partition_map(partitions: Vec<AssignedTopicPartitions>) -> HashMap<Uuid, Vec<i32>> {
@@ -133,33 +133,32 @@ pub(super) fn apply_seed(state: &mut GroupState, seed: GroupSeed) {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::Bytes;
-    use krabka_ids::PartitionIndex;
-    use krabka_protocol::owned::heartbeat_request::HeartbeatRequest;
-
-    use super::*;
-    use crate::{
-        codes,
-        coordinator::unified::{
-            actor::test_support::topic_reconcile_input,
-            consumer_state::ResolvedRegularExpression,
-            migration::serve_classic_heartbeat,
-            persistence_next_gen::{
-                ClassicMemberMetadata, CurrentMemberAssignmentValue, CurrentTopicPartitions,
-                MemberAssignmentState, MemberMetadataValue, RegularExpressionValue,
-                TargetAssignmentMemberValue,
+    use {
+        super::*,
+        crate::{
+            codes,
+            coordinator::unified::{
+                actor::test_support::topic_reconcile_input,
+                consumer_state::ResolvedRegularExpression,
+                migration::serve_classic_heartbeat,
+                persistence_next_gen::{
+                    ClassicMemberMetadata, CurrentMemberAssignmentValue, CurrentTopicPartitions,
+                    MemberAssignmentState, MemberMetadataValue, RegularExpressionValue,
+                    TargetAssignmentMemberValue,
+                },
+                reconciler::ReconcileInput,
+                test_support::MemberEpoch,
             },
-            reconciler::ReconcileInput,
-            test_support::MemberEpoch,
         },
+        assert2::check,
+        bytes::Bytes,
+        krabka_ids::PartitionIndex,
+        krabka_protocol::owned::heartbeat_request::HeartbeatRequest,
     };
 
     const TOPIC: Uuid = Uuid([7; 16]);
 
-    fn image() -> ReconcileInput {
-        topic_reconcile_input("t", TOPIC, 2)
-    }
+    fn image() -> ReconcileInput { topic_reconcile_input("t", TOPIC, 2) }
 
     /// The replayed client identity and timeout shared by the member seed fixtures.
     fn seeded_member_metadata(
@@ -232,34 +231,28 @@ mod tests {
                 ),
             )]
             .into(),
-            target_per_member: [(
-                "m".to_string(),
-                TargetAssignmentMemberValue {
-                    topic_partitions: vec![AssignedTopicPartitions {
-                        topic_id: TOPIC,
-                        partitions: target.into_iter().map(|index| index.0).collect(),
-                    }],
-                },
-            )]
+            target_per_member: [("m".to_string(), TargetAssignmentMemberValue {
+                topic_partitions: vec![AssignedTopicPartitions {
+                    topic_id: TOPIC,
+                    partitions: target.into_iter().map(|index| index.0).collect(),
+                }],
+            })]
             .into(),
-            current_per_member: [(
-                "m".to_string(),
-                CurrentMemberAssignmentValue {
-                    member_epoch: member_epoch.0,
-                    previous_member_epoch: member_epoch.0 - 1,
-                    state,
-                    assigned_partitions: vec![CurrentTopicPartitions {
-                        topic_id: TOPIC,
-                        partitions: assigned.into_iter().map(|index| index.0).collect(),
-                        assignment_epochs: None,
-                    }],
-                    partitions_pending_revocation: vec![CurrentTopicPartitions {
-                        topic_id: TOPIC,
-                        partitions: pending.into_iter().map(|index| index.0).collect(),
-                        assignment_epochs: None,
-                    }],
-                },
-            )]
+            current_per_member: [("m".to_string(), CurrentMemberAssignmentValue {
+                member_epoch: member_epoch.0,
+                previous_member_epoch: member_epoch.0 - 1,
+                state,
+                assigned_partitions: vec![CurrentTopicPartitions {
+                    topic_id: TOPIC,
+                    partitions: assigned.into_iter().map(|index| index.0).collect(),
+                    assignment_epochs: None,
+                }],
+                partitions_pending_revocation: vec![CurrentTopicPartitions {
+                    topic_id: TOPIC,
+                    partitions: pending.into_iter().map(|index| index.0).collect(),
+                    assignment_epochs: None,
+                }],
+            })]
             .into(),
             ..GroupSeed::default()
         }
@@ -353,14 +346,11 @@ mod tests {
             resolved_regexes: resolved
                 .into_iter()
                 .map(|topics| {
-                    (
-                        "pay.*".to_string(),
-                        RegularExpressionValue {
-                            topics: topics.iter().map(|topic| (*topic).to_string()).collect(),
-                            version: 7,
-                            timestamp_ms: 1_000,
-                        },
-                    )
+                    ("pay.*".to_string(), RegularExpressionValue {
+                        topics: topics.iter().map(|topic| (*topic).to_string()).collect(),
+                        version: 7,
+                        timestamp_ms: 1_000,
+                    })
                 })
                 .collect(),
             ..GroupSeed::default()
@@ -376,18 +366,19 @@ mod tests {
     /// away.
     #[test]
     fn a_replayed_regex_keeps_the_topics_it_resolved_to() {
-        use krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest;
-
-        use crate::coordinator::unified::{
-            ClientIdentity,
-            actor::{
-                member_state::update_member_state,
-                offset_delete::{SubscribedTopics, offset_delete_guard},
-                regex_resolution::RegexResolution,
-                test_support::StaticMetadata,
+        use {
+            crate::coordinator::unified::{
+                ClientIdentity,
+                actor::{
+                    member_state::update_member_state,
+                    offset_delete::{SubscribedTopics, offset_delete_guard},
+                    regex_resolution::RegexResolution,
+                    test_support::StaticMetadata,
+                },
+                config::NextGenConfig,
+                group::{CoordinatorGroup, GroupKind},
             },
-            config::NextGenConfig,
-            group::{CoordinatorGroup, GroupKind},
+            krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
         };
 
         // (label, the replayed resolution, the pattern of a heartbeat after

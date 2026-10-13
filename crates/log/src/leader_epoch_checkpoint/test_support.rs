@@ -1,12 +1,12 @@
 //! The one fixture the checkpoint tests share: a temporary directory holding an
 //! as-yet unwritten `leader-epoch-checkpoint` path.
 
-use std::path::PathBuf;
-
-use krabka_ids::{LeaderEpoch, Offset};
-use tempfile::TempDir;
-
-use super::{EpochEntry, LeaderEpochCheckpoint};
+use {
+    super::{EpochEntry, LeaderEpochCheckpoint},
+    krabka_ids::{LeaderEpoch, Offset},
+    std::path::PathBuf,
+    tempfile::TempDir,
+};
 
 pub(super) fn fresh() -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();

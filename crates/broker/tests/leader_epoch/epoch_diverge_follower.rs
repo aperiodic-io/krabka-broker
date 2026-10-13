@@ -6,18 +6,19 @@
 //! because the truncation is done by the follower's own running replicator, so
 //! it carries the cluster setup that the single-broker fixture cannot give it.
 
-use assert2::assert;
-
-use crate::{
-    cluster_lock,
-    epoch_harness::record,
-    support::{
-        self,
-        client::connect_client,
-        produce::{batch_request, replicated_topic_produce_setup},
-        registered_cluster, shutdown_cluster,
-        topics::AssignedTopicSetup,
+use {
+    crate::{
+        cluster_lock,
+        epoch_harness::record,
+        support::{
+            self,
+            client::connect_client,
+            produce::{batch_request, replicated_topic_produce_setup},
+            registered_cluster, shutdown_cluster,
+            topics::AssignedTopicSetup,
+        },
     },
+    assert2::assert,
 };
 
 /// KIP-320 follower side, end to end. A follower whose local log has a

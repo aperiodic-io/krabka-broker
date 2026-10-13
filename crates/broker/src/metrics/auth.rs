@@ -51,9 +51,7 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn record_authentication_splits_success_and_failure_per_mechanism() {

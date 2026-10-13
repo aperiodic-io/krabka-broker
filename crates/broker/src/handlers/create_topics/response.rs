@@ -3,17 +3,18 @@
 //! were created, and the KIP-219 throttle window recorded on the request
 //! context for the connection loop to enforce after the reply is written.
 
-use krabka_protocol::owned::create_topics_response::{
-    CreatableTopicConfigs, CreatableTopicResult, CreateTopicsResponse,
-};
-use krabka_units::Time;
-
-use crate::{
-    broker::Broker,
-    codes,
-    handlers::{RequestContext, audit_admin_success, audit_resource},
-    metrics::QuotaType,
-    quota::throttle_time_ms,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{RequestContext, audit_admin_success, audit_resource},
+        metrics::QuotaType,
+        quota::throttle_time_ms,
+    },
+    krabka_protocol::owned::create_topics_response::{
+        CreatableTopicConfigs, CreatableTopicResult, CreateTopicsResponse,
+    },
+    krabka_units::Time,
 };
 
 pub(super) fn topic_error_result(
@@ -122,9 +123,7 @@ pub(super) fn finish_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn created_topic_resources_include_only_successful_topics() {

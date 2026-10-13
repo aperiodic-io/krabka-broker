@@ -28,8 +28,10 @@
 
 mod support;
 
-use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle, NodeId};
+use {
+    assert2::{assert, check},
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle, NodeId},
+};
 
 // Kafka 4.3.1 is the compatibility oracle: it is the released tool whose
 // non-`--all` describe path goes through `DescribeCluster`.
@@ -90,9 +92,7 @@ async fn start_broker() -> (BrokerHandle, tempfile::TempDir) {
 /// indistinguishable from a real routing failure. Widening the budget is what
 /// keeps a real failure legible; a request that is actually refused still
 /// fails at once.
-fn command_config() -> &'static std::path::Path {
-    support::jvm_admin_config()
-}
+fn command_config() -> &'static std::path::Path { support::jvm_admin_config() }
 
 /// Run `kafka-configs.sh --entity-type broker-loggers --entity-name 1 <args>`
 /// in a throwaway container, returning the output without asserting on the
@@ -126,9 +126,7 @@ async fn kafka_configs(args: &[&str]) -> std::process::Output {
     out
 }
 
-fn combined(output: &std::process::Output) -> String {
-    support::combined_output(output)
-}
+fn combined(output: &std::process::Output) -> String { support::combined_output(output) }
 
 /// The whole `broker-loggers` operator loop, driven by the real 4.3.1 tool.
 ///

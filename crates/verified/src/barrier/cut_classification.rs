@@ -1,10 +1,11 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::logic;
-use super::{
-    BarrierCutClassification, BarrierMarkerFenceDecision, BarrierMarkerFenceFacts,
-    BarrierPlacementDecision, BarrierTargetCountDecision,
+use {
+    super::{
+        BarrierCutClassification, BarrierMarkerFenceDecision, BarrierMarkerFenceFacts,
+        BarrierPlacementDecision, BarrierTargetCountDecision,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Add a topic's exact positive partition count without wrapping.

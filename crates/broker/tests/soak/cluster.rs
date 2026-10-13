@@ -30,16 +30,16 @@
 //!
 //! [`process_kill_durability`]: ../process_kill_durability.rs
 
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-
 pub(crate) use crate::support::docker;
-use crate::support::{free_port, remove_container_with_volumes, storage::host_directory_user};
+use {
+    crate::support::{free_port, remove_container_with_volumes, storage::host_directory_user},
+    assert2::assert,
+    std::{
+        path::{Path, PathBuf},
+        process::Command,
+        time::{Duration, Instant},
+    },
+};
 
 /// The tag `//packaging:image_load` loads the broker image under.
 ///
@@ -94,23 +94,15 @@ pub(crate) struct SoakBroker {
 
 impl SoakBroker {
     /// `uid:gid` of the host data directory, for `docker run --user`.
-    fn user(&self) -> String {
-        host_directory_user(self.host_root())
-    }
+    fn user(&self) -> String { host_directory_user(self.host_root()) }
 
-    fn host_root(&self) -> &Path {
-        self.root.path()
-    }
+    fn host_root(&self) -> &Path { self.root.path() }
 
     /// The host-side log directory this broker writes into.
-    pub(crate) fn host_log_dir(&self) -> PathBuf {
-        self.host_root().join("data")
-    }
+    pub(crate) fn host_log_dir(&self) -> PathBuf { self.host_root().join("data") }
 
     /// Where a host-side client bootstraps against this broker.
-    pub(crate) fn bootstrap(&self) -> String {
-        format!("127.0.0.1:{}", self.client_port)
-    }
+    pub(crate) fn bootstrap(&self) -> String { format!("127.0.0.1:{}", self.client_port) }
 
     /// Where a host-side scraper reads this broker's `/metrics`.
     pub(crate) fn metrics_url(&self) -> String {
@@ -273,9 +265,7 @@ impl Drop for SoakBroker {
 /// given is the same string, built without a round of coordination.
 /// The metadata directory id of node `n`: outside the 100 lowest ids, which
 /// Kafka reserves and the broker refuses at startup.
-fn directory_id(n: u32) -> uuid::Uuid {
-    uuid::Uuid::from_u64_pair(1, u64::from(n))
-}
+fn directory_id(n: u32) -> uuid::Uuid { uuid::Uuid::from_u64_pair(1, u64::from(n)) }
 
 /// Three brokers, formatted into one quorum and running.
 pub(crate) struct SoakCluster {

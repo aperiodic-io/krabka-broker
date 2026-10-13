@@ -7,26 +7,26 @@
 //!
 //! [`JwksHandle`]: krabka_security::JwksHandle
 
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicI64, AtomicU64, Ordering},
+use {
+    super::fetch_jwks,
+    crate::time_util,
+    krabka_security::JwksHandle,
+    krabka_units::{Time, convert::TimeExt},
+    krabka_verified::{
+        JwksOnDemandDecision, jwks_on_demand_refresh_decision, jwks_publication_generations,
     },
-    time::Duration,
+    qubit_clock::Timer,
+    std::{
+        path::PathBuf,
+        sync::{
+            Arc,
+            atomic::{AtomicI64, AtomicU64, Ordering},
+        },
+        time::Duration,
+    },
+    tokio::sync::mpsc,
+    tokio_util::sync::CancellationToken,
 };
-
-use krabka_security::JwksHandle;
-use krabka_units::{Time, convert::TimeExt};
-use krabka_verified::{
-    JwksOnDemandDecision, jwks_on_demand_refresh_decision, jwks_publication_generations,
-};
-use qubit_clock::Timer;
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-
-use super::fetch_jwks;
-use crate::time_util;
 
 /// Names this cadence loop in the timer-failure logs that [`time_util::arm`]
 /// and [`time_util::fired`] emit.

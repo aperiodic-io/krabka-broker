@@ -5,19 +5,19 @@
 //! committed `ProducerIdsRecord` stores the first ID in the next unassigned
 //! block, so broker restarts and controller failover cannot reuse IDs.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicI64, Ordering},
+use {
+    crate::{error::BrokerError, metadata_source::MetadataSource},
+    krabka_log::ProducerId,
+    krabka_metadata::{MetadataRecord, NodeId, ProducerIdsRecord},
+    krabka_verified::{
+        ProducerIdBlockAllocationDecision as BlockDecision, producer_id_block_allocation,
+    },
+    std::sync::{
+        Arc,
+        atomic::{AtomicI64, Ordering},
+    },
+    tokio::sync::Mutex,
 };
-
-use krabka_log::ProducerId;
-use krabka_metadata::{MetadataRecord, NodeId, ProducerIdsRecord};
-use krabka_verified::{
-    ProducerIdBlockAllocationDecision as BlockDecision, producer_id_block_allocation,
-};
-use tokio::sync::Mutex;
-
-use crate::{error::BrokerError, metadata_source::MetadataSource};
 
 /// Kafka's controller-assigned producer-ID block size.
 pub(crate) const PRODUCER_ID_BLOCK_SIZE: i32 = 1_000;
@@ -209,9 +209,7 @@ impl ProducerIdManager {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[tokio::test]
     async fn local_test_allocator_returns_monotonic_ids() {

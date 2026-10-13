@@ -5,12 +5,12 @@
 //! same in `GroupCoordinatorService.onMetadataUpdate`, which schedules
 //! `OffsetMetadataManager.onTopicsDeleted` on every coordinator shard.
 
-use std::collections::BTreeSet;
-
-use tokio::sync::oneshot;
-
-use super::{chrono_now_ms, retention::append_tombstones};
-use crate::coordinator::unified::{group::CoordinatorGroup, offsets_log::OffsetsLog};
+use {
+    super::{chrono_now_ms, retention::append_tombstones},
+    crate::coordinator::unified::{group::CoordinatorGroup, offsets_log::OffsetsLog},
+    std::collections::BTreeSet,
+    tokio::sync::oneshot,
+};
 
 #[cfg(test)]
 mod tests;

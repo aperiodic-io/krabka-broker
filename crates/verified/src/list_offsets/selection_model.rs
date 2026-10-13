@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
-use super::{
-    ListOffsetsBoundDecision, ListOffsetsBoundFacts, ListOffsetsEarliestFacts,
-    ListOffsetsEpochDecision, ListOffsetsKind,
-};
 #[cfg(creusot)]
 use super::{ListOffsetsSelectionDecision, ListOffsetsSelectionFacts, logic};
+use {
+    super::{
+        ListOffsetsBoundDecision, ListOffsetsBoundFacts, ListOffsetsEarliestFacts,
+        ListOffsetsEpochDecision, ListOffsetsKind,
+    },
+    creusot_std::prelude::*,
+};
 
 /// Classify every timestamp sentinel, including its first supported version.
 #[must_use]

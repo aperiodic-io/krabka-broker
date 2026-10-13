@@ -11,16 +11,17 @@
 
 mod sim_harness;
 
-use std::cell::RefCell;
-
-use krabka_ids::{NodeId, Offset};
-use krabka_protocol::records::RecordBatch;
-use krabka_raft::kraft::{
-    KraftLog,
-    types::{Epoch, LogOffsetMetadata, LogView},
+use {
+    krabka_ids::{NodeId, Offset},
+    krabka_protocol::records::RecordBatch,
+    krabka_raft::kraft::{
+        KraftLog,
+        types::{Epoch, LogOffsetMetadata, LogView},
+    },
+    krabka_units::prelude::{ByteSize, gibibytes},
+    sim_harness::{cluster::Sim, node_log::SimNodeLog},
+    std::cell::RefCell,
 };
-use krabka_units::prelude::{ByteSize, gibibytes};
-use sim_harness::{cluster::Sim, node_log::SimNodeLog};
 
 /// A read budget larger than any log this simulation builds, so every read
 /// returns the whole log.
@@ -71,12 +72,10 @@ fn make_batch(epoch: Epoch, value: &[u8]) -> RecordBatch {
 }
 
 impl LogView for KraftBackedLog {
-    fn end_offset(&self) -> i64 {
-        LogView::end_offset(&self.log)
-    }
-    fn last_epoch(&self) -> Epoch {
-        LogView::last_epoch(&self.log)
-    }
+    fn end_offset(&self) -> i64 { LogView::end_offset(&self.log) }
+
+    fn last_epoch(&self) -> Epoch { LogView::last_epoch(&self.log) }
+
     fn end_offset_for_epoch(&self, epoch: Epoch) -> LogOffsetMetadata {
         LogView::end_offset_for_epoch(&self.log, epoch)
     }

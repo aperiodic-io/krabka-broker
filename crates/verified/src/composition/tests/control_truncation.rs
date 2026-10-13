@@ -1,7 +1,4 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::whole_batch_truncation_bounds_controls;
+use {super::whole_batch_truncation_bounds_controls, assert2::assert, proptest::prelude::*};
 
 fn check(ends: &[i64], start: i64, cut: i64, previous: i64, history: &[i64], need: i64) {
     let retained_batches: Vec<_> = ends.iter().copied().filter(|&end| end <= cut).collect();

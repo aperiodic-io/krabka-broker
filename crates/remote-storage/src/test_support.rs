@@ -1,17 +1,17 @@
 //! Segment fixtures shared by the filesystem and object-store backend tests.
 
-use std::path::{Path, PathBuf};
-
-use bytes::Bytes;
-use krabka_ids::LeaderEpoch;
-use uuid::Uuid;
-
-use crate::{
-    metadata::{
-        RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
-        RemoteLogSegmentState, TopicIdPartition,
+use {
+    crate::{
+        metadata::{
+            RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+            RemoteLogSegmentState, TopicIdPartition,
+        },
+        storage_manager::{IndexType, LogSegmentData, RemoteStorageManager},
     },
-    storage_manager::{IndexType, LogSegmentData, RemoteStorageManager},
+    bytes::Bytes,
+    krabka_ids::LeaderEpoch,
+    std::path::{Path, PathBuf},
+    uuid::Uuid,
 };
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]

@@ -66,37 +66,34 @@ pub(in crate::server) fn flexible_min(api_key: i16) -> Option<i16> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::Bytes;
-    use krabka_ids::ApiKey;
-    use krabka_protocol::{
-        Decode,
-        owned::{
-            add_raft_voter_request, api_versions_request,
-            api_versions_response::{ApiVersion as ApiVersionEntry, ApiVersionsResponse},
-            begin_quorum_epoch_request,
-            begin_quorum_epoch_request::BeginQuorumEpochRequest,
-            controller_registration_request, describe_cluster_request, describe_quorum_request,
-            end_quorum_epoch_request,
-            end_quorum_epoch_request::EndQuorumEpochRequest,
-            fetch_request,
-            fetch_request::FetchRequest,
-            fetch_snapshot_request,
-            fetch_snapshot_request::FetchSnapshotRequest,
-            remove_raft_voter_request, sasl_authenticate_request, sasl_handshake_request,
-            update_raft_voter_request, vote_request,
-            vote_request::VoteRequest,
+    use {
+        super::*,
+        crate::{
+            UnstableApiVersions,
+            kraft::{
+                transport::{api_key, wire::PeerRequest},
+                types::NodeId,
+            },
+            network::addressing::api_version_for,
         },
-    };
-
-    use super::*;
-    use crate::{
-        UnstableApiVersions,
-        kraft::{
-            transport::{api_key, wire::PeerRequest},
-            types::NodeId,
+        assert2::{assert, check},
+        bytes::Bytes,
+        krabka_ids::ApiKey,
+        krabka_protocol::{
+            Decode,
+            owned::{
+                add_raft_voter_request, api_versions_request,
+                api_versions_response::{ApiVersion as ApiVersionEntry, ApiVersionsResponse},
+                begin_quorum_epoch_request::{self, BeginQuorumEpochRequest},
+                controller_registration_request, describe_cluster_request, describe_quorum_request,
+                end_quorum_epoch_request::{self, EndQuorumEpochRequest},
+                fetch_request::{self, FetchRequest},
+                fetch_snapshot_request::{self, FetchSnapshotRequest},
+                remove_raft_voter_request, sasl_authenticate_request, sasl_handshake_request,
+                update_raft_voter_request,
+                vote_request::{self, VoteRequest},
+            },
         },
-        network::addressing::api_version_for,
     };
 
     /// Whether `buf` is exactly one `T` at `version`, with nothing left over.
@@ -213,15 +210,12 @@ mod tests {
             ),
         ] {
             let image = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-            let body = super::super::api_versions_response_body(
-                4,
-                super::super::ApiVersionsView {
-                    image: &image,
-                    metadata_offset: -1,
-                    admin_router: None,
-                    unstable,
-                },
-            );
+            let body = super::super::api_versions_response_body(4, super::super::ApiVersionsView {
+                image: &image,
+                metadata_offset: -1,
+                admin_router: None,
+                unstable,
+            });
             let response = ApiVersionsResponse::decode(&mut &body[..], 4).expect("decode response");
             assert!(
                 response.api_keys == expected_entries(api_versions_max),

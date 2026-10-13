@@ -7,18 +7,19 @@
 //! Every append path updates the producer state, so a leader, a follower and a
 //! follower that appends verbatim keep the same batches.
 
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{Time, mebibytes};
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    CleanupPolicy,
-    config::LogConfig,
-    log::test_support::{
-        AppendPath as Path, append_path as append, commit_marker, compaction_ctx, set_segment_size,
-        tiny_segments,
+use {
+    super::*,
+    crate::{
+        CleanupPolicy,
+        config::LogConfig,
+        log::test_support::{
+            AppendPath as Path, append_path as append, commit_marker, compaction_ctx,
+            set_segment_size, tiny_segments,
+        },
     },
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{Time, mebibytes},
+    tempfile::tempdir,
 };
 
 krabka_macros::compacted_batch!(Kept);
@@ -129,14 +130,11 @@ fn compaction_keeps_the_last_record_of_each_producer_in_the_log() {
             let dir = tempdir().unwrap();
             // One batch for each segment, and no delete retention, so that the
             // third pass finds the delete horizon of a marker passed.
-            let mut log = Log::open(
-                dir.path(),
-                LogConfig {
-                    cleanup_policy: CleanupPolicy::Compact,
-                    delete_retention: Time::ZERO,
-                    ..tiny_segments()
-                },
-            )
+            let mut log = Log::open(dir.path(), LogConfig {
+                cleanup_policy: CleanupPolicy::Compact,
+                delete_retention: Time::ZERO,
+                ..tiny_segments()
+            })
             .unwrap();
             for batch in batches.iter().cloned() {
                 append(&mut log, path, batch);

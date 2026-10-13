@@ -2,10 +2,11 @@
 //! that denied a principal access to a named resource. Only denials reach this
 //! module, so the record is always a failure.
 
-use serde_json::json;
-
-use super::{ProductInfo, envelope::metadata};
-use crate::event::{AuditEndpoint, AuditPrincipal};
+use {
+    super::{ProductInfo, envelope::metadata},
+    crate::event::{AuditEndpoint, AuditPrincipal},
+    serde_json::json,
+};
 
 pub(super) fn ocsf_authorization_denied(
     principal: &AuditPrincipal,

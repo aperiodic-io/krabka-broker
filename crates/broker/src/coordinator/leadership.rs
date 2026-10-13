@@ -13,31 +13,31 @@
 //! yet is loading too, as Kafka's runtime has no `ACTIVE` shard for an
 //! election it has not processed, so no request slips in ahead of the load.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
+use {
+    super::{
+        GroupCoordinator,
+        bootstrap::{OFFSETS_TOPIC, replay_partition},
+        partitioner::partition_for_group,
+        unified::{
+            actor::GroupActorMessage, share::actor::ShareGroupActorMessage,
+            streams::actor::StreamsGroupActorMessage,
+        },
     },
-    time::Duration,
-};
-
-use krabka_ids::{LeaderEpoch, PartitionIndex};
-use krabka_metadata::{MetadataImage, NodeId};
-use tokio_util::sync::CancellationToken;
-
-use super::{
-    GroupCoordinator,
-    bootstrap::{OFFSETS_TOPIC, replay_partition},
-    partitioner::partition_for_group,
-    unified::{
-        actor::GroupActorMessage, share::actor::ShareGroupActorMessage,
-        streams::actor::StreamsGroupActorMessage,
+    crate::{
+        metadata_source::MetadataSource, partition_registry::PartitionRegistry,
+        task_util::shutdown_actor,
     },
-};
-use crate::{
-    metadata_source::MetadataSource, partition_registry::PartitionRegistry,
-    task_util::shutdown_actor,
+    krabka_ids::{LeaderEpoch, PartitionIndex},
+    krabka_metadata::{MetadataImage, NodeId},
+    std::{
+        collections::{HashMap, HashSet},
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::Duration,
+    },
+    tokio_util::sync::CancellationToken,
 };
 
 pub(crate) fn spawn(
@@ -130,9 +130,7 @@ impl GroupCoordinator {
 
     /// `true` while any offsets partition this broker leads is replaying, the
     /// check of Kafka's read-all-shards operations such as `ListGroups`.
-    pub(crate) fn is_any_loading(&self) -> bool {
-        !self.shard_terms().loading.is_empty()
-    }
+    pub(crate) fn is_any_loading(&self) -> bool { !self.shard_terms().loading.is_empty() }
 
     /// Record `epoch` as the term this broker leads `partition` under,
     /// without a load.
@@ -191,9 +189,7 @@ impl LoadGuard {
 }
 
 impl Drop for LoadGuard {
-    fn drop(&mut self) {
-        self.coordinator.end_load(self.partition, self.load_id);
-    }
+    fn drop(&mut self) { self.coordinator.end_load(self.partition, self.load_id); }
 }
 
 fn spawn_partition_load(
@@ -340,29 +336,30 @@ async fn unload_partition(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{MetadataRecord, PartitionRecord};
-
-    use super::*;
-    use crate::{
-        broker::Broker,
-        codes::{COORDINATOR_LOAD_IN_PROGRESS, NONE},
-        coordinator::{
-            test_support::default_coordinator,
-            unified::{ImageMetadataProvider, offsets_log::fake::InMemoryOffsetsLog},
+    use {
+        super::*,
+        crate::{
+            broker::Broker,
+            codes::{COORDINATOR_LOAD_IN_PROGRESS, NONE},
+            coordinator::{
+                test_support::default_coordinator,
+                unified::{ImageMetadataProvider, offsets_log::fake::InMemoryOffsetsLog},
+            },
+            handlers::{
+                delete_groups::handle as delete_groups_handle, heartbeat::handle,
+                join_group::handle as join_group_handle, leave_group::handle as leave_group_handle,
+                list_groups::handle as list_groups_handle,
+                offset_commit::handle as offset_commit_handle,
+                offset_fetch::handle as offset_fetch_handle,
+            },
+            metrics::{BrokerMetrics, ConsumerGroupLabel, ShareGroupIdLabel},
+            test_support::{
+                FakeMetadataSource, peer, principal, request_context, start_broker_no_audit_with,
+            },
+            txn::handlers::txn_offset_commit::handle as txn_offset_commit_handle,
         },
-        handlers::{
-            delete_groups::handle as delete_groups_handle, heartbeat::handle,
-            join_group::handle as join_group_handle, leave_group::handle as leave_group_handle,
-            list_groups::handle as list_groups_handle,
-            offset_commit::handle as offset_commit_handle,
-            offset_fetch::handle as offset_fetch_handle,
-        },
-        metrics::{BrokerMetrics, ConsumerGroupLabel, ShareGroupIdLabel},
-        test_support::{
-            FakeMetadataSource, peer, principal, request_context, start_broker_no_audit_with,
-        },
-        txn::handlers::txn_offset_commit::handle as txn_offset_commit_handle,
+        assert2::check,
+        krabka_metadata::{MetadataRecord, PartitionRecord},
     };
 
     #[test]

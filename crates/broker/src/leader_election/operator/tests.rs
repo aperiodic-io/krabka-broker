@@ -3,17 +3,18 @@
 //! forces after the ISR is gone, and the witness replica that neither may give
 //! leadership to.
 
-use assert2::assert;
-use krabka_metadata::{LeaderEpoch, MetadataImage};
-use uuid::Uuid;
-
-use super::*;
-use crate::{
-    leader_election::test_support::{
-        ElectionSetup, ExpectedPartitionSetup, alive_set, expected_partition, img_with_partition,
-        no_witnesses, register_broker_with_dirs, witnesses,
+use {
+    super::*,
+    crate::{
+        leader_election::test_support::{
+            ElectionSetup, ExpectedPartitionSetup, alive_set, expected_partition,
+            img_with_partition, no_witnesses, register_broker_with_dirs, witnesses,
+        },
+        test_support::replica_nodes,
     },
-    test_support::replica_nodes,
+    assert2::assert,
+    krabka_metadata::{LeaderEpoch, MetadataImage},
+    uuid::Uuid,
 };
 
 #[tokio::test]

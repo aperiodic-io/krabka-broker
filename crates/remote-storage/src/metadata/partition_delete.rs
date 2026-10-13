@@ -6,11 +6,12 @@
 //! separate from the per-segment one in
 //! [`RemoteLogSegmentState`](crate::metadata::RemoteLogSegmentState).
 
-use krabka_verified::storage::{
-    RemotePartitionDeleteLifecycle, remote_partition_delete_transition,
+use {
+    crate::metadata::TopicIdPartition,
+    krabka_verified::storage::{
+        RemotePartitionDeleteLifecycle, remote_partition_delete_transition,
+    },
 };
-
-use crate::metadata::TopicIdPartition;
 
 /// Lifecycle state of a remote *partition* deletion.
 ///
@@ -64,9 +65,7 @@ pub struct RemotePartitionDeleteMetadata {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn partition_delete_transition_matrix_is_exhaustive() {

@@ -10,18 +10,19 @@
 //! `streamsGroupHeartbeat`) throw `UnsupportedOperationException` and are
 //! unreachable. The broker's default configuration serves 4.3.1.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-};
-
-use crate::{
-    streams_harness::{
-        boot, connect, create_topic, describe, finalize_streams_version, first_join, follow_up,
-        join_and_converge, topology,
+use {
+    crate::{
+        streams_harness::{
+            boot, connect, create_topic, describe, finalize_streams_version, first_join, follow_up,
+            join_and_converge, topology,
+        },
+        support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
     },
-    support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
 };
 
 /// The Kafka error code `INVALID_REQUEST`.

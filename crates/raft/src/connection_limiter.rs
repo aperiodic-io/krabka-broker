@@ -3,15 +3,16 @@
 //! slot when a connection ends. It is a self-contained counter pair, so it sits
 //! apart from the accept loop that consults it.
 
-use std::{
-    net::IpAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+use {
+    dashmap::DashMap,
+    std::{
+        net::IpAddr,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
     },
 };
-
-use dashmap::DashMap;
 
 /// Live-connection accounting backing the `max.connections` (global) and
 /// `max.connections.per.ip` caps. A clone shares the same counters, which are
@@ -86,15 +87,11 @@ impl ConnectionLimiter {
 
     /// Diagnostic accessor: current global live-connection count.
     #[must_use]
-    pub fn total(&self) -> usize {
-        self.total.load(Ordering::Acquire)
-    }
+    pub fn total(&self) -> usize { self.total.load(Ordering::Acquire) }
 
     /// Test/diagnostic accessor: current per-IP live-connection count.
     #[cfg(test)]
-    fn per_ip_count(&self, ip: IpAddr) -> usize {
-        self.per_ip.get(&ip).map_or(0, |e| *e)
-    }
+    fn per_ip_count(&self, ip: IpAddr) -> usize { self.per_ip.get(&ip).map_or(0, |e| *e) }
 }
 
 /// RAII release for one accepted connection. Moved into the spawned
@@ -124,9 +121,10 @@ impl Drop for ConnectionGuard {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn connection_guard_increments_and_decrements_global_and_per_ip() {

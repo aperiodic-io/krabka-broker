@@ -6,15 +6,15 @@
 //! and the topics that a member's regex subscription resolves to live in the
 //! group, in `regex`.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::{Duration, Instant},
+use {
+    crate::coordinator::unified::persistence_next_gen::MemberAssignmentState,
+    bytes::Bytes,
+    krabka_protocol::primitives::uuid::Uuid,
+    std::{
+        collections::{HashMap, HashSet},
+        time::{Duration, Instant},
+    },
 };
-
-use bytes::Bytes;
-use krabka_protocol::primitives::uuid::Uuid;
-
-use crate::coordinator::unified::persistence_next_gen::MemberAssignmentState;
 
 /// Classic-protocol state for a member hosted inside a consumer group: Kafka's
 /// `ConsumerGroupMemberMetadataValue.ClassicMemberMetadata`.
@@ -107,9 +107,7 @@ impl MemberState {
     /// group. Its RPCs are then `JoinGroup`, `SyncGroup`, and `Heartbeat`, not
     /// `ConsumerGroupHeartbeat`.
     #[must_use]
-    pub fn is_classic(&self) -> bool {
-        self.classic.is_some()
-    }
+    pub fn is_classic(&self) -> bool { self.classic.is_some() }
 
     /// `true` when the member holds `partition` of `topic_id`, as assigned or
     /// as pending revocation.

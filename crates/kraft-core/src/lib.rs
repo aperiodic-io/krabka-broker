@@ -29,9 +29,10 @@ pub mod types;
 #[cfg(feature = "sim")]
 pub mod sim;
 
-pub use core::{QuorumStateMachine, election_jitter_ms};
-
-pub use action::{Action, TimerKind};
-pub use event::{Event, LogEnd, SuccessorRank};
-pub use role::{ReplicaProgress, Role};
-pub use types::{Epoch, LogOffsetMetadata, LogView, NodeId, QuorumState, ReplicaKey, SimInstant};
+pub use {
+    action::{Action, TimerKind},
+    core::{QuorumStateMachine, election_jitter_ms},
+    event::{Event, LogEnd, SuccessorRank},
+    role::{ReplicaProgress, Role},
+    types::{Epoch, LogOffsetMetadata, LogView, NodeId, QuorumState, ReplicaKey, SimInstant},
+};

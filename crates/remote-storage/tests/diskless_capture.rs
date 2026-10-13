@@ -1,17 +1,18 @@
-use std::collections::HashMap;
-
-use assert2::check;
-use krabka_audit::FileEd25519Signer;
-use krabka_remote_storage::{
-    ObjectEntry, Sha256Digest, TrustedManifestKeys,
-    diskless::{
-        CAPTURE_HEAD_NAME, CapturedWalRange, DisklessPartitionCapture, DisklessWalCapture,
-        WalCaptureProjection, WalDeleteFloorKey, WalDeleteFloorRecord, WalFlushRecord,
-        WalIndexEntry, WalIndexKey,
+use {
+    assert2::check,
+    krabka_audit::FileEd25519Signer,
+    krabka_remote_storage::{
+        ObjectEntry, Sha256Digest, TrustedManifestKeys,
+        diskless::{
+            CAPTURE_HEAD_NAME, CapturedWalRange, DisklessPartitionCapture, DisklessWalCapture,
+            WalCaptureProjection, WalDeleteFloorKey, WalDeleteFloorRecord, WalFlushRecord,
+            WalIndexEntry, WalIndexKey,
+        },
     },
+    ring::{rand::SystemRandom, signature::Ed25519KeyPair},
+    std::collections::HashMap,
+    uuid::Uuid,
 };
-use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-use uuid::Uuid;
 
 fn entry(first: i64, last: i64) -> WalIndexEntry {
     WalIndexEntry {

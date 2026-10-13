@@ -107,34 +107,34 @@
 mod jvm_acceptance;
 mod support;
 
-use std::{
-    collections::BTreeMap,
-    fmt::{self, Debug, Display},
-    io::{Read, Write},
-    process::{Child, Command, ExitStatus, Stdio},
-    sync::{Arc, Mutex},
-    thread::{self, JoinHandle},
-    time::Duration,
-};
-
-use assert2::assert;
-use krabka_client_admin::AdminClient;
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    describe_cluster_request::DescribeClusterRequest,
-    describe_cluster_response::DescribeClusterResponse,
-    describe_groups_request::DescribeGroupsRequest,
-    describe_groups_response::DescribeGroupsResponse,
-    describe_topic_partitions_request::{DescribeTopicPartitionsRequest, TopicRequest},
-    describe_topic_partitions_response::{
-        DescribeTopicPartitionsResponse, DescribeTopicPartitionsResponsePartition,
+use {
+    crate::{
+        jvm_acceptance::{broker0_advertised, start_host_broker},
+        support::{admin::topic_spec, client::connect_owned},
     },
-};
-use tokio::time::Instant;
-
-use crate::{
-    jvm_acceptance::{broker0_advertised, start_host_broker},
-    support::{admin::topic_spec, client::connect_owned},
+    assert2::assert,
+    krabka_client_admin::AdminClient,
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        describe_cluster_request::DescribeClusterRequest,
+        describe_cluster_response::DescribeClusterResponse,
+        describe_groups_request::DescribeGroupsRequest,
+        describe_groups_response::DescribeGroupsResponse,
+        describe_topic_partitions_request::{DescribeTopicPartitionsRequest, TopicRequest},
+        describe_topic_partitions_response::{
+            DescribeTopicPartitionsResponse, DescribeTopicPartitionsResponsePartition,
+        },
+    },
+    std::{
+        collections::BTreeMap,
+        fmt::{self, Debug, Display},
+        io::{Read, Write},
+        process::{Child, Command, ExitStatus, Stdio},
+        sync::{Arc, Mutex},
+        thread::{self, JoinHandle},
+        time::Duration,
+    },
+    tokio::time::Instant,
 };
 
 /// The image, built here and named in the `sarama_conformance` entry of the
@@ -326,9 +326,7 @@ impl Progress {
         eprintln!("KRABKA[test] phase={phase} end t={elapsed:.1?} {outcome}");
     }
 
-    fn elapsed(&self) -> Duration {
-        self.started.elapsed()
-    }
+    fn elapsed(&self) -> Duration { self.started.elapsed() }
 }
 
 /// The failure text of a wait, or the empty string when it succeeded.
@@ -367,9 +365,7 @@ fn run_kaf(args: &[&str], input: Option<&str>) -> String {
 /// The cells of one `kaf` table row. Every table `kaf` prints is padded with
 /// a `text/tabwriter`, so a column is only recoverable by splitting on runs of
 /// whitespace -- which is also why every value asserted below is one token.
-fn cells(line: &str) -> Vec<String> {
-    line.split_whitespace().map(str::to_owned).collect()
-}
+fn cells(line: &str) -> Vec<String> { line.split_whitespace().map(str::to_owned).collect() }
 
 /// Go's `%v` for a slice of ints: `[1]`, `[1 2]`. `kaf` prints the replica and
 /// ISR lists that way, so the expected value has to be built that way too.
@@ -523,9 +519,7 @@ impl GroupConsumer {
     /// consume` that ends before the test kills it has failed: `errorExit` is
     /// how every unhandled error in `kaf` leaves, and the group path has no
     /// other exit.
-    fn exited(&mut self) -> Option<ExitStatus> {
-        self.child.try_wait().expect("poll kaf consume")
-    }
+    fn exited(&mut self) -> Option<ExitStatus> { self.child.try_wait().expect("poll kaf consume") }
 
     /// Stop the container, join the drains, and hand back its stdout. Both
     /// streams were echoed line by line as they arrived, so this prints only
@@ -600,9 +594,7 @@ impl GroupShape {
     }
 
     /// The `client_id` of the first member, when there is one.
-    fn first_member(&self) -> Option<&str> {
-        self.members.first().map(String::as_str)
-    }
+    fn first_member(&self) -> Option<&str> { self.members.first().map(String::as_str) }
 }
 
 impl Display for GroupShape {

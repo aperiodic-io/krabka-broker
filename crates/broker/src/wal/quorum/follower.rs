@@ -1,14 +1,15 @@
 //! Pull-based durable WAL follower for one diskless shard.
 
-use std::path::PathBuf;
-
-use krabka_client_core::ClientError;
-use krabka_log::LogConfig;
-use krabka_protocol::owned::fetch_response::FetchResponse;
-use krabka_raft::NodeId;
-use krabka_units::convert::{ByteSizeExt as _, TimeExt as _};
-use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use {
+    krabka_client_core::ClientError,
+    krabka_log::LogConfig,
+    krabka_protocol::owned::fetch_response::FetchResponse,
+    krabka_raft::NodeId,
+    krabka_units::convert::{ByteSizeExt as _, TimeExt as _},
+    std::path::PathBuf,
+    tokio_util::sync::CancellationToken,
+    tracing::{info, warn},
+};
 
 mod checkpoint;
 mod connection;
@@ -17,19 +18,21 @@ mod log;
 mod promotion;
 
 pub(crate) use self::promotion::hydrate_on_promotion;
-use self::{
-    connection::{connect_with_backoff, sleep_or_cancel},
-    fetch::{
-        FetchProgress, fetch_progress, response_partition, validate_diverging_epoch,
-        validate_fetch_frontiers, validate_reset_offset,
+use {
+    self::{
+        connection::{connect_with_backoff, sleep_or_cancel},
+        fetch::{
+            FetchProgress, fetch_progress, response_partition, validate_diverging_epoch,
+            validate_fetch_frontiers, validate_reset_offset,
+        },
+        log::FollowerLog,
     },
-    log::FollowerLog,
+    super::{
+        registry::ShardId,
+        wire::{QuorumGroup, fetch_request},
+    },
+    crate::{codes, replicator::ReplicationConnectionConfig},
 };
-use super::{
-    registry::ShardId,
-    wire::{QuorumGroup, fetch_request},
-};
-use crate::{codes, replicator::ReplicationConnectionConfig};
 
 pub(crate) struct Config {
     pub(crate) node_id: NodeId,
@@ -172,26 +175,26 @@ async fn run_inner(config: &Config, follower: &FollowerLog) -> Result<(), String
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        path::Path,
-        sync::{Arc, Mutex},
-    };
-
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_ids::{Offset, PartitionIndex};
-    use krabka_log::Log;
-    use krabka_protocol::records::{Record, RecordBatch};
-
-    use super::*;
-    use crate::{
-        replicator::replication_connection_for_test,
-        wal::{
-            WalStore as _,
-            quorum::{
-                engine::WalShardEngine,
-                registry::{WalPlacement, WalShardRegistry},
+    use {
+        super::*,
+        crate::{
+            replicator::replication_connection_for_test,
+            wal::{
+                WalStore as _,
+                quorum::{
+                    engine::WalShardEngine,
+                    registry::{WalPlacement, WalShardRegistry},
+                },
             },
+        },
+        assert2::assert,
+        bytes::Bytes,
+        krabka_ids::{Offset, PartitionIndex},
+        krabka_log::Log,
+        krabka_protocol::records::{Record, RecordBatch},
+        std::{
+            path::Path,
+            sync::{Arc, Mutex},
         },
     };
 

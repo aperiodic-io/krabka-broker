@@ -9,14 +9,16 @@
 //! that released it only on commit would leave every `read_committed` consumer
 //! of the partition pinned behind a transaction that is over.
 
-use assert2::check;
-use krabka_client_producer::Producer;
-
-use crate::{
-    support,
-    wire::{
-        EndOfPartition, create_topic, end_of_partition, latest_row, send_ok, wait_for_settled_log,
+use {
+    crate::{
+        support,
+        wire::{
+            EndOfPartition, create_topic, end_of_partition, latest_row, send_ok,
+            wait_for_settled_log,
+        },
     },
+    assert2::check,
+    krabka_client_producer::Producer,
 };
 
 /// How the transaction ends.

@@ -27,10 +27,11 @@ pub(crate) fn matches(request: &str, cluster_id: uuid::Uuid) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use uuid::Uuid;
-
-    use super::{encode, matches};
+    use {
+        super::{encode, matches},
+        assert2::assert,
+        uuid::Uuid,
+    };
 
     #[test]
     fn encodes_kafkas_base64_uuid_form() {

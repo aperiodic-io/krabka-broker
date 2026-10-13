@@ -4,31 +4,31 @@
 //! with each other, so they are grouped here purely as the periodic work the
 //! broker spawns at startup.
 
-use std::sync::Arc;
-
-use krabka_units::{Time, convert::TimeExt};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    blocking::spawn_blocking,
-    broker::adapters::ControllerAdapter,
-    cleaner::{CleanerConfig, run as run_cleaner},
-    config::BrokerConfig,
-    controller_endpoint::ControllerDialer,
-    disk_scanner::DiskScanner,
-    heartbeat::controller_state::ControllerLivenessState,
-    isr_maintenance::{Config, run as run_isr_maintenance},
-    leader_rebalance::{AutoRebalanceConfig, ControllerLike, run as run_leader_rebalance},
-    log_retention::{LogRetentionConfig, run as run_log_retention},
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    reassignment::{ReassignmentController, run as run_reassignment},
-    task_util::run_every,
-    time_util::now_ms,
+use {
+    crate::{
+        blocking::spawn_blocking,
+        broker::adapters::ControllerAdapter,
+        cleaner::{CleanerConfig, run as run_cleaner},
+        config::BrokerConfig,
+        controller_endpoint::ControllerDialer,
+        disk_scanner::DiskScanner,
+        heartbeat::controller_state::ControllerLivenessState,
+        isr_maintenance::{Config, run as run_isr_maintenance},
+        leader_rebalance::{AutoRebalanceConfig, ControllerLike, run as run_leader_rebalance},
+        log_retention::{LogRetentionConfig, run as run_log_retention},
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        reassignment::{ReassignmentController, run as run_reassignment},
+        task_util::run_every,
+        time_util::now_ms,
+    },
+    krabka_units::{Time, convert::TimeExt},
+    std::sync::Arc,
+    tokio::task::JoinHandle,
+    tokio_util::sync::CancellationToken,
 };
 
 pub(super) fn spawn_storage_security_maintenance(
@@ -245,17 +245,17 @@ pub(super) fn spawn_cluster_data_maintenance(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{ActiveProducer, ProducerId};
-    use krabka_protocol::records::{Record, RecordBatch};
-    use tokio::sync::Notify;
-
-    use super::expire_log_producers;
-    use crate::{partition::test_support::test_partition, partition_registry::PartitionRegistry};
+    use {
+        super::expire_log_producers,
+        crate::{partition::test_support::test_partition, partition_registry::PartitionRegistry},
+        assert2::assert,
+        bytes::Bytes,
+        krabka_ids::PartitionIndex,
+        krabka_log::{ActiveProducer, ProducerId},
+        krabka_protocol::records::{Record, RecordBatch},
+        std::sync::Arc,
+        tokio::sync::Notify,
+    };
 
     /// A one-record idempotent batch of `producer_id` at sequence 0.
     fn idempotent_batch(producer_id: i64, max_timestamp: i64) -> RecordBatch {

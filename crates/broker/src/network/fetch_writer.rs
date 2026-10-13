@@ -39,15 +39,16 @@
 //! emits, `sink` decides what a given stream can take, and `drain` writes the
 //! finished plan out with `sendfile` for the file-backed ops.
 
-use bytes::{BufMut, Bytes, BytesMut};
-use krabka_protocol::{
-    api_key::ApiKey, owned::fetch_response::FetchResponse, records::RecordsPayload,
-};
-
-use self::body_plan::{FetchWriteOp, fetch_response_write_plan};
-use crate::{
-    error::BrokerError,
-    network::{codec, response_header_len, response_header_v1},
+use {
+    self::body_plan::{FetchWriteOp, fetch_response_write_plan},
+    crate::{
+        error::BrokerError,
+        network::{codec, response_header_len, response_header_v1},
+    },
+    bytes::{BufMut, Bytes, BytesMut},
+    krabka_protocol::{
+        api_key::ApiKey, owned::fetch_response::FetchResponse, records::RecordsPayload,
+    },
 };
 
 mod body_plan;

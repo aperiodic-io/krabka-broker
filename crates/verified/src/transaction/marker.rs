@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
-use super::{
-    LogBatchKind, TransactionMarkerMaterializationDecision, TransactionMarkerPartitionState,
-    TransactionMarkerRequest,
-};
 #[cfg(creusot)]
 use super::{TransactionIdentity, TransactionSnapshot};
+use {
+    super::{
+        LogBatchKind, TransactionMarkerMaterializationDecision, TransactionMarkerPartitionState,
+        TransactionMarkerRequest,
+    },
+    creusot_std::prelude::*,
+};
 
 /// Transaction version 2 requires an epoch bump for a pending transaction's
 /// marker, except at the final marker epoch. Completed retries remain allowed.

@@ -262,9 +262,10 @@ pub fn short_name(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     fn map(specs: &[&str], principal: &str, default_realm: &str) -> Option<String> {
         let rules: Vec<_> = specs

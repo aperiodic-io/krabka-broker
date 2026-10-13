@@ -5,15 +5,16 @@
 //! and not currently the leader, which this file reaches by metadata injection
 //! rather than by killing a broker; the test's own doc comment explains why.
 
-use assert2::assert;
-
-use crate::{
-    cluster::{admin_cluster, admin_text_cluster, election_partition},
-    jvm_acceptance::{
-        KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image_and_mount,
-        wait_jvm_isr_contains, wait_jvm_partition_any_leader, wait_jvm_partition_leader,
+use {
+    crate::{
+        cluster::{admin_cluster, admin_text_cluster, election_partition},
+        jvm_acceptance::{
+            KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image_and_mount,
+            wait_jvm_isr_contains, wait_jvm_partition_any_leader, wait_jvm_partition_leader,
+        },
+        oracle::OracleComparison,
     },
-    oracle::OracleComparison,
+    assert2::assert,
 };
 
 /// JVM acceptance test for `kafka-leader-election --election-type preferred`.
@@ -45,23 +46,19 @@ async fn jvm_kafka_leader_election_preferred() {
     let admin_mount = admin_props.mount_str();
 
     // Create rf=2 topic as super-user via the 7.5 JVM image.
-    docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-topics",
-            "--create",
-            "--if-not-exists",
-            "--topic",
-            TOPIC,
-            "--replica-assignment",
-            "1:2",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-        ],
-    );
+    docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-topics",
+        "--create",
+        "--if-not-exists",
+        "--topic",
+        TOPIC,
+        "--replica-assignment",
+        "1:2",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+    ]);
 
     // Wait for broker 1 to see the partition in the committed metadata image.
     cluster.h1.wait_until_partition_present(TOPIC, 0).await;
@@ -238,21 +235,18 @@ async fn election_selectors_report_election_not_needed_as_apache_kafka_does() {
     let document = election_json(&selector_partitions());
     let mut answers = Vec::new();
     for side in [&oracle_side, &krabka_side] {
-        side.run(
-            "kafka-topics",
-            &[
-                "--bootstrap-server",
-                side.bootstrap(),
-                "--create",
-                "--if-not-exists",
-                "--topic",
-                SELECTOR_TOPIC,
-                "--partitions",
-                &SELECTOR_PARTITIONS.to_string(),
-                "--replication-factor",
-                "1",
-            ],
-        )
+        side.run("kafka-topics", &[
+            "--bootstrap-server",
+            side.bootstrap(),
+            "--create",
+            "--if-not-exists",
+            "--topic",
+            SELECTOR_TOPIC,
+            "--partitions",
+            &SELECTOR_PARTITIONS.to_string(),
+            "--replication-factor",
+            "1",
+        ])
         .expect_success();
 
         // The document selector first. It names exactly this topic's
@@ -286,16 +280,13 @@ async fn election_selectors_report_election_not_needed_as_apache_kafka_does() {
         // topics too, so it is narrowed to this topic's partitions before it
         // is compared -- the coordinator topics differ between the two sides
         // and say nothing about the selector.
-        let by_all = side.run(
-            "kafka-leader-election",
-            &[
-                "--bootstrap-server",
-                side.bootstrap(),
-                "--election-type",
-                "preferred",
-                "--all-topic-partitions",
-            ],
-        );
+        let by_all = side.run("kafka-leader-election", &[
+            "--bootstrap-server",
+            side.bootstrap(),
+            "--election-type",
+            "preferred",
+            "--all-topic-partitions",
+        ]);
         let mine: std::collections::BTreeMap<_, _> = parse_election(&by_all.text())
             .into_iter()
             .filter(|(partition, _)| partition.topic == SELECTOR_TOPIC)

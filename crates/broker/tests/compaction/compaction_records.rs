@@ -6,26 +6,26 @@
 //! `Fetch` calls. Its result feeds `assert_latest_records_survive`, which is
 //! the actual claim of this suite, so the two live together.
 
-use std::net::SocketAddr;
-
-use assert2::assert;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
-    primitives::uuid::Uuid,
-};
-use tokio::net::TcpStream;
-
-use crate::{
-    CLIENT_ID,
-    kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
-    support::{
-        fetch::{
-            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+use {
+    crate::{
+        CLIENT_ID,
+        kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
+        support::{
+            fetch::{
+                FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+                SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+            },
+            wire::HeaderEncoding as RequestHeaderEncoding,
         },
-        wire::HeaderEncoding as RequestHeaderEncoding,
     },
+    assert2::assert,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
+        primitives::uuid::Uuid,
+    },
+    std::net::SocketAddr,
+    tokio::net::TcpStream,
 };
 
 /// A flattened record: key and value as plain byte vecs.
@@ -66,17 +66,13 @@ pub(crate) async fn fetch_all(addr: SocketAddr, topic: &str, topic_id: Uuid) -> 
             })
         };
         let mut stream = TcpStream::connect(addr).await.expect("connect");
-        let resp: FetchResponse = kafka_wire::exchange(
-            &mut stream,
-            &req,
-            WireExchangeSetup {
-                api_key: WireApiKey(1),
-                version: WireApiVersion(version),
-                client_id: CLIENT_ID,
-                header: RequestHeaderEncoding::Flexible,
-                ..Default::default()
-            },
-        )
+        let resp: FetchResponse = kafka_wire::exchange(&mut stream, &req, WireExchangeSetup {
+            api_key: WireApiKey(1),
+            version: WireApiVersion(version),
+            client_id: CLIENT_ID,
+            header: RequestHeaderEncoding::Flexible,
+            ..Default::default()
+        })
         .await
         .expect("Fetch round-trip");
 

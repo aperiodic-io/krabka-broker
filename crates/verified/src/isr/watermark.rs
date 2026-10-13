@@ -1,7 +1,8 @@
-use creusot_std::prelude::*;
-
-use super::{
-    HighWatermarkFacts, HwmReplica, IsrCandidateFacts, IsrEligibilityFacts, IsrMemberRole,
+use {
+    super::{
+        HighWatermarkFacts, HwmReplica, IsrCandidateFacts, IsrEligibilityFacts, IsrMemberRole,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Kafka's `Partition.isReplicaIsrEligible`: the broker is neither fenced nor
@@ -227,6 +228,4 @@ pub fn leader_high_watermark(facts: HighWatermarkFacts, replicas: &[HwmReplica])
 /// Report a proposal only when at least one unique member is added or removed.
 #[ensures(result == (removed@ > 0 || added@ > 0))]
 #[must_use]
-pub fn isr_proposal_changed(removed: usize, added: usize) -> bool {
-    removed > 0 || added > 0
-}
+pub fn isr_proposal_changed(removed: usize, added: usize) -> bool { removed > 0 || added > 0 }

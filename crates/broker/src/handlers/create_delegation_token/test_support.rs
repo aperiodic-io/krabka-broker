@@ -4,9 +4,7 @@ use crate::authorizer::SimpleAclAuthorizer;
 
 /// An ACL authorizer with no super users and no ACLs, for tests that do not
 /// exercise the act-as path.
-pub(super) fn empty_super_users() -> SimpleAclAuthorizer {
-    super_users_with(&[])
-}
+pub(super) fn empty_super_users() -> SimpleAclAuthorizer { super_users_with(&[]) }
 
 /// An ACL authorizer whose super users are `names`, with no ACLs.
 pub(super) fn super_users_with(names: &[&str]) -> SimpleAclAuthorizer {

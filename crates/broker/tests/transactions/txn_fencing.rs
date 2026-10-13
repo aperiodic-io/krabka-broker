@@ -6,22 +6,25 @@
 //! unknown member, or a next-gen member epoch that is behind or ahead of the
 //! live one.
 
-use assert2::assert;
-use krabka_client_consumer::{AutoOffsetReset, Consumer};
-use krabka_client_producer::ProducerError;
-
-use crate::{
-    support::{
-        self,
-        client::connect_client,
-        consumer_groups::joining_consumer,
-        producer::transactional_producer,
-        transactions::{
-            InitProducerSetup, ProducerIdentity, init_producer_request, txn_offset_partition,
-            txn_offset_topic,
+use {
+    crate::{
+        support::{
+            self,
+            client::connect_client,
+            consumer_groups::joining_consumer,
+            producer::transactional_producer,
+            transactions::{
+                InitProducerSetup, ProducerIdentity, init_producer_request, txn_offset_partition,
+                txn_offset_topic,
+            },
+        },
+        txn_harness::{
+            boot_single, boot_single_trunk, create_topic, init_transaction, rec, send_ok,
         },
     },
-    txn_harness::{boot_single, boot_single_trunk, create_topic, init_transaction, rec, send_ok},
+    assert2::assert,
+    krabka_client_consumer::{AutoOffsetReset, Consumer},
+    krabka_client_producer::ProducerError,
 };
 
 /// Producer B with the same `transactional_id` fences Producer A. Every
@@ -231,14 +234,9 @@ async fn txn_offset_commit_fences_classic_generation_and_member() {
         producer_epoch,
         generation_id_or_member_epoch: generation_id,
         member_id: member_id.into(),
-        topics: vec![txn_offset_topic(
-            "fence-in",
-            topic_id,
-            vec![txn_offset_partition(
-                krabka_ids::PartitionIndex(0),
-                krabka_ids::Offset(1),
-            )],
-        )],
+        topics: vec![txn_offset_topic("fence-in", topic_id, vec![
+            txn_offset_partition(krabka_ids::PartitionIndex(0), krabka_ids::Offset(1)),
+        ])],
         ..Default::default()
     };
 
@@ -313,14 +311,9 @@ async fn txn_offset_commit_fences_next_gen_member_epoch() {
         producer_epoch,
         generation_id_or_member_epoch: epoch_val, // carries the member epoch for next-gen groups
         member_id: member_id.clone(),
-        topics: vec![txn_offset_topic(
-            "ng-in",
-            topic_id,
-            vec![txn_offset_partition(
-                krabka_ids::PartitionIndex(0),
-                krabka_ids::Offset(1),
-            )],
-        )],
+        topics: vec![txn_offset_topic("ng-in", topic_id, vec![
+            txn_offset_partition(krabka_ids::PartitionIndex(0), krabka_ids::Offset(1)),
+        ])],
         ..Default::default()
     };
 

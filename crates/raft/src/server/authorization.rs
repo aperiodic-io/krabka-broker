@@ -11,18 +11,19 @@
 //! exception is `AssignReplicasToDirs`, whose broker handler takes no
 //! principal, so the table holds it. `ApiVersions` needs no grant.
 
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{Decode, Encode, owned};
-
-use crate::{
-    ClusterOperation,
-    error::RaftError,
-    kraft::transport::{PeerApi, api_key},
-    wire::{
-        API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
-        KrabkaMetadataFetchResponse, KrabkaSubmitChangeResponse,
-        PRIVATE_CLUSTER_AUTHORIZATION_FAILED,
+use {
+    crate::{
+        ClusterOperation,
+        error::RaftError,
+        kraft::transport::{PeerApi, api_key},
+        wire::{
+            API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
+            KrabkaMetadataFetchResponse, KrabkaSubmitChangeResponse,
+            PRIVATE_CLUSTER_AUTHORIZATION_FAILED,
+        },
     },
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{Decode, Encode, owned},
 };
 
 /// Kafka's `CLUSTER_AUTHORIZATION_FAILED`.

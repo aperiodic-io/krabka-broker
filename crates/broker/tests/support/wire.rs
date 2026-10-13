@@ -1,9 +1,10 @@
 //! Length-prefixed Kafka frame I/O, leaving headers and decoding to each caller.
 
-use std::io;
-
-use krabka_units::ByteSize;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use {
+    krabka_units::ByteSize,
+    std::io,
+    tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+};
 
 /// Write and flush a frame with the caller's original length diagnostic.
 ///
@@ -51,20 +52,19 @@ impl<R: krabka_protocol::Encode, const V: i16> krabka_protocol::Encode for At<R,
         self.0.encode(buf, version)
     }
 
-    fn encoded_len(&self, version: i16) -> usize {
-        self.0.encoded_len(version)
-    }
+    fn encoded_len(&self, version: i16) -> usize { self.0.encoded_len(version) }
 }
 
 impl<R: krabka_protocol::ProtocolRequest, const V: i16> krabka_protocol::ProtocolRequest
     for At<R, V>
 {
-    const API_KEY: i16 = R::API_KEY;
-    const MIN_VERSION: i16 = V;
-    const MAX_VERSION: i16 = V;
-    const LATEST_STABLE_VERSION: i16 = V;
-    const FLEXIBLE_MIN: i16 = R::FLEXIBLE_MIN;
     type Response = R::Response;
+
+    const API_KEY: i16 = R::API_KEY;
+    const FLEXIBLE_MIN: i16 = R::FLEXIBLE_MIN;
+    const LATEST_STABLE_VERSION: i16 = V;
+    const MAX_VERSION: i16 = V;
+    const MIN_VERSION: i16 = V;
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -161,8 +161,7 @@ pub struct WireFrameSetup<'a> {
 }
 
 pub fn request_frame(setup: WireFrameSetup<'_>) -> bytes::BytesMut {
-    use bytes::BufMut;
-    use krabka_units::convert::ByteSizeExt;
+    use {bytes::BufMut, krabka_units::convert::ByteSizeExt};
     let WireFrameSetup {
         api_key,
         version,

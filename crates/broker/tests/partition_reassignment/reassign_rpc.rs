@@ -5,14 +5,14 @@
 //! flattens the decoded response into plain tuples that a test can compare
 //! directly.
 
-use std::net::SocketAddr;
-
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use tokio::net::TcpStream;
-
-use crate::{
-    kafka_wire, kafka_wire::ExchangeSetup as WireExchangeSetup, plaintext_wire::CLIENT_ID,
-    support::wire::HeaderEncoding as RequestHeaderEncoding,
+use {
+    crate::{
+        kafka_wire, kafka_wire::ExchangeSetup as WireExchangeSetup, plaintext_wire::CLIENT_ID,
+        support::wire::HeaderEncoding as RequestHeaderEncoding,
+    },
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    std::net::SocketAddr,
+    tokio::net::TcpStream,
 };
 
 /// Drives `AlterPartitionReassignments` over a fresh PLAINTEXT connection. It
@@ -57,18 +57,15 @@ pub async fn drive_list_reassignments(
         ..Default::default()
     };
     let mut stream = TcpStream::connect(addr).await.expect("connect");
-    let resp: ListPartitionReassignmentsResponse = kafka_wire::exchange(
-        &mut stream,
-        &req,
-        WireExchangeSetup {
+    let resp: ListPartitionReassignmentsResponse =
+        kafka_wire::exchange(&mut stream, &req, WireExchangeSetup {
             api_key: WireApiKey(46),
             client_id: CLIENT_ID,
             header: RequestHeaderEncoding::Flexible,
             ..Default::default()
-        },
-    )
-    .await
-    .expect("ListPartitionReassignments round-trip");
+        })
+        .await
+        .expect("ListPartitionReassignments round-trip");
 
     resp.topics
         .into_iter()
@@ -129,19 +126,16 @@ pub async fn alter_reassignments_on(
         topics,
         ..Default::default()
     };
-    let resp: AlterPartitionReassignmentsResponse = kafka_wire::exchange(
-        stream,
-        &req,
-        WireExchangeSetup {
+    let resp: AlterPartitionReassignmentsResponse =
+        kafka_wire::exchange(stream, &req, WireExchangeSetup {
             api_key: WireApiKey(45),
             version: WireApiVersion(1),
             client_id: CLIENT_ID,
             header: RequestHeaderEncoding::Flexible,
             ..Default::default()
-        },
-    )
-    .await
-    .expect("AlterPartitionReassignments round-trip");
+        })
+        .await
+        .expect("AlterPartitionReassignments round-trip");
 
     resp.responses
         .into_iter()

@@ -6,27 +6,28 @@
 //! scope, the registry ceiling, the operator signature, and the break-glass
 //! approval that a thaw needs.
 
-use krabka_metadata::{
-    BreakGlassAction, MetadataImage, MetadataRecord, PatternType, TopicFreezeRecord,
-};
-use krabka_protocol::krabka::freeze::SetTopicFreezeRequest;
-use uuid::Uuid;
-
-use super::outcome::{Accepted, Refusal};
 pub(super) use crate::break_glass::gate::consumed_proposal_id;
-use crate::{
-    break_glass::{gate, handlers::principal_name},
-    cluster_id::encode,
-    codes,
-    config::BrokerConfig,
-    freeze::{
-        freeze_target,
-        handlers::pattern_type_concrete,
-        scope_covers_internal_topic,
-        signing::{FreezeSignatureCheck, verify_freeze_signature},
+use {
+    super::outcome::{Accepted, Refusal},
+    crate::{
+        break_glass::{gate, handlers::principal_name},
+        cluster_id::encode,
+        codes,
+        config::BrokerConfig,
+        freeze::{
+            freeze_target,
+            handlers::pattern_type_concrete,
+            scope_covers_internal_topic,
+            signing::{FreezeSignatureCheck, verify_freeze_signature},
+        },
+        handlers::{RequestContext, cluster_alter_denied},
+        time_util::now_ms,
     },
-    handlers::{RequestContext, cluster_alter_denied},
-    time_util::now_ms,
+    krabka_metadata::{
+        BreakGlassAction, MetadataImage, MetadataRecord, PatternType, TopicFreezeRecord,
+    },
+    krabka_protocol::krabka::freeze::SetTopicFreezeRequest,
+    uuid::Uuid,
 };
 
 /// Everything the checks read, and nothing they write.

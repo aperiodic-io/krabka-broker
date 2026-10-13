@@ -6,28 +6,28 @@
 //! It loads a partition when this broker becomes its leader, and it unloads
 //! the partition when this broker stops leading it (see `leadership`).
 
-use std::{
-    collections::BTreeSet,
-    sync::{Arc, Mutex as StdMutex, atomic::AtomicU64},
-};
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use krabka_security::ListenerProtocol;
-use krabka_units::ByteSize;
-use tokio::sync::{Mutex, Notify, RwLock};
-
-use crate::{
-    codes::{INVALID_PRODUCER_ID_MAPPING, UNKNOWN_SERVER_ERROR},
-    coordinator::GroupCoordinator,
-    error::BrokerError,
-    metadata_source::MetadataSource,
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    task_util::cloned_registry_values,
-    txn::{partitioner::partition_for_tid, state::TxnEntry},
+use {
+    crate::{
+        codes::{INVALID_PRODUCER_ID_MAPPING, UNKNOWN_SERVER_ERROR},
+        coordinator::GroupCoordinator,
+        error::BrokerError,
+        metadata_source::MetadataSource,
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        task_util::cloned_registry_values,
+        txn::{partitioner::partition_for_tid, state::TxnEntry},
+    },
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    krabka_log::ProducerId,
+    krabka_security::ListenerProtocol,
+    krabka_units::ByteSize,
+    std::{
+        collections::BTreeSet,
+        sync::{Arc, Mutex as StdMutex, atomic::AtomicU64},
+    },
+    tokio::sync::{Mutex, Notify, RwLock},
 };
 
 /// The commit rule of a `__transaction_state` write.
@@ -315,12 +315,13 @@ impl TxnCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::{
-        test_support::PartitionCount,
-        txn::coordinator::test_support::{test_coordinator, test_coordinator_with_partitions},
+    use {
+        super::*,
+        crate::{
+            test_support::PartitionCount,
+            txn::coordinator::test_support::{test_coordinator, test_coordinator_with_partitions},
+        },
+        assert2::check,
     };
 
     #[test]

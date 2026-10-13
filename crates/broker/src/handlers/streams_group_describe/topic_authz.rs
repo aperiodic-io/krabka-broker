@@ -17,10 +17,11 @@ define_required_topics!(StreamsGroupTopologyValue);
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::coordinator::unified::streams::persistence::{StoredSubtopology, StoredTopicInfo};
+    use {
+        super::*,
+        crate::coordinator::unified::streams::persistence::{StoredSubtopology, StoredTopicInfo},
+        assert2::check,
+    };
 
     fn topic_info(name: &str) -> StoredTopicInfo {
         StoredTopicInfo {

@@ -10,13 +10,15 @@
 //! The offsets half of the tool needs a live cluster and is covered by
 //! `crates/restore/tests/dr_roundtrip.rs`.
 
-use assert2::check;
-use krabka_backup::{
-    BackupError, EXIT_INTEGRITY,
-    archive::{Archive, ArchiveArgs},
-    capture::capture_key,
-    manifest::{MANIFEST, METADATA_CHECKPOINT, Manifest, RLMM_SNAPSHOT, sha256_hex},
-    run,
+use {
+    assert2::check,
+    krabka_backup::{
+        BackupError, EXIT_INTEGRITY,
+        archive::{Archive, ArchiveArgs},
+        capture::capture_key,
+        manifest::{MANIFEST, METADATA_CHECKPOINT, Manifest, RLMM_SNAPSHOT, sha256_hex},
+        run,
+    },
 };
 
 /// The RLMM snapshot bytes a fixture node holds. The capture copies bytes and

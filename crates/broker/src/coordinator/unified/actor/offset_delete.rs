@@ -6,21 +6,21 @@
 //! computes both from the live group: the group-level error, or the set of
 //! topics that the group subscribes to.
 
-use std::collections::HashSet;
-
-use bytes::Buf as _;
-use krabka_protocol::{
-    Decode, owned::consumer_protocol_subscription::ConsumerProtocolSubscription,
-};
-
-use super::ErrorCode;
-use crate::{
-    codes,
-    coordinator::unified::{
-        classic_state::{ClassicGroup as ClassicState, GroupState as ClassicGroupState},
-        consumer_state::GroupState as ConsumerState,
-        group::CoordinatorGroup,
+use {
+    super::ErrorCode,
+    crate::{
+        codes,
+        coordinator::unified::{
+            classic_state::{ClassicGroup as ClassicState, GroupState as ClassicGroupState},
+            consumer_state::GroupState as ConsumerState,
+            group::CoordinatorGroup,
+        },
     },
+    bytes::Buf as _,
+    krabka_protocol::{
+        Decode, owned::consumer_protocol_subscription::ConsumerProtocolSubscription,
+    },
+    std::collections::HashSet,
 };
 
 /// The topics whose offsets `OffsetDelete` must not remove.
@@ -121,14 +121,15 @@ fn decode_subscribed_topics(metadata: &[u8]) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::Bytes;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        actor::test_support::subscription_blob_at as subscription,
-        classic_state::Member as ClassicMember,
-        consumer_state::{ResolvedRegularExpression, test_support::member},
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            actor::test_support::subscription_blob_at as subscription,
+            classic_state::Member as ClassicMember,
+            consumer_state::{ResolvedRegularExpression, test_support::member},
+        },
+        assert2::check,
+        bytes::Bytes,
     };
 
     fn named(topics: &[&str]) -> SubscribedTopics {
@@ -259,14 +260,11 @@ mod tests {
 
         check!(consumer_subscribed_topics(&g) == SubscribedTopics::All);
 
-        g.set_resolved_regex(
-            "pay.*".into(),
-            ResolvedRegularExpression {
-                topics: ["payments".to_string()].into(),
-                version: 1,
-                timestamp_ms: 1,
-            },
-        );
+        g.set_resolved_regex("pay.*".into(), ResolvedRegularExpression {
+            topics: ["payments".to_string()].into(),
+            version: 1,
+            timestamp_ms: 1,
+        });
         check!(consumer_subscribed_topics(&g) == named(&["orders", "payments"]));
     }
 }

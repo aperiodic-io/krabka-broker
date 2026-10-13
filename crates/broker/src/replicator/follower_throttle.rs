@@ -13,18 +13,18 @@
 //! (`ReplicaFetcherThread.processPartitionData` records every throttled
 //! partition), so [`record_replicated`] charges it as it arrives.
 
-use std::sync::atomic::{
-    AtomicI64, AtomicU64,
-    Ordering::{Acquire, Relaxed, Release},
+use {
+    super::Config,
+    crate::throttle::{REPLICATION_QUOTA_WINDOW, TopicThrottle},
+    krabka_units::{
+        ByteRate, ByteSize,
+        convert::{ByteRateExt, ByteSizeExt},
+    },
+    std::sync::atomic::{
+        AtomicI64, AtomicU64,
+        Ordering::{Acquire, Relaxed, Release},
+    },
 };
-
-use krabka_units::{
-    ByteRate, ByteSize,
-    convert::{ByteRateExt, ByteSizeExt},
-};
-
-use super::Config;
-use crate::throttle::{REPLICATION_QUOTA_WINDOW, TopicThrottle};
 
 /// How far a followed partition trails the leader's high watermark, as the
 /// `lag` of Kafka's `PartitionFetchState`.
@@ -46,13 +46,9 @@ impl ReplicaLag {
     const UNKNOWN: i64 = -1;
 
     /// Whether the partition is in sync: its lag is known and is zero.
-    fn in_sync(&self) -> bool {
-        self.lag.load(Acquire) == 0
-    }
+    fn in_sync(&self) -> bool { self.lag.load(Acquire) == 0 }
 
-    fn note_appended(&self, bytes: u64) {
-        self.appended.fetch_add(bytes, Relaxed);
-    }
+    fn note_appended(&self, bytes: u64) { self.appended.fetch_add(bytes, Relaxed); }
 
     /// Recomputes the lag from the leader's high watermark and this replica's
     /// log end, once a response row has been applied: `max(0, hw - leo)`. Like
@@ -142,15 +138,16 @@ pub(super) fn follower_partition_fetch_cap(cfg: &Config) -> FetchThrottleDecisio
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::{bytes, bytes_per_sec};
-
-    use super::*;
-    use crate::{
-        replicator::test_support::{
-            LEADER_ID, NODE_ID, image_with_follower_throttle, image_with_leader, test_config,
+    use {
+        super::*,
+        crate::{
+            replicator::test_support::{
+                LEADER_ID, NODE_ID, image_with_follower_throttle, image_with_leader, test_config,
+            },
+            throttle::MICROS_PER_TOKEN,
         },
-        throttle::MICROS_PER_TOKEN,
+        assert2::{assert, check},
+        krabka_units::{bytes, bytes_per_sec},
     };
 
     #[test]

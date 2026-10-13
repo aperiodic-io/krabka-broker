@@ -1,8 +1,6 @@
 //! Peer identity and distinct-rack placement for native diskless WAL clusters.
 
-use krabka_broker::NodeId;
-
-use crate::support::NodeIndex;
+use {crate::support::NodeIndex, krabka_broker::NodeId};
 
 #[derive(Clone, Copy)]
 pub struct WalVoterCount(pub usize);
@@ -15,9 +13,7 @@ pub struct PeerCredentialsSetup<'a> {
     pub password: &'a str,
 }
 
-pub fn broker_principal(node: NodeId) -> String {
-    format!("broker-{node}")
-}
+pub fn broker_principal(node: NodeId) -> String { format!("broker-{node}") }
 
 /// Preserve the lazy ordered peer credential construction and checked node ids.
 ///

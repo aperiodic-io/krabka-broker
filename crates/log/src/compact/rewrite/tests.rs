@@ -1,24 +1,24 @@
 //! Unit tests for the compaction rewrite pass: superseded-record removal,
 //! tombstone and marker delete-horizon stamping, and `RETAIN_EMPTY`.
 
-use std::fs;
-
-use krabka_compression::CompressionType;
-use krabka_ids::Offset;
-use krabka_protocol::records::{Attributes, Record, TimestampType};
-use krabka_units::prelude::millis;
-
-use super::*;
-use crate::{
-    ProducerId,
-    compact::{
-        build_offset_map,
-        test_support::{
-            RETENTION, TransactionalRecordSetup, control_batch, make_record, rewrite_all,
-            rewrite_with_map, superseded_records, transactional_record, write_sealed_batches,
-            write_sealed_segment,
+use {
+    super::*,
+    crate::{
+        ProducerId,
+        compact::{
+            build_offset_map,
+            test_support::{
+                RETENTION, TransactionalRecordSetup, control_batch, make_record, rewrite_all,
+                rewrite_with_map, superseded_records, transactional_record, write_sealed_batches,
+                write_sealed_segment,
+            },
         },
     },
+    krabka_compression::CompressionType,
+    krabka_ids::Offset,
+    krabka_protocol::records::{Attributes, Record, TimestampType},
+    krabka_units::prelude::millis,
+    std::fs,
 };
 
 /// A far-future `now` so nothing in the simple tests ages out, plus an
@@ -97,14 +97,10 @@ fn rewrite_drops_superseded_records() {
 #[test]
 fn rewrite_keeps_tombstone_as_latest() {
     let dir = tempfile::tempdir().unwrap();
-    let first_segment = write_sealed_segment(
-        dir.path(),
-        0,
-        vec![
-            make_record(0, Some(b"k1"), Some(b"v1")),
-            make_record(1, Some(b"k1"), None), // tombstone
-        ],
-    );
+    let first_segment = write_sealed_segment(dir.path(), 0, vec![
+        make_record(0, Some(b"k1"), Some(b"v1")),
+        make_record(1, Some(b"k1"), None), // tombstone
+    ]);
     let segment_refs = vec![&first_segment];
     let out = rewrite_simple(dir.path(), &segment_refs);
     let bytes = fs::read(&out.log_swap).unwrap();
@@ -350,13 +346,10 @@ fn rewrite_retain_empty_for_active_producer() {
     let segment_refs = vec![&seg];
     let mut active = HashMap::new();
     // pid 1000 is active, and its last data batch ends at offset 0.
-    active.insert(
-        ProducerId(1000),
-        ProducerLastRecord {
-            last_data_offset: Some(Offset(0)),
-            producer_epoch: 7,
-        },
-    );
+    active.insert(ProducerId(1000), ProducerLastRecord {
+        last_data_offset: Some(Offset(0)),
+        producer_epoch: 7,
+    });
     let out = rewrite_all(
         dir.path(),
         &segment_refs,
@@ -417,16 +410,13 @@ fn rewrite_retain_empty_extends_last_offset() {
     let batches = read_rewrite(&out, (0, 105));
     assert2::assert!(
         batches
-            == vec![
-                keyed_value_batch(0, b"k1", b"v1"),
-                RecordBatch {
-                    base_offset: 100,
-                    last_offset_delta: 5,
-                    base_timestamp: -1,
-                    producer_id: -1,
-                    ..RecordBatch::default()
-                },
-            ]
+            == vec![keyed_value_batch(0, b"k1", b"v1"), RecordBatch {
+                base_offset: 100,
+                last_offset_delta: 5,
+                base_timestamp: -1,
+                producer_id: -1,
+                ..RecordBatch::default()
+            },]
     );
 }
 
@@ -626,14 +616,11 @@ fn only_the_last_group_of_a_round_keeps_an_emptied_last_batch() {
 
     assert2::assert!(
         outputs
-            == [
-                vec![],
-                vec![RecordBatch {
-                    base_offset: 1,
-                    base_timestamp: -1,
-                    last_offset_delta: 0,
-                    ..RecordBatch::default()
-                }]
-            ]
+            == [vec![], vec![RecordBatch {
+                base_offset: 1,
+                base_timestamp: -1,
+                last_offset_delta: 0,
+                ..RecordBatch::default()
+            }]]
     );
 }

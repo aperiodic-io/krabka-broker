@@ -9,13 +9,13 @@
 //! `TransactionManager.FindCoordinatorHandler` do. A suite that sends raw
 //! requests uses [`find_coordinator`] to make the same lookup.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_protocol::owned::find_coordinator_response::Coordinator;
-
-use crate::support::discovery::coordinator_lookup_request;
+use {
+    crate::support::discovery::coordinator_lookup_request,
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_protocol::owned::find_coordinator_response::Coordinator,
+    std::time::{Duration, Instant},
+};
 
 /// `FindCoordinator` key type of a consumer group.
 pub const KEY_TYPE_GROUP: i8 = 0;

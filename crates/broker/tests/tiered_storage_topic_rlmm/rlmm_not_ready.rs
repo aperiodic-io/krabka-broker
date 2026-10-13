@@ -5,16 +5,16 @@
 //! never swaps the manager in and every `add_remote_log_segment_metadata` call
 //! returns `NotReady`. The dead-port override keeps the manager unavailable.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_broker::RlmmKind;
-
-use crate::{
-    rlmm_cluster::{await_tiered_config, build_client, start_configured_topic_rlmm},
-    rlmm_round_trip::remote_log_files,
-    run_broker_test,
-    topic_fixture::{create_configured_topic, tiered_configs},
+use {
+    crate::{
+        rlmm_cluster::{await_tiered_config, build_client, start_configured_topic_rlmm},
+        rlmm_round_trip::remote_log_files,
+        run_broker_test,
+        topic_fixture::{create_configured_topic, tiered_configs},
+    },
+    assert2::assert,
+    krabka_broker::RlmmKind,
+    std::time::Duration,
 };
 
 /// While the topic-backed RLMM has not yet activated, the RLM copy task must

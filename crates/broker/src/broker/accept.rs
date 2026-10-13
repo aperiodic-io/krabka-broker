@@ -2,17 +2,17 @@
 //! KIP-612 accept-rate checks it applies to every inbound connection. It is a
 //! module of its own because it is the broker's only network ingress point.
 
-use std::sync::Arc;
-
-use krabka_units::{ByteSize, Time, convert::TimeExt as _};
-use tokio::{net::TcpListener, task::JoinSet};
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    broker::Broker,
-    config::ListenerSpec,
-    network::client::tune_socket,
-    quota::{lookup_ip_quota_with_key, positive_f64_to_u64},
+use {
+    crate::{
+        broker::Broker,
+        config::ListenerSpec,
+        network::client::tune_socket,
+        quota::{lookup_ip_quota_with_key, positive_f64_to_u64},
+    },
+    krabka_units::{ByteSize, Time, convert::TimeExt as _},
+    std::sync::Arc,
+    tokio::{net::TcpListener, task::JoinSet},
+    tokio_util::sync::CancellationToken,
 };
 
 /// KIP-612 quota key for accept-rate throttling; matches the
@@ -59,9 +59,7 @@ async fn close_after(stream: tokio::net::TcpStream, delay: Time) {
     drop(stream);
 }
 
-async fn shutdown_connection_tasks(connections: &mut JoinSet<()>) {
-    connections.shutdown().await;
-}
+async fn shutdown_connection_tasks(connections: &mut JoinSet<()>) { connections.shutdown().await; }
 
 pub(super) async fn accept_loop(
     broker: Arc<Broker>,
@@ -193,29 +191,24 @@ fn tune_accepted_socket(
     send_buffer: ByteSize,
     receive_buffer: ByteSize,
 ) {
-    tune_socket(
-        stream,
-        send_buffer,
-        receive_buffer,
-        [
-            |e| tracing::debug!(error = %e, "TCP_NODELAY set failed on accepted socket"),
-            |e| tracing::debug!(error = %e, "SO_SNDBUF set failed on accepted socket"),
-            |e| tracing::debug!(error = %e, "SO_RCVBUF set failed on accepted socket"),
-        ],
-    );
+    tune_socket(stream, send_buffer, receive_buffer, [
+        |e| tracing::debug!(error = %e, "TCP_NODELAY set failed on accepted socket"),
+        |e| tracing::debug!(error = %e, "SO_SNDBUF set failed on accepted socket"),
+        |e| tracing::debug!(error = %e, "SO_RCVBUF set failed on accepted socket"),
+    ]);
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use assert2::assert;
-    use krabka_units::{kibibytes, millis};
-
-    use super::*;
-    use crate::{
-        network::test_support::{check_socket_tuning, tcp_pair},
-        test_support::wait_tasks_started,
+    use {
+        super::*,
+        crate::{
+            network::test_support::{check_socket_tuning, tcp_pair},
+            test_support::wait_tasks_started,
+        },
+        assert2::assert,
+        krabka_units::{kibibytes, millis},
+        std::sync::atomic::{AtomicUsize, Ordering},
     };
 
     #[tokio::test]
@@ -237,9 +230,7 @@ mod tests {
         struct DropCounter(Arc<AtomicUsize>);
 
         impl Drop for DropCounter {
-            fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::SeqCst);
-            }
+            fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
         }
 
         let started = Arc::new(AtomicUsize::new(0));

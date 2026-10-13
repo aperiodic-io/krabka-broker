@@ -1,10 +1,11 @@
 //! RFC 2253 rendering checked against the strings Java's
 //! `X500Principal.getName()` gives for the same DER.
 
-use assert2::check;
-use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
-
-use super::{name_rfc2253, subject_dn_rfc2253};
+use {
+    super::{name_rfc2253, subject_dn_rfc2253},
+    assert2::check,
+    rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair},
+};
 
 const CN: &[u8] = &[0x55, 0x04, 0x03];
 const C: &[u8] = &[0x55, 0x04, 0x06];
@@ -56,11 +57,9 @@ fn renders_names_as_x500_principal_get_name() {
         ("single RDN", &[&[(CN, UTF8, b"alice")]], "CN=alice"),
         (
             "RDNs come out last first",
-            &[
-                &[(C, PRINTABLE, b"US")],
-                &[(O, UTF8, b"krabka")],
-                &[(CN, UTF8, b"alice")],
-            ],
+            &[&[(C, PRINTABLE, b"US")], &[(O, UTF8, b"krabka")], &[(
+                CN, UTF8, b"alice",
+            )]],
             "CN=alice,O=krabka,C=US",
         ),
         (
@@ -75,10 +74,10 @@ fn renders_names_as_x500_principal_get_name() {
         ),
         (
             "multi-valued RDN joins with plus in encoding order",
-            &[
-                &[(O, UTF8, b"krabka")],
-                &[(CN, UTF8, b"alice"), (UID, UTF8, b"42")],
-            ],
+            &[&[(O, UTF8, b"krabka")], &[
+                (CN, UTF8, b"alice"),
+                (UID, UTF8, b"42"),
+            ]],
             "CN=alice+UID=42,O=krabka",
         ),
         (

@@ -5,16 +5,16 @@
 //! the `AlterUserScramCredentials` wire path, which keeps every test in this
 //! suite focused on the read half of KIP-554.
 
-use std::net::SocketAddr;
-
-use krabka_broker::BrokerHandle;
-use krabka_metadata::{AclOperation, MetadataRecord, ResourceType};
-use krabka_security::SaslMechanism;
-use tempfile::TempDir;
-
-use crate::support::{
-    acl::{ClusterAclSetup, cluster_acl_record, use_simple_acl_authorizer},
-    sasl::{sasl_temp_config, start_broker},
+use {
+    crate::support::{
+        acl::{ClusterAclSetup, cluster_acl_record, use_simple_acl_authorizer},
+        sasl::{sasl_temp_config, start_broker},
+    },
+    krabka_broker::BrokerHandle,
+    krabka_metadata::{AclOperation, MetadataRecord, ResourceType},
+    krabka_security::SaslMechanism,
+    std::net::SocketAddr,
+    tempfile::TempDir,
 };
 
 pub(crate) fn admin_test_password() -> String {

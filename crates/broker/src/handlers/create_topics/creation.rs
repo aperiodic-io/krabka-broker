@@ -7,35 +7,36 @@
 //! for each row that it gets, from a client or from the auto topic creation
 //! of a broker ([`crate::auto_topic_creation::AutoTopicCreation`]).
 
-use std::collections::BTreeMap;
-
-use krabka_protocol::owned::{
-    create_topics_request::CreatableTopic, create_topics_response::CreatableTopicResult,
-};
-use krabka_raft::RaftError;
-use uuid::Uuid;
-
-use super::{
-    THROTTLING_QUOTA_EXCEEDED_MESSAGE, automatic_leaderships, diskless_wal_placement_error,
-    inactive_brokers, invalid_topic_shape, manual_leaderships,
-    name::topic_name_error,
-    placement::{automatic_placement_exclusions, resolve_assignments},
-    placement_failure_message,
-    records::{null_config_error, topic_config_overrides, topic_records},
-    resolve_default,
-    response::topic_error_result,
-    site_broker_views, topic_exists_result,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    config_keys::{self, resolve_preferred_leader_site},
-    handlers::{
-        offline_replicas::unavailable_brokers, partition_materialization::PartitionMaterialization,
+use {
+    super::{
+        THROTTLING_QUOTA_EXCEEDED_MESSAGE, automatic_leaderships, diskless_wal_placement_error,
+        inactive_brokers, invalid_topic_shape, manual_leaderships,
+        name::topic_name_error,
+        placement::{automatic_placement_exclusions, resolve_assignments},
+        placement_failure_message,
+        records::{null_config_error, topic_config_overrides, topic_records},
+        resolve_default,
+        response::topic_error_result,
+        site_broker_views, topic_exists_result,
     },
-    quota::ControllerMutationQuota,
-    site_placement::PlacementRng,
-    topic_policy::check,
+    crate::{
+        broker::Broker,
+        codes,
+        config_keys::{self, resolve_preferred_leader_site},
+        handlers::{
+            offline_replicas::unavailable_brokers,
+            partition_materialization::PartitionMaterialization,
+        },
+        quota::ControllerMutationQuota,
+        site_placement::PlacementRng,
+        topic_policy::check,
+    },
+    krabka_protocol::owned::{
+        create_topics_request::CreatableTopic, create_topics_response::CreatableTopicResult,
+    },
+    krabka_raft::RaftError,
+    std::collections::BTreeMap,
+    uuid::Uuid,
 };
 
 /// A topic that passed every check, and was committed unless the request is

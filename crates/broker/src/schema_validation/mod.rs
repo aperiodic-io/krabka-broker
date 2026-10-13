@@ -60,7 +60,5 @@ impl SchemaGate {
     /// `schema.validation.mode` alone does not turn validation on, so a topic
     /// that sets only the mode has no gate.
     #[must_use]
-    pub fn is_active(self) -> bool {
-        self.key || self.value
-    }
+    pub fn is_active(self) -> bool { self.key || self.value }
 }

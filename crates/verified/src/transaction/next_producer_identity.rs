@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::first_unstable_frontier;
-use super::{IdleTransactionState, NO_TRANSACTION_TIMEOUT_MS};
+use {
+    super::{IdleTransactionState, NO_TRANSACTION_TIMEOUT_MS},
+    creusot_std::prelude::*,
+};
 
 /// Select the first unstable transaction offset, or the log end when no
 /// transaction is open. A pending start beyond the log end is rejected.

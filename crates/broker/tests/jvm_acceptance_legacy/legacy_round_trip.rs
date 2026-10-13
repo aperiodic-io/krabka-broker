@@ -5,10 +5,11 @@
 //! handler and down-conversion in the `Fetch` handler within one test, so it
 //! stands on its own.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE_LEGACY, consume_console, produce_console, start_legacy_console_broker,
+use {
+    crate::jvm_acceptance::{
+        KAFKA_IMAGE_LEGACY, consume_console, produce_console, start_legacy_console_broker,
+    },
+    assert2::assert,
 };
 
 /// Test 1: pure-legacy round-trip.

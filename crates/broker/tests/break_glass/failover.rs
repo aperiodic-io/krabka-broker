@@ -8,18 +8,19 @@
 //! straight into the log here. The wire path that produces them is proved on
 //! the SASL broker elsewhere in the suite.
 
-use assert2::check;
-use krabka_broker::{codes, config::BackgroundUncleanRecovery};
-use krabka_metadata::{
-    BreakGlassApproval as StoredApproval, BreakGlassProposalRecord, MetadataRecord,
-};
-
-use crate::{
-    cluster::{index_of, plain_client, start_gated_cluster, wait_for_new_leader},
-    principals::{BOB, CAROL, principal},
-    proposals::{ACTION_DELETE_TOPIC, now_ms, open, stored},
-    support::{self, shutdown_cluster},
-    topics::{create_topic, delete_topic_as_admin_client},
+use {
+    crate::{
+        cluster::{index_of, plain_client, start_gated_cluster, wait_for_new_leader},
+        principals::{BOB, CAROL, principal},
+        proposals::{ACTION_DELETE_TOPIC, now_ms, open, stored},
+        support::{self, shutdown_cluster},
+        topics::{create_topic, delete_topic_as_admin_client},
+    },
+    assert2::check,
+    krabka_broker::{codes, config::BackgroundUncleanRecovery},
+    krabka_metadata::{
+        BreakGlassApproval as StoredApproval, BreakGlassProposalRecord, MetadataRecord,
+    },
 };
 
 /// An approved proposal outlives the controller that recorded it.

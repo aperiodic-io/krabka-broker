@@ -8,15 +8,15 @@
 //! A group with no interval injects only on demand, and the scheduler passes
 //! over it.
 
-use std::sync::Arc;
-
-use krabka_units::convert::TimeExt as _;
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
-
-use crate::{
-    barrier::coordinator::BarrierCoordinator, metadata_source::MetadataSource,
-    task_util::run_every, time_util::now_ms,
+use {
+    crate::{
+        barrier::coordinator::BarrierCoordinator, metadata_source::MetadataSource,
+        task_util::run_every, time_util::now_ms,
+    },
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
+    tracing::{debug, info},
 };
 
 /// Entry point of the spawned task. It returns when `shutdown` is cancelled.
@@ -48,11 +48,12 @@ async fn inject_due(coordinator: &BarrierCoordinator, controller: &dyn MetadataS
 
 #[cfg(test)]
 mod tests {
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::barrier::coordinator::test_support::{
-        Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec,
+    use {
+        super::*,
+        crate::barrier::coordinator::test_support::{
+            Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec,
+        },
+        krabka_units::millis,
     };
 
     async fn periodic_group(fixture: &Fixture) -> (BarrierCoordinator, Arc<dyn MetadataSource>) {

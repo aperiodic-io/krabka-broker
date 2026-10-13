@@ -4,9 +4,10 @@
 //! approver set a broker held when it made a decision. The hash covers the
 //! members alone, and not the order an operator wrote them in.
 
-use std::collections::BTreeSet;
-
-use sha2::{Digest as _, Sha256};
+use {
+    sha2::{Digest as _, Sha256},
+    std::collections::BTreeSet,
+};
 
 /// SHA-256 hex fingerprint of a configured approver set.
 ///

@@ -3,20 +3,20 @@
 //! payload, and a fetch whose acquired window is fragmented must carry every
 //! acquired offset and nothing from the gap between them.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_client_core::Client;
-
-use crate::{
-    harness::{ConsumptionFixture, bootstrap_share_state, consumption_fixture, produce_n},
-    share_rpc::{acquire_three_and_acknowledge, acquired_count, share_fetch},
-    support::share::{
-        RefetchSetup, ShareAck, ShareProduceSetup, ShareRecordSeedSetup, ShareRecordsSetup,
-        ShareSessionEpoch, ShareSessionSetup, ShareTopicSetup, acknowledge_success,
-        join_consume_member, permitted_topic_fixture, produce_values, record_values,
-        refetch_while_empty,
+use {
+    crate::{
+        harness::{ConsumptionFixture, bootstrap_share_state, consumption_fixture, produce_n},
+        share_rpc::{acquire_three_and_acknowledge, acquired_count, share_fetch},
+        support::share::{
+            RefetchSetup, ShareAck, ShareProduceSetup, ShareRecordSeedSetup, ShareRecordsSetup,
+            ShareSessionEpoch, ShareSessionSetup, ShareTopicSetup, acknowledge_success,
+            join_consume_member, permitted_topic_fixture, produce_values, record_values,
+            refetch_while_empty,
+        },
     },
+    assert2::assert,
+    krabka_client_core::Client,
+    std::time::Duration,
 };
 
 /// Regression: a `ShareFetch` whose acquired offset begins a *later* record
@@ -47,29 +47,22 @@ async fn acquire_past_leading_batch_returns_bytes() {
 
     // A separate single-record batch at offset 3 (this starts a new batch; the
     // acquired range 3..3 begins past the leading 0..2 batch).
-    produce_n(
-        &client,
-        ShareRecordsSetup {
-            topic_id: tid,
-            ..Default::default()
-        },
-    )
+    produce_n(&client, ShareRecordsSetup {
+        topic_id: tid,
+        ..Default::default()
+    })
     .await;
 
     // Acquire offset 3 — the payload must carry the record bytes.
     let row3 = share_fetch(&client, session.fetch_at(ShareSessionEpoch(2))).await;
-    let row3 = refetch_while_empty(
-        &client,
-        row3,
-        RefetchSetup {
-            session: ShareSessionSetup {
-                member: &member,
-                topic_id: tid,
-                ..Default::default()
-            },
+    let row3 = refetch_while_empty(&client, row3, RefetchSetup {
+        session: ShareSessionSetup {
+            member: &member,
+            topic_id: tid,
             ..Default::default()
         },
-    )
+        ..Default::default()
+    })
     .await;
     assert!(
         acquired_count(&row3) == 1,

@@ -37,9 +37,7 @@
 //! JVM tools another way: `DescribeConfigs` reports a read-only `write.freeze`
 //! key for every topic, so `kafka-configs --describe` shows it.
 
-use clap::Parser;
-
-use self::command::dispatch;
+use {self::command::dispatch, clap::Parser};
 
 mod cli;
 mod command;

@@ -2,17 +2,17 @@
 //! a `Produce` for one partition at all, and the metadata-image comparisons
 //! that back them.
 
-use std::sync::Arc;
-
-use krabka_protocol::owned::produce_response::LeaderIdAndEpoch;
-
-use super::{ACKS_ALL, NO_LEADER_ID, topic_settings::topic_min_insync_replicas};
-use crate::{
-    codes,
-    log_dir_status::LogDirRegistry,
-    partition::{Partition, ReplicationTarget},
-    partition_registry::PartitionRegistry,
-    replica_state::ReplicaState,
+use {
+    super::{ACKS_ALL, NO_LEADER_ID, topic_settings::topic_min_insync_replicas},
+    crate::{
+        codes,
+        log_dir_status::LogDirRegistry,
+        partition::{Partition, ReplicationTarget},
+        partition_registry::PartitionRegistry,
+        replica_state::ReplicaState,
+    },
+    krabka_protocol::owned::produce_response::LeaderIdAndEpoch,
+    std::sync::Arc,
 };
 
 pub(super) struct PartitionGateError {
@@ -195,24 +195,25 @@ pub(super) fn current_leader_hint(record: &krabka_metadata::PartitionRecord) -> 
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{BrokerConfigRecord, MetadataImage, MetadataRecord, PartitionRecord};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        codes::{NOT_ENOUGH_REPLICAS, NOT_LEADER_OR_FOLLOWER},
-        config_keys::{BROKER_WITNESS, MIN_INSYNC_REPLICAS, WITNESS_TRUE},
-        handlers::{
-            produce::test_support::image_with_topic,
-            test_support::{ReplicatedPartitionSetup, replicated_partition},
+    use {
+        super::*,
+        crate::{
+            codes::{NOT_ENOUGH_REPLICAS, NOT_LEADER_OR_FOLLOWER},
+            config_keys::{BROKER_WITNESS, MIN_INSYNC_REPLICAS, WITNESS_TRUE},
+            handlers::{
+                produce::test_support::image_with_topic,
+                test_support::{ReplicatedPartitionSetup, replicated_partition},
+            },
+            log_dir::partition_dir,
+            log_dir_status::LogDirRegistry,
+            partition::ReplicationTarget,
+            partition_registry::PartitionRegistry,
+            replica_state::ReplicaState,
+            test_support::{StandalonePartitionSetup, StorageMode, spawn_standalone_partition},
         },
-        log_dir::partition_dir,
-        log_dir_status::LogDirRegistry,
-        partition::ReplicationTarget,
-        partition_registry::PartitionRegistry,
-        replica_state::ReplicaState,
-        test_support::{StandalonePartitionSetup, StorageMode, spawn_standalone_partition},
+        assert2::assert,
+        krabka_metadata::{BrokerConfigRecord, MetadataImage, MetadataRecord, PartitionRecord},
+        uuid::Uuid,
     };
 
     #[bon::builder]
@@ -364,14 +365,10 @@ mod tests {
             krabka_log::LogConfig::default(),
         )
         .unwrap();
-        let partition = spawn_standalone_partition(
-            dir.path(),
-            log,
-            StandalonePartitionSetup {
-                storage: StorageMode::Diskless,
-                ..Default::default()
-            },
-        );
+        let partition = spawn_standalone_partition(dir.path(), log, StandalonePartitionSetup {
+            storage: StorageMode::Diskless,
+            ..Default::default()
+        });
 
         assert!(!diskless_role_ready(&partition, record));
         partition
@@ -420,14 +417,10 @@ mod tests {
         partitions.insert(
             "orders".into(),
             krabka_ids::PartitionIndex(0),
-            spawn_standalone_partition(
-                dir.path(),
-                log,
-                StandalonePartitionSetup {
-                    storage: StorageMode::from_wire(diskless),
-                    ..Default::default()
-                },
-            ),
+            spawn_standalone_partition(dir.path(), log, StandalonePartitionSetup {
+                storage: StorageMode::from_wire(diskless),
+                ..Default::default()
+            }),
         );
         validate_partition_gate(
             "orders",

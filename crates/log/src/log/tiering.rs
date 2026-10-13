@@ -6,16 +6,16 @@
 //! a `RemoteLogManager` needs, rolls when that manager tells it to roll, and
 //! deletes what that manager tells it to delete.
 
-use std::path::{Path, PathBuf};
-
-use krabka_ids::{LeaderEpoch, Offset};
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-use tracing::instrument;
-
-use super::Log;
-use crate::{
-    error::LogError, leader_epoch_checkpoint::EpochEntry, name, producer_snapshot, retention,
-    segment::Segment,
+use {
+    super::Log,
+    crate::{
+        error::LogError, leader_epoch_checkpoint::EpochEntry, name, producer_snapshot, retention,
+        segment::Segment,
+    },
+    krabka_ids::{LeaderEpoch, Offset},
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
+    std::path::{Path, PathBuf},
+    tracing::instrument,
 };
 
 /// A sealed segment described for tiered-storage offload (KIP-405).

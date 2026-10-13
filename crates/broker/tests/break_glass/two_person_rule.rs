@@ -6,18 +6,19 @@
 //! reads together: a broker that honoured nothing and a broker that honoured
 //! everything both fail here, and only one of the two fails anywhere else.
 
-use assert2::{assert, check};
-use krabka_broker::codes;
-use krabka_protocol::krabka::break_glass::{
-    ApproveBreakGlassResponse, BreakGlassApproval as WireApproval, DescribedBreakGlassProposal,
-};
-
-use crate::{
-    cluster::{Cluster, boot},
-    principals::{ALICE, BOB, CAROL, MALLORY, principal},
-    proposals::{ACTION_DELETE_TOPIC, TTL_CONFIGURED, approve, open, propose, stored},
-    support,
-    topics::{delete_topic, topic_exists},
+use {
+    crate::{
+        cluster::{Cluster, boot},
+        principals::{ALICE, BOB, CAROL, MALLORY, principal},
+        proposals::{ACTION_DELETE_TOPIC, TTL_CONFIGURED, approve, open, propose, stored},
+        support,
+        topics::{delete_topic, topic_exists},
+    },
+    assert2::{assert, check},
+    krabka_broker::codes,
+    krabka_protocol::krabka::break_glass::{
+        ApproveBreakGlassResponse, BreakGlassApproval as WireApproval, DescribedBreakGlassProposal,
+    },
 };
 
 /// The whole two-person loop: Alice opens a proposal, Bob and Carol approve it,

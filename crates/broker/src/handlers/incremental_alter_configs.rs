@@ -26,29 +26,30 @@
 //! resource type has its own submodule that owns the key whitelist, the value
 //! validation, and the metadata record that it stages.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_protocol::owned::{
-    incremental_alter_configs_request::{
-        self, AlterConfigsResource, IncrementalAlterConfigsRequest,
+use {
+    crate::{
+        config_keys::{
+            MIN_INSYNC_REPLICAS, broker_dynamic::BrokerConfigContext, clear_elr_records,
+            group::GroupBounds,
+        },
+        handlers::{
+            RequestContext, audit_resource, config_resource_refusal, decode_request,
+            encode_response,
+            forward_to_controller::{controller_listener_dispatch, to_active_controller},
+            response_encoding::ErrorRow as _,
+        },
     },
-    incremental_alter_configs_response::{
-        AlterConfigsResourceResponse, IncrementalAlterConfigsResponse,
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    krabka_protocol::owned::{
+        incremental_alter_configs_request::{
+            self, AlterConfigsResource, IncrementalAlterConfigsRequest,
+        },
+        incremental_alter_configs_response::{
+            AlterConfigsResourceResponse, IncrementalAlterConfigsResponse,
+        },
     },
-};
-use krabka_raft::RaftError;
-
-use crate::{
-    config_keys::{
-        MIN_INSYNC_REPLICAS, broker_dynamic::BrokerConfigContext, clear_elr_records,
-        group::GroupBounds,
-    },
-    handlers::{
-        RequestContext, audit_resource, config_resource_refusal, decode_request, encode_response,
-        forward_to_controller::{controller_listener_dispatch, to_active_controller},
-        response_encoding::ErrorRow as _,
-    },
+    krabka_raft::RaftError,
+    std::{sync::Arc, time::Duration},
 };
 
 mod broker_logger_scope;
@@ -59,17 +60,24 @@ mod group_scope;
 mod test_support;
 mod topic_scope;
 
-use self::{
-    broker_logger_scope::handle_broker_logger_scoped, broker_scope::handle_broker_scoped,
-    client_metrics_scope::handle_client_metrics_scoped, group_scope::handle_group_scoped,
-    topic_scope::topic_config_record,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    handlers::describe_configs::{
-        RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
-        RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+fn set_error_response(out: &mut AlterConfigsResourceResponse, (code, message): (i16, String)) {
+    out.error_code = code;
+    out.error_message = Some(message);
+}
+
+use {
+    self::{
+        broker_logger_scope::handle_broker_logger_scoped, broker_scope::handle_broker_scoped,
+        client_metrics_scope::handle_client_metrics_scoped, group_scope::handle_group_scoped,
+        topic_scope::topic_config_record,
+    },
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::describe_configs::{
+            RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
+            RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+        },
     },
 };
 const OP_SET: i8 = 0;
@@ -445,15 +453,19 @@ async fn process_resource_once(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        handlers::{
-            incremental_alter_configs::test_support::{
-                AlterableConfig, check, make_scoped_resource,
+    use {
+        super::*,
+        crate::{
+            handlers::{
+                incremental_alter_configs::test_support::{
+                    AlterableConfig, check, make_scoped_resource,
+                },
+                test_support::{assert_dispatch_response, ordered_rows},
             },
-            test_support::{assert_dispatch_response, ordered_rows},
+            test_support::{
+                context_helper, start_broker_with_authorizer as start_broker, test_ctx,
+            },
         },
-        test_support::{context_helper, start_broker_with_authorizer as start_broker, test_ctx},
     };
 
     context_helper!(client_id = "admin-client");
@@ -580,29 +592,21 @@ mod tests {
                 vec![duplicate.clone(), duplicate, Ok(())],
             ),
             (
-                vec![resource(
-                    RESOURCE_TYPE_TOPIC,
-                    "t",
-                    vec![
-                        config("retention.ms", OP_SET, Some("1")),
-                        config("retention.ms", OP_DELETE, None),
-                    ],
-                )],
+                vec![resource(RESOURCE_TYPE_TOPIC, "t", vec![
+                    config("retention.ms", OP_SET, Some("1")),
+                    config("retention.ms", OP_DELETE, None),
+                ])],
                 vec![Err((
                     codes::INVALID_REQUEST,
                     "Error due to duplicate config keys".to_owned(),
                 ))],
             ),
             (
-                vec![resource(
-                    RESOURCE_TYPE_GROUP,
-                    "g",
-                    vec![
-                        config("a", OP_SET, None),
-                        config("b", OP_DELETE, None),
-                        config("c", OP_APPEND, None),
-                    ],
-                )],
+                vec![resource(RESOURCE_TYPE_GROUP, "g", vec![
+                    config("a", OP_SET, None),
+                    config("b", OP_DELETE, None),
+                    config("c", OP_APPEND, None),
+                ])],
                 vec![Err((
                     codes::INVALID_REQUEST,
                     "Null value not supported for : a, c".to_owned(),

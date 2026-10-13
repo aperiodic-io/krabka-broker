@@ -5,31 +5,31 @@
 //! KIP-1071 gates produce -- feature disabled, group unknown, streams actor
 //! gone -- stay byte-for-byte what the JVM admin client expects.
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
-
-use assert2::{assert, check};
-use krabka_metadata::{AclOperation, MetadataRecord, ResourceType};
-use krabka_protocol::UnknownTaggedFields;
-
-use super::{
-    test_support::{
-        describe, describe_as, describe_at, error_group, finalize_streams_version,
-        seed_streams_group_topology, start_broker, start_broker_with_authorizer,
-        topology_with_source_topic, unfinalize_streams_version,
+use {
+    super::{
+        test_support::{
+            describe, describe_as, describe_at, error_group, finalize_streams_version,
+            seed_streams_group_topology, start_broker, start_broker_with_authorizer,
+            topology_with_source_topic, unfinalize_streams_version,
+        },
+        *,
     },
-    *,
-};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    authorizer::{AllowAllAuthorizer, SimpleAclAuthorizer},
-    broker::BrokerHandle,
-    codes,
-    coordinator::unified::streams::actor::StreamsGroupActorMessage,
-    handlers::{
-        authorized_operations::authorized_operations_bits,
-        group_heartbeat_test_support::{StreamsTopologySetup, streams_request_with_topology},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        authorizer::{AllowAllAuthorizer, SimpleAclAuthorizer},
+        broker::BrokerHandle,
+        codes,
+        coordinator::unified::streams::actor::StreamsGroupActorMessage,
+        handlers::{
+            authorized_operations::authorized_operations_bits,
+            group_heartbeat_test_support::{StreamsTopologySetup, streams_request_with_topology},
+        },
+        test_support::{DenyAll, peer, principal, request_context, start_broker_with},
     },
-    test_support::{DenyAll, peer, principal, request_context, start_broker_with},
+    assert2::{assert, check},
+    krabka_metadata::{AclOperation, MetadataRecord, ResourceType},
+    krabka_protocol::UnknownTaggedFields,
+    std::{collections::HashSet, sync::Arc, time::Duration},
 };
 
 /// Commit one literal `Allow` ACL for `User:<user>` on `(resource_type,
@@ -327,19 +327,20 @@ async fn include_authorized_operations_fills_the_bitfield_only_on_opt_in() {
 /// reported, its endpoint, its tags and its target assignment.
 #[tokio::test]
 async fn ready_group_describes_the_configured_topology_and_every_member_field() {
-    use krabka_protocol::owned::{
-        common::{
-            streams_group_describe_response::{
-                assignment::Assignment, endpoint::Endpoint, key_value::KeyValue,
-                task_offset::TaskOffset, topic_info::TopicInfo,
+    use {
+        super::test_support::{create_topic, expected_task_ids, heartbeat},
+        krabka_protocol::owned::{
+            common::{
+                streams_group_describe_response::{
+                    assignment::Assignment, endpoint::Endpoint, key_value::KeyValue,
+                    task_offset::TaskOffset, topic_info::TopicInfo,
+                },
+                streams_group_heartbeat_request as hb,
             },
-            streams_group_heartbeat_request as hb,
+            streams_group_describe_response::{Member, Subtopology, Topology},
+            streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
         },
-        streams_group_describe_response::{Member, Subtopology, Topology},
-        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
     };
-
-    use super::test_support::{create_topic, expected_task_ids, heartbeat};
 
     // The member reports task offsets, which Kafka 4.3.1 refuses and trunk
     // takes.
@@ -382,18 +383,15 @@ async fn ready_group_describes_the_configured_topology_and_every_member_field() 
         offset,
         ..Default::default()
     };
-    let steady = heartbeat(
-        &broker,
-        &StreamsGroupHeartbeatRequest {
-            group_id: "app".into(),
-            member_id: "m1".into(),
-            member_epoch: joined.member_epoch,
-            rebalance_timeout_ms: -1,
-            task_offsets: Some(vec![task_offset(5)]),
-            task_end_offsets: Some(vec![task_offset(10)]),
-            ..Default::default()
-        },
-    )
+    let steady = heartbeat(&broker, &StreamsGroupHeartbeatRequest {
+        group_id: "app".into(),
+        member_id: "m1".into(),
+        member_epoch: joined.member_epoch,
+        rebalance_timeout_ms: -1,
+        task_offsets: Some(vec![task_offset(5)]),
+        task_end_offsets: Some(vec![task_offset(10)]),
+        ..Default::default()
+    })
     .await;
     check!(steady.error_code == codes::NONE, "{steady:?}");
 
@@ -484,12 +482,13 @@ async fn ready_group_describes_the_configured_topology_and_every_member_field() 
 /// `GROUP_ID_NOT_FOUND` with Kafka's `castToStreamsGroup` message.
 #[tokio::test]
 async fn empty_group_is_empty_and_another_group_type_is_not_found() {
-    use krabka_protocol::owned::{
-        common::streams_group_heartbeat_request as hb,
-        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+    use {
+        super::test_support::heartbeat,
+        krabka_protocol::owned::{
+            common::streams_group_heartbeat_request as hb,
+            streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+        },
     };
-
-    use super::test_support::heartbeat;
 
     broker_fixture!((broker_handle, _dir, broker), start_broker(true));
     finalize_streams_version(&broker).await;

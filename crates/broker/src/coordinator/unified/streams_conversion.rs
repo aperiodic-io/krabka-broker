@@ -5,14 +5,15 @@
 //! tombstone the records of the protocol being left, and force the type lock —
 //! so they are easiest to keep correct side by side.
 
-use std::sync::Arc;
-
-use super::{
-    actor::GroupActorMessage,
-    group_coordinator::{GroupCoordinator, GroupType},
-    streams,
+use {
+    super::{
+        actor::GroupActorMessage,
+        group_coordinator::{GroupCoordinator, GroupType},
+        streams,
+    },
+    crate::error::BrokerError,
+    std::sync::Arc,
 };
-use crate::error::BrokerError;
 
 impl GroupCoordinator {
     /// The `error_message` of the `GROUP_ID_NOT_FOUND` answer to a
@@ -209,10 +210,11 @@ impl GroupCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::{DeleteGroupError, unified::test_support::make_coord_with_log};
+    use {
+        super::*,
+        crate::coordinator::{DeleteGroupError, unified::test_support::make_coord_with_log},
+        assert2::{assert, check},
+    };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn conversion_paths_update_type_locks_and_report_missing_streams() {

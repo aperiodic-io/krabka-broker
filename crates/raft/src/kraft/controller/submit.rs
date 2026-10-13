@@ -2,27 +2,27 @@
 //! records against a scratch image, the append that assigns their offsets, and
 //! the parked commit waiters that the high watermark later resolves or fails.
 
-use std::sync::Arc;
-
-use krabka_ids::Offset;
-use krabka_metadata::{
-    BreakGlassProposalRecord, DelegationToken, DelegationTokenRecord, DeleteDelegationTokenRecord,
-    MetadataImage, MetadataRecord, PartitionRecord, TopicFreezeRecord, from_kraft_value,
-    to_kraft_values,
-};
-use tokio::sync::oneshot;
-
-use super::{
-    CommitWaiter, Engine, KraftController,
-    offsets::{
-        assigned_record_offset, hwm_reaches_waiter, leader_alone_is_majority,
-        submit_waiter_need_offset, validate_append_result,
+use {
+    super::{
+        CommitWaiter, Engine, KraftController,
+        offsets::{
+            assigned_record_offset, hwm_reaches_waiter, leader_alone_is_majority,
+            submit_waiter_need_offset, validate_append_result,
+        },
+        records::{decode_committed_value, metadata_record_batch, next_batch_offset},
     },
-    records::{decode_committed_value, metadata_record_batch, next_batch_offset},
-};
-use crate::{
-    DelegationTokenMutation, OffsetReservation, SubmitChangeResult, error::RaftError,
-    kraft::role::Role,
+    crate::{
+        DelegationTokenMutation, OffsetReservation, SubmitChangeResult, error::RaftError,
+        kraft::role::Role,
+    },
+    krabka_ids::Offset,
+    krabka_metadata::{
+        BreakGlassProposalRecord, DelegationToken, DelegationTokenRecord,
+        DeleteDelegationTokenRecord, MetadataImage, MetadataRecord, PartitionRecord,
+        TopicFreezeRecord, from_kraft_value, to_kraft_values,
+    },
+    std::sync::Arc,
+    tokio::sync::oneshot,
 };
 
 impl Engine {
@@ -922,15 +922,16 @@ fn replay_value_blobs(blobs: &[bytes::Bytes], image: &mut MetadataImage) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use krabka_metadata::{DelegationTokenRecord, MetadataRecord, PartitionRecord};
-    use krabka_security::KafkaPrincipal;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        kraft::controller::test_support::EngineSetup,
-        test_support::{single_partition_topic, single_replica_partition},
-        types::NodeId,
+    use {
+        super::*,
+        crate::{
+            kraft::controller::test_support::EngineSetup,
+            test_support::{single_partition_topic, single_replica_partition},
+            types::NodeId,
+        },
+        krabka_metadata::{DelegationTokenRecord, MetadataRecord, PartitionRecord},
+        krabka_security::KafkaPrincipal,
+        uuid::Uuid,
     };
 
     fn principal(name: &str) -> KafkaPrincipal {
@@ -1074,9 +1075,10 @@ mod tests {
 
     #[test]
     fn unguarded_delegation_token_records_validation() {
-        use krabka_metadata::DeleteDelegationTokenRecord;
-
-        use crate::kraft::controller::test_support::{build_engine_only, one_offset_batch};
+        use {
+            crate::kraft::controller::test_support::{build_engine_only, one_offset_batch},
+            krabka_metadata::DeleteDelegationTokenRecord,
+        };
 
         let (mut engine, _dir) = build_engine_only(EngineSetup {
             ids: &[NodeId(1)],

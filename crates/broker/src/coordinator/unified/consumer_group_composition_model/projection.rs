@@ -6,21 +6,21 @@
 //! real code over it, and projects the result back. Keeping both directions in
 //! one file is what makes it easy to see that they are inverses.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
-use krabka_log::Offset;
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::{
-    TOPIC,
-    state::{CgcState, MemberProj},
-};
-use crate::coordinator::{
-    test_support::sorted_epoch_pairs,
-    unified::{
-        actor::reconciliation_model_support::{assert_member_epochs, model_epoch_assertion},
-        consumer_state::GroupState,
+use {
+    super::{
+        TOPIC,
+        state::{CgcState, MemberProj},
     },
+    crate::coordinator::{
+        test_support::sorted_epoch_pairs,
+        unified::{
+            actor::reconciliation_model_support::{assert_member_epochs, model_epoch_assertion},
+            consumer_state::GroupState,
+        },
+    },
+    krabka_log::Offset,
+    krabka_protocol::primitives::uuid::Uuid,
+    std::collections::{BTreeMap, BTreeSet, HashMap},
 };
 
 fn epochs_of(map: &HashMap<Uuid, HashMap<i32, i32>>) -> Vec<(i32, i32)> {

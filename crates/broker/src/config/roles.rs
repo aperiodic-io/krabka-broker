@@ -36,24 +36,18 @@ pub enum NodeRole {
 impl BrokerConfig {
     /// True when this node hosts data partitions and registers as a broker.
     #[must_use]
-    pub fn is_broker(&self) -> bool {
-        self.roles.contains(&NodeRole::Broker)
-    }
+    pub fn is_broker(&self) -> bool { self.roles.contains(&NodeRole::Broker) }
 
     /// True when this node participates in the `__cluster_metadata` quorum.
     #[must_use]
-    pub fn is_controller(&self) -> bool {
-        self.roles.contains(&NodeRole::Controller)
-    }
+    pub fn is_controller(&self) -> bool { self.roles.contains(&NodeRole::Controller) }
 
     /// True when this node is a data-bearing witness.
     ///
     /// A witness replicates partition data and votes, but serves no client
     /// traffic and never leads a partition. See [`NodeRole::Witness`].
     #[must_use]
-    pub fn is_witness(&self) -> bool {
-        self.roles.contains(&NodeRole::Witness)
-    }
+    pub fn is_witness(&self) -> bool { self.roles.contains(&NodeRole::Witness) }
 
     /// Checks that [`NodeRole::Witness`] comes with the roles it depends on.
     pub(super) fn validate_witness_roles(&self) -> Result<(), BrokerError> {
@@ -71,13 +65,14 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_raft::NodeId;
-
-    use super::*;
-    use crate::{
-        SslPrincipalMapper,
-        config::{ListenerSpec, test_support::witness_roles},
+    use {
+        super::*,
+        crate::{
+            SslPrincipalMapper,
+            config::{ListenerSpec, test_support::witness_roles},
+        },
+        assert2::{assert, check},
+        krabka_raft::NodeId,
     };
 
     #[test]

@@ -10,17 +10,18 @@
 //! covered in `krabka_raft::kraft::controller`, and the cross-node catch-up
 //! over KIP-595 `FetchSnapshot` is covered by the engine simulator.
 
-use std::time::Duration;
-
-use assert2::check;
-use krabka_metadata::{FeatureLevelRecord, MetadataImage, MetadataRecord, NodeId, TopicRecord};
-use krabka_raft::{
-    BootstrapMode, Controller, ControllerConfig, deserialize_metadata_snapshot,
-    deserialize_metadata_snapshot_image, serialize_metadata_snapshot,
+use {
+    assert2::check,
+    krabka_metadata::{FeatureLevelRecord, MetadataImage, MetadataRecord, NodeId, TopicRecord},
+    krabka_raft::{
+        BootstrapMode, Controller, ControllerConfig, deserialize_metadata_snapshot,
+        deserialize_metadata_snapshot_image, serialize_metadata_snapshot,
+    },
+    krabka_units::prelude::{Time, millis},
+    std::time::Duration,
+    tempfile::TempDir,
+    uuid::Uuid,
 };
-use krabka_units::prelude::{Time, millis};
-use tempfile::TempDir;
-use uuid::Uuid;
 
 krabka_macros::topic_record_fixture!(single_partition_topic);
 
@@ -77,10 +78,11 @@ fn the_snapshot_image_keeps_the_quorum_controls() {
             }]),
         }),
     ];
-    let image = MetadataImage::from_records(
-        cid,
-        &[controls[0].clone(), controls[1].clone(), topic.clone()],
-    );
+    let image = MetadataImage::from_records(cid, &[
+        controls[0].clone(),
+        controls[1].clone(),
+        topic.clone(),
+    ]);
     let bytes = serialize_metadata_snapshot(&image, 1_700_000_000_000).unwrap();
 
     let whole = deserialize_metadata_snapshot_image(&bytes).unwrap();

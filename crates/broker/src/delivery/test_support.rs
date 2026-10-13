@@ -5,32 +5,32 @@
 //! writer actor: the scheduler never sends the partition a message, so a
 //! closed writer channel is enough.
 
-use std::{
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicI32, AtomicU64},
+use {
+    crate::{
+        delivery::{DeliveryHandles, PartitionDelivery, metrics::DeliveryMetrics},
+        log_dir::partition_dir,
+        partition::{
+            Partition, WriterMessage, empty_marker_materialization, initial_replication_target,
+        },
+        partition_registry::PartitionRegistry,
+        replica_state::ReplicaState,
+        test_support::UnixMillis,
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-use arc_swap::ArcSwap;
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_log::{DeliveryPolicy, Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_units::{Time, convert::TimeExt as _};
-use qubit_clock::{ManualMonotonicClock, WallClock};
-use tokio::sync::{Notify, mpsc};
-
-use crate::{
-    delivery::{DeliveryHandles, PartitionDelivery, metrics::DeliveryMetrics},
-    log_dir::partition_dir,
-    partition::{
-        Partition, WriterMessage, empty_marker_materialization, initial_replication_target,
+    arc_swap::ArcSwap,
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_log::{DeliveryPolicy, Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_units::{Time, convert::TimeExt as _},
+    qubit_clock::{ManualMonotonicClock, WallClock},
+    std::{
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicI32, AtomicU64},
+        },
+        time::{Duration, SystemTime, UNIX_EPOCH},
     },
-    partition_registry::PartitionRegistry,
-    replica_state::ReplicaState,
-    test_support::UnixMillis,
+    tokio::sync::{Notify, mpsc},
 };
 
 /// A fixed clock reading, so a schedule in a test is exact rather than nearly
@@ -117,16 +117,12 @@ pub(crate) fn scheduled_partition(
     let batches = activations
         .iter()
         .map(|activation_ms| batch_at(activation_ms.0));
-    partition_with_batches(
-        dir,
-        clock,
-        DeliveryPartitionSetup {
-            topic,
-            config,
-            batches: batches.collect(),
-            leader,
-        },
-    )
+    partition_with_batches(dir, clock, DeliveryPartitionSetup {
+        topic,
+        config,
+        batches: batches.collect(),
+        leader,
+    })
 }
 
 /// A partition over a log with `config` that holds `batches`, registered
@@ -292,9 +288,7 @@ impl DeliveryMetrics for RecordingMetrics {
         self.push(MetricEvent::Late(lateness.millis_i64()));
     }
 
-    fn scheduler_woke(&self) {
-        self.push(MetricEvent::Wakeup);
-    }
+    fn scheduler_woke(&self) { self.push(MetricEvent::Wakeup); }
 }
 
 /// Poll `done` until it holds, yielding between tries so a task on the same

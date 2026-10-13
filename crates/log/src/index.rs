@@ -8,19 +8,19 @@
 //! layouts are byte-compatible with Kafka's, so each entry's encode, decode
 //! and binary-search paths stay beside the layout they read.
 
-use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom},
-    path::Path,
-};
-
-use zerocopy::{
-    BigEndian, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::U32,
-};
-
-use crate::{
-    error::LogError,
-    io::{IoTarget, LogIo, write_all},
+use {
+    crate::{
+        error::LogError,
+        io::{IoTarget, LogIo, write_all},
+    },
+    std::{
+        fs::{File, OpenOptions},
+        io::{Read, Seek, SeekFrom},
+        path::Path,
+    },
+    zerocopy::{
+        BigEndian, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, byteorder::U32,
+    },
 };
 
 // Keep the open span consistent for every on-disk index and checkpoint.
@@ -63,16 +63,12 @@ macro_rules! index_constructor {
 macro_rules! index_methods {
     ($target:expr) => {
         #[cfg(not(target_os = "wasi"))]
-        pub(crate) fn flush_handle(&self) -> std::io::Result<File> {
-            self.file.try_clone()
-        }
+        pub(crate) fn flush_handle(&self) -> std::io::Result<File> { self.file.try_clone() }
 
         /// The number of entries the index holds, which decides when the
         /// segment is full under `segment.index.bytes`.
         #[must_use]
-        pub fn entry_count(&self) -> usize {
-            self.entries.len()
-        }
+        pub fn entry_count(&self) -> usize { self.entries.len() }
 
         #[tracing::instrument(level = "debug", skip_all, err)]
         pub fn flush(&mut self) -> Result<(), LogError> {
@@ -80,9 +76,7 @@ macro_rules! index_methods {
         }
 
         /// Route this index's writes and syncs through `io`.
-        pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn crate::io::LogIo>) {
-            self.io = io;
-        }
+        pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn crate::io::LogIo>) { self.io = io; }
     };
 }
 
@@ -120,6 +114,21 @@ macro_rules! seed_index_fixture {
             append_entries(&mut index, entries);
             (dir, path, index)
         }
+    };
+}
+
+mod prelude {
+    pub(super) use {
+        crate::{
+            error::LogError,
+            io::{IoTarget, LogIo},
+        },
+        std::{fs::File, path::Path},
+        tracing::instrument,
+        zerocopy::{
+            BigEndian, IntoBytes,
+            byteorder::{I64, U32},
+        },
     };
 }
 

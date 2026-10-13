@@ -5,18 +5,18 @@
 //! Both scenarios pick the target directory from where the partition happens
 //! to sit, because placement is least-loaded and therefore not fixed.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_client_consumer::{AutoOffsetReset, Consumer};
-use krabka_client_producer::Producer;
-
-use crate::{
-    harness::{count_topic_dirs, wait_for_move_complete},
-    support::{producer::enqueue_unkeyed_values, topics::TopicPartitionCount},
-    two_dir_topic::{Setup, start},
-    wire::{CLIENT_ID, alter_replica_log_dirs},
+use {
+    crate::{
+        harness::{count_topic_dirs, wait_for_move_complete},
+        support::{producer::enqueue_unkeyed_values, topics::TopicPartitionCount},
+        two_dir_topic::{Setup, start},
+        wire::{CLIENT_ID, alter_replica_log_dirs},
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_client_consumer::{AutoOffsetReset, Consumer},
+    krabka_client_producer::Producer,
+    std::time::{Duration, Instant},
 };
 
 fn target_dir_opposite_to_partition_0<'a>(

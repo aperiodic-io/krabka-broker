@@ -1,8 +1,9 @@
 //! Log-directory fixtures shared by JBOD integration suites.
-use std::net::SocketAddr;
-
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
-use tempfile::TempDir;
+use {
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+    std::net::SocketAddr,
+    tempfile::TempDir,
+};
 
 /// The metadata for each `*.log` file directly under a partition directory.
 pub fn local_log_segment_metadata(directory: &std::path::Path) -> Vec<std::fs::Metadata> {
@@ -113,9 +114,7 @@ pub fn host_directory_user(path: &std::path::Path) -> String {
 }
 
 #[cfg(not(unix))]
-pub fn host_directory_user(_path: &std::path::Path) -> String {
-    "0:0".to_string()
-}
+pub fn host_directory_user(_path: &std::path::Path) -> String { "0:0".to_string() }
 
 /// The readiness a storage scenario requires before it reads partition state.
 #[derive(Clone, Copy, Default)]

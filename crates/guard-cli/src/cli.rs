@@ -7,13 +7,13 @@
 //! value, and it refuses the combination the parser already rules out rather
 //! than falling back to a default that would mean something else.
 
-use std::path::PathBuf;
-
-use clap::{Args, Parser, Subcommand, ValueEnum};
-use krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED};
-use krabka_units::Time;
-
-use super::failure::Failure;
+use {
+    super::failure::Failure,
+    clap::{Args, Parser, Subcommand, ValueEnum},
+    krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED},
+    krabka_units::Time,
+    std::path::PathBuf,
+};
 
 /// The tool's command line.
 ///

@@ -4,15 +4,16 @@
 //! extent the `.log` walk established -- and the diagnostics that report a bad
 //! entry by its byte position, so they sit together in one file.
 
-use krabka_ids::Offset;
-use krabka_remote_storage::index::{
-    AbortedTxnIndexEntry, OffsetIndexEntry, TimeIndexEntry, parse_offset_index, parse_time_index,
-    parse_txn_index,
+use {
+    super::offset_as_u64,
+    crate::error::RestoreError,
+    krabka_ids::Offset,
+    krabka_remote_storage::index::{
+        AbortedTxnIndexEntry, OffsetIndexEntry, TimeIndexEntry, parse_offset_index,
+        parse_time_index, parse_txn_index,
+    },
+    object_store::path::Path,
 };
-use object_store::path::Path;
-
-use super::offset_as_u64;
-use crate::error::RestoreError;
 
 /// Byte length of one serialized offset-index entry. `krabka_remote_storage`
 /// keeps its own copy of this constant private, so it is recomputed here from

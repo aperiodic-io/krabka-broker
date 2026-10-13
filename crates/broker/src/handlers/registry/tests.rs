@@ -1,14 +1,14 @@
 //! Tests for the assembled dispatch table: which `api_key` maps to which
 //! handler kind, and how the table agrees with the advertised api catalog.
 
-use std::collections::BTreeSet;
-
-use assert2::assert;
-
-use super::*;
-use crate::{
-    api_catalog::dispatched_apis,
-    handlers::{self, ApiKeyCode, KRABKA_PRIVATE_API_KEY_FLOOR},
+use {
+    super::*,
+    crate::{
+        api_catalog::dispatched_apis,
+        handlers::{self, ApiKeyCode, KRABKA_PRIVATE_API_KEY_FLOOR},
+    },
+    assert2::assert,
+    std::collections::BTreeSet,
 };
 
 #[test]

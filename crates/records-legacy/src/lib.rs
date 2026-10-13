@@ -28,9 +28,11 @@
 //! ## Encode and decode a v1 `MessageSet`
 //!
 //! ```rust
-//! use bytes::{Bytes, BytesMut};
-//! use krabka_ids::Offset;
-//! use krabka_records_legacy::{Magic, ParsedRecord, decode_message_set, encode_flat_message_set};
+//! use {
+//!     bytes::{Bytes, BytesMut},
+//!     krabka_ids::Offset,
+//!     krabka_records_legacy::{Magic, ParsedRecord, decode_message_set, encode_flat_message_set},
+//! };
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let records = vec![ParsedRecord {
@@ -53,10 +55,12 @@ mod error;
 mod message;
 mod set;
 
-pub use bridge::{legacy_to_v2, legacy_to_v2_with_policy, parsed_from_v2, v2_to_legacy};
-pub use error::LegacyRecordsError;
-pub use message::{Magic, Message, attrs, attrs_with_compression, compression_from_attrs};
-pub use set::{
-    ParsedRecord, decode_message_set, decode_message_set_with_policy,
-    encode_compressed_message_set, encode_flat_message_set,
+pub use {
+    bridge::{legacy_to_v2, legacy_to_v2_with_policy, parsed_from_v2, v2_to_legacy},
+    error::LegacyRecordsError,
+    message::{Magic, Message, attrs, attrs_with_compression, compression_from_attrs},
+    set::{
+        ParsedRecord, decode_message_set, decode_message_set_with_policy,
+        encode_compressed_message_set, encode_flat_message_set,
+    },
 };

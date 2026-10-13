@@ -130,10 +130,11 @@ pub(super) fn top_level_error_response(error_code: i16) -> DescribeQuorumRespons
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::{Decode as _, Encode as _, owned::describe_quorum_response};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_protocol::{Decode as _, Encode as _, owned::describe_quorum_response},
+    };
 
     /// Each whole-request refusal carries Kafka's `Errors.message()` for
     /// its code, as `DescribeQuorumRequest.getTopLevelErrorResponse` sets.

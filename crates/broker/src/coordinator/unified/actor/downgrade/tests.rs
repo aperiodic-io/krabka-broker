@@ -1,25 +1,26 @@
 //! Unit tests for the KIP-848 downgrade trigger and the classic state it
 //! restores.
 
-use assert2::{assert, check};
-use krabka_log::Offset;
-
-use crate::{
-    codes,
-    coordinator::unified::{
-        actor::{
-            GroupActorMessage, GroupKindTag,
-            test_support::{
-                BidirectionalClassicSetup, ClassicMemberSetup, bidirectional_coordinator,
-                bidirectional_with_members, decode_assignment, join_native_consumer,
-                log_has_classic_group_metadata_write, make_coordinator_with_topic,
-                make_coordinator_with_topic_policy, rpc, seed_classic_member,
-                seeded_bidirectional_coordinator, spawn_and_downgrade,
-                upgrade_with_transient_native,
+use {
+    crate::{
+        codes,
+        coordinator::unified::{
+            actor::{
+                GroupActorMessage, GroupKindTag,
+                test_support::{
+                    BidirectionalClassicSetup, ClassicMemberSetup, bidirectional_coordinator,
+                    bidirectional_with_members, decode_assignment, join_native_consumer,
+                    log_has_classic_group_metadata_write, make_coordinator_with_topic,
+                    make_coordinator_with_topic_policy, rpc, seed_classic_member,
+                    seeded_bidirectional_coordinator, spawn_and_downgrade,
+                    upgrade_with_transient_native,
+                },
             },
+            classic_state::OffsetEntry,
         },
-        classic_state::OffsetEntry,
     },
+    assert2::{assert, check},
+    krabka_log::Offset,
 };
 
 /// KIP-848 DOWNGRADE trigger: a consumer group that hosts a classic member
@@ -209,17 +210,14 @@ async fn committed_offsets_survive_a_flip() {
 
     // Record a committed offset for ("t", 0) via the kind-agnostic path.
     let rx = rpc::begin(&handle, |tx| GroupActorMessage::UpdateCommitted {
-        entries: vec![(
-            ("t".to_string(), 0),
-            OffsetEntry {
-                offset: Offset(99),
-                leader_epoch: 3,
-                metadata: String::new(),
-                commit_timestamp_ms: 0,
-                expire_timestamp_ms: None,
-                topic_id: None,
-            },
-        )],
+        entries: vec![(("t".to_string(), 0), OffsetEntry {
+            offset: Offset(99),
+            leader_epoch: 3,
+            metadata: String::new(),
+            commit_timestamp_ms: 0,
+            expire_timestamp_ms: None,
+            topic_id: None,
+        })],
         reply: tx,
     })
     .await;

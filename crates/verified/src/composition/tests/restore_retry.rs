@@ -1,5 +1,7 @@
-use super::*;
-use crate::restore::{RestoreContentExclusions, RestoreTimestampType};
+use {
+    super::*,
+    crate::restore::{RestoreContentExclusions, RestoreTimestampType},
+};
 
 proptest! {
     #[test]

@@ -6,18 +6,19 @@
 //! helper is what keeps a new phase, a new field, or a corrected guard from
 //! reaching four of the five.
 
-use krabka_audit::{AuditError, AuditLog, AuditOutcome, PrivilegedPhase};
-use krabka_metadata::BreakGlassAction;
-use uuid::Uuid;
-
-use crate::{
-    break_glass::{
-        action_name, gate,
-        handlers::{PrivilegedAudit, audit_privileged, require_privileged},
+use {
+    crate::{
+        break_glass::{
+            action_name, gate,
+            handlers::{PrivilegedAudit, audit_privileged, require_privileged},
+        },
+        config::BreakGlassConfig,
+        handlers::RequestContext,
+        operator_keys::approver_set_fingerprint,
     },
-    config::BreakGlassConfig,
-    handlers::RequestContext,
-    operator_keys::approver_set_fingerprint,
+    krabka_audit::{AuditError, AuditLog, AuditOutcome, PrivilegedPhase},
+    krabka_metadata::BreakGlassAction,
+    uuid::Uuid,
 };
 
 /// One gated transition, as its audit event records it.
@@ -119,22 +120,22 @@ fn transition_audit<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use krabka_audit::{
-        AuditEndpoint, AuditEvent, AuditMode, AuditPrincipal, AuditRecord, AuditSink, AuditStats,
-        AuditWriter, AuditWriterParams, ChainState, LifecycleKind, Spool,
-    };
-    use krabka_units::prelude::{hours, mebibytes};
-
-    use super::*;
-    use crate::{
-        break_glass::{
-            ALL_ACTIONS,
-            handlers::tests::{audit_channel, context, peer, principal},
+    use {
+        super::*,
+        crate::{
+            break_glass::{
+                ALL_ACTIONS,
+                handlers::tests::{audit_channel, context, peer, principal},
+            },
+            broker::Broker,
         },
-        broker::Broker,
+        assert2::{assert, check},
+        krabka_audit::{
+            AuditEndpoint, AuditEvent, AuditMode, AuditPrincipal, AuditRecord, AuditSink,
+            AuditStats, AuditWriter, AuditWriterParams, ChainState, LifecycleKind, Spool,
+        },
+        krabka_units::prelude::{hours, mebibytes},
+        std::sync::Arc,
     };
 
     const PROPOSAL: Uuid = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
@@ -192,21 +193,18 @@ mod tests {
         let (_dir, spool) = full_spool();
         let stats = Arc::new(AuditStats::new());
         let (log, receiver) = AuditLog::new_with_mode_and_spool(8, mode, &spool);
-        let writer = AuditWriter::new(
-            receiver,
-            AuditWriterParams {
-                sink: Arc::new(FailingSink),
-                product: Broker::audit_product(),
-                signer: None,
-                checkpoint_every_n: 0,
-                checkpoint_every: hours(1),
-                chain: ChainState::new(),
-                spool: Some(spool),
-                stats: Arc::clone(&stats),
-                replay_every: hours(1),
-                timer: Arc::new(qubit_clock::StdTimer::new()),
-            },
-        );
+        let writer = AuditWriter::new(receiver, AuditWriterParams {
+            sink: Arc::new(FailingSink),
+            product: Broker::audit_product(),
+            signer: None,
+            checkpoint_every_n: 0,
+            checkpoint_every: hours(1),
+            chain: ChainState::new(),
+            spool: Some(spool),
+            stats: Arc::clone(&stats),
+            replay_every: hours(1),
+            timer: Arc::new(qubit_clock::StdTimer::new()),
+        });
         let writer = tokio::spawn(writer.run());
         let principal = principal("alice");
         let peer = peer();

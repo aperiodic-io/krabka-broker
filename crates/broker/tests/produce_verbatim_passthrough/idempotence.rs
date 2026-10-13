@@ -5,11 +5,12 @@
 //! header fields the verbatim append leaves untouched: the producer id, the
 //! epoch, `base_sequence`, and `last_offset_delta`.
 
-use assert2::{assert, check};
-
-use crate::{
-    harness::{boot, create_topic, idempotent_lz4_batch, produce_one, topic_id_for},
-    support::client::connect_client,
+use {
+    crate::{
+        harness::{boot, create_topic, idempotent_lz4_batch, produce_one, topic_id_for},
+        support::client::connect_client,
+    },
+    assert2::{assert, check},
 };
 
 /// Idempotent-producer dedup runs on the HEADER fields that the verbatim path

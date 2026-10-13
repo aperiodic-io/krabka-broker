@@ -63,7 +63,5 @@ impl SignatureRefusal {
     ///
     /// The code is [`Self::CODE`] for every variant, and the text is the only
     /// part that separates the six checks.
-    pub(crate) fn wire(self) -> (i16, &'static str) {
-        (Self::CODE, self.message())
-    }
+    pub(crate) fn wire(self) -> (i16, &'static str) { (Self::CODE, self.message()) }
 }

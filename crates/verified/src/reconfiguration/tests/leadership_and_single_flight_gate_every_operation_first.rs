@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn leadership_and_single_flight_gate_every_operation_first() {

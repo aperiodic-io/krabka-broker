@@ -1,20 +1,21 @@
 //! Behaviour tests for the voter-reconfiguration handlers: what each
 //! request must carry before the quorum sees it, and what a refusal says.
 
-use assert2::check;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        add_raft_voter_request::AddRaftVoterRequest,
-        add_raft_voter_response::AddRaftVoterResponse,
-        remove_raft_voter_request::{self, RemoveRaftVoterRequest},
-        remove_raft_voter_response::RemoveRaftVoterResponse,
+use {
+    super::*,
+    crate::server::test_support::{
+        activate_dynamic_membership, decoded, single_voter_engine, wait_for_leader,
     },
-};
-
-use super::*;
-use crate::server::test_support::{
-    activate_dynamic_membership, decoded, single_voter_engine, wait_for_leader,
+    assert2::check,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            add_raft_voter_request::AddRaftVoterRequest,
+            add_raft_voter_response::AddRaftVoterResponse,
+            remove_raft_voter_request::{self, RemoveRaftVoterRequest},
+            remove_raft_voter_response::RemoveRaftVoterResponse,
+        },
+    },
 };
 
 #[derive(Clone, Copy)]
@@ -204,14 +205,10 @@ async fn a_malformed_reconfiguration_is_refused_before_the_quorum_sees_it() {
             voter_directory_id,
             ..Default::default()
         };
-        let response = remove_response(
-            &request,
-            &engine,
-            VoterResponseSetup {
-                context: "a refusal is still a response",
-                ..response_setup
-            },
-        )
+        let response = remove_response(&request, &engine, VoterResponseSetup {
+            context: "a refusal is still a response",
+            ..response_setup
+        })
         .await;
         check!(response == expected, "{what}");
     }
@@ -289,24 +286,14 @@ async fn adding_a_voter_needs_an_id_and_a_reachable_listener() {
             vec![good_listener()],
         ),
         ("no listeners at all", 2, directory, vec![]),
-        (
-            "a listener on port zero",
-            2,
-            directory,
-            vec![Listener {
-                port: 0,
-                ..good_listener()
-            }],
-        ),
-        (
-            "a listener with no host",
-            2,
-            directory,
-            vec![Listener {
-                host: String::new(),
-                ..good_listener()
-            }],
-        ),
+        ("a listener on port zero", 2, directory, vec![Listener {
+            port: 0,
+            ..good_listener()
+        }]),
+        ("a listener with no host", 2, directory, vec![Listener {
+            host: String::new(),
+            ..good_listener()
+        }]),
     ];
 
     for (what, voter_id, voter_directory_id, listeners) in cases {

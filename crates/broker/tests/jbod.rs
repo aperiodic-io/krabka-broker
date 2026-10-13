@@ -16,23 +16,23 @@ mod support;
 #[path = "support/two_dir_topic.rs"]
 mod two_dir_topic;
 
-use std::net::SocketAddr;
-
-use assert2::assert;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::owned::{
-    describe_log_dirs_request::DescribeLogDirsRequest,
-    describe_log_dirs_response::DescribeLogDirsResponse,
-};
-use tokio::net::TcpStream;
-
-use crate::{
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
-    support::{
-        storage::count_partition_dirs, topics::TopicPartitionCount,
-        wire::HeaderEncoding as RequestHeaderEncoding,
+use {
+    crate::{
+        kafka_wire::ExchangeSetup as WireExchangeSetup,
+        support::{
+            storage::count_partition_dirs, topics::TopicPartitionCount,
+            wire::HeaderEncoding as RequestHeaderEncoding,
+        },
+        two_dir_topic::{PartitionReadiness, Setup, start},
     },
-    two_dir_topic::{PartitionReadiness, Setup, start},
+    assert2::assert,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::owned::{
+        describe_log_dirs_request::DescribeLogDirsRequest,
+        describe_log_dirs_response::DescribeLogDirsResponse,
+    },
+    std::net::SocketAddr,
+    tokio::net::TcpStream,
 };
 
 const CLIENT_ID: &str = "krabka-jbod-test";

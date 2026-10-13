@@ -5,25 +5,25 @@
 //! sees both. The interleaved case reuses one `transactional_id` across three
 //! back-to-back transactions.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_client_consumer::IsolationLevel;
-use krabka_protocol::owned::fetch_request::FetchRequest;
-use krabka_units::bytes;
-
-use crate::{
-    support::{
-        client::connect_client,
-        discovery::topic_metadata_request,
-        fetch::{
-            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+use {
+    crate::{
+        support::{
+            client::connect_client,
+            discovery::topic_metadata_request,
+            fetch::{
+                FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+            },
+            producer::{default_producer, enqueue_string_values, transactional_producer},
+            topics::metadata_topic,
+            transaction_wire::{committed_values, observed_values, read_committed_at_least},
         },
-        producer::{default_producer, enqueue_string_values, transactional_producer},
-        topics::metadata_topic,
-        transaction_wire::{committed_values, observed_values, read_committed_at_least},
+        txn_harness::{boot_single, create_topic, create_topic_with_segment_bytes, rec, send_ok},
     },
-    txn_harness::{boot_single, create_topic, create_topic_with_segment_bytes, rec, send_ok},
+    assert2::assert,
+    krabka_client_consumer::IsolationLevel,
+    krabka_protocol::owned::fetch_request::FetchRequest,
+    krabka_units::bytes,
+    std::time::Duration,
 };
 
 /// Commits a transaction, after which a `read_committed` consumer sees all 3

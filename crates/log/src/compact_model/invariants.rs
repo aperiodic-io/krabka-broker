@@ -14,11 +14,12 @@
 //! [`retains`]. The two checks are independent, so a pass that breaks one rule
 //! is reported against that rule alone.
 
-use std::collections::{HashMap, HashSet};
-
-use super::{
-    DELETE_RETENTION_MS,
-    state::{Entry, EntryKind},
+use {
+    super::{
+        DELETE_RETENTION_MS,
+        state::{Entry, EntryKind},
+    },
+    std::collections::{HashMap, HashSet},
 };
 
 /// One named pass rule. The name is the `always` property that checks it.

@@ -1,9 +1,10 @@
 //! Property tests over the visibility window that every fetch computes,
 //! run on random valid watermark tuples rather than on a fixed table.
 
-use proptest::prelude::*;
-
-use super::{FetchWatermarks, Offset, compute_visibility_window};
+use {
+    super::{FetchWatermarks, Offset, compute_visibility_window},
+    proptest::prelude::*,
+};
 
 proptest! {
     /// The per-fetch visibility contract over large-N random valid

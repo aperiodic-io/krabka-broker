@@ -2,14 +2,14 @@
 //! index does not re-download, the byte budget evicts by recency, a deleted
 //! segment releases its bytes, and the disabled cache stores nothing.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use {
+    super::*,
+    assert2::check,
+    std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
-
-use assert2::check;
-
-use super::*;
 
 #[test]
 fn simultaneous_fills_never_publish_partial_cached_bytes() {

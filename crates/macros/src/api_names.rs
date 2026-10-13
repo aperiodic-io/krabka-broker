@@ -11,11 +11,12 @@
 //! An entry is a `CamelCase` api name, optionally followed by the separator
 //! the macro asks for and the tokens up to the next top-level `,` or `;`.
 
-use std::collections::BTreeSet;
-
-use moxy::{
-    ast::ParseError,
-    token::{Ident, Span, TokenStream, TokenTree},
+use {
+    moxy::{
+        ast::ParseError,
+        token::{Ident, Span, TokenStream, TokenTree},
+    },
+    std::collections::BTreeSet,
 };
 
 /// The identifiers derived from one `CamelCase` Kafka api name, the way
@@ -85,13 +86,9 @@ fn starts_with_separator(tokens: &[TokenTree], at: usize, separator: &str) -> bo
     })
 }
 
-fn is_comma(token: &TokenTree) -> bool {
-    token.is_punct_comma()
-}
+fn is_comma(token: &TokenTree) -> bool { token.is_punct_comma() }
 
-fn is_semi(token: &TokenTree) -> bool {
-    token.is_punct_semi()
-}
+fn is_semi(token: &TokenTree) -> bool { token.is_punct_semi() }
 
 fn error_at(tokens: &[TokenTree], at: usize, message: &str) -> ParseError {
     let span = tokens.get(at).map_or_else(Span::call_site, TokenTree::span);
@@ -213,9 +210,10 @@ pub(crate) fn section<'a>(sections: &'a [Section], label: &str) -> &'a [Entry] {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{ApiNames, Ident, TokenStream, parse_sections, section};
+    use {
+        super::{ApiNames, Ident, TokenStream, parse_sections, section},
+        assert2::assert,
+    };
 
     fn texts(names: &ApiNames) -> [String; 6] {
         [
@@ -290,13 +288,10 @@ mod tests {
         assert!(
             parsed
                 == Ok(vec![
-                    (
-                        "a".to_owned(),
-                        vec![
-                            ("One".to_owned(), String::new()),
-                            ("Two".to_owned(), "x :: y :: handle".to_owned()),
-                        ]
-                    ),
+                    ("a".to_owned(), vec![
+                        ("One".to_owned(), String::new()),
+                        ("Two".to_owned(), "x :: y :: handle".to_owned()),
+                    ]),
                     ("b".to_owned(), vec![]),
                 ])
         );

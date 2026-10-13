@@ -68,6 +68,13 @@ mod support;
 
 mod test_support {
     pub(crate) mod truncation {
+        pub(crate) mod prelude {
+            pub(crate) use {
+                krabka_metadata::{LeaderEpoch, MetadataRecord},
+                std::time::{Duration, Instant},
+            };
+        }
+
         pub(crate) use crate::{
             docker::{produce_lines_via_jvm, set_container_paused},
             dump_log::{dump_log_in_container, max_offset_in_dump},

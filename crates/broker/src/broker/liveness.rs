@@ -3,27 +3,27 @@
 //! reseeds the liveness registry. These are the event-driven halves of the
 //! liveness phase, split from the periodic gauge sampler beside them.
 
-use std::sync::Arc;
-
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    config::BrokerConfig,
-    cordoned_log_dirs::CordonedLogDirs,
-    heartbeat::{
-        client::{Config, InitialUnfence, run},
-        controller_state::{ControllerLivenessState, replicated_registrations},
+use {
+    crate::{
+        config::BrokerConfig,
+        cordoned_log_dirs::CordonedLogDirs,
+        heartbeat::{
+            client::{Config, InitialUnfence, run},
+            controller_state::{ControllerLivenessState, replicated_registrations},
+        },
+        leader_election::{LivenessTickState, run_liveness_tick},
+        log_dir_id::LogDirIds,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+        unclean_recovery::{
+            BackgroundRecovery, RecoveryPolicy, UncleanRecoveryHandle, UncleanRecoveryManager,
+        },
     },
-    leader_election::{LivenessTickState, run_liveness_tick},
-    log_dir_id::LogDirIds,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
-    unclean_recovery::{
-        BackgroundRecovery, RecoveryPolicy, UncleanRecoveryHandle, UncleanRecoveryManager,
-    },
+    krabka_units::{Time, convert::TimeExt as _},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
 };
 
 /// Drives broker-death failover from the liveness registry. Every
@@ -263,12 +263,13 @@ pub(super) fn start_liveness_services(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        broker::test_support::fake_source, metadata_source::MetadataSource,
-        test_support::broker_registration,
+    use {
+        super::*,
+        crate::{
+            broker::test_support::fake_source, metadata_source::MetadataSource,
+            test_support::broker_registration,
+        },
+        assert2::assert,
     };
 
     fn image_with_registered_broker(node_id: u64) -> krabka_metadata::MetadataImage {

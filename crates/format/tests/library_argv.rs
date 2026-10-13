@@ -1,8 +1,6 @@
 //! Library argument parsing must return control to its embedding process.
 
-use std::process::Command;
-
-use assert2::assert;
+use {assert2::assert, std::process::Command};
 
 #[test]
 fn library_argv_returns_instead_of_exiting_the_embedding_process() {

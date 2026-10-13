@@ -3,14 +3,14 @@
 //! request. It is separate from the read path because the retry ordering and
 //! the wire encoding are a concern of their own.
 
-use std::sync::Arc;
-
-use krabka_metadata::{MetadataImage, MetadataRecord, PrivateRpc};
-use krabka_raft::{DelegationTokenMutation, NodeId, OutboundDialer, RaftError, SubmitChangeResult};
-use tokio::sync::watch;
-
-use super::MetadataWriter;
-use crate::controller_endpoint::quorum_targets;
+use {
+    super::MetadataWriter,
+    crate::controller_endpoint::quorum_targets,
+    krabka_metadata::{MetadataImage, MetadataRecord, PrivateRpc},
+    krabka_raft::{DelegationTokenMutation, NodeId, OutboundDialer, RaftError, SubmitChangeResult},
+    std::sync::Arc,
+    tokio::sync::watch,
+};
 
 /// Forwards metadata writes from a broker-only node to the controller
 /// quorum. Tries the leader hint first (from the observer), then walks the
@@ -256,25 +256,25 @@ impl MetadataWriter for QuorumForwarder {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::SocketAddr,
-        sync::{
-            Mutex,
-            atomic::{AtomicUsize, Ordering},
+    use {
+        super::*,
+        crate::{metadata_source::test_support::topic_record, test_support::mock_request_broker},
+        bytes::{Bytes, BytesMut},
+        krabka_protocol::{
+            Encode,
+            owned::{
+                api_versions_request,
+                api_versions_response::{ApiVersion, ApiVersionsResponse},
+            },
+        },
+        std::{
+            net::SocketAddr,
+            sync::{
+                Mutex,
+                atomic::{AtomicUsize, Ordering},
+            },
         },
     };
-
-    use bytes::{Bytes, BytesMut};
-    use krabka_protocol::{
-        Encode,
-        owned::{
-            api_versions_request,
-            api_versions_response::{ApiVersion, ApiVersionsResponse},
-        },
-    };
-
-    use super::*;
-    use crate::{metadata_source::test_support::topic_record, test_support::mock_request_broker};
 
     fn voters() -> Vec<(krabka_raft::NodeId, String)> {
         vec![
@@ -479,13 +479,10 @@ mod tests {
                 .await
                 .expect("applied");
             actual.push((level, std::mem::take(&mut *sent.lock().unwrap())));
-            expected.push((
-                level,
-                vec![
-                    (krabka_raft::API_KEY_SUBMIT_CHANGE, 0),
-                    (krabka_raft::API_KEY_DELEGATION_TOKEN_MUTATION, 0),
-                ],
-            ));
+            expected.push((level, vec![
+                (krabka_raft::API_KEY_SUBMIT_CHANGE, 0),
+                (krabka_raft::API_KEY_DELEGATION_TOKEN_MUTATION, 0),
+            ]));
         }
         assert2::assert!(actual == expected);
         mock.stop();
@@ -521,23 +518,17 @@ mod tests {
     async fn quorum_forwarder_not_leader_response_preserves_positive_hint() {
         let err = rejected_submission(1, 7, "redirect").await;
 
-        assert2::assert!(matches!(
-            err,
-            RaftError::NotLeader {
-                current_leader: Some(NodeId(7))
-            }
-        ));
+        assert2::assert!(matches!(err, RaftError::NotLeader {
+            current_leader: Some(NodeId(7))
+        }));
     }
 
     #[tokio::test]
     async fn quorum_forwarder_negative_leader_hint_is_unknown() {
         let err = rejected_submission(3, -1, "unknown-leader").await;
 
-        assert2::assert!(matches!(
-            err,
-            RaftError::NotLeader {
-                current_leader: None
-            }
-        ));
+        assert2::assert!(matches!(err, RaftError::NotLeader {
+            current_leader: None
+        }));
     }
 }

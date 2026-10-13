@@ -19,9 +19,7 @@
 pub trait SendfileSink {
     /// Whether the underlying transport already enforces a no-progress write
     /// deadline. A buffered protocol delegates this to its byte transport.
-    fn write_idle_is_enforced(&self) -> bool {
-        false
-    }
+    fn write_idle_is_enforced(&self) -> bool { false }
     crate::sendfile_cfg! {
         /// Maximum time a sendfile response write may make no progress.
         /// Direct streams have no deadline; the connection loop supplies its
@@ -48,6 +46,12 @@ pub trait SendfileSink {
 }
 
 impl SendfileSink for tokio::net::TcpStream {
+    crate::sendfile_cfg! {
+        fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> {
+            Some(self)
+        }
+    }
+
     fn is_sendfile_capable(&self) -> bool {
         // True on every SENDFILE-alias platform; false on Windows.
         cfg!(any(
@@ -60,36 +64,29 @@ impl SendfileSink for tokio::net::TcpStream {
             target_os = "dragonfly",
         ))
     }
-    crate::sendfile_cfg! {
-        fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> {
-            Some(self)
-        }
-    }
 }
 
 impl<S: SendfileSink> SendfileSink for tokio_rustls::server::TlsStream<S> {
-    fn write_idle_is_enforced(&self) -> bool {
-        self.get_ref().0.write_idle_is_enforced()
-    }
-
     crate::sendfile_cfg! {
         fn write_idle_window(&self) -> Option<std::time::Duration> {
             self.get_ref().0.write_idle_window()
         }
     }
-    // Userspace TLS: rustls encrypts in userspace, so file bytes must pass
-    // through the rustls buffer — there is no kernel file→socket path. This is
-    // the non-kTLS fallback (the broker's `ktls_enabled` startup probe returned
-    // false, or the kernel lacks the `tls` module): the connection is served
-    // over a plain `TlsStream` and the fetch path falls back to pread+write_all.
-    fn is_sendfile_capable(&self) -> bool {
-        false
-    }
+
     crate::sendfile_cfg! {
         fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> {
             None
         }
     }
+
+    fn write_idle_is_enforced(&self) -> bool { self.get_ref().0.write_idle_is_enforced() }
+
+    // Userspace TLS: rustls encrypts in userspace, so file bytes must pass
+    // through the rustls buffer — there is no kernel file→socket path. This is
+    // the non-kTLS fallback (the broker's `ktls_enabled` startup probe returned
+    // false, or the kernel lacks the `tls` module): the connection is served
+    // over a plain `TlsStream` and the fetch path falls back to pread+write_all.
+    fn is_sendfile_capable(&self) -> bool { false }
 }
 
 // Linux kTLS (Increment F): a `KtlsStream` is just a TCP socket whose TLS
@@ -101,10 +98,7 @@ impl<S: SendfileSink> SendfileSink for tokio_rustls::server::TlsStream<S> {
 // stream a client decrypts is byte-identical to the userspace rustls path.
 #[cfg(target_os = "linux")]
 impl SendfileSink for ktls::KtlsStream<tokio::net::TcpStream> {
-    fn is_sendfile_capable(&self) -> bool {
-        true
-    }
-    fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> {
-        Some(self.get_ref())
-    }
+    fn is_sendfile_capable(&self) -> bool { true }
+
+    fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> { Some(self.get_ref()) }
 }

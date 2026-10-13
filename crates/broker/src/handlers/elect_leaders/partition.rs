@@ -5,19 +5,20 @@
 //! offset-aware recovery strategy goes to the Unclean Recovery Manager, and
 //! every other target elects straight out of the metadata image.
 
-use krabka_metadata::{LeaderRecoveryState, MetadataRecord, PartitionUpdateRecord};
-use krabka_protocol::owned::elect_leaders_response::PartitionResult;
-
-use super::{
-    batch::ElectionBatch,
-    env::ElectionEnv,
-    recovery::run_offset_aware_recovery,
-    response::elect_error_to_wire,
-    unclean_gate::{authorize_unclean, refuse_unclean, unclean_target},
-};
-use crate::{
-    config_keys::{RecoveryStrategy, resolve_recovery_strategy},
-    leader_election::{ElectionType, select_new_leader_for_partition},
+use {
+    super::{
+        batch::ElectionBatch,
+        env::ElectionEnv,
+        recovery::run_offset_aware_recovery,
+        response::elect_error_to_wire,
+        unclean_gate::{authorize_unclean, refuse_unclean, unclean_target},
+    },
+    crate::{
+        config_keys::{RecoveryStrategy, resolve_recovery_strategy},
+        leader_election::{ElectionType, select_new_leader_for_partition},
+    },
+    krabka_metadata::{LeaderRecoveryState, MetadataRecord, PartitionUpdateRecord},
+    krabka_protocol::owned::elect_leaders_response::PartitionResult,
 };
 
 /// Elect one partition, and answer the row the response carries for it.

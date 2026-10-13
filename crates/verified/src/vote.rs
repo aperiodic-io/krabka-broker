@@ -167,9 +167,7 @@ pub fn vote_admission_decision(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn wire_fields_reject_negatives_without_rejecting_zero() {

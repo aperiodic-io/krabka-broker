@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
-use crate::schema::{
-    SchemaBatchAdmission, SchemaFailureDecision, SchemaFailureKind, SchemaFieldAction,
-    SchemaFieldRole, schema_batch_admission, schema_failure_decision, schema_field_action,
-    schema_frame_id,
+use {
+    crate::schema::{
+        SchemaBatchAdmission, SchemaFailureDecision, SchemaFailureKind, SchemaFieldAction,
+        SchemaFieldRole, schema_batch_admission, schema_failure_decision, schema_field_action,
+        schema_frame_id,
+    },
+    creusot_std::prelude::*,
 };
 
 model_types! {

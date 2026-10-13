@@ -18,23 +18,23 @@
 //! and compare them: every field of the reconstruction in one projection, and
 //! the bytes the two logs hold after replicating the same batches.
 
-use std::{path::PathBuf, sync::Arc};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig, Offset};
-use krabka_protocol::records::RecordBatch;
-use krabka_units::mebibytes;
-use tempfile::TempDir;
-
-use super::ReplicaSeam;
-use crate::{
-    broker::spawn_partition,
-    log_dir_status::LogDirRegistry,
-    partition::{Partition, ReplicationTarget},
-    producer_state::ProducerState,
-    replica_state::ReplicaState,
+use {
+    super::ReplicaSeam,
+    crate::{
+        broker::spawn_partition,
+        log_dir_status::LogDirRegistry,
+        partition::{Partition, ReplicationTarget},
+        producer_state::ProducerState,
+        replica_state::ReplicaState,
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig, Offset},
+    krabka_protocol::records::RecordBatch,
+    krabka_units::mebibytes,
+    std::{path::PathBuf, sync::Arc},
+    tempfile::TempDir,
 };
 
 /// The topic and partition the seam hard-codes, which a production partition

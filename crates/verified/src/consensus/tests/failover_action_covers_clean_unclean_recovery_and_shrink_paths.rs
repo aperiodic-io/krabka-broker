@@ -2,12 +2,14 @@ use super::*;
 
 #[test]
 fn failover_action_covers_clean_unclean_recovery_and_shrink_paths() {
-    use FailoverAction::{
-        ElectClean, ElectFromElr, ElectLastKnown, ElectUnclean, NoChange, Recover, ShrinkIsr,
-        Unavailable,
+    use {
+        FailoverAction::{
+            ElectClean, ElectFromElr, ElectLastKnown, ElectUnclean, NoChange, Recover, ShrinkIsr,
+            Unavailable,
+        },
+        FailoverRecovery::{Aggressive, Balanced, None},
+        LiveIsr::{Electable, Empty, WitnessesOnly},
     };
-    use FailoverRecovery::{Aggressive, Balanced, None};
-    use LiveIsr::{Electable, Empty, WitnessesOnly};
 
     // The arguments are the live ISR, then `has_electable_elr`,
     // `last_known_leader_electable`, the recovery strategy and

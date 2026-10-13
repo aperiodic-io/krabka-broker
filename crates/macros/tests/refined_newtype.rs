@@ -1,15 +1,17 @@
 //! What `#[derive(RefinedNewtype)]` accepts, refuses, parses and prints.
 
-use assert2::assert;
-use krabka_macros::RefinedNewtype;
-use krabka_units::{
-    fmt::Human as _,
-    prelude::{
-        ByteSize, ByteSizeExt as _, Frequency, FrequencyExt as _, Time, TimeExt as _, bytes,
-        kibibytes, mebibytes, millis, per_sec, secs,
+use {
+    assert2::assert,
+    krabka_macros::RefinedNewtype,
+    krabka_units::{
+        fmt::Human as _,
+        prelude::{
+            ByteSize, ByteSizeExt as _, Frequency, FrequencyExt as _, Time, TimeExt as _, bytes,
+            kibibytes, mebibytes, millis, per_sec, secs,
+        },
     },
+    refined_type::rule::{GreaterI32, GreaterU32, MinMaxU32, MinMaxU64},
 };
-use refined_type::rule::{GreaterI32, GreaterU32, MinMaxU32, MinMaxU64};
 
 /// The rule's own error, a `u32` getter named `into_value`, and a free parse
 /// function.

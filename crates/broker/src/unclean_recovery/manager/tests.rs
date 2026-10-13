@@ -2,30 +2,35 @@
 //! needed, when no replica is eligible, and how a duplicate job for the same
 //! partition is refused.
 
-use assert2::{assert, check};
-use krabka_audit::{AuditEvent, AuditLog, AuditOutcome, PrivilegedPhase};
-use krabka_metadata::{
-    BreakGlassAction, BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionElrRecord,
-    PartitionRecord,
-};
-use krabka_units::secs;
-use tokio::sync::oneshot;
-use uuid::Uuid;
-
-use super::*;
-use crate::{
-    config::{BackgroundUncleanRecovery, BreakGlassConfig},
-    config_keys::RecoveryStrategy,
-    elr::TopicElr,
-    heartbeat::controller_state::ControllerLivenessState,
-    leader_election::{
-        compute_unclean_restart_changes,
-        test_support::{ElectionSetup, img_with_partition, mark_witnesses_in_image},
+use {
+    super::*,
+    crate::{
+        config::{BackgroundUncleanRecovery, BreakGlassConfig},
+        config_keys::RecoveryStrategy,
+        elr::TopicElr,
+        heartbeat::controller_state::ControllerLivenessState,
+        leader_election::{
+            compute_unclean_restart_changes,
+            test_support::{ElectionSetup, img_with_partition, mark_witnesses_in_image},
+        },
+        metadata_source::MetadataSource,
+        metrics::{
+            BreakGlassAction as MetricBreakGlassAction, BreakGlassActionLabel, BrokerMetrics,
+        },
+        test_support::{
+            FakeMetadataSource, broker_registration, finalize_elr_version, replica_nodes,
+        },
+        unclean_recovery::{BackgroundRecovery, selection::ElectionBasis},
     },
-    metadata_source::MetadataSource,
-    metrics::{BreakGlassAction as MetricBreakGlassAction, BreakGlassActionLabel, BrokerMetrics},
-    test_support::{FakeMetadataSource, broker_registration, finalize_elr_version, replica_nodes},
-    unclean_recovery::{BackgroundRecovery, selection::ElectionBasis},
+    assert2::{assert, check},
+    krabka_audit::{AuditEvent, AuditLog, AuditOutcome, PrivilegedPhase},
+    krabka_metadata::{
+        BreakGlassAction, BrokerRegistrationRecord, MetadataImage, MetadataRecord,
+        PartitionElrRecord, PartitionRecord,
+    },
+    krabka_units::secs,
+    tokio::sync::oneshot,
+    uuid::Uuid,
 };
 
 mod commit_fencing;
@@ -434,15 +439,10 @@ async fn an_elr_election_is_recorded_as_applied_and_meters_no_loss() {
         &gated(BackgroundUncleanRecovery::AuditOnly),
         audit_log,
     );
-    let outcome = commit_fixture_election(
-        &mgr,
-        &image,
-        &job(),
-        Election {
-            leader: NodeId(2),
-            basis: ElectionBasis::EligibleLeaderReplica,
-        },
-    )
+    let outcome = commit_fixture_election(&mgr, &image, &job(), Election {
+        leader: NodeId(2),
+        basis: ElectionBasis::EligibleLeaderReplica,
+    })
     .await;
 
     assert!(outcome == RecoveryOutcome::Elected(NodeId(2)));
@@ -738,14 +738,10 @@ async fn recover_one_dedups_in_flight_job() {
 #[tokio::test]
 async fn a_witness_never_wins_the_election_however_the_elr_reads() {
     let cases = [
-        (
-            "a data ELR member wins on its membership",
-            None,
-            Election {
-                leader: NodeId(3),
-                basis: ElectionBasis::EligibleLeaderReplica,
-            },
-        ),
+        ("a data ELR member wins on its membership", None, Election {
+            leader: NodeId(3),
+            basis: ElectionBasis::EligibleLeaderReplica,
+        }),
         (
             "an ELR witness leaves the fallback to decide",
             Some(3),
@@ -767,12 +763,10 @@ async fn a_witness_never_wins_the_election_however_the_elr_reads() {
         );
         let image = mgr.controller.current_image();
 
-        let election = UncleanRecoveryManager::elect_from(
-            &image,
-            &[NodeId(1)],
-            &[3],
-            &[info(2, 400), info(3, 20)],
-        );
+        let election = UncleanRecoveryManager::elect_from(&image, &[NodeId(1)], &[3], &[
+            info(2, 400),
+            info(3, 20),
+        ]);
 
         check!(election == Some(expected), "case {label}");
     }
@@ -893,15 +887,10 @@ async fn an_applied_election_names_the_proposal_that_authorized_it() {
     for (label, job, expected) in cases {
         let (mut events, image, mgr) =
             audited_candidate(BackgroundUncleanRecovery::AuditOnly).await;
-        let outcome = commit_fixture_election(
-            &mgr,
-            &image,
-            &job,
-            Election {
-                leader: NodeId(2),
-                basis: ElectionBasis::EligibleLeaderReplica,
-            },
-        )
+        let outcome = commit_fixture_election(&mgr, &image, &job, Election {
+            leader: NodeId(2),
+            basis: ElectionBasis::EligibleLeaderReplica,
+        })
         .await;
 
         check!(

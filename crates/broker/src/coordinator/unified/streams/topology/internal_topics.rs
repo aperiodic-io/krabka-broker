@@ -5,9 +5,7 @@
 //! module turns the internal topics that the configured topology still misses
 //! into the specs that the heartbeat hands to `CreateTopics`.
 
-use std::collections::BTreeMap;
-
-use super::configured::ConfiguredTopology;
+use {super::configured::ConfiguredTopology, std::collections::BTreeMap};
 
 /// A fully-resolved internal topic that the heartbeat must create.
 ///
@@ -50,14 +48,15 @@ pub fn internal_topic_specs(configured: &ConfiguredTopology) -> Vec<InternalTopi
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        coordinator::unified::streams::topology::configured::{
-            ConfiguredInternalTopic, ConfiguredSubtopology,
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::streams::topology::configured::{
+                ConfiguredInternalTopic, ConfiguredSubtopology,
+            },
+            test_support::string_pairs,
         },
-        test_support::string_pairs,
+        assert2::assert,
     };
 
     #[test]
@@ -73,16 +72,13 @@ mod tests {
         let cl = topic("cl", None, &[]);
         let configured = ConfiguredTopology {
             topology_epoch: 1,
-            subtopologies: Some(BTreeMap::from([(
-                "0".to_string(),
-                ConfiguredSubtopology {
-                    number_of_tasks: 5,
-                    source_topics: std::collections::BTreeSet::new(),
-                    repartition_source_topics: BTreeMap::from([("rp".to_string(), rp.clone())]),
-                    repartition_sink_topics: std::collections::BTreeSet::new(),
-                    state_changelog_topics: BTreeMap::from([("cl".to_string(), cl.clone())]),
-                },
-            )])),
+            subtopologies: Some(BTreeMap::from([("0".to_string(), ConfiguredSubtopology {
+                number_of_tasks: 5,
+                source_topics: std::collections::BTreeSet::new(),
+                repartition_source_topics: BTreeMap::from([("rp".to_string(), rp.clone())]),
+                repartition_sink_topics: std::collections::BTreeSet::new(),
+                state_changelog_topics: BTreeMap::from([("cl".to_string(), cl.clone())]),
+            })])),
             internal_topics_to_create: BTreeMap::from([
                 ("cl".to_string(), cl),
                 ("rp".to_string(), rp),

@@ -2,9 +2,7 @@
 //! high-watermark advance opens, and the half-open ranges a fetch may read
 //! from. They are free functions so each rule can be checked without an engine.
 
-use krabka_ids::Offset;
-
-use crate::error::RaftError;
+use {crate::error::RaftError, krabka_ids::Offset};
 
 pub fn assigned_record_offset(assign_base: Offset, delta: i64) -> i64 {
     assign_base.0.saturating_add(delta)

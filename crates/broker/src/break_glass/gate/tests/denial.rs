@@ -4,12 +4,13 @@
 //! proposals answer with the nearest of them, and the denial names the proposal
 //! an operator can act on.
 
-use assert2::{assert, check};
-use krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord, MetadataImage};
-use uuid::Uuid;
-
-use super::{NOW_MS, approval, config, image_of, proposal};
-use crate::break_glass::gate::{BreakGlassDenial, DenialReason, authorize};
+use {
+    super::{NOW_MS, approval, config, image_of, proposal},
+    crate::break_glass::gate::{BreakGlassDenial, DenialReason, authorize},
+    assert2::{assert, check},
+    krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord, MetadataImage},
+    uuid::Uuid,
+};
 
 #[test]
 fn an_empty_registry_refuses_with_no_proposal() {

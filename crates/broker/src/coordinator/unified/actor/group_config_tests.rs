@@ -3,33 +3,33 @@
 //! `GroupMetadataManager.consumerGroupSessionTimeoutMs`,
 //! `consumerGroupHeartbeatIntervalMs` and `consumerGroupAssignmentIntervalMs`.
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::{assert, check};
-use krabka_protocol::{
-    owned::{
-        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-        consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
-    },
-    primitives::uuid::Uuid,
-};
-
-use super::{GroupActorHandle, test_support::StaticMetadata};
-use crate::{
-    codes,
-    coordinator::unified::{
-        GroupCoordinator,
-        actor::test_support::rpc::consumer_request_as_client,
-        config::NextGenConfig,
-        offsets_log::fake::InMemoryOffsetsLog,
-        reconciler::ReconcileInput,
-        share::config::ShareGroupConfig,
-        streams::config::StreamsGroupConfig,
-        test_support::{
-            check_group_assignment_timing, check_group_session_timeout, fixed_source,
-            group_config_image,
+use {
+    super::{GroupActorHandle, test_support::StaticMetadata},
+    crate::{
+        codes,
+        coordinator::unified::{
+            GroupCoordinator,
+            actor::test_support::rpc::consumer_request_as_client,
+            config::NextGenConfig,
+            offsets_log::fake::InMemoryOffsetsLog,
+            reconciler::ReconcileInput,
+            share::config::ShareGroupConfig,
+            streams::config::StreamsGroupConfig,
+            test_support::{
+                check_group_assignment_timing, check_group_session_timeout, fixed_source,
+                group_config_image,
+            },
         },
     },
+    assert2::{assert, check},
+    krabka_protocol::{
+        owned::{
+            consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+            consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
+        },
+        primitives::uuid::Uuid,
+    },
+    std::{sync::Arc, time::Duration},
 };
 
 /// A coordinator over topic `t` with two partitions, whose metadata image
@@ -64,18 +64,15 @@ async fn heartbeat(
     member_id: &str,
     member_epoch: i32,
 ) -> ConsumerGroupHeartbeatResponse {
-    consumer_request_as_client(
-        handle,
-        ConsumerGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: member_id.into(),
-            member_epoch,
-            subscribed_topic_names: (member_epoch == 0).then(|| vec!["t".into()]),
-            rebalance_timeout_ms: 60_000,
-            topic_partitions: (member_epoch == 0).then(Vec::new),
-            ..Default::default()
-        },
-    )
+    consumer_request_as_client(handle, ConsumerGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: member_id.into(),
+        member_epoch,
+        subscribed_topic_names: (member_epoch == 0).then(|| vec!["t".into()]),
+        rebalance_timeout_ms: 60_000,
+        topic_partitions: (member_epoch == 0).then(Vec::new),
+        ..Default::default()
+    })
     .await
 }
 
@@ -83,10 +80,10 @@ async fn heartbeat(
 /// `consumer.heartbeat.interval.ms`, or the broker's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_group_reports_its_own_heartbeat_interval() {
-    let coordinator = coordinator(
-        NextGenConfig::assigning_at_once(),
-        &[("tuned", &[("consumer.heartbeat.interval.ms", "7000")])],
-    );
+    let coordinator = coordinator(NextGenConfig::assigning_at_once(), &[("tuned", &[(
+        "consumer.heartbeat.interval.ms",
+        "7000",
+    )])]);
     let mut reported = Vec::new();
     for group_id in ["tuned", "plain"] {
         let handle = coordinator.get_or_create_consumer(group_id);

@@ -21,17 +21,17 @@
 //!
 //! See the design spec `crates/broker/docs/transaction-coordinator-design.md`.
 
-use std::collections::VecDeque;
-
-use krabka_verified::increment_sequence;
-use stateright::{Model, Property};
-
-use super::{
-    Decision, ProducerEntry, RetainedBatch,
-    decision::{Checked, SequenceContext, check_retained},
-    entry::{EarlierBatches, NUM_BATCHES_TO_RETAIN},
+use {
+    super::{
+        Decision, ProducerEntry, RetainedBatch,
+        decision::{Checked, SequenceContext, check_retained},
+        entry::{EarlierBatches, NUM_BATCHES_TO_RETAIN},
+    },
+    crate::{model_check::check_model, partition::LogOffset},
+    krabka_verified::increment_sequence,
+    stateright::{Model, Property},
+    std::collections::VecDeque,
 };
-use crate::{model_check::check_model, partition::LogOffset};
 
 const MAX_STATES: usize = 2_000_000;
 const MAX_DEPTH: usize = 40;
@@ -223,8 +223,8 @@ enum ProdAction {
 }
 
 impl Model for ProducerModel {
-    type State = ProdState;
     type Action = ProdAction;
+    type State = ProdState;
 
     fn init_states(&self) -> Vec<Self::State> {
         vec![ProdState {
@@ -239,13 +239,10 @@ impl Model for ProducerModel {
         for epoch in 0..=self.max_epoch {
             for base in 0..=self.max_seq {
                 for delta in 0..=1 {
-                    actions.push(ProdAction::Submit(
-                        epoch,
-                        Range {
-                            base,
-                            last: base + delta,
-                        },
-                    ));
+                    actions.push(ProdAction::Submit(epoch, Range {
+                        base,
+                        last: base + delta,
+                    }));
                 }
             }
         }

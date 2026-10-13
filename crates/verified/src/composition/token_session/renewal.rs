@@ -1,14 +1,16 @@
-use creusot_std::prelude::*;
-
-use crate::{
-    authz::{
-        RequestAuthState, request_auth_admission, sasl_session_expiry, session_expired_for_request,
+use {
+    crate::{
+        authz::{
+            RequestAuthState, request_auth_admission, sasl_session_expiry,
+            session_expired_for_request,
+        },
+        delegation_token::{
+            ScramCredentialSource, TokenCreateDecision, TokenMutationDecision, TokenMutationFacts,
+            TokenMutationKind, TokenMutationState, TokenRenewDecision, create_token_deadlines,
+            renew_token_expiry, scram_credential_source, token_is_active, token_mutation_decision,
+        },
     },
-    delegation_token::{
-        ScramCredentialSource, TokenCreateDecision, TokenMutationDecision, TokenMutationFacts,
-        TokenMutationKind, TokenMutationState, TokenRenewDecision, create_token_deadlines,
-        renew_token_expiry, scram_credential_source, token_is_active, token_mutation_decision,
-    },
+    creusot_std::prelude::*,
 };
 
 model_types! {

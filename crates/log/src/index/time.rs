@@ -3,15 +3,7 @@
 //! `TimeIndex.maybeAppend` keeps them, and the offset is the last offset of the
 //! batch that set the timestamp.
 
-use std::{fs::File, path::Path};
-
-use tracing::instrument;
-use zerocopy::{BigEndian, IntoBytes, byteorder::I64};
-
-use crate::{
-    error::LogError,
-    io::{IoTarget, LogIo},
-};
+use super::prelude::*;
 
 /// 12 bytes per entry: timestamp as i64 BE and `relative_offset` as u32 BE.
 pub const TIME_ENTRY_SIZE: usize = 12;
@@ -102,18 +94,16 @@ impl TimeIndex {
     /// indexes, so it is the floor a reopened segment restores its
     /// `max_timestamp` from.
     #[must_use]
-    pub fn last_entry(&self) -> Option<(i64, u32)> {
-        self.entries.last().copied()
-    }
+    pub fn last_entry(&self) -> Option<(i64, u32)> { self.entries.last().copied() }
 }
 
 #[cfg(test)]
 mod time_tests {
-    use std::{fs::OpenOptions, io::Write};
-
-    use assert2::check;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        std::{fs::OpenOptions, io::Write},
+    };
 
     seed_index_fixture!(TimeIndex, i64);
 
@@ -165,12 +155,10 @@ mod time_tests {
                 vec![(100, 5)],
             ),
             ("older timestamp", vec![(100, 5)], (99, 9), vec![(100, 5)]),
-            (
-                "newer timestamp",
-                vec![(100, 5)],
+            ("newer timestamp", vec![(100, 5)], (101, 9), vec![
+                (100, 5),
                 (101, 9),
-                vec![(100, 5), (101, 9)],
-            ),
+            ]),
         ] {
             let (_dir, path, mut idx) = populated_index("0.timeindex", &existing);
             idx.maybe_append(appended.0, appended.1).unwrap();
@@ -182,10 +170,11 @@ mod time_tests {
 
     #[test]
     fn append_and_choose_scan_start() {
-        let (_dir, _path, idx) = populated_index(
-            "00000000000000000000.timeindex",
-            &[(1_000_000, 0), (2_000_000, 100), (3_000_000, 200)],
-        );
+        let (_dir, _path, idx) = populated_index("00000000000000000000.timeindex", &[
+            (1_000_000, 0),
+            (2_000_000, 100),
+            (3_000_000, 200),
+        ]);
         for (name, ts, want) in [
             ("before first", 0, 0),
             ("floor first", 1_500_000, 0),
@@ -206,10 +195,10 @@ mod time_tests {
 
     #[test]
     fn ignores_trailing_zero_padding() {
-        let (_dir, path) = written_index(
-            "00000000000000000000.timeindex",
-            &[(1_000, 0), (2_000, 100)],
-        );
+        let (_dir, path) = written_index("00000000000000000000.timeindex", &[
+            (1_000, 0),
+            (2_000, 100),
+        ]);
         let mut f = OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(&[0u8; TIME_ENTRY_SIZE * 2]).unwrap();
         f.sync_data().unwrap();

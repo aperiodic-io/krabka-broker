@@ -8,31 +8,31 @@
 //! topic authorization. After the topic authorization, a topic or a partition
 //! that the image does not hold answers `UNKNOWN_TOPIC_OR_PARTITION`.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_protocol::{
-    owned::{
-        offset_commit_request::{
-            OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
-        },
-        offset_commit_response::{
-            OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
+use {
+    crate::{
+        authorizer::{AllowAllAuthorizer, Authorizer},
+        broker::BrokerHandle,
+        codes,
+        coordinator::unified::actor::GroupActorMessage,
+        handlers::test_support::CreateTopicSetup,
+        test_support::{
+            DenyAll, dispatch_wire, peer, principal, request_context, start_group_broker_no_audit,
         },
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use tokio::sync::oneshot;
-
-use crate::{
-    authorizer::{AllowAllAuthorizer, Authorizer},
-    broker::BrokerHandle,
-    codes,
-    coordinator::unified::actor::GroupActorMessage,
-    handlers::test_support::CreateTopicSetup,
-    test_support::{
-        DenyAll, dispatch_wire, peer, principal, request_context, start_group_broker_no_audit,
+    assert2::assert,
+    krabka_protocol::{
+        owned::{
+            offset_commit_request::{
+                OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+            },
+            offset_commit_response::{
+                OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
+    std::sync::Arc,
+    tokio::sync::oneshot,
 };
 
 /// An id that no topic in these tests has.
@@ -90,7 +90,12 @@ async fn committed_keys(broker: &BrokerHandle, group: &str) -> Vec<(String, i32)
 }
 
 macro_rules! consumer_commit {
-    (($shared:ident, $user:ident, $address:ident, $context:ident, $actual:ident), $broker:expr, $version:expr, $request:ident) => {
+    (
+        ($shared:ident, $user:ident, $address:ident, $context:ident, $actual:ident),
+        $broker:expr,
+        $version:expr,
+        $request:ident
+    ) => {
         let $shared = $broker.broker_arc_for_test();
         request_identity!(($user, $address), principal("consumer"));
         let $context = request_context(&$user, &$address, "consumer-client");
@@ -201,17 +206,14 @@ async fn run_table(authorizer: Arc<dyn Authorizer>, cases: &[Case]) {
 
 #[tokio::test]
 async fn topic_row_error_follows_version_and_topic_reference() {
-    run_table(
-        Arc::new(AllowAllAuthorizer),
-        &[
-            Case::new(9, TopicRef::KnownName, codes::NONE),
-            Case::new(2, TopicRef::UnknownName, codes::UNKNOWN_TOPIC_OR_PARTITION),
-            Case::new(9, TopicRef::UnknownName, codes::UNKNOWN_TOPIC_OR_PARTITION),
-            Case::new(10, TopicRef::KnownId, codes::NONE),
-            Case::new(10, TopicRef::UnknownId, codes::UNKNOWN_TOPIC_ID),
-            Case::new(10, TopicRef::ZeroId, codes::UNKNOWN_TOPIC_ID),
-        ],
-    )
+    run_table(Arc::new(AllowAllAuthorizer), &[
+        Case::new(9, TopicRef::KnownName, codes::NONE),
+        Case::new(2, TopicRef::UnknownName, codes::UNKNOWN_TOPIC_OR_PARTITION),
+        Case::new(9, TopicRef::UnknownName, codes::UNKNOWN_TOPIC_OR_PARTITION),
+        Case::new(10, TopicRef::KnownId, codes::NONE),
+        Case::new(10, TopicRef::UnknownId, codes::UNKNOWN_TOPIC_ID),
+        Case::new(10, TopicRef::ZeroId, codes::UNKNOWN_TOPIC_ID),
+    ])
     .await;
 }
 
@@ -233,13 +235,10 @@ async fn unresolved_id_answers_before_topic_authorization() {
 /// denial answers `GROUP_AUTHORIZATION_FAILED` on every row.
 #[tokio::test]
 async fn group_authorization_answers_before_topic_resolution() {
-    run_table(
-        Arc::new(DenyAll),
-        &[
-            Case::new(10, TopicRef::UnknownId, codes::GROUP_AUTHORIZATION_FAILED),
-            Case::new(10, TopicRef::ZeroId, codes::GROUP_AUTHORIZATION_FAILED),
-        ],
-    )
+    run_table(Arc::new(DenyAll), &[
+        Case::new(10, TopicRef::UnknownId, codes::GROUP_AUTHORIZATION_FAILED),
+        Case::new(10, TopicRef::ZeroId, codes::GROUP_AUTHORIZATION_FAILED),
+    ])
     .await;
 }
 

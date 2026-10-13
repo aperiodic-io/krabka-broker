@@ -69,11 +69,12 @@
 //! Kafka gates the whole thing on `isElrFeatureEnabled`; krabka applies the
 //! same feature-level gate below.
 
-use krabka_metadata::{MetadataImage, MetadataRecord, NodeId};
-
-use crate::{
-    elr::{TopicElr, state::without_legacy_elr},
-    features::{ELR_VERSION, feature_enabled},
+use {
+    crate::{
+        elr::{TopicElr, state::without_legacy_elr},
+        features::{ELR_VERSION, feature_enabled},
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord, NodeId},
 };
 
 /// The `V1PartitionElr` records that take `node` out of every ELR it is named

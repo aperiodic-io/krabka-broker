@@ -1,14 +1,15 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::jwks_publication::initial_session_input_valid;
-use super::published_keys_bound_oauth_session;
 #[cfg(creusot)]
 use crate::authz::AclDefault;
-use crate::{
-    authz::{AclDecision, AclFacts, acl_decision, controller_request_admission},
-    jwks::JwksCacheFacts,
-    oauth::{OAuthSessionDecision, OAuthSessionFacts},
+use {
+    super::published_keys_bound_oauth_session,
+    crate::{
+        authz::{AclDecision, AclFacts, acl_decision, controller_request_admission},
+        jwks::JwksCacheFacts,
+        oauth::{OAuthSessionDecision, OAuthSessionFacts},
+    },
+    creusot_std::prelude::*,
 };
 
 type ControllerSessionTrace = (Option<i64>, Vec<bool>, (u64, u64));

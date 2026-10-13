@@ -1,11 +1,12 @@
 //! Shared credential fields of the runtime and file GCS configurations.
 
-use moxy::{
-    ast::ParseError,
-    token::{LitStr, Span, TokenStream, TokenTree},
+use {
+    crate::meta::{mode, named_body},
+    moxy::{
+        ast::ParseError,
+        token::{LitStr, Span, TokenStream, TokenTree},
+    },
 };
-
-use crate::meta::{mode, named_body};
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     let [prefix_doc, path_doc, key_doc, adc_doc, endpoint_doc] = match mode(meta, ["file", "runtime"])? {

@@ -3,43 +3,43 @@
 //! recovery, coordinators, runtime services, and final assembly -- and holds
 //! the commentary that explains why that order is the one that works.
 
-use std::{future::Future, sync::Arc};
-
-use futures_util::future::BoxFuture;
-use krabka_units::convert::{ByteSizeExt as _, TimeExt as _};
-
-use crate::{
-    auto_topic_creation::AutoTopicCreation,
-    barrier::scheduler::run as run_barrier_scheduler,
-    broker::{
-        Broker, BrokerHandle, DisklessRuntime,
-        coordinators::{CoordinatorInputs, CoordinatorStartup, start_coordinators},
-        finish::{BrokerStorageStartup, finish_broker_startup},
-        listeners::bind_ephemeral_data_plane_listener,
-        metadata_phase::{MetadataControlPlane, MetadataPhase, start_metadata_phase},
-        runtime::start_broker_runtime,
-        storage::{StorageStartup, recover_storage_and_groups},
-        transport::{StartupTransport, prepare_startup_transport},
+use {
+    crate::{
+        auto_topic_creation::AutoTopicCreation,
+        barrier::scheduler::run as run_barrier_scheduler,
+        broker::{
+            Broker, BrokerHandle, DisklessRuntime,
+            coordinators::{CoordinatorInputs, CoordinatorStartup, start_coordinators},
+            finish::{BrokerStorageStartup, finish_broker_startup},
+            listeners::bind_ephemeral_data_plane_listener,
+            metadata_phase::{MetadataControlPlane, MetadataPhase, start_metadata_phase},
+            runtime::start_broker_runtime,
+            storage::{StorageStartup, recover_storage_and_groups},
+            transport::{StartupTransport, prepare_startup_transport},
+        },
+        config::{BrokerConfig, DEFAULT_READINESS_MAX_METADATA_LAG},
+        controller_admin::BrokerControllerAdminRouter,
+        coordinator::{
+            leadership::spawn, retention::run as run_offset_retention,
+            topic_deletion::spawn as spawn_topic_deletion,
+        },
+        delivery::{
+            DeliveryWaker, config::DeliveryConfig, metrics::BrokerDeliveryMetrics,
+            scheduler::run as run_delivery_scheduler,
+        },
+        error::BrokerError,
+        health::{HealthState, metadata_progress},
+        heartbeat::client::InitialUnfence,
+        lag::{LAG_POLL_INTERVAL, LagPoller},
+        metadata_source::{MetadataSource, or_fatal_fault},
+        metrics::BrokerMetrics,
+        raft_handshake::AuditLogArc,
+        share_coordinator::coordinator::jobs::spawn as spawn_share_coordinator_jobs,
+        share_partition::backlog_poller::BacklogPoller,
     },
-    config::{BrokerConfig, DEFAULT_READINESS_MAX_METADATA_LAG},
-    controller_admin::BrokerControllerAdminRouter,
-    coordinator::{
-        leadership::spawn, retention::run as run_offset_retention,
-        topic_deletion::spawn as spawn_topic_deletion,
-    },
-    delivery::{
-        DeliveryWaker, config::DeliveryConfig, metrics::BrokerDeliveryMetrics,
-        scheduler::run as run_delivery_scheduler,
-    },
-    error::BrokerError,
-    health::{HealthState, metadata_progress},
-    heartbeat::client::InitialUnfence,
-    lag::{LAG_POLL_INTERVAL, LagPoller},
-    metadata_source::{MetadataSource, or_fatal_fault},
-    metrics::BrokerMetrics,
-    raft_handshake::AuditLogArc,
-    share_coordinator::coordinator::jobs::spawn as spawn_share_coordinator_jobs,
-    share_partition::backlog_poller::BacklogPoller,
+    futures_util::future::BoxFuture,
+    krabka_units::convert::{ByteSizeExt as _, TimeExt as _},
+    std::{future::Future, sync::Arc},
 };
 
 impl Broker {
@@ -322,18 +322,15 @@ impl Broker {
             share_partition_leaders,
             share_persister,
             dead_letters,
-        } = start_coordinators(
-            &config,
-            CoordinatorInputs {
-                controller: &controller,
-                partitions: &partitions,
-                group_coordinator: &group_coordinator,
-                producer_ids: &producer_ids,
-                inter_broker_client: &inter_broker_client,
-                auto_topic_creation: &auto_topic_creation,
-                metrics: &metrics,
-            },
-        )
+        } = start_coordinators(&config, CoordinatorInputs {
+            controller: &controller,
+            partitions: &partitions,
+            group_coordinator: &group_coordinator,
+            producer_ids: &producer_ids,
+            inter_broker_client: &inter_broker_client,
+            auto_topic_creation: &auto_topic_creation,
+            metrics: &metrics,
+        })
         .await;
 
         // 4b. Spawn the replicator supervisor. Started AFTER the controller
@@ -575,11 +572,12 @@ async fn wait_for_initial_unfence(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::test_support::{UNSUPPORTED_LEVEL_FAULT, finalize_unstable_metadata_version};
+    use {
+        super::*,
+        crate::test_support::{UNSUPPORTED_LEVEL_FAULT, finalize_unstable_metadata_version},
+        assert2::assert,
+        tempfile::tempdir,
+    };
 
     #[test]
     fn public_startup_futures_are_unboxed() {

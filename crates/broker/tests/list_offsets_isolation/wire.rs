@@ -12,19 +12,21 @@
 //! producing the records that precede the transaction, and waiting until the
 //! log has settled so a reading taken next measures the state the case meant.
 
-use assert2::check;
-use bytes::Bytes;
-use krabka_broker::{BrokerHandle, codes};
-use krabka_client_core::Client;
-use krabka_client_producer::{Producer, ProducerRecord};
-use krabka_protocol::owned::{
-    list_offsets_request::ListOffsetsRequest, list_offsets_response::ListOffsetsPartitionResponse,
-};
-
-use crate::support::{
-    offsets::{list_offset_partition, single_partition_list_offsets},
-    producer::{ProducerRecordSetup, producer_record},
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        offsets::{list_offset_partition, single_partition_list_offsets},
+        producer::{ProducerRecordSetup, producer_record},
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    assert2::check,
+    bytes::Bytes,
+    krabka_broker::{BrokerHandle, codes},
+    krabka_client_core::Client,
+    krabka_client_producer::{Producer, ProducerRecord},
+    krabka_protocol::owned::{
+        list_offsets_request::ListOffsetsRequest,
+        list_offsets_response::ListOffsetsPartitionResponse,
+    },
 };
 
 /// Request timestamp sentinel (-1) asking for the end of the partition.
@@ -77,9 +79,7 @@ pub(super) fn matched_row(offset: i64, timestamp: i64) -> ListOffsetsPartitionRe
 /// partition is unavailable. Asserting the error code is `NONE` here is what
 /// keeps a future implementation from turning a fence into a retryable failure
 /// that would spin a consumer forever.
-pub(super) fn refused_row() -> ListOffsetsPartitionResponse {
-    matched_row(-1, -1)
-}
+pub(super) fn refused_row() -> ListOffsetsPartitionResponse { matched_row(-1, -1) }
 
 /// The whole `LATEST` row a healthy partition 0 answers with.
 ///
@@ -88,9 +88,7 @@ pub(super) fn refused_row() -> ListOffsetsPartitionResponse {
 /// epoch: Kafka fills it from `Partition.getLeaderEpoch` rather than leaving
 /// it unknown. Spelling the full row out is what makes an isolation level
 /// that quietly changed the error code or the timestamp fail here too.
-pub(super) fn latest_row(offset: i64) -> ListOffsetsPartitionResponse {
-    matched_row(offset, -1)
-}
+pub(super) fn latest_row(offset: i64) -> ListOffsetsPartitionResponse { matched_row(offset, -1) }
 
 pub(super) async fn create_topic(client: &Client, name: &str) {
     let response = client

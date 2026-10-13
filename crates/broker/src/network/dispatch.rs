@@ -13,15 +13,16 @@
 //!   (`api_key=18`) is the one EXCEPT case: its response header is always
 //!   v0.
 
-use std::{net::SocketAddr, sync::Arc};
-
-use bytes::Bytes;
-use futures_util::SinkExt;
-use krabka_protocol::{Decode as _, api_key::ApiKey};
-use krabka_units::{Time, convert::TimeExt};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_util::codec::Framed;
-use tracing::Instrument as _;
+use {
+    bytes::Bytes,
+    futures_util::SinkExt,
+    krabka_protocol::{Decode as _, api_key::ApiKey},
+    krabka_units::{Time, convert::TimeExt},
+    std::{net::SocketAddr, sync::Arc},
+    tokio::io::{AsyncRead, AsyncWrite},
+    tokio_util::codec::Framed,
+    tracing::Instrument as _,
+};
 
 mod accept;
 mod fetch;
@@ -67,9 +68,7 @@ impl RequestByteBudget {
     /// The permits not currently spent. Test-only: what production code cares
     /// about is whether a frame is admitted, not how much room is left.
     #[cfg(test)]
-    pub(crate) fn available(&self) -> usize {
-        self.permits.available_permits()
-    }
+    pub(crate) fn available(&self) -> usize { self.permits.available_permits() }
 }
 
 #[cfg(test)]
@@ -78,34 +77,36 @@ mod tests;
 mod throttle_audit;
 
 pub use self::accept::serve_connection_on_listener;
-use self::{
-    fetch::dispatch_fetch,
-    guards::{ActiveConnectionGuard, InFlightGuard, QueuedRequestGuard},
-    registry::{DispatchContext, send_registry_response},
-    response::{ResponseShape, apply_request_quota, encode_response},
-    sasl::{SaslFrameOutcome, SaslListener, try_handle_sasl_frame},
-    session::{FrameWaitPolicy, RequestLimits, initial_connection_auth, next_connection_frame},
-    write_idle::WriteIdle,
-};
-use crate::{
-    api_catalog::{INTER_BROKER_ONLY_APIS, ListenerKind, is_disabled_version},
-    broker::Broker,
-    config::ListenerSpec,
-    handlers::{
-        ApiKeyCode, ApiVersion,
-        api_versions::{is_valid_client_info, unsupported_version_response},
-        registry::DispatchEntry,
+use {
+    self::{
+        fetch::dispatch_fetch,
+        guards::{ActiveConnectionGuard, InFlightGuard, QueuedRequestGuard},
+        registry::{DispatchContext, send_registry_response},
+        response::{ResponseShape, apply_request_quota, encode_response},
+        sasl::{SaslFrameOutcome, SaslListener, try_handle_sasl_frame},
+        session::{FrameWaitPolicy, RequestLimits, initial_connection_auth, next_connection_frame},
+        write_idle::WriteIdle,
     },
-    metrics::ConnectionCloseReason,
-    network::{
-        auth::ConnectionAuth,
-        codec::{self, KafkaCodec},
-        fetch_writer::SendfileSink,
-        listener::resolve_sasl_mechanisms_for_listener,
-        request::{ParsedRequest, parse_request, peek_api_key},
+    crate::{
+        api_catalog::{INTER_BROKER_ONLY_APIS, ListenerKind, is_disabled_version},
+        broker::Broker,
+        config::ListenerSpec,
+        handlers::{
+            ApiKeyCode, ApiVersion,
+            api_versions::{is_valid_client_info, unsupported_version_response},
+            registry::DispatchEntry,
+        },
+        metrics::ConnectionCloseReason,
+        network::{
+            auth::ConnectionAuth,
+            codec::{self, KafkaCodec},
+            fetch_writer::SendfileSink,
+            listener::resolve_sasl_mechanisms_for_listener,
+            request::{ParsedRequest, parse_request, peek_api_key},
+        },
+        telemetry::request_span,
+        time_util::now_ms,
     },
-    telemetry::request_span,
-    time_util::now_ms,
 };
 
 /// What the connection loop does once a response has been written.

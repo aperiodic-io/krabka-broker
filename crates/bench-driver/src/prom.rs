@@ -3,16 +3,16 @@
 //! For Strimzi only, it also captures JVM heap and non-heap from the JMX
 //! exporter.
 
-use std::collections::BTreeMap;
-
-use anyhow::{Context, Result, anyhow};
-use krabka_units::prelude::*;
-use serde::Deserialize;
-
-use crate::{
-    ids::{MessageCount, TimeOffsetMs},
-    numeric::{event_rate, nonnegative_f64_to_u64, to_f64},
-    scenario::{BrokerSample, Resource, Stack},
+use {
+    crate::{
+        ids::{MessageCount, TimeOffsetMs},
+        numeric::{event_rate, nonnegative_f64_to_u64, to_f64},
+        scenario::{BrokerSample, Resource, Stack},
+    },
+    anyhow::{Context, Result, anyhow},
+    krabka_units::prelude::*,
+    serde::Deserialize,
+    std::collections::BTreeMap,
 };
 
 /// Default HTTP request timeout for Prometheus queries.
@@ -380,9 +380,7 @@ struct PromResult {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn prometheus_request_timeout_constructs_prom_client() {

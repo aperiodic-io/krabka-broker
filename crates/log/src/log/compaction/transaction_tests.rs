@@ -2,20 +2,21 @@
 //! [`Log::compact`] keeps of a compacted topic that an exactly-once producer
 //! wrote to, and what its `.txnindex` says afterwards.
 
-use bytes::Bytes;
-use krabka_ids::{Offset, ProducerId};
-use krabka_protocol::records::{Attributes, RecordBatch};
-use krabka_units::prelude::mebibytes;
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    config::LogConfig,
-    log::test_support::{
-        abort_marker, commit_marker, compacting_segments, compaction_ctx, keyed_batch,
-        set_segment_size,
+use {
+    super::*,
+    crate::{
+        config::LogConfig,
+        log::test_support::{
+            abort_marker, commit_marker, compacting_segments, compaction_ctx, keyed_batch,
+            set_segment_size,
+        },
+        txn_index::AbortedTxn,
     },
-    txn_index::AbortedTxn,
+    bytes::Bytes,
+    krabka_ids::{Offset, ProducerId},
+    krabka_protocol::records::{Attributes, RecordBatch},
+    krabka_units::prelude::mebibytes,
+    tempfile::tempdir,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -78,9 +79,7 @@ fn marker_offsets(log: &Log) -> Vec<i64> {
         .collect()
 }
 
-fn aborted_txns(log: &Log) -> Vec<AbortedTxn> {
-    log.aborted_in_range(Offset(0), Offset(10))
-}
+fn aborted_txns(log: &Log) -> Vec<AbortedTxn> { log.aborted_in_range(Offset(0), Offset(10)) }
 
 /// The one aborted transaction the fixtures write: producer 2000's data at
 /// offset 2 and its abort marker at offset 3.
@@ -156,16 +155,16 @@ fn an_abort_marker_and_its_index_entry_age_out_once_the_aborted_data_is_gone() {
     // (case, whether the producers expire before the first pass, then for
     // each pass the marker offsets and whether the index entry stays)
     let cases = [
-        (
-            "expired producers",
-            true,
-            [(vec![1, 3], true), (vec![1, 3], false), (vec![1], false)],
-        ),
-        (
-            "active producers",
-            false,
-            [(vec![1, 3], true), (vec![1, 3], true), (vec![1, 3], true)],
-        ),
+        ("expired producers", true, [
+            (vec![1, 3], true),
+            (vec![1, 3], false),
+            (vec![1], false),
+        ]),
+        ("active producers", false, [
+            (vec![1, 3], true),
+            (vec![1, 3], true),
+            (vec![1, 3], true),
+        ]),
     ];
     // The third pass runs after the delete horizon of the first two.
     let delete_retention_ms = LogConfig::default().delete_retention.millis_i64_trunc();

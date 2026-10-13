@@ -4,20 +4,21 @@
 //! refused with `CLUSTER_AUTHORIZATION_FAILED` (31) on every partition, because
 //! the request needs cluster `Alter` permission.
 
-use assert2::assert;
-
-use crate::{
-    kafka_wire::AutomaticTopicSetup,
-    plaintext_wire::CLIENT_ID,
-    sasl_wire::{
-        create_topic_as_admin, drive_alter_reassignments_sasl_plain,
-        start_single_broker_sasl_plaintext_with_users,
+use {
+    crate::{
+        kafka_wire::AutomaticTopicSetup,
+        plaintext_wire::CLIENT_ID,
+        sasl_wire::{
+            create_topic_as_admin, drive_alter_reassignments_sasl_plain,
+            start_single_broker_sasl_plaintext_with_users,
+        },
+        support::{
+            acl::{TopicAclSetup, topic_acl_record},
+            retry::retry_until,
+            topics::ConfiguredTopicSetup,
+        },
     },
-    support::{
-        acl::{TopicAclSetup, topic_acl_record},
-        retry::retry_until,
-        topics::ConfiguredTopicSetup,
-    },
+    assert2::assert,
 };
 
 /// Test 4: alice, who authenticated over SASL/PLAIN and holds no ACLs, sends
@@ -28,10 +29,10 @@ use crate::{
 /// allows everything when `image.acls` is empty.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn non_super_user_denied() {
-    let (handle, _dir, addr) = start_single_broker_sasl_plaintext_with_users(
-        "admin",
-        &[("admin", "admin-secret"), ("alice", "alice-secret")],
-    )
+    let (handle, _dir, addr) = start_single_broker_sasl_plaintext_with_users("admin", &[
+        ("admin", "admin-secret"),
+        ("alice", "alice-secret"),
+    ])
     .await;
 
     // Seed a dummy ACL to disable the compat shim.  The ACL itself is
@@ -54,17 +55,14 @@ async fn non_super_user_denied() {
         .wait_for_image(|img| img.all_acls().next().is_some())
         .await;
 
-    create_topic_as_admin(
-        addr,
-        AutomaticTopicSetup {
-            client_id: CLIENT_ID,
-            topic: ConfiguredTopicSetup {
-                name: "foo".to_string(),
-                configs: vec![],
-                ..Default::default()
-            },
+    create_topic_as_admin(addr, AutomaticTopicSetup {
+        client_id: CLIENT_ID,
+        topic: ConfiguredTopicSetup {
+            name: "foo".to_string(),
+            configs: vec![],
+            ..Default::default()
         },
-    )
+    })
     .await;
     handle.wait_until_partition_present("foo", 0).await;
 
@@ -74,12 +72,11 @@ async fn non_super_user_denied() {
     // a metadata-image or metric signal, so there is no awaiter to wait on.
     let resp = retry_until()
         .attempt(|| async {
-            drive_alter_reassignments_sasl_plain(
-                addr,
-                "alice",
-                "alice-secret",
-                vec![("foo", 0, Some(vec![1]))],
-            )
+            drive_alter_reassignments_sasl_plain(addr, "alice", "alice-secret", vec![(
+                "foo",
+                0,
+                Some(vec![1]),
+            )])
             .await
         })
         .is_complete(|rows| {

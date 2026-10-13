@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume, quota_charge,
-    quota_credit,
+use {
+    super::{
+        AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume, quota_charge,
+        quota_credit,
+    },
+    creusot_std::prelude::*,
 };
 
 // cargo-mutants: #[cfg(creusot)] specification, absent from runtime tests.

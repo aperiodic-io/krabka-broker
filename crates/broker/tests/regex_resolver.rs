@@ -1,10 +1,11 @@
 //! A custom resolver implemented through the broker's public API.
 
-use std::collections::{BTreeSet, HashMap};
-
-use assert2::assert;
-use krabka_broker::coordinator::unified::regex_resolver::{
-    ResolvedRegularExpression, TopicRegexResolver,
+use {
+    assert2::assert,
+    krabka_broker::coordinator::unified::regex_resolver::{
+        ResolvedRegularExpression, TopicRegexResolver,
+    },
+    std::collections::{BTreeSet, HashMap},
 };
 
 #[derive(Debug)]
@@ -15,14 +16,11 @@ impl TopicRegexResolver for OrdersResolver {
         regexes
             .first()
             .map(|pattern| {
-                HashMap::from([(
-                    pattern.clone(),
-                    ResolvedRegularExpression {
-                        topics: BTreeSet::from(["orders".to_owned()]),
-                        version: 42,
-                        timestamp_ms: 1_000,
-                    },
-                )])
+                HashMap::from([(pattern.clone(), ResolvedRegularExpression {
+                    topics: BTreeSet::from(["orders".to_owned()]),
+                    version: 42,
+                    timestamp_ms: 1_000,
+                })])
             })
             .unwrap_or_default()
     }
@@ -34,13 +32,10 @@ fn a_consumer_can_implement_and_call_a_custom_resolver() {
     let subscriptions = resolver.resolve(&BTreeSet::from(["orders.*".to_owned()]));
     assert!(
         subscriptions
-            == HashMap::from([(
-                "orders.*".to_owned(),
-                ResolvedRegularExpression {
-                    topics: BTreeSet::from(["orders".to_owned()]),
-                    version: 42,
-                    timestamp_ms: 1_000,
-                },
-            )])
+            == HashMap::from([("orders.*".to_owned(), ResolvedRegularExpression {
+                topics: BTreeSet::from(["orders".to_owned()]),
+                version: 42,
+                timestamp_ms: 1_000,
+            },)])
     );
 }

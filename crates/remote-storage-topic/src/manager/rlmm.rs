@@ -6,15 +6,16 @@
 //! offset. The bridge lives in the sibling `mutations` module. Each gated read
 //! consults [`ReadGate`] before it delegates to the inner cache.
 
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{
-    InmemoryRemoteLogMetadataManager, RemoteLogMetadataManager, RemoteLogSegmentMetadata,
-    RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, RemotePartitionDeleteMetadata,
-    RemoteStorageError, TopicIdPartition,
+use {
+    super::{TopicBasedRemoteLogMetadataManager, assignment::ReadGate},
+    crate::{partitioning::metadata_partition_for, serde::MetadataEvent},
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{
+        InmemoryRemoteLogMetadataManager, RemoteLogMetadataManager, RemoteLogSegmentMetadata,
+        RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, RemotePartitionDeleteMetadata,
+        RemoteStorageError, TopicIdPartition,
+    },
 };
-
-use super::{TopicBasedRemoteLogMetadataManager, assignment::ReadGate};
-use crate::{partitioning::metadata_partition_for, serde::MetadataEvent};
 
 impl TopicBasedRemoteLogMetadataManager {
     /// Apply the assignment/readiness gate before consulting cached metadata.
@@ -117,17 +118,17 @@ impl RemoteLogMetadataManager for TopicBasedRemoteLogMetadataManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_remote_storage::RemotePartitionDeleteState;
-
-    use super::*;
-    use crate::{
-        log::{InProcessMetadataEventLog, MetadataEventLog},
-        manager::test_support::{
-            finish, on_blocking, seed_finished, start_manager, start_manager_all, started, tp,
+    use {
+        super::*,
+        crate::{
+            log::{InProcessMetadataEventLog, MetadataEventLog},
+            manager::test_support::{
+                finish, on_blocking, seed_finished, start_manager, start_manager_all, started, tp,
+            },
         },
+        assert2::assert,
+        krabka_remote_storage::RemotePartitionDeleteState,
+        std::sync::Arc,
     };
 
     krabka_macros::remote_segment_check!(check_finished_segment);

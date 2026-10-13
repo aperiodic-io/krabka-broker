@@ -52,10 +52,7 @@ pub(super) fn delete_records_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::codes;
+    use {super::*, crate::codes, assert2::assert};
 
     #[test]
     fn response_helpers_preserve_topic_and_partition_fields() {

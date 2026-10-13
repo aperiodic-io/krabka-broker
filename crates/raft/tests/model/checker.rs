@@ -3,29 +3,29 @@
 //! the state-space boundary. The trait demands one `impl` block, so the whole
 //! checker interface lives in this one file.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use krabka_raft::kraft::{
-    QuorumStateMachine,
-    action::TimerKind,
-    event::Event,
-    role::Role,
-    types::{Epoch, LogView, NodeId, QuorumState},
-};
-use stateright::{
-    Model, Property,
-    semantics::{ConsistencyTester, LinearizabilityTester},
-};
-
-use super::{
-    commit::settle_committed,
-    config::ConsensusModel,
-    log::ModelLog,
-    spec::{APPENDER_COUNT, AppenderId, ClientId, KraftLogSpec, LogOp},
-    state::{
-        CommitPoint, ModelAction, ModelState, NodeModel, StepWitness, is_leader, live_authority,
-        node_high_watermark,
+use {
+    super::{
+        commit::settle_committed,
+        config::ConsensusModel,
+        log::ModelLog,
+        spec::{APPENDER_COUNT, AppenderId, ClientId, KraftLogSpec, LogOp},
+        state::{
+            CommitPoint, ModelAction, ModelState, NodeModel, StepWitness, is_leader,
+            live_authority, node_high_watermark,
+        },
     },
+    krabka_raft::kraft::{
+        QuorumStateMachine,
+        action::TimerKind,
+        event::Event,
+        role::Role,
+        types::{Epoch, LogView, NodeId, QuorumState},
+    },
+    stateright::{
+        Model, Property,
+        semantics::{ConsistencyTester, LinearizabilityTester},
+    },
+    std::collections::{BTreeMap, BTreeSet},
 };
 
 fn append_to_leader(state: &mut ModelState, leader: NodeId, client: ClientId, value: u64) -> i64 {
@@ -45,8 +45,8 @@ fn append_to_leader(state: &mut ModelState, leader: NodeId, client: ClientId, va
 }
 
 impl Model for ConsensusModel {
-    type State = ModelState;
     type Action = ModelAction;
+    type State = ModelState;
 
     fn init_states(&self) -> Vec<Self::State> {
         let voters = self.voter_set();
@@ -57,14 +57,11 @@ impl Model for ConsensusModel {
                 QuorumState::bootstrap(uuid::Uuid::nil(), voters.clone()),
                 Self::election_timeout_of(id),
             );
-            nodes.insert(
-                id,
-                NodeModel {
-                    machine,
-                    log: ModelLog::default(),
-                    high_watermark: 0,
-                },
-            );
+            nodes.insert(id, NodeModel {
+                machine,
+                log: ModelLog::default(),
+                high_watermark: 0,
+            });
         }
         vec![ModelState {
             nodes,

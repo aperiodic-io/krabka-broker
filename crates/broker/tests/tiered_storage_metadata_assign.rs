@@ -11,16 +11,17 @@
 use assert2::assert;
 mod support;
 
-use std::time::{Duration, Instant};
-
-use bytes::Bytes;
-use futures_util::StreamExt;
-use krabka_broker::BrokerHandle;
-use krabka_remote_storage_topic::{
-    kafka_log::{KafkaMetadataEventLog, KafkaMetadataLogConfig},
-    log::{MetadataEventLog, PartitionStart},
+use {
+    bytes::Bytes,
+    futures_util::StreamExt,
+    krabka_broker::BrokerHandle,
+    krabka_remote_storage_topic::{
+        kafka_log::{KafkaMetadataEventLog, KafkaMetadataLogConfig},
+        log::{MetadataEventLog, PartitionStart},
+    },
+    std::time::{Duration, Instant},
+    tempfile::TempDir,
 };
-use tempfile::TempDir;
 
 krabka_macros::bound_start_fixture!(config, bare_config, ::krabka_broker);
 

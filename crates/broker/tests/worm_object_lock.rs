@@ -12,15 +12,15 @@
 mod jvm_acceptance;
 mod support;
 
-use std::process::Command;
-
-use assert2::{assert, check};
-use jvm_acceptance::*;
-use krabka_audit::signing::FileEd25519Signer;
-use krabka_log::LogConfig;
-use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-
-use crate::support::{JvmBrokerSetup, controller_voters, init_tracing_with};
+use {
+    crate::support::{JvmBrokerSetup, controller_voters, init_tracing_with},
+    assert2::{assert, check},
+    jvm_acceptance::*,
+    krabka_audit::signing::FileEd25519Signer,
+    krabka_log::LogConfig,
+    ring::{rand::SystemRandom, signature::Ed25519KeyPair},
+    std::process::Command,
+};
 
 /// Object-Lock bucket for this suite. It is not [`MINIO_BUCKET`]: that bucket
 /// is the ordinary mutable tier, and a locked bucket behaves differently enough
@@ -225,16 +225,13 @@ async fn start_worm_broker(
         // for the whole test. A restart is what would start a new epoch, and
         // this suite never restarts.
         remote_log_metadata: krabka_broker::RlmmKind::InMemory,
-        ..support::jvm_broker_config(
-            dir.path().to_path_buf(),
-            JvmBrokerSetup {
-                listen: listen_addr,
-                controller: controller_addr,
-                advertised: (broker0_advertised()).to_owned(),
-                voters: controller_voters(&[(1, controller_addr)]),
-                ..Default::default()
-            },
-        )
+        ..support::jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
+            listen: listen_addr,
+            controller: controller_addr,
+            advertised: (broker0_advertised()).to_owned(),
+            voters: controller_voters(&[(1, controller_addr)]),
+            ..Default::default()
+        })
     };
     let handle = krabka_broker::Broker::start(config)
         .await

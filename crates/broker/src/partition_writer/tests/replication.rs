@@ -1,14 +1,15 @@
 //! Writer-loop tests for the follower-facing arms: an append at a caller
 //! supplied offset and the truncation that undoes one.
 
-use assert2::assert;
-use krabka_log::Offset;
-use tokio::sync::oneshot;
-
-use super::*;
-use crate::{
-    partition_writer::test_support::sample_batch,
-    test_support::{EmptyPayloadBatchSetup, RecordCount},
+use {
+    super::*,
+    crate::{
+        partition_writer::test_support::sample_batch,
+        test_support::{EmptyPayloadBatchSetup, RecordCount},
+    },
+    assert2::assert,
+    krabka_log::Offset,
+    tokio::sync::oneshot,
 };
 
 #[tokio::test]

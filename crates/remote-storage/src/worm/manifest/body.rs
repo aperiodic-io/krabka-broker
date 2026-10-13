@@ -4,13 +4,13 @@
 //! These are the `serde` types of the manifest file. `ManifestBody` is the
 //! signed content and `SegmentManifest` is the file as a whole.
 
-use std::collections::BTreeMap;
-
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-use super::{ChainStamp, ManifestSignature, Sha256Digest};
-use crate::metadata::RemoteLogSegmentMetadata;
+use {
+    super::{ChainStamp, ManifestSignature, Sha256Digest},
+    crate::metadata::RemoteLogSegmentMetadata,
+    serde::{Deserialize, Serialize},
+    std::collections::BTreeMap,
+    uuid::Uuid,
+};
 
 /// One object that a segment copy wrote to the archive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,18 +134,20 @@ pub struct SegmentManifest {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::LeaderEpoch;
-
-    use super::*;
-    use crate::{
-        metadata::{
-            RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentState, TopicIdPartition,
+    use {
+        super::*,
+        crate::{
+            metadata::{
+                RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentState,
+                TopicIdPartition,
+            },
+            worm::manifest::{
+                HexBytes,
+                test_support::{KEY_ID, bare_object, located_object, sample_body, sample_segment},
+            },
         },
-        worm::manifest::{
-            HexBytes,
-            test_support::{KEY_ID, bare_object, located_object, sample_body, sample_segment},
-        },
+        assert2::check,
+        krabka_ids::LeaderEpoch,
     };
 
     #[test]

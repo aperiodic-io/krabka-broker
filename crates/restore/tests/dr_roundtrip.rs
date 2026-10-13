@@ -45,25 +45,25 @@ mod batches;
 #[path = "roundtrip/fixture.rs"]
 mod fixture;
 
-use std::collections::BTreeMap;
-
-use assert2::{assert, check};
-use krabka_backup::{archive::ArchiveArgs, capture::capture_key, manifest::RLMM_SNAPSHOT, run};
-use krabka_broker::{BrokerConfig, BrokerHandle};
-use krabka_client_admin::AdminClient;
-use krabka_client_core::{
-    Client, CoordinatorKeyType, build_find_coordinator, coordinator_endpoint,
-};
-use krabka_metadata::{MetadataImage, MetadataRecord, NodeId, TopicConfigRecord, TopicRecord};
-use krabka_remote_storage::{PartitionDump, RlmmCacheDump, TopicIdPartition};
-use krabka_remote_storage_topic::Snapshot;
-use krabka_restore::restore;
-use uuid::Uuid;
-
-use crate::{
-    args::ControllerListener,
-    fixture::{Fixture, build_fixture},
-    topic_configuration::check_topic_configuration,
+use {
+    crate::{
+        args::ControllerListener,
+        fixture::{Fixture, build_fixture},
+        topic_configuration::check_topic_configuration,
+    },
+    assert2::{assert, check},
+    krabka_backup::{archive::ArchiveArgs, capture::capture_key, manifest::RLMM_SNAPSHOT, run},
+    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_client_admin::AdminClient,
+    krabka_client_core::{
+        Client, CoordinatorKeyType, build_find_coordinator, coordinator_endpoint,
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord, NodeId, TopicConfigRecord, TopicRecord},
+    krabka_remote_storage::{PartitionDump, RlmmCacheDump, TopicIdPartition},
+    krabka_remote_storage_topic::Snapshot,
+    krabka_restore::restore,
+    std::collections::BTreeMap,
+    uuid::Uuid,
 };
 
 krabka_macros::single_replica_partition_fixture!(single_replica_partition);
@@ -303,16 +303,14 @@ async fn a_captured_cluster_restores_with_its_configuration_and_its_group_positi
         krabka_backup::manifest::METADATA_CHECKPOINT,
     ));
     let post_log_dir = workspace.path().join("post");
-    let report = restore(&controller.restore_args(
-        fixture.archive_root.path(),
-        &post_log_dir,
-        &[
+    let report = restore(
+        &controller.restore_args(fixture.archive_root.path(), &post_log_dir, &[
             "--rlmm-snapshot",
             &rlmm.display().to_string(),
             "--metadata-snapshot",
             &checkpoint.display().to_string(),
-        ],
-    ))
+        ]),
+    )
     .await
     .expect("restore from the archive");
     check!(report.metadata.topic_configs == 1);

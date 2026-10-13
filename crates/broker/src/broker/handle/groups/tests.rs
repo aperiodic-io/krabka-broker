@@ -1,26 +1,26 @@
-use std::sync::Arc;
-
-use assert2::{assert, check};
-
-use super::*;
-use crate::{
-    broker::Broker,
-    coordinator::unified::{
-        GroupSeed, StreamsGroupSeed,
-        actor::{GroupActorMessage, GroupKindTag},
-        classic_state::{ClassicGroup, Member},
-        group::{CoordinatorGroup, GroupKind},
-        persistence_next_gen::MemberMetadataValue,
-        streams::{
-            actor::StreamsGroupActorMessage,
-            persistence::{
-                DescriptionEpochs, StreamsGroupCurrentMemberAssignmentValue,
-                StreamsGroupMemberMetadataValue, StreamsGroupTargetAssignmentMemberValue,
-                StreamsMemberWireState,
+use {
+    super::*,
+    crate::{
+        broker::Broker,
+        coordinator::unified::{
+            GroupSeed, StreamsGroupSeed,
+            actor::{GroupActorMessage, GroupKindTag},
+            classic_state::{ClassicGroup, Member},
+            group::{CoordinatorGroup, GroupKind},
+            persistence_next_gen::MemberMetadataValue,
+            streams::{
+                actor::StreamsGroupActorMessage,
+                persistence::{
+                    DescriptionEpochs, StreamsGroupCurrentMemberAssignmentValue,
+                    StreamsGroupMemberMetadataValue, StreamsGroupTargetAssignmentMemberValue,
+                    StreamsMemberWireState,
+                },
             },
         },
+        test_support::start_broker_with,
     },
-    test_support::start_broker_with,
+    assert2::{assert, check},
+    std::sync::Arc,
 };
 
 fn consumer_group_seed(member_id: &str) -> GroupSeed {
@@ -29,9 +29,8 @@ fn consumer_group_seed(member_id: &str) -> GroupSeed {
         target_epoch: 4,
         ..Default::default()
     };
-    seed.members.insert(
-        member_id.to_string(),
-        MemberMetadataValue {
+    seed.members
+        .insert(member_id.to_string(), MemberMetadataValue {
             instance_id: None,
             rack_id: None,
             client_id: "client".to_string(),
@@ -41,8 +40,7 @@ fn consumer_group_seed(member_id: &str) -> GroupSeed {
             server_assignor: None,
             rebalance_timeout_ms: 60_000,
             classic: None,
-        },
-    );
+        });
     seed
 }
 
@@ -71,20 +69,17 @@ fn streams_group_seed(member_id: &str) -> StreamsGroupSeed {
     active.insert("subtopology-0".to_string(), vec![0, 1]);
 
     let mut members = std::collections::HashMap::new();
-    members.insert(
-        member_id.to_string(),
-        StreamsGroupMemberMetadataValue {
-            instance_id: None,
-            rack_id: None,
-            client_id: "streams-client".to_string(),
-            client_host: "127.0.0.1".to_string(),
-            process_id: "process-1".to_string(),
-            user_endpoint: None,
-            client_tags: Vec::new(),
-            rebalance_timeout_ms: 60_000,
-            topology_epoch: 0,
-        },
-    );
+    members.insert(member_id.to_string(), StreamsGroupMemberMetadataValue {
+        instance_id: None,
+        rack_id: None,
+        client_id: "streams-client".to_string(),
+        client_host: "127.0.0.1".to_string(),
+        process_id: "process-1".to_string(),
+        user_endpoint: None,
+        client_tags: Vec::new(),
+        rebalance_timeout_ms: 60_000,
+        topology_epoch: 0,
+    });
 
     let mut target_per_member = std::collections::HashMap::new();
     target_per_member.insert(

@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
-use super::{
-    AclDecision, AclDefault, AclFacts, AclOperationKind, TokenApi, TokenApiAdmission,
-    TokenDescriptionAcl, acl_decision, acl_identity_match, acl_operation_match, acl_resource_match,
-    token_api_admission, token_describe_visible,
-};
 #[cfg(creusot)]
 use super::{AclPatternKind, AclResourceTypeMatch};
+use {
+    super::{
+        AclDecision, AclDefault, AclFacts, AclOperationKind, TokenApi, TokenApiAdmission,
+        TokenDescriptionAcl, acl_decision, acl_identity_match, acl_operation_match,
+        acl_resource_match, token_api_admission, token_describe_visible,
+    },
+    creusot_std::prelude::*,
+};
 
 // cargo-mutants: #[cfg(creusot)] specification, absent from runtime tests.
 #[cfg(creusot)]

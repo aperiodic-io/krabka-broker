@@ -3,21 +3,21 @@
 //! towards the watermark, how a voter-set change takes effect, and what a
 //! reopen must not truncate.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_ids::{Offset, PartitionIndex};
-use krabka_kraft_core::NodeId;
-use uuid::Uuid;
-
-use super::{
-    QuorumWalStore,
-    test_support::{append_source, batch, distributed_store, open_log, source_log},
-};
-use crate::{
-    error::BrokerError,
-    metrics::BrokerMetrics,
-    wal::{WalStore, quorum::registry::ShardId},
+use {
+    super::{
+        QuorumWalStore,
+        test_support::{append_source, batch, distributed_store, open_log, source_log},
+    },
+    crate::{
+        error::BrokerError,
+        metrics::BrokerMetrics,
+        wal::{WalStore, quorum::registry::ShardId},
+    },
+    assert2::assert,
+    krabka_ids::{Offset, PartitionIndex},
+    krabka_kraft_core::NodeId,
+    std::sync::Arc,
+    uuid::Uuid,
 };
 
 /// Wait until the spawned `sync_durable` has fsynced `offset` and recorded the

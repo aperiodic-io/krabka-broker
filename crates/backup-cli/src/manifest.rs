@@ -8,10 +8,11 @@
 //! answer the only question that matters before a disaster, which is whether
 //! this copy would restore.
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha2::{Digest as _, Sha256};
-
-use crate::error::BackupError;
+use {
+    crate::error::BackupError,
+    serde::{Deserialize, Serialize, de::DeserializeOwned},
+    sha2::{Digest as _, Sha256},
+};
 
 /// Version of `manifest.json`, its required top-level `"version"` field.
 ///
@@ -153,10 +154,11 @@ pub fn artifact_problem(expected: &Artifact, actual: &[u8]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::{Artifact, MANIFEST_VERSION, Manifest, artifact_problem, sha256_hex};
-    use crate::error::BackupError;
+    use {
+        super::{Artifact, MANIFEST_VERSION, Manifest, artifact_problem, sha256_hex},
+        crate::error::BackupError,
+        assert2::check,
+    };
 
     fn artifact(bytes: &[u8]) -> Artifact {
         Artifact {

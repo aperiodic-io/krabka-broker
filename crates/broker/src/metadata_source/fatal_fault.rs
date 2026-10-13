@@ -1,11 +1,7 @@
 //! Running startup work against the fatal fault of the controller that this
 //! node hosts.
 
-use std::future::Future;
-
-use tokio::sync::watch;
-
-use crate::error::BrokerError;
+use {crate::error::BrokerError, std::future::Future, tokio::sync::watch};
 
 /// Runs `work`, and ends it with [`BrokerError::FatalFault`] as soon as
 /// `faults` carries a fault.
@@ -50,11 +46,7 @@ pub(crate) async fn or_fatal_fault<T>(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert, std::time::Duration};
 
     const FAULT: &str = "Tried to apply FeatureLevelRecord, but this controller only supports 7-30";
 

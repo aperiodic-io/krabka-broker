@@ -67,10 +67,11 @@
 //! election available, and that election is then reported as the data-losing
 //! one it is rather than hidden behind a leader nobody can reach.
 
-use std::collections::{BTreeSet, HashSet};
-
-use krabka_raft::NodeId;
-use krabka_verified::consensus::RecoveryCandidate;
+use {
+    krabka_raft::NodeId,
+    krabka_verified::consensus::RecoveryCandidate,
+    std::collections::{BTreeSet, HashSet},
+};
 
 /// One replica's reported log state, from a `GetReplicaLogInfo` response.
 ///
@@ -120,9 +121,7 @@ pub(crate) enum ElectionBasis {
 impl ElectionBasis {
     /// Whether this election may have dropped committed records. It is the
     /// `unclean` flag on Kafka's `PartitionChangeBuilder.ElectionResult`.
-    pub(crate) fn loses_data(self) -> bool {
-        self == Self::MostCompleteLog
-    }
+    pub(crate) fn loses_data(self) -> bool { self == Self::MostCompleteLog }
 
     /// The clause an operator-facing log line or audit reason reads, after the
     /// broker id: "elected broker 3 <this>".
@@ -223,10 +222,11 @@ pub(crate) fn has_newer_leader(responses: &[ReplicaLogInfo], known_leader_epoch:
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::leader_election::test_support::{no_witnesses, witnesses};
+    use {
+        super::*,
+        crate::leader_election::test_support::{no_witnesses, witnesses},
+        assert2::{assert, check},
+    };
 
     fn ri(broker_id: u64, epoch: i32, leo: i64) -> ReplicaLogInfo {
         ReplicaLogInfo {

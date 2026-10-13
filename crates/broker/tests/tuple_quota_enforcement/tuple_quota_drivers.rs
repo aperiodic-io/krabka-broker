@@ -7,20 +7,20 @@
 //! property of the produce driver: a freshly seeded ACL can still be absent
 //! from the handler's image snapshot when the first request arrives.
 
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use krabka_protocol::owned::produce_response::ProduceResponse;
-
 pub use crate::kafka_wire::quotas::drive_alter_client_quotas_sasl;
-use crate::{
-    CLIENT_ID,
-    kafka_wire::{
-        self, PlainAuthenticationSetup, ProduceRecordCount, SaslProduceSetup,
-        ZeroFilledRecordsSetup,
+use {
+    crate::{
+        CLIENT_ID,
+        kafka_wire::{
+            self, PlainAuthenticationSetup, ProduceRecordCount, SaslProduceSetup,
+            ZeroFilledRecordsSetup,
+        },
+    },
+    assert2::assert,
+    krabka_protocol::owned::produce_response::ProduceResponse,
+    std::{
+        net::SocketAddr,
+        time::{Duration, Instant},
     },
 };
 
@@ -35,22 +35,19 @@ pub(crate) async fn await_authorized_produce(
 ) -> ProduceResponse {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let response = kafka_wire::produce_sasl_with_ids(
-            addr,
-            SaslProduceSetup {
-                authentication: PlainAuthenticationSetup {
-                    client_id: CLIENT_ID,
-                    password: (password).to_vec(),
-                    ..Default::default()
-                },
-                produce_client_id: client_id,
-                records: ZeroFilledRecordsSetup {
-                    topic: ("tuple-quota-topic").to_string(),
-                    count: ProduceRecordCount(4),
-                    ..Default::default()
-                },
+        let response = kafka_wire::produce_sasl_with_ids(addr, SaslProduceSetup {
+            authentication: PlainAuthenticationSetup {
+                client_id: CLIENT_ID,
+                password: (password).to_vec(),
+                ..Default::default()
             },
-        )
+            produce_client_id: client_id,
+            records: ZeroFilledRecordsSetup {
+                topic: ("tuple-quota-topic").to_string(),
+                count: ProduceRecordCount(4),
+                ..Default::default()
+            },
+        })
         .await;
         let error_code = response
             .responses

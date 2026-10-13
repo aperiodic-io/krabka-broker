@@ -2,38 +2,36 @@
 //! default `MovePolicy`, and builders for a source `Partition` and the record
 //! batches it holds.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+use {
+    super::MovePolicy,
+    crate::{
+        log_dir::future_partition_dir,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        test_support::{
+            PartitionRecordsSetup, RecordCount, StandalonePartitionSetup, open_partition,
+            partition_records_batch,
+        },
+        throttle::TokenBucket,
     },
-};
-
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-use krabka_units::{mebibytes, millis};
-
-use super::MovePolicy;
-use crate::{
-    log_dir::future_partition_dir,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    test_support::{
-        PartitionRecordsSetup, RecordCount, StandalonePartitionSetup, open_partition,
-        partition_records_batch,
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    krabka_units::{mebibytes, millis},
+    std::{
+        path::{Path, PathBuf},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicU64, Ordering},
+        },
     },
-    throttle::TokenBucket,
 };
 
 #[derive(Debug)]
 pub(super) struct TestStampSource(pub(super) AtomicU64);
 
 impl krabka_log::StampSource for TestStampSource {
-    fn next_stamp(&self) -> u64 {
-        self.0.fetch_add(1, Ordering::Relaxed)
-    }
+    fn next_stamp(&self) -> u64 { self.0.fetch_add(1, Ordering::Relaxed) }
 }
 
 pub(super) fn test_policy() -> MovePolicy {
@@ -52,14 +50,11 @@ pub(super) fn fixture_partition(
     topic: &str,
     partition: PartitionIndex,
 ) -> Arc<Partition> {
-    open_partition(
-        log_dir,
-        StandalonePartitionSetup {
-            topic,
-            partition: krabka_ids::PartitionIndex(partition.get()),
-            ..Default::default()
-        },
-    )
+    open_partition(log_dir, StandalonePartitionSetup {
+        topic,
+        partition: krabka_ids::PartitionIndex(partition.get()),
+        ..Default::default()
+    })
 }
 
 pub(super) fn append_records(part: &Arc<Partition>, setup: PartitionRecordsSetup) {
@@ -94,13 +89,10 @@ pub(super) fn source_partition(primary: &Path, setup: FutureSourceSetup) -> Arc<
             .set_stamp_source(stamp_source)
             .expect("source stamp index");
     }
-    append_records(
-        &part,
-        PartitionRecordsSetup {
-            count: setup.count,
-            ..Default::default()
-        },
-    );
+    append_records(&part, PartitionRecordsSetup {
+        count: setup.count,
+        ..Default::default()
+    });
     part
 }
 
@@ -174,9 +166,7 @@ pub(super) fn plant_future_log(
 pub(super) struct RecordValueBytes(pub usize);
 
 impl Default for RecordValueBytes {
-    fn default() -> Self {
-        Self(20)
-    }
+    fn default() -> Self { Self(20) }
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

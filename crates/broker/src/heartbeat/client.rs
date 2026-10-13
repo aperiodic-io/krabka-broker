@@ -11,23 +11,23 @@
 //! heartbeat would ever arrive, and the controller's liveness registry would
 //! fence the whole cluster one `liveness_tick_interval` after boot.
 
-use std::sync::Arc;
-
-use krabka_client_core::ConnectionOptions;
-use krabka_protocol::owned::broker_heartbeat_request::BrokerHeartbeatRequest;
-use krabka_security::ListenerProtocol;
-use krabka_units::{Time, convert::TimeExt as _, fmt::Human as _, millis, secs};
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
-
-use crate::{
-    codes::{CLUSTER_AUTHORIZATION_FAILED, NONE, NOT_CONTROLLER},
-    controller_endpoint::leader_endpoint,
-    cordoned_log_dirs::CordonedLogDirs,
-    log_dir_id::LogDirIds,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    network::client::InterBrokerClient,
+use {
+    crate::{
+        codes::{CLUSTER_AUTHORIZATION_FAILED, NONE, NOT_CONTROLLER},
+        controller_endpoint::leader_endpoint,
+        cordoned_log_dirs::CordonedLogDirs,
+        log_dir_id::LogDirIds,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        network::client::InterBrokerClient,
+    },
+    krabka_client_core::ConnectionOptions,
+    krabka_protocol::owned::broker_heartbeat_request::BrokerHeartbeatRequest,
+    krabka_security::ListenerProtocol,
+    krabka_units::{Time, convert::TimeExt as _, fmt::Human as _, millis, secs},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
+    tracing::{debug, warn},
 };
 
 /// Where this broker's first unfencing stands: Kafka's
@@ -122,9 +122,7 @@ fn all_log_dirs_offline(cfg: &Config) -> bool {
     all_dirs_offline(&cfg.all_log_dirs, &cfg.log_dir_status)
 }
 
-fn heartbeat_rpc_timeout(interval: Time) -> Time {
-    (interval * 2.0).max(millis(500)).min(secs(1))
-}
+fn heartbeat_rpc_timeout(interval: Time) -> Time { (interval * 2.0).max(millis(500)).min(secs(1)) }
 
 fn heartbeat_connection_options(broker_id: i32, interval: Time) -> ConnectionOptions {
     let timeout = heartbeat_rpc_timeout(interval);
@@ -404,34 +402,34 @@ pub(crate) async fn run(mut cfg: Config) {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::Mutex,
-        time::{Duration, Instant},
-    };
-
-    use assert2::{assert, check};
-    use bytes::BytesMut;
-    use krabka_client_core::{MockBroker, MockReply};
-    use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord};
-    use krabka_protocol::{
-        Encode as _,
-        owned::{
-            api_versions_request,
-            api_versions_response::{ApiVersion, ApiVersionsResponse},
-            broker_heartbeat_request,
-            broker_heartbeat_response::BrokerHeartbeatResponse,
+    use {
+        super::*,
+        crate::{
+            codes::{NONE, NOT_CONTROLLER},
+            cordoned_log_dirs::CordonedLogDirs,
+            features::METADATA_VERSION,
+            log_dir_id::LogDirIds,
+            log_dir_status::LogDirRegistry,
+            metadata_source::MetadataSource,
+            test_support::{FakeMetadataSource, broker_registration, two_log_dirs},
         },
-    };
-
-    use super::*;
-    use crate::{
-        codes::{NONE, NOT_CONTROLLER},
-        cordoned_log_dirs::CordonedLogDirs,
-        features::METADATA_VERSION,
-        log_dir_id::LogDirIds,
-        log_dir_status::LogDirRegistry,
-        metadata_source::MetadataSource,
-        test_support::{FakeMetadataSource, broker_registration, two_log_dirs},
+        assert2::{assert, check},
+        bytes::BytesMut,
+        krabka_client_core::{MockBroker, MockReply},
+        krabka_metadata::{BrokerRegistrationRecord, MetadataRecord},
+        krabka_protocol::{
+            Encode as _,
+            owned::{
+                api_versions_request,
+                api_versions_response::{ApiVersion, ApiVersionsResponse},
+                broker_heartbeat_request,
+                broker_heartbeat_response::BrokerHeartbeatResponse,
+            },
+        },
+        std::{
+            sync::Mutex,
+            time::{Duration, Instant},
+        },
     };
 
     // How a fake controller answers a heartbeat.
@@ -518,17 +516,11 @@ mod tests {
             Self { broker, seen }
         }
 
-        fn connections(&self) -> usize {
-            self.seen.lock().unwrap().connections
-        }
+        fn connections(&self) -> usize { self.seen.lock().unwrap().connections }
 
-        fn heartbeats(&self) -> usize {
-            self.seen.lock().unwrap().heartbeats
-        }
+        fn heartbeats(&self) -> usize { self.seen.lock().unwrap().heartbeats }
 
-        fn answer_next(&self, answer: Answer) {
-            self.seen.lock().unwrap().next_answer = answer;
-        }
+        fn answer_next(&self, answer: Answer) { self.seen.lock().unwrap().next_answer = answer; }
 
         // Waits until the fake has seen `more` heartbeats after the ones it
         // has seen already.
@@ -681,16 +673,10 @@ mod tests {
     fn heartbeat_request_reports_registration_and_applied_metadata() {
         let offline = krabka_protocol::primitives::uuid::Uuid([7; 16]);
         let cordoned = krabka_protocol::primitives::uuid::Uuid([9; 16]);
-        let req = heartbeat_request(
-            3,
-            41,
-            47,
-            true,
-            HeartbeatLogDirs {
-                offline: vec![offline],
-                cordoned: Some(vec![cordoned]),
-            },
-        );
+        let req = heartbeat_request(3, 41, 47, true, HeartbeatLogDirs {
+            offline: vec![offline],
+            cordoned: Some(vec![cordoned]),
+        });
 
         assert!(
             req == BrokerHeartbeatRequest {

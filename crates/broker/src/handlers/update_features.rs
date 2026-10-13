@@ -11,11 +11,13 @@
 //! `AlterUserScramCredentials`, so the handler receives the authenticated
 //! principal and the peer for the ACL check.
 
-use krabka_protocol::owned::{
-    update_features_request::UpdateFeaturesRequest,
-    update_features_response::UpdateFeaturesResponse,
+use {
+    krabka_protocol::owned::{
+        update_features_request::UpdateFeaturesRequest,
+        update_features_response::UpdateFeaturesResponse,
+    },
+    krabka_raft::RaftError,
 };
-use krabka_raft::RaftError;
 
 mod java_order;
 mod preconditions;
@@ -28,14 +30,16 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    response::{feature_error, success, top_level_error},
-    validate::{UpdateError, plan_updates},
-};
-use crate::{
-    broker::Broker,
-    codes,
-    handlers::{RequestContext, audit_admin_success, audit_resource, cluster_alter_denied},
+use {
+    self::{
+        response::{feature_error, success, top_level_error},
+        validate::{UpdateError, plan_updates},
+    },
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{RequestContext, audit_admin_success, audit_resource, cluster_alter_denied},
+    },
 };
 
 /// `NOT_CONTROLLER`'s answer when the write reaches a node that has lost the

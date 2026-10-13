@@ -1,10 +1,11 @@
 //! Committed diskless-WAL index capture.
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
-
-use krabka_remote_storage::diskless::{DisklessWalCapture, REPLAY_FENCE_KEY, WalCaptureProjection};
-use krabka_remote_storage_topic::{MetadataEventLog, MetadataLogError};
-use uuid::Uuid;
+use {
+    krabka_remote_storage::diskless::{DisklessWalCapture, REPLAY_FENCE_KEY, WalCaptureProjection},
+    krabka_remote_storage_topic::{MetadataEventLog, MetadataLogError},
+    std::{collections::HashMap, sync::Arc, time::Duration},
+    uuid::Uuid,
+};
 
 /// How long the whole index read may take before the capture gives up.
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -109,19 +110,19 @@ async fn project_committed_index(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
-    use assert2::{assert, check};
-    use async_trait::async_trait;
-    use bytes::Bytes;
-    use krabka_remote_storage::diskless::{
-        CapturedWalRange, DisklessPartitionCapture, WalFlushRecord, WalIndexEntry,
+    use {
+        super::*,
+        assert2::{assert, check},
+        async_trait::async_trait,
+        bytes::Bytes,
+        krabka_remote_storage::diskless::{
+            CapturedWalRange, DisklessPartitionCapture, WalFlushRecord, WalIndexEntry,
+        },
+        krabka_remote_storage_topic::{
+            InProcessMetadataEventLog, MetadataEventRecord, RangeVisitor,
+        },
+        std::sync::Mutex,
     };
-    use krabka_remote_storage_topic::{
-        InProcessMetadataEventLog, MetadataEventRecord, RangeVisitor,
-    };
-
-    use super::*;
 
     const TOPIC_ID: Uuid = Uuid::from_u128(9);
 
@@ -222,9 +223,7 @@ mod tests {
 
     krabka_macros::wal_capture_topic_fixture!(orders, TOPIC_ID, "orders", 1);
 
-    fn visited_offsets(log: &ScriptedLog) -> Vec<(i32, i64)> {
-        log.visited.lock().unwrap().clone()
-    }
+    fn visited_offsets(log: &ScriptedLog) -> Vec<(i32, i64)> { log.visited.lock().unwrap().clone() }
 
     #[tokio::test]
     async fn capture_skips_replay_fences_and_projects_the_rest() {

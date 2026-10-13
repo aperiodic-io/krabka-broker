@@ -4,9 +4,7 @@
 //! Every stage of the handler reads or writes this row, so it lives on its own
 //! rather than in any one of them.
 
-use krabka_protocol::owned::share_fetch_response::PartitionData;
-
-use super::request::AckBatch;
+use {super::request::AckBatch, krabka_protocol::owned::share_fetch_response::PartitionData};
 
 /// One resolved `(topic, partition)` request row. It travels through the
 /// acquire passes, so the handler assembles the response once at the end.

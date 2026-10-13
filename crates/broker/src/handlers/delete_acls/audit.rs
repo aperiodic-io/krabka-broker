@@ -5,11 +5,12 @@
 //! after the controller submit, so the selection is a scan over the response
 //! rows rather than over the request. That join is worth its own file.
 
-use krabka_protocol::owned::delete_acls_response::DeleteAclsFilterResult;
-
-use crate::{
-    codes,
-    handlers::{RequestContext, audit_admin_success, audit_resource},
+use {
+    crate::{
+        codes,
+        handlers::{RequestContext, audit_admin_success, audit_resource},
+    },
+    krabka_protocol::owned::delete_acls_response::DeleteAclsFilterResult,
 };
 
 pub(super) fn deleted_acl_resources(
@@ -35,24 +36,21 @@ pub(super) fn audit_deleted_acls(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::AclOperation;
-
-    use super::*;
-    use crate::handlers::delete_acls::{
-        response::{filter_result, matching_acl_result},
-        test_support::acl,
+    use {
+        super::*,
+        crate::handlers::delete_acls::{
+            response::{filter_result, matching_acl_result},
+            test_support::acl,
+        },
+        assert2::assert,
+        krabka_metadata::AclOperation,
     };
 
     #[test]
     fn deleted_acl_resources_include_only_successful_matches() {
-        let ok = filter_result(
-            codes::NONE,
-            None,
-            vec![matching_acl_result(&acl(
-                crate::test_support::AllowAclSetup::default(),
-            ))],
-        );
+        let ok = filter_result(codes::NONE, None, vec![matching_acl_result(&acl(
+            crate::test_support::AllowAclSetup::default(),
+        ))]);
         let failed = filter_result(
             codes::COORDINATOR_NOT_AVAILABLE,
             Some("submit failed".into()),

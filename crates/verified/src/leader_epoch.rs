@@ -6,8 +6,10 @@
 //! pair that an `OffsetForLeaderEpoch` row carries and that a `Fetch` row's
 //! `diverging_epoch` is built from.
 
-use creusot_std::prelude::*;
-use krabka_ids::{LeaderEpoch, Offset};
+use {
+    creusot_std::prelude::*,
+    krabka_ids::{LeaderEpoch, Offset},
+};
 
 /// Kafka `LeaderEpochFileCache.UNDEFINED_EPOCH`.
 const UNDEFINED_EPOCH: LeaderEpoch = LeaderEpoch(-1);
@@ -138,11 +140,7 @@ pub fn epoch_and_offset_for_entries(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use proptest::prelude::*;
-
-    use super::*;
+    use {super::*, proptest::prelude::*, std::collections::BTreeMap};
 
     /// Kafka's own `endOffsetFor`, written against a `TreeMap`-shaped index
     /// (`higherEntry` / `floorEntry`) rather than the kernel's linear scan.

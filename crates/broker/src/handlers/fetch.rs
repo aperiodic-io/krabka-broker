@@ -19,13 +19,15 @@
 //! the client side with the `aborted_transactions` list. This matches Apache
 //! Kafka.
 
-use bytes::BytesMut;
-use krabka_log::Offset;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
+use {
+    bytes::BytesMut,
+    krabka_log::Offset,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
+    },
+    krabka_units::convert::ByteSizeExt as _,
 };
-use krabka_units::convert::ByteSizeExt as _;
 
 mod node_endpoints;
 mod plan;
@@ -53,31 +55,33 @@ mod leader_read_tests;
 #[cfg(test)]
 mod topic_resolution_tests;
 
-use self::{
-    node_endpoints::fetch_node_endpoints,
-    plan::{PendingPlanContext, build_pending_reads},
-    read_loop::execute_pending_reads,
-    request::{FetchPreparation, prepare_fetch},
-    response::{
-        charge_fetch_cpu, downconvert_legacy_responses, record_fetch_metrics,
-        withhold_current_leader_before_kip_951,
-    },
-    session::{commit_fetch_session, prepare_fetch_session, refresh_fetch_session_metrics},
-    throttle::{
-        apply_consumer_fetch_quota, consumer_quota_window_bytes, fetch_response_size,
-        throttle_follower_responses,
-    },
-};
 pub(crate) use self::{plan::PendingRead, read::LiveOffsets};
-use crate::{
-    broker::Broker,
-    codes::CLUSTER_AUTHORIZATION_FAILED,
-    error::BrokerError,
-    fetch_session::INVALID_SESSION_ID,
-    handlers::{ApiKeyCode, RequestContext},
-    metrics::RequestPhases,
-    network::fetch_writer::records_to_serve,
-    wal::quorum::wire::{KIP_595_FETCH_VERSION, decode_fetch_request},
+use {
+    self::{
+        node_endpoints::fetch_node_endpoints,
+        plan::{PendingPlanContext, build_pending_reads},
+        read_loop::execute_pending_reads,
+        request::{FetchPreparation, prepare_fetch},
+        response::{
+            charge_fetch_cpu, downconvert_legacy_responses, record_fetch_metrics,
+            withhold_current_leader_before_kip_951,
+        },
+        session::{commit_fetch_session, prepare_fetch_session, refresh_fetch_session_metrics},
+        throttle::{
+            apply_consumer_fetch_quota, consumer_quota_window_bytes, fetch_response_size,
+            throttle_follower_responses,
+        },
+    },
+    crate::{
+        broker::Broker,
+        codes::CLUSTER_AUTHORIZATION_FAILED,
+        error::BrokerError,
+        fetch_session::INVALID_SESSION_ID,
+        handlers::{ApiKeyCode, RequestContext},
+        metrics::RequestPhases,
+        network::fetch_writer::records_to_serve,
+        wal::quorum::wire::{KIP_595_FETCH_VERSION, decode_fetch_request},
+    },
 };
 
 /// This handler's own wire api key, for the `api_key` label the request-phase
@@ -499,18 +503,19 @@ fn serve_empty_rather_than_null_records(resp: &mut FetchResponse) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
-    use assert2::assert;
-    use bytes::{Bytes, BytesMut};
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{Log, LogConfig, Offset};
-    use krabka_metadata::AclOperation;
-    use krabka_protocol::{
-        Encode as _,
-        records::{Record, RecordBatch, RecordsPayload},
+    use {
+        assert2::assert,
+        bytes::{Bytes, BytesMut},
+        krabka_ids::PartitionIndex,
+        krabka_log::{Log, LogConfig, Offset},
+        krabka_metadata::AclOperation,
+        krabka_protocol::{
+            Encode as _,
+            records::{Record, RecordBatch, RecordsPayload},
+        },
+        krabka_security::Principal,
+        std::sync::Mutex,
     };
-    use krabka_security::Principal;
 
     /// A partition with nothing to serve reaches the wire as an empty record
     /// set at every version the handler encodes, the legacy Fetch v0-3 codec
@@ -675,9 +680,7 @@ mod tests {
     }
 
     /// The peer principal a routed WAL fetch authenticates as.
-    fn wal_peer_principal() -> Principal {
-        sasl_principal("broker-2")
-    }
+    fn wal_peer_principal() -> Principal { sasl_principal("broker-2") }
 
     #[tokio::test]
     async fn handle_routes_discriminated_wal_fetch_on_broker_listener() {

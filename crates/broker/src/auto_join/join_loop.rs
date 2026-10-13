@@ -6,19 +6,20 @@
 //! `RemoveRaftVoter` for the stale entry first, then re-joins on a later
 //! iteration.
 
-use krabka_protocol::owned::remove_raft_voter_request::RemoveRaftVoterRequest;
-use krabka_units::convert::TimeExt as _;
-
-use super::{
-    AutoJoinParams,
-    outcome::{JoinOutcome, log_join_outcome},
-    request::{advertised_controller_listener, build_add_raft_voter_request, join_target},
-    rpc::{send_add_raft_voter, send_remove_raft_voter},
-};
 #[cfg(test)]
 use crate::Broker;
 #[cfg(test)]
 use crate::BrokerConfig;
+use {
+    super::{
+        AutoJoinParams,
+        outcome::{JoinOutcome, log_join_outcome},
+        request::{advertised_controller_listener, build_add_raft_voter_request, join_target},
+        rpc::{send_add_raft_voter, send_remove_raft_voter},
+    },
+    krabka_protocol::owned::remove_raft_voter_request::RemoveRaftVoterRequest,
+    krabka_units::convert::TimeExt as _,
+};
 
 /// Drive the auto-join loop. Returns immediately (without touching the
 /// network) when `auto_join` is disabled. Otherwise loops until this broker
@@ -137,19 +138,19 @@ pub(crate) fn build_remove_raft_voter_request(
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
-
-    use krabka_metadata::{
-        KRaftVersionRange, MetadataImage, MetadataRecord, Voter, VoterEndpoint, VoterSet,
-        VotersRecord,
-    };
-    use krabka_raft::NodeId;
-    use krabka_units::{millis, secs};
-
-    use super::*;
-    use crate::{
-        auto_join::test_support::params, metadata_source::MetadataSource,
-        test_support::FakeMetadataSource,
+    use {
+        super::*,
+        crate::{
+            auto_join::test_support::params, metadata_source::MetadataSource,
+            test_support::FakeMetadataSource,
+        },
+        krabka_metadata::{
+            KRaftVersionRange, MetadataImage, MetadataRecord, Voter, VoterEndpoint, VoterSet,
+            VotersRecord,
+        },
+        krabka_raft::NodeId,
+        krabka_units::{millis, secs},
+        std::{sync::Arc, time::Duration},
     };
 
     fn image_with_voter(node_id: NodeId) -> MetadataImage {

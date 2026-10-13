@@ -6,19 +6,19 @@
 //! keeping the two apart means the caching policy, including the shorter TTL
 //! for a registry that could not answer, reads in one place.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
+use {
+    super::{SchemaValidator, UNAVAILABLE_TTL_MS, reject::RejectReason},
+    crate::{metrics::BrokerMetrics, schema_validation::ValidationMode, time_util},
+    krabka_schema_serde::{
+        error::SchemaSerdeError, registry::model::SchemaReference, subject::SchemaKind,
+    },
+    krabka_units::convert::TimeExt as _,
+    qubit_clock::WallClock as _,
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    },
 };
-
-use krabka_schema_serde::{
-    error::SchemaSerdeError, registry::model::SchemaReference, subject::SchemaKind,
-};
-use krabka_units::convert::TimeExt as _;
-use qubit_clock::WallClock as _;
-
-use super::{SchemaValidator, UNAVAILABLE_TTL_MS, reject::RejectReason};
-use crate::{metrics::BrokerMetrics, schema_validation::ValidationMode, time_util};
 
 const MAX_REFERENCE_SCHEMAS: usize = 32;
 const MAX_REFERENCE_BYTES: usize = 1024 * 1024;
@@ -127,13 +127,10 @@ impl SchemaValidator {
         let expires_at_ms = now.saturating_add(ttl_ms);
         {
             let mut cache = self.cache.lock().expect("schema cache mutex poisoned");
-            cache.put(
-                id,
-                Cached {
-                    entry: fetched.clone(),
-                    expires_at_ms,
-                },
-            );
+            cache.put(id, Cached {
+                entry: fetched.clone(),
+                expires_at_ms,
+            });
         }
         fetched
     }
@@ -291,21 +288,21 @@ impl SchemaValidator {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, SystemTime};
-
-    use assert2::{assert, check};
-    use krabka_schema_serde::subject::Role;
-    use krabka_units::{millis, minutes, secs};
-    use qubit_clock::ManualMonotonicClock;
-    use wiremock::{
-        Mock, MockServer, ResponseTemplate,
-        matchers::{method, path},
-    };
-
-    use super::*;
-    use crate::schema_validation::validator::test_support::{
-        KNOWN_ID, framed, no_metrics, registry, response_endpoint, unavailable_ttl_ms, validator,
-        value_check,
+    use {
+        super::*,
+        crate::schema_validation::validator::test_support::{
+            KNOWN_ID, framed, no_metrics, registry, response_endpoint, unavailable_ttl_ms,
+            validator, value_check,
+        },
+        assert2::{assert, check},
+        krabka_schema_serde::subject::Role,
+        krabka_units::{millis, minutes, secs},
+        qubit_clock::ManualMonotonicClock,
+        std::time::{Duration, SystemTime},
+        wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        },
     };
 
     fn clocked_validator(uri: String) -> (Arc<ManualMonotonicClock>, SchemaValidator) {

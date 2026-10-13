@@ -2,17 +2,17 @@
 //! heartbeat: the resolution a heartbeat makes for its group, the records it
 //! writes, and the refreshes that a heartbeat without a pattern makes.
 
-use std::{collections::HashSet, time::Instant};
-
-use assert2::{assert, check};
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::*;
-use crate::coordinator::unified::{
-    actor::{seed::apply_seed, test_support::StaticMetadata},
-    persistence_next_gen::RegularExpressionValue,
-    reconciler::ReconcileInput,
-    regex_resolver::FixedRegexResolver,
+use {
+    super::*,
+    crate::coordinator::unified::{
+        actor::{seed::apply_seed, test_support::StaticMetadata},
+        persistence_next_gen::RegularExpressionValue,
+        reconciler::ReconcileInput,
+        regex_resolver::FixedRegexResolver,
+    },
+    assert2::{assert, check},
+    krabka_protocol::primitives::uuid::Uuid,
+    std::{collections::HashSet, time::Instant},
 };
 
 const A1: Uuid = Uuid([1; 16]);
@@ -318,54 +318,42 @@ fn a_failover_keeps_the_topics_of_a_regex_without_a_heartbeat_that_carries_the_p
         metadata_hash: 0,
         target_epoch: 5,
         assignment_timestamp_ms: 0,
-        members: [(
-            "m1".to_string(),
-            MemberMetadataValue {
-                instance_id: None,
-                rack_id: None,
-                client_id: "client".into(),
-                client_host: "host".into(),
-                subscribed_topic_names: vec![],
-                subscribed_topic_regex: Some("a.*".into()),
-                server_assignor: None,
-                rebalance_timeout_ms: 60_000,
-                classic: None,
-            },
-        )]
+        members: [("m1".to_string(), MemberMetadataValue {
+            instance_id: None,
+            rack_id: None,
+            client_id: "client".into(),
+            client_host: "host".into(),
+            subscribed_topic_names: vec![],
+            subscribed_topic_regex: Some("a.*".into()),
+            server_assignor: None,
+            rebalance_timeout_ms: 60_000,
+            classic: None,
+        })]
         .into(),
-        target_per_member: [(
-            "m1".to_string(),
-            TargetAssignmentMemberValue {
-                topic_partitions: both.clone(),
-            },
-        )]
+        target_per_member: [("m1".to_string(), TargetAssignmentMemberValue {
+            topic_partitions: both.clone(),
+        })]
         .into(),
-        current_per_member: [(
-            "m1".to_string(),
-            CurrentMemberAssignmentValue {
-                member_epoch: 5,
-                previous_member_epoch: 4,
-                state: MemberAssignmentState::Stable,
-                assigned_partitions: both
-                    .iter()
-                    .map(|topic| CurrentTopicPartitions {
-                        topic_id: topic.topic_id,
-                        partitions: topic.partitions.clone(),
-                        assignment_epochs: None,
-                    })
-                    .collect(),
-                partitions_pending_revocation: vec![],
-            },
-        )]
+        current_per_member: [("m1".to_string(), CurrentMemberAssignmentValue {
+            member_epoch: 5,
+            previous_member_epoch: 4,
+            state: MemberAssignmentState::Stable,
+            assigned_partitions: both
+                .iter()
+                .map(|topic| CurrentTopicPartitions {
+                    topic_id: topic.topic_id,
+                    partitions: topic.partitions.clone(),
+                    assignment_epochs: None,
+                })
+                .collect(),
+            partitions_pending_revocation: vec![],
+        })]
         .into(),
-        resolved_regexes: [(
-            "a.*".to_string(),
-            RegularExpressionValue {
-                topics: vec!["a1".into(), "a2".into()],
-                version: 100,
-                timestamp_ms: RegexResolution::TEST_NOW_MS,
-            },
-        )]
+        resolved_regexes: [("a.*".to_string(), RegularExpressionValue {
+            topics: vec!["a1".into(), "a2".into()],
+            version: 100,
+            timestamp_ms: RegexResolution::TEST_NOW_MS,
+        })]
         .into(),
     };
     let metadata = metadata(true);

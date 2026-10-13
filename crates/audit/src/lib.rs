@@ -19,18 +19,20 @@ mod spool_model;
 #[cfg(test)]
 mod test_support;
 
-pub use chain::{ChainState, GENESIS_HEAD, chain_hash};
-pub use checkpoint::{Checkpoint, EVENT_CLASS_CHECKPOINT};
-pub use event::{
-    AuditEndpoint, AuditEvent, AuditEventClass, AuditOutcome, AuditPrincipal, AuditResource,
-    LifecycleKind, PrivilegedPhase,
+pub use {
+    chain::{ChainState, GENESIS_HEAD, chain_hash},
+    checkpoint::{Checkpoint, EVENT_CLASS_CHECKPOINT},
+    event::{
+        AuditEndpoint, AuditEvent, AuditEventClass, AuditOutcome, AuditPrincipal, AuditResource,
+        LifecycleKind, PrivilegedPhase,
+    },
+    ids::{CheckpointCount, EpochMs, MaxSpoolBytes, RecordCount, Seq, SpoolBytes},
+    krabka_ids::NodeId,
+    log::{AuditLog, AuditMode, AuditReceiver, AuditWriter, AuditWriterParams},
+    ocsf::{ProductInfo, to_ocsf},
+    signing::{FileEd25519Signer, checkpoint_signing_bytes, verify_signature},
+    sink::{AuditError, AuditRecord, AuditSink, HEADER_PREV_HASH, HEADER_SEQ, MemorySink},
+    spool::Spool,
+    stats::AuditStats,
+    verify::{TrustedKeys, VerifyBreak, VerifyReport, verify_partition_dir},
 };
-pub use ids::{CheckpointCount, EpochMs, MaxSpoolBytes, RecordCount, Seq, SpoolBytes};
-pub use krabka_ids::NodeId;
-pub use log::{AuditLog, AuditMode, AuditReceiver, AuditWriter, AuditWriterParams};
-pub use ocsf::{ProductInfo, to_ocsf};
-pub use signing::{FileEd25519Signer, checkpoint_signing_bytes, verify_signature};
-pub use sink::{AuditError, AuditRecord, AuditSink, HEADER_PREV_HASH, HEADER_SEQ, MemorySink};
-pub use spool::Spool;
-pub use stats::AuditStats;
-pub use verify::{TrustedKeys, VerifyBreak, VerifyReport, verify_partition_dir};

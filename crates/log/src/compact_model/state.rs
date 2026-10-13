@@ -3,10 +3,11 @@
 //! the [`Cleaner`] a pass runs, and the [`CompactModel`] bounds together with
 //! the derivations that a compaction pass needs.
 
-use std::collections::{HashMap, HashSet};
-
-use crate::compact::{
-    BatchMeta, RecordMeta, RetainDecision, TxnDataState, retain_decision, should_index_key,
+use {
+    crate::compact::{
+        BatchMeta, RecordMeta, RetainDecision, TxnDataState, retain_decision, should_index_key,
+    },
+    std::collections::{HashMap, HashSet},
 };
 
 /// What a log entry carries downstream of the compaction decision.

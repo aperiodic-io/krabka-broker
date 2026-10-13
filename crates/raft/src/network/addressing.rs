@@ -5,12 +5,13 @@
 //! Both are pure functions over the static voter set and the KIP-595 codec
 //! table, so they are kept apart from the connection cache that calls them.
 
-use krabka_ids::{ApiKey, ApiVersion};
-use krabka_metadata::voters::VoterSet;
-
-use crate::{
-    kraft::{transport::PeerApi, types::NodeId},
-    types::controller_endpoint_addr,
+use {
+    crate::{
+        kraft::{transport::PeerApi, types::NodeId},
+        types::controller_endpoint_addr,
+    },
+    krabka_ids::{ApiKey, ApiVersion},
+    krabka_metadata::voters::VoterSet,
 };
 
 /// Resolves a voter's controller-listener address from the voter set.
@@ -34,8 +35,7 @@ pub(crate) fn api_version_for(key: ApiKey) -> ApiVersion {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::kraft::transport::api_key;
+    use {super::*, crate::kraft::transport::api_key};
 
     #[bon::builder]
     fn voter_fixture(endpoints: Vec<krabka_metadata::VoterEndpoint>) -> krabka_metadata::Voter {

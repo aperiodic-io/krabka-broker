@@ -8,8 +8,10 @@
 //! on every replica. The tracker of the produce path does not take part: on a
 //! follower it does not hold the replicated data batches.
 
-use super::storage::{LogStorage, MaintenanceAck, maintain_log};
-use crate::replica_state::ReplicaState;
+use {
+    super::storage::{LogStorage, MaintenanceAck, maintain_log},
+    crate::replica_state::ReplicaState,
+};
 
 pub(super) async fn handle_compact(
     storage: LogStorage<'_>,

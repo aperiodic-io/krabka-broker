@@ -2,19 +2,19 @@
 //! [`RemoteLogMetadataManager`]. It mirrors Kafka's test fixture of the same
 //! name. Tiered-storage tests run against this manager.
 
-use std::{collections::HashMap, sync::Mutex};
-
-use krabka_ids::LeaderEpoch;
-
-use crate::{
-    cache::{RemoteLogMetadataCache, sort_by_start_offset},
-    dump::{PartitionDump, RlmmCacheDump},
-    error::RemoteStorageError,
-    metadata::{
-        RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemotePartitionDeleteMetadata,
-        RemotePartitionDeleteState, TopicIdPartition,
+use {
+    crate::{
+        cache::{RemoteLogMetadataCache, sort_by_start_offset},
+        dump::{PartitionDump, RlmmCacheDump},
+        error::RemoteStorageError,
+        metadata::{
+            RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
+            RemotePartitionDeleteMetadata, RemotePartitionDeleteState, TopicIdPartition,
+        },
+        metadata_manager::RemoteLogMetadataManager,
     },
-    metadata_manager::RemoteLogMetadataManager,
+    krabka_ids::LeaderEpoch,
+    std::{collections::HashMap, sync::Mutex},
 };
 
 /// In-memory [`RemoteLogMetadataManager`]: one `RemoteLogMetadataCache` per
@@ -31,9 +31,7 @@ pub struct InmemoryRemoteLogMetadataManager {
 impl InmemoryRemoteLogMetadataManager {
     /// Constructs an empty manager.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Dumps every partition's segment and partition-delete metadata for a
     /// snapshot. The result is order-independent. [`Self::import`] re-derives
@@ -179,15 +177,14 @@ impl RemoteLogMetadataManager for InmemoryRemoteLogMetadataManager {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use uuid::Uuid;
+    use {
+        super::*,
+        crate::metadata::RemotePartitionDeleteState,
+        assert2::{assert, check},
+        uuid::Uuid,
+    };
 
-    use super::*;
-    use crate::metadata::RemotePartitionDeleteState;
-
-    fn tp() -> TopicIdPartition {
-        TopicIdPartition::new(Uuid::from_u128(1), "orders", 0)
-    }
+    fn tp() -> TopicIdPartition { TopicIdPartition::new(Uuid::from_u128(1), "orders", 0) }
 
     krabka_macros::remote_segment_fixtures!(started, finish, crate, end);
 

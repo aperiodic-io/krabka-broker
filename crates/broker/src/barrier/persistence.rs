@@ -86,9 +86,7 @@ pub(crate) const NO_EPOCH: i64 = -1;
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn no_epoch_constant_is_negative_one() {

@@ -7,10 +7,11 @@
 //! it, because between them they are the only code in `support` that speaks
 //! `FetchRequest` directly.
 
-use krabka_broker::coordinator::AUDIT_TOPIC;
-use krabka_protocol::{owned::fetch_response::FetchResponse, records::Record};
-
-use crate::support::fetch::{SinglePartitionFetchSetup, single_partition_fetch};
+use {
+    crate::support::fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+    krabka_broker::coordinator::AUDIT_TOPIC,
+    krabka_protocol::{owned::fetch_response::FetchResponse, records::Record},
+};
 
 /// Fetch the audit topic and return the `seq` header value (parsed as `u64`)
 /// from each non-checkpoint record, in order.

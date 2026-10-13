@@ -2,34 +2,34 @@
 //! or a snapshot hint, the apply of a leader's Fetch response, and the
 //! reassembly and install of a KIP-630 snapshot fetched from the leader.
 
-use std::sync::Arc;
-
-use krabka_ids::Offset;
-use krabka_metadata::{MetadataImage, MetadataRecord, VotersRecord};
-use krabka_verified::{
-    SnapshotInstallDecision,
-    raft::{
-        FetchContent, FetchFence, FetchResponseFacts, FetchResponseMutation,
-        fetch_response_mutation,
+use {
+    super::{
+        Engine, KraftControlState, Role,
+        checkpoint::{retain_recent_checkpoints, write_checkpoint},
+        offsets::fetch_offset_has_records,
+        records::{decode_batches, encode_batches},
     },
-    snapshot_install_decision,
-};
-
-use super::{
-    Engine, KraftControlState, Role,
-    checkpoint::{retain_recent_checkpoints, write_checkpoint},
-    offsets::fetch_offset_has_records,
-    records::{decode_batches, encode_batches},
-};
-use crate::{
-    error::RaftError,
-    kraft::{
-        event::Event,
-        snapshot_fetch::{SnapshotFetchState, SnapshotFetchStep},
-        transport::wire,
-        types::{Epoch, NodeId},
+    crate::{
+        error::RaftError,
+        kraft::{
+            event::Event,
+            snapshot_fetch::{SnapshotFetchState, SnapshotFetchStep},
+            transport::wire,
+            types::{Epoch, NodeId},
+        },
+        snapshot::SnapshotReader,
     },
-    snapshot::SnapshotReader,
+    krabka_ids::Offset,
+    krabka_metadata::{MetadataImage, MetadataRecord, VotersRecord},
+    krabka_verified::{
+        SnapshotInstallDecision,
+        raft::{
+            FetchContent, FetchFence, FetchResponseFacts, FetchResponseMutation,
+            fetch_response_mutation,
+        },
+        snapshot_install_decision,
+    },
+    std::sync::Arc,
 };
 
 pub fn should_serve_fetch_records(
@@ -168,13 +168,10 @@ impl Engine {
             } => Some(leader_id.0),
             _ => None,
         };
-        let discovering = matches!(
-            self.core.role(),
-            Role::Observer {
-                leader_id: None,
-                ..
-            }
-        );
+        let discovering = matches!(self.core.role(), Role::Observer {
+            leader_id: None,
+            ..
+        });
         let state = self.core.quorum_state();
         let mutation = fetch_response_mutation(
             FetchFence {

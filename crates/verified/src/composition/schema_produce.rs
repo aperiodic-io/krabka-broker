@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
-use super::schema_walk::{SchemaWalkField, framed_schema_walk_admission};
 #[cfg(creusot)]
 use super::schema_walk::{decoded_id, field_admitted};
-use crate::{
-    produce::{ProduceBatchAdmission, produce_batch_admission, produce_durability_frontier},
-    schema::{SchemaBatchAdmission, SchemaFieldAction, SchemaFieldRole},
+use {
+    super::schema_walk::{SchemaWalkField, framed_schema_walk_admission},
+    crate::{
+        produce::{ProduceBatchAdmission, produce_batch_admission, produce_durability_frontier},
+        schema::{SchemaBatchAdmission, SchemaFieldAction, SchemaFieldRole},
+    },
+    creusot_std::prelude::*,
 };
 
 type PreparedSchemaAppend = Option<(Vec<(SchemaFieldAction, Option<u32>, bool)>, i64)>;

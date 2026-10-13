@@ -5,44 +5,44 @@
 //! real `OffsetFetch` handler. The sweep's clock is a parameter, so a test
 //! moves time forward by passing a later `now_ms` rather than sleeping.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_protocol::owned::{
-    create_topics_request::{self},
-    leave_group_request::LeaveGroupRequest,
-    offset_commit_request::OffsetCommitRequest,
-};
-use krabka_units::mebibytes;
-use tokio::sync::oneshot;
-
-use super::sweep;
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::{Broker, BrokerHandle},
-    codes,
-    coordinator::{
-        bootstrap::OFFSETS_TOPIC,
-        partitioner::partition_for_group,
-        persistence::{Key, OffsetCommitValue, parse_key},
-        test_support::{commit_request as make_commit_request, fetch_offset},
-        unified::{
-            GroupSeed, GroupType,
-            actor::{GroupActorMessage, GroupKindTag, test_support::classic_member},
-            classic_state::{ClassicGroup, GroupState, OffsetEntry},
-            group::{CoordinatorGroup, GroupKind},
+use {
+    super::sweep,
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::{Broker, BrokerHandle},
+        codes,
+        coordinator::{
+            bootstrap::OFFSETS_TOPIC,
+            partitioner::partition_for_group,
+            persistence::{Key, OffsetCommitValue, parse_key},
+            test_support::{commit_request as make_commit_request, fetch_offset},
+            unified::{
+                GroupSeed, GroupType,
+                actor::{GroupActorMessage, GroupKindTag, test_support::classic_member},
+                classic_state::{ClassicGroup, GroupState, OffsetEntry},
+                group::{CoordinatorGroup, GroupKind},
+            },
         },
+        handlers::{
+            offset_commit::handle,
+            test_support::{CreateTopicSetup, configured_topic_request},
+        },
+        test_support::{
+            UnixMillis, dispatch_context, encode_request, peer, principal, request_context,
+            start_broker_with_authorizer_no_audit,
+        },
+        time_util::now_ms,
     },
-    handlers::{
-        offset_commit::handle,
-        test_support::{CreateTopicSetup, configured_topic_request},
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_protocol::owned::{
+        create_topics_request::{self},
+        leave_group_request::LeaveGroupRequest,
+        offset_commit_request::OffsetCommitRequest,
     },
-    test_support::{
-        UnixMillis, dispatch_context, encode_request, peer, principal, request_context,
-        start_broker_with_authorizer_no_audit,
-    },
-    time_util::now_ms,
+    krabka_units::mebibytes,
+    std::sync::Arc,
+    tokio::sync::oneshot,
 };
 
 const GROUP: &str = "retention-group";
@@ -83,13 +83,10 @@ async fn assert_offset_retained_after_sweep(
 
 /// Independent expected result for a pass that deletes the group.
 fn deleted_group(reaped: Vec<(String, i32)>) -> Vec<(String, super::ReapOutcome)> {
-    vec![(
-        GROUP.to_string(),
-        super::ReapOutcome {
-            reaped,
-            group_deleted: true,
-        },
-    )]
+    vec![(GROUP.to_string(), super::ReapOutcome {
+        reaped,
+        group_deleted: true,
+    })]
 }
 
 /// Start a broker that holds `TOPIC`, since `OffsetCommit` answers
@@ -163,17 +160,14 @@ fn seed_replayed_group(broker: &Broker, setup: ReplayedGroupSetup<'_>) {
     let mut group = CoordinatorGroup::seeded(
         GROUP,
         GroupKind::Classic(state),
-        [(
-            (TOPIC.to_string(), 0),
-            OffsetEntry {
-                offset: krabka_log::Offset(42),
-                leader_epoch: -1,
-                metadata: String::new(),
-                commit_timestamp_ms: setup.commit_timestamp_ms.0,
-                expire_timestamp_ms: None,
-                topic_id: None,
-            },
-        )]
+        [((TOPIC.to_string(), 0), OffsetEntry {
+            offset: krabka_log::Offset(42),
+            leader_epoch: -1,
+            metadata: String::new(),
+            commit_timestamp_ms: setup.commit_timestamp_ms.0,
+            expire_timestamp_ms: None,
+            topic_id: None,
+        })]
         .into(),
     );
     group.empty_since_ms = setup.empty_since_ms.map(|at| at.0);
@@ -307,12 +301,9 @@ async fn empty_group_loses_its_offsets_after_the_retention() {
     let records = offsets_log_records(&broker);
     check!(has_tombstone(&records, &committed_offset_key()));
     // The group held nothing else, so its own record went in the same pass.
-    check!(has_tombstone(
-        &records,
-        &Key::GroupMetadata {
-            group_id: GROUP.into()
-        }
-    ));
+    check!(has_tombstone(&records, &Key::GroupMetadata {
+        group_id: GROUP.into()
+    }));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -550,13 +541,10 @@ async fn a_simple_group_expires_from_its_commit_not_from_the_restart() {
     let (broker_handle, _dir) = start().await;
     let broker = broker_handle.broker_arc_for_test();
     let restarted_at = now_ms();
-    seed_replayed_group(
-        &broker,
-        ReplayedGroupSetup {
-            commit_timestamp_ms: UnixMillis(restarted_at - RETENTION_MS * 10),
-            ..Default::default()
-        },
-    );
+    seed_replayed_group(&broker, ReplayedGroupSetup {
+        commit_timestamp_ms: UnixMillis(restarted_at - RETENTION_MS * 10),
+        ..Default::default()
+    });
 
     let swept = sweep_at(&broker, restarted_at).await;
 
@@ -574,14 +562,11 @@ async fn a_joined_group_expires_from_the_moment_it_emptied() {
     let (broker_handle, _dir) = start().await;
     let broker = broker_handle.broker_arc_for_test();
     let emptied_at = now_ms();
-    seed_replayed_group(
-        &broker,
-        ReplayedGroupSetup {
-            protocol_type: Some("consumer"),
-            empty_since_ms: Some(UnixMillis(emptied_at)),
-            commit_timestamp_ms: UnixMillis(emptied_at - RETENTION_MS * 10),
-        },
-    );
+    seed_replayed_group(&broker, ReplayedGroupSetup {
+        protocol_type: Some("consumer"),
+        empty_since_ms: Some(UnixMillis(emptied_at)),
+        commit_timestamp_ms: UnixMillis(emptied_at - RETENTION_MS * 10),
+    });
 
     let early = sweep_at(&broker, emptied_at + RETENTION_MS - 1).await;
     assert!(early.is_empty());
@@ -625,17 +610,14 @@ async fn an_acknowledged_commit_is_never_reaped_by_a_concurrent_sweep() {
             Box::new(CoordinatorGroup::seeded(
                 group.clone(),
                 GroupKind::Classic(ClassicGroup::new(&group)),
-                [(
-                    (TOPIC.to_string(), 0),
-                    OffsetEntry {
-                        offset: krabka_log::Offset(1),
-                        leader_epoch: -1,
-                        metadata: String::new(),
-                        commit_timestamp_ms: now - RETENTION_MS * 10,
-                        expire_timestamp_ms: None,
-                        topic_id: None,
-                    },
-                )]
+                [((TOPIC.to_string(), 0), OffsetEntry {
+                    offset: krabka_log::Offset(1),
+                    leader_epoch: -1,
+                    metadata: String::new(),
+                    commit_timestamp_ms: now - RETENTION_MS * 10,
+                    expire_timestamp_ms: None,
+                    topic_id: None,
+                })]
                 .into(),
             )),
         );

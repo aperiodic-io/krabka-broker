@@ -1,11 +1,12 @@
 //! Tests for the reconstruction of the KIP-932 share-group and KIP-1071
 //! streams-group seeds from their persisted records.
 
-use assert2::{assert, check};
-use krabka_protocol::records::RecordBatch;
-
-use super::replay::{Replayed, apply_record, apply_tombstone};
-use crate::coordinator::{GroupCoordinator, persistence};
+use {
+    super::replay::{Replayed, apply_record, apply_tombstone},
+    crate::coordinator::{GroupCoordinator, persistence},
+    assert2::{assert, check},
+    krabka_protocol::records::RecordBatch,
+};
 
 fn apply_member_tombstones<K: AsRef<[u8]>>(
     coordinator: &std::sync::Arc<GroupCoordinator>,
@@ -25,9 +26,10 @@ fn apply_member_tombstones<K: AsRef<[u8]>>(
 /// assignment, and the current assignment.
 #[tokio::test]
 async fn share_group_records_replay_into_seed() {
-    use krabka_protocol::primitives::uuid::Uuid;
-
-    use crate::coordinator::unified::share::persistence as sp;
+    use {
+        crate::coordinator::unified::share::persistence as sp,
+        krabka_protocol::primitives::uuid::Uuid,
+    };
 
     let coord = super::test_support::bare_coordinator();
 
@@ -86,21 +88,18 @@ async fn share_group_records_replay_into_seed() {
     // Kafka's `shareGroupFenceMember` order removes the member: its current
     // assignment tombstone leaves it at epoch -1, and then its member
     // tombstone removes it.
-    apply_member_tombstones(
-        &coord,
-        [
-            sp::encode_share_key(&sp::ShareGroupKey::CurrentMemberAssignment {
-                group_id: "sg".into(),
-                member_id: "m1".into(),
-            })
-            .unwrap(),
-            sp::encode_share_key(&sp::ShareGroupKey::MemberMetadata {
-                group_id: "sg".into(),
-                member_id: "m1".into(),
-            })
-            .unwrap(),
-        ],
-    );
+    apply_member_tombstones(&coord, [
+        sp::encode_share_key(&sp::ShareGroupKey::CurrentMemberAssignment {
+            group_id: "sg".into(),
+            member_id: "m1".into(),
+        })
+        .unwrap(),
+        sp::encode_share_key(&sp::ShareGroupKey::MemberMetadata {
+            group_id: "sg".into(),
+            member_id: "m1".into(),
+        })
+        .unwrap(),
+    ]);
     let seed = coord.cached_share_seed("sg").expect("seed still present");
     assert!(!seed.members.contains_key("m1"), "tombstone removed member");
 }
@@ -187,21 +186,18 @@ async fn streams_group_records_replay_into_seed() {
     // Kafka's `removeStreamsMember` order removes the member: its current
     // assignment tombstone leaves it at epoch -1, and then its member
     // tombstone removes it.
-    apply_member_tombstones(
-        &coord,
-        [
-            sp::encode_streams_key(&sp::StreamsGroupKey::CurrentMemberAssignment {
-                group_id: "stg".into(),
-                member_id: "m1".into(),
-            })
-            .unwrap(),
-            sp::encode_streams_key(&sp::StreamsGroupKey::MemberMetadata {
-                group_id: "stg".into(),
-                member_id: "m1".into(),
-            })
-            .unwrap(),
-        ],
-    );
+    apply_member_tombstones(&coord, [
+        sp::encode_streams_key(&sp::StreamsGroupKey::CurrentMemberAssignment {
+            group_id: "stg".into(),
+            member_id: "m1".into(),
+        })
+        .unwrap(),
+        sp::encode_streams_key(&sp::StreamsGroupKey::MemberMetadata {
+            group_id: "stg".into(),
+            member_id: "m1".into(),
+        })
+        .unwrap(),
+    ]);
     let seed = coord
         .cached_streams_seed("stg")
         .expect("seed still present");

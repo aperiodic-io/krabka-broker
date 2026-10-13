@@ -9,27 +9,28 @@
 //! chain is the declaration order of the struct, so every field keeps the
 //! position it has always had.
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    net::SocketAddr,
-    path::PathBuf,
-    sync::Arc,
-};
-
-use krabka_log::LogConfig;
-use krabka_raft::{
-    BootstrapMode, ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity,
-    MetadataRaftFetchMax, NodeId,
-};
-use krabka_security::{SaslMechanism, TlsConfig};
-use krabka_units::{ByteSize, Ratio, Time};
-
-use crate::{
-    config::{
-        BreakGlassConfig, BrokerFeatureFlags, FreezeConfig, InterBrokerCredentials, ListenerSpec,
-        NodeRole, RemoteStorageBackend, ReplicationRuntimeConfig, RlmmKind, StretchProfile,
+use {
+    crate::{
+        config::{
+            BreakGlassConfig, BrokerFeatureFlags, FreezeConfig, InterBrokerCredentials,
+            ListenerSpec, NodeRole, RemoteStorageBackend, ReplicationRuntimeConfig, RlmmKind,
+            StretchProfile,
+        },
+        operator_keys::OperatorKeys,
     },
-    operator_keys::OperatorKeys,
+    krabka_log::LogConfig,
+    krabka_raft::{
+        BootstrapMode, ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity,
+        MetadataRaftFetchMax, NodeId,
+    },
+    krabka_security::{SaslMechanism, TlsConfig},
+    krabka_units::{ByteSize, Ratio, Time},
+    std::{
+        collections::{BTreeMap, HashMap},
+        net::SocketAddr,
+        path::PathBuf,
+        sync::Arc,
+    },
 };
 
 // The end of the field chain: it emits the struct from the fields the chain

@@ -5,15 +5,16 @@
 //! sent, so the hot path can decide verbatim passthrough per partition instead
 //! of materializing owned records for the whole request.
 
-use bytes::Bytes;
-use krabka_protocol::{
-    Decode,
-    owned::produce_request::ProduceRequest,
-    primitives::uuid::Uuid as WireUuid,
-    records::{Attributes, RecordsPayload, count_records_in_v2_batches, produce_framing},
+use {
+    crate::error::BrokerError,
+    bytes::Bytes,
+    krabka_protocol::{
+        Decode,
+        owned::produce_request::ProduceRequest,
+        primitives::uuid::Uuid as WireUuid,
+        records::{Attributes, RecordsPayload, count_records_in_v2_batches, produce_framing},
+    },
 };
-
-use crate::error::BrokerError;
 
 /// One partition's records, as they arrived on the wire and BEFORE any owned
 /// decode or decompression.
@@ -353,10 +354,7 @@ pub(super) fn decode_produce_request(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::handlers::produce::test_support::encode_batch;
+    use {super::*, crate::handlers::produce::test_support::encode_batch, assert2::assert};
 
     fn batch_with_value(len: usize) -> krabka_protocol::records::RecordBatch {
         krabka_protocol::records::RecordBatch {

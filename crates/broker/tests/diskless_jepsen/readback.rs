@@ -12,18 +12,18 @@
 //! record model; the JVM client shares neither, so agreement between them says
 //! the bytes on the wire are Kafka's and not this project's idea of them.
 
-use std::{
-    process::Stdio,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use krabka_client_core::{FetchMinBytes, IsolatedFetch};
-
-use crate::{
-    TOPIC,
-    history::{AckedRecord, ledger_values},
-    support::client::connect_owned,
+use {
+    crate::{
+        TOPIC,
+        history::{AckedRecord, ledger_values},
+        support::client::connect_owned,
+    },
+    assert2::assert,
+    krabka_client_core::{FetchMinBytes, IsolatedFetch},
+    std::{
+        process::Stdio,
+        time::{Duration, Instant},
+    },
 };
 
 /// The image the JVM console consumer runs from.
@@ -67,20 +67,17 @@ async fn consume_ledger(bootstrap: &str, expected: usize) -> Vec<(i64, Vec<u8>)>
     let mut offset = 0;
     while observed.len() < expected && Instant::now() < deadline {
         let records = client
-            .fetch_partition_with_isolation_on(
-                broker_id,
-                IsolatedFetch {
-                    topic: TOPIC,
-                    topic_id,
-                    partition: 0,
-                    fetch_offset: offset,
-                    max_wait: krabka_units::millis(500),
-                    max: krabka_units::mebibytes(4),
-                    partition_max: krabka_units::mebibytes(4),
-                    fetch_min: FetchMinBytes::default(),
-                    isolation_level: 0,
-                },
-            )
+            .fetch_partition_with_isolation_on(broker_id, IsolatedFetch {
+                topic: TOPIC,
+                topic_id,
+                partition: 0,
+                fetch_offset: offset,
+                max_wait: krabka_units::millis(500),
+                max: krabka_units::mebibytes(4),
+                partition_max: krabka_units::mebibytes(4),
+                fetch_min: FetchMinBytes::default(),
+                isolation_level: 0,
+            })
             .await
             .expect("direct partition fetch");
         for record in records {

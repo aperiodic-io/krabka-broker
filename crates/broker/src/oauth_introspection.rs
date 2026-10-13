@@ -3,13 +3,14 @@
 //! It lives here instead of in `crates/security`, so that the security crate
 //! stays free of I/O. This mirrors the JWKS-refresher pattern.
 
-use std::{path::Path, sync::Arc};
-
-use async_trait::async_trait;
-use krabka_security::{
-    IntrospectionClient, IntrospectionError, JwksTrustError, build_client_config_from_pem,
+use {
+    async_trait::async_trait,
+    krabka_security::{
+        IntrospectionClient, IntrospectionError, JwksTrustError, build_client_config_from_pem,
+    },
+    krabka_units::{Time, convert::TimeExt as _},
+    std::{path::Path, sync::Arc},
 };
-use krabka_units::{Time, convert::TimeExt as _};
 
 /// reqwest-backed RFC 7662 introspection client.
 ///
@@ -125,15 +126,15 @@ async fn request_json(
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, sync::Mutex};
-
-    use assert2::assert;
-    use krabka_units::{millis, secs};
-    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-    use tokio_util::sync::CancellationToken;
-
-    use super::*;
-    use crate::test_support::{ecdsa_pair_for_host, serve_loopback_tls};
+    use {
+        super::*,
+        crate::test_support::{ecdsa_pair_for_host, serve_loopback_tls},
+        assert2::assert,
+        krabka_units::{millis, secs},
+        std::{net::SocketAddr, sync::Mutex},
+        tokio::io::{AsyncReadExt as _, AsyncWriteExt as _},
+        tokio_util::sync::CancellationToken,
+    };
 
     /// Records observed requests so tests can assert on the bytes.
     #[derive(Debug, Default)]
@@ -451,14 +452,10 @@ mod tests {
         let ca_path = dir.path().join("ca.pem");
         std::fs::write(&ca_path, cert.pem()).unwrap();
         drop(listener);
-        let client = https_client(
-            addr,
-            &ca_path,
-            HttpsClientSetup {
-                timeout: millis(200),
-                ..Default::default()
-            },
-        );
+        let client = https_client(addr, &ca_path, HttpsClientSetup {
+            timeout: millis(200),
+            ..Default::default()
+        });
         let err = client.introspect("tok").await.unwrap_err();
         assert!(
             matches!(err, IntrospectionError::Transport(_)),

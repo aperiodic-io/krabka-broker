@@ -1,9 +1,10 @@
 //! The KFC-1 scheduled-delivery gate, which decides whether a batch's
 //! delivery time is one the target partition accepts.
 
-use krabka_units::{Time, convert::TimeExt};
-
-use crate::config_keys::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, resolve_delivery_max_delay};
+use {
+    crate::config_keys::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, resolve_delivery_max_delay},
+    krabka_units::{Time, convert::TimeExt},
+};
 
 /// The KFC-1 produce-time delivery settings of one topic.
 ///

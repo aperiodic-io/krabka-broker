@@ -20,9 +20,10 @@ mod support;
 #[path = "fetch_min_bytes/wire.rs"]
 mod wire;
 
-use assert2::assert;
-
-use crate::wire::{FetchFacts, HELD_AT_LEAST, min_bytes_exchange};
+use {
+    crate::wire::{FetchFacts, HELD_AT_LEAST, min_bytes_exchange},
+    assert2::assert,
+};
 
 #[tokio::test]
 async fn a_fetch_below_its_min_bytes_is_held_until_max_wait_and_then_answers() {

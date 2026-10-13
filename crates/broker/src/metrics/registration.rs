@@ -74,7 +74,5 @@ impl BrokerMetrics {
 }
 
 impl Default for BrokerMetrics {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }

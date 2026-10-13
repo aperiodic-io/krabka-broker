@@ -1,14 +1,15 @@
 //! S3's incomplete-multipart listing, which `object_store` 0.13 does not expose,
 //! and the signed bucket `GET` it shares with the WORM check.
 
-use object_store::{
-    RetryConfig,
-    aws::{AwsAuthorizer, AwsCredential},
-    client::HttpRequestBody,
+use {
+    crate::{ObjectStoreError, S3Config, build::build_s3_store},
+    object_store::{
+        RetryConfig,
+        aws::{AwsAuthorizer, AwsCredential},
+        client::HttpRequestBody,
+    },
+    serde::{Deserialize, de::DeserializeOwned},
 };
-use serde::{Deserialize, de::DeserializeOwned};
-
-use crate::{ObjectStoreError, S3Config, build::build_s3_store};
 
 /// One upload that S3 has initiated but not completed or aborted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,17 +219,17 @@ pub(crate) async fn signed_s3_get_xml<T: DeserializeOwned>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering::SeqCst},
-    };
-
-    use assert2::check;
-    use tokio::io::AsyncWriteExt as _;
-
-    use super::*;
-    use crate::test_support::{
-        accept_http_request, http_listener, read_request, respond, s3_config, serve_http_pages,
+    use {
+        super::*,
+        crate::test_support::{
+            accept_http_request, http_listener, read_request, respond, s3_config, serve_http_pages,
+        },
+        assert2::check,
+        std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering::SeqCst},
+        },
+        tokio::io::AsyncWriteExt as _,
     };
 
     async fn with_listing<T>(
@@ -254,9 +255,7 @@ mod tests {
         check!(error.to_string().contains(reason));
     }
 
-    fn config(endpoint: String) -> S3Config {
-        s3_config("bucket", endpoint)
-    }
+    fn config(endpoint: String) -> S3Config { s3_config("bucket", endpoint) }
 
     #[test]
     fn parses_incomplete_uploads_and_pagination() {
@@ -349,14 +348,10 @@ mod tests {
         drop(listener);
 
         let client = s3_http_client(&config(endpoint.clone())).unwrap();
-        let error = read_ok_body(
-            client.get(endpoint),
-            "ListMultipartUploads",
-            &RetryConfig {
-                max_retries: 0,
-                ..RetryConfig::default()
-            },
-        )
+        let error = read_ok_body(client.get(endpoint), "ListMultipartUploads", &RetryConfig {
+            max_retries: 0,
+            ..RetryConfig::default()
+        })
         .await
         .unwrap_err();
 

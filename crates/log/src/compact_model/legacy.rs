@@ -6,23 +6,21 @@
 //! through the model's real [`compact_pass`], with only the [`Cleaner`]
 //! swapped.
 
-use std::collections::BTreeSet;
-
-use stateright::{Checker, Model};
-
-use super::{
-    invariants::Invariant,
-    pass::compact_pass,
-    state::{Cleaner, CompactAction, CompactModel, Entry, EntryKind},
+use {
+    super::{
+        invariants::Invariant,
+        pass::compact_pass,
+        state::{Cleaner, CompactAction, CompactModel, Entry, EntryKind},
+    },
+    crate::compact::{BatchMeta, RecordMeta, RetainDecision, TxnDataState, retain_decision},
+    stateright::{Checker, Model},
+    std::collections::BTreeSet,
 };
-use crate::compact::{BatchMeta, RecordMeta, RetainDecision, TxnDataState, retain_decision};
 
 /// The OLD dedup-map filter: every keyed record is indexed, control records
 /// included. Two commit markers carry the same `ControlRecordType` key bytes,
 /// so the newer one supersedes the older in the map.
-fn legacy_should_index_key(key: Option<&[u8]>, _is_control_batch: bool) -> bool {
-    key.is_some()
-}
+fn legacy_should_index_key(key: Option<&[u8]>, _is_control_batch: bool) -> bool { key.is_some() }
 
 /// The OLD retain decision. A control record is treated as keyed data: it is
 /// kept only while it is the newest record for its control key, and an older
@@ -88,15 +86,10 @@ fn legacy_cleaner_breaks_the_marker_rules_on_the_recorded_counterexample() {
     let input = vec![data(0), commit(0), data(1), commit(1)];
     for (name, cleaner, want_output, want_violations) in [
         ("production", Cleaner::PRODUCTION, input.clone(), vec![]),
-        (
-            "legacy",
-            LEGACY,
-            vec![data(0), data(1), commit(1)],
-            vec![
-                Invariant::ControlNotDeduped,
-                Invariant::MarkerDataPrecedence,
-            ],
-        ),
+        ("legacy", LEGACY, vec![data(0), data(1), commit(1)], vec![
+            Invariant::ControlNotDeduped,
+            Invariant::MarkerDataPrecedence,
+        ]),
     ] {
         let output = compact_pass(&input, 0, cleaner);
         assert2::assert!(output == want_output, "cleaner {name}");
@@ -135,15 +128,12 @@ fn checker_rejects_the_legacy_cleaner() {
         .collect();
     assert2::assert!(broken == BTreeSet::from(["control_not_deduped", "marker_data_precedence"]));
     for property in ["control_not_deduped", "marker_data_precedence"] {
-        checker.assert_discovery(
-            property,
-            vec![
-                CompactAction::AppendData(0, 0),
-                CompactAction::AppendCommit(0),
-                CompactAction::AppendData(1, 0),
-                CompactAction::AppendCommit(1),
-                CompactAction::Compact,
-            ],
-        );
+        checker.assert_discovery(property, vec![
+            CompactAction::AppendData(0, 0),
+            CompactAction::AppendCommit(0),
+            CompactAction::AppendData(1, 0),
+            CompactAction::AppendCommit(1),
+            CompactAction::Compact,
+        ]);
     }
 }

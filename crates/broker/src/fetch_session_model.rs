@@ -27,19 +27,19 @@
 //! choice-independent. The sorted projection also gives identical fingerprints
 //! for identical resulting content, so the explored graph is well-defined.
 
-use std::{
-    collections::HashMap,
-    hash::{Hash, Hasher},
+use {
+    super::{CachedPartitionState, FetchSessionKey, apply_incremental},
+    crate::model_check::{assert_pinned_count, run_bfs},
+    krabka_protocol::{
+        owned::fetch_request::{FetchPartition, FetchTopic, ForgottenTopic},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    stateright::{Checker, Model, Property},
+    std::{
+        collections::HashMap,
+        hash::{Hash, Hasher},
+    },
 };
-
-use krabka_protocol::{
-    owned::fetch_request::{FetchPartition, FetchTopic, ForgottenTopic},
-    primitives::uuid::Uuid as WireUuid,
-};
-use stateright::{Checker, Model, Property};
-
-use super::{CachedPartitionState, FetchSessionKey, apply_incremental};
-use crate::model_check::{assert_pinned_count, run_bfs};
 
 // Exhaustiveness is bounded on UNIQUE states (memory-proportional). The combined
 // forget×sub action cross-product makes the *generated* (visited-edge) count
@@ -63,9 +63,7 @@ const PINNED_UNIQUE_STATES_WIDE: usize = 148;
 // Tiny symbolic universe. Names {A,B}, ids {U,V} (a rename = same id, new name).
 const NAME_A: &str = "A";
 const NAME_B: &str = "B";
-fn id_of(tag: u8) -> WireUuid {
-    WireUuid([tag; 16])
-}
+fn id_of(tag: u8) -> WireUuid { WireUuid([tag; 16]) }
 
 /// A client topic reference and which identity halves it carries. `tag` 1 = id
 /// U and `tag` 2 = id V. The name is one of {A, B}. `Both(B, 1)` models a
@@ -119,15 +117,11 @@ impl CacheState {
     }
 }
 impl PartialEq for CacheState {
-    fn eq(&self, o: &Self) -> bool {
-        self.proj() == o.proj()
-    }
+    fn eq(&self, o: &Self) -> bool { self.proj() == o.proj() }
 }
 impl Eq for CacheState {}
 impl Hash for CacheState {
-    fn hash<H: Hasher>(&self, h: &mut H) {
-        self.proj().hash(h);
-    }
+    fn hash<H: Hasher>(&self, h: &mut H) { self.proj().hash(h); }
 }
 
 /// One incremental fetch: optionally forget one (ref, partition), optionally
@@ -189,8 +183,47 @@ fn no_shadow(partitions: &HashMap<FetchSessionKey, CachedPartitionState>) -> boo
 }
 
 impl Model for FsModel {
-    type State = CacheState;
     type Action = Fetch;
+    type State = CacheState;
+
+    krabka_macros::model_transition!(last, a, s; {
+            let forgotten: Vec<ForgottenTopic> = a
+                .forget
+                .into_iter()
+                .map(|(r, p)| forgotten_topic(r, p))
+                .collect();
+            let topics: Vec<FetchTopic> = a
+                .sub
+                .into_iter()
+                .map(|(r, p, mb)| fetch_topic(r, p, mb))
+                .collect();
+
+            apply_incremental(&mut s.partitions, &forgotten, &topics);
+
+            // Headline safety, per transition (fires the moment a shadow appears).
+            assert2::assert!(
+                no_shadow(&s.partitions),
+                "shadow entry after {a:?}: {:?}",
+                s.proj()
+            );
+
+            // Subscription fidelity: a subscribed partition is reflected with the
+            // requested max_bytes by some key matching the request's identity.
+            if let Some((r, p, mb)) = a.sub {
+                let present = s
+                    .partitions
+                    .iter()
+                    .any(|(k, st)| ref_matches(k, r, p) && st.max_bytes == mb);
+                assert2::assert!(
+                    present,
+                    "subscription not reflected after {a:?}: {:?}",
+                    s.proj()
+                );
+            }
+
+            Some(s)
+
+    });
 
     fn init_states(&self) -> Vec<Self::State> {
         // Seed: a fully-resolved session — one key with BOTH halves (name A,
@@ -235,45 +268,6 @@ impl Model for FsModel {
         }
     }
 
-    krabka_macros::model_transition!(last, a, s; {
-            let forgotten: Vec<ForgottenTopic> = a
-                .forget
-                .into_iter()
-                .map(|(r, p)| forgotten_topic(r, p))
-                .collect();
-            let topics: Vec<FetchTopic> = a
-                .sub
-                .into_iter()
-                .map(|(r, p, mb)| fetch_topic(r, p, mb))
-                .collect();
-
-            apply_incremental(&mut s.partitions, &forgotten, &topics);
-
-            // Headline safety, per transition (fires the moment a shadow appears).
-            assert2::assert!(
-                no_shadow(&s.partitions),
-                "shadow entry after {a:?}: {:?}",
-                s.proj()
-            );
-
-            // Subscription fidelity: a subscribed partition is reflected with the
-            // requested max_bytes by some key matching the request's identity.
-            if let Some((r, p, mb)) = a.sub {
-                let present = s
-                    .partitions
-                    .iter()
-                    .any(|(k, st)| ref_matches(k, r, p) && st.max_bytes == mb);
-                assert2::assert!(
-                    present,
-                    "subscription not reflected after {a:?}: {:?}",
-                    s.proj()
-                );
-            }
-
-            Some(s)
-
-    });
-
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
             Property::always("no_shadow", |_, s: &CacheState| no_shadow(&s.partitions)),
@@ -295,9 +289,7 @@ impl Model for FsModel {
         ]
     }
 
-    fn within_boundary(&self, s: &Self::State) -> bool {
-        s.partitions.len() <= 8
-    }
+    fn within_boundary(&self, s: &Self::State) -> bool { s.partitions.len() <= 8 }
 }
 
 fn run(model: FsModel, label: &str, pinned_unique_states: usize) {

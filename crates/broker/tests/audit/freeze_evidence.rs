@@ -11,13 +11,14 @@
 //! Each case here drives the whole workflow in [`crate::freeze_workflow`] over
 //! the wire and then reads the answer back off `__krabka_audit`.
 
-use assert2::{assert, check};
-use krabka_broker::coordinator::AUDIT_TOPIC;
-
-use crate::{
-    freeze_signing::{FreezeBytes, freeze_signing_bytes, pattern_type_byte},
-    freeze_workflow::{ALICE, ALICE_KEY_ID, BOB, CAROL, run_thaw_workflow},
-    support,
+use {
+    crate::{
+        freeze_signing::{FreezeBytes, freeze_signing_bytes, pattern_type_byte},
+        freeze_workflow::{ALICE, ALICE_KEY_ID, BOB, CAROL, run_thaw_workflow},
+        support,
+    },
+    assert2::{assert, check},
+    krabka_broker::coordinator::AUDIT_TOPIC,
 };
 
 /// The `PrivilegedAction` records whose `api.operation` is `operation`.

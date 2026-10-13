@@ -2,17 +2,18 @@
 //! ordering, verbatim byte-exactness, group draining, and the append
 //! notification.
 
-use assert2::assert;
-use krabka_log::Offset;
-use tempfile::tempdir;
-use tokio::sync::oneshot;
-
-use super::*;
-use crate::{
-    partition::{ProduceData, ProduceJob},
-    partition_writer::test_support::{GatedWal, sample_batch, test_sequencer},
-    test_support::{EmptyPayloadBatchSetup, RecordCount},
-    wal::SharedWal,
+use {
+    super::*,
+    crate::{
+        partition::{ProduceData, ProduceJob},
+        partition_writer::test_support::{GatedWal, sample_batch, test_sequencer},
+        test_support::{EmptyPayloadBatchSetup, RecordCount},
+        wal::SharedWal,
+    },
+    assert2::assert,
+    krabka_log::Offset,
+    tempfile::tempdir,
+    tokio::sync::oneshot,
 };
 
 async fn writer_after_first_append() -> DefaultWriter {
@@ -75,17 +76,12 @@ async fn writer_groups_queued_produces_up_to_configured_cap() {
         let _ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
     }
 
-    let writer = spawn_writer(
-        dir.path(),
-        log.clone(),
-        rx,
-        WriterOptions {
-            wal: Some(wal),
-            max_produce_group: MAX_GROUP,
-            sequencer: Some(test_sequencer()),
-            ..Default::default()
-        },
-    );
+    let writer = spawn_writer(dir.path(), log.clone(), rx, WriterOptions {
+        wal: Some(wal),
+        max_produce_group: MAX_GROUP,
+        sequencer: Some(test_sequencer()),
+        ..Default::default()
+    });
 
     tokio::time::timeout(std::time::Duration::from_secs(10), sync_started_rx)
         .await
@@ -105,17 +101,12 @@ async fn durable_sync_ack_waits_for_diskless_wal() {
     let (wal, sync_started_rx, release_sync_tx) = GatedWal::gated_channel();
     let wal: SharedWal = wal;
     let (tx, rx) = mpsc::channel(2);
-    let writer = spawn_writer(
-        dir.path(),
-        log,
-        rx,
-        WriterOptions {
-            wal: Some(wal),
-            max_produce_group: 1,
-            sequencer: Some(test_sequencer()),
-            ..Default::default()
-        },
-    );
+    let writer = spawn_writer(dir.path(), log, rx, WriterOptions {
+        wal: Some(wal),
+        max_produce_group: 1,
+        sequencer: Some(test_sequencer()),
+        ..Default::default()
+    });
 
     let append_ack_rx = queue_batch(&tx, sample_batch(EmptyPayloadBatchSetup::default())).await;
     assert!(
@@ -167,8 +158,7 @@ async fn writer_appends_and_acks_on_multi_thread_runtime() {
 
 #[tokio::test]
 async fn writer_appends_verbatim_byte_exact() {
-    use krabka_log::VerbatimBatch;
-    use krabka_protocol::records::RecordBatch as ProtoBatch;
+    use {krabka_log::VerbatimBatch, krabka_protocol::records::RecordBatch as ProtoBatch};
 
     let DefaultWriter {
         dir: _dir,

@@ -5,18 +5,19 @@
 //! returns the computed subscription, which holds the metrics, the interval,
 //! and the id. See `client_metrics::manager`.
 
-use krabka_protocol::{
-    owned::{
-        get_telemetry_subscriptions_request::GetTelemetrySubscriptionsRequest,
-        get_telemetry_subscriptions_response::GetTelemetrySubscriptionsResponse,
+use {
+    crate::{
+        client_metrics::manager::{ACCEPTED_COMPRESSION_TYPES, SubscriptionDecision},
+        handlers::context::TelemetryContext,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use uuid::Uuid;
-
-use crate::{
-    client_metrics::manager::{ACCEPTED_COMPRESSION_TYPES, SubscriptionDecision},
-    handlers::context::TelemetryContext,
+    krabka_protocol::{
+        owned::{
+            get_telemetry_subscriptions_request::GetTelemetrySubscriptionsRequest,
+            get_telemetry_subscriptions_response::GetTelemetrySubscriptionsResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    uuid::Uuid,
 };
 
 wire_handler! {
@@ -55,17 +56,18 @@ wire_handler! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::owned::get_telemetry_subscriptions_response;
-
-    use super::*;
-    use crate::{
-        client_metrics::{
-            config::INTERVAL_MS_DEFAULT,
-            manager::{ComputedSubscription, subscription_id},
+    use {
+        super::*,
+        crate::{
+            client_metrics::{
+                config::INTERVAL_MS_DEFAULT,
+                manager::{ComputedSubscription, subscription_id},
+            },
+            codes,
+            test_support::peer,
         },
-        codes,
-        test_support::peer,
+        assert2::assert,
+        krabka_protocol::owned::get_telemetry_subscriptions_response,
     };
 
     crate::test_support::codec_helpers!(

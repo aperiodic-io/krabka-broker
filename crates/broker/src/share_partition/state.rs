@@ -22,9 +22,7 @@
 //! keeps the run list in shape, and `persistence` maps to and from the share
 //! coordinator's records.
 
-use std::time::Instant;
-
-use krabka_log::Offset;
+use {krabka_log::Offset, std::time::Instant};
 
 mod acknowledge;
 mod acquire;
@@ -40,9 +38,7 @@ pub(crate) mod test_support;
 /// Saturating `i64 -> i32` conversion for record counts. Offset ranges do not
 /// overflow `i32` in practice, but the counter type is `i32` to match the
 /// persister.
-fn clamp_i32(n: i64) -> i32 {
-    i32::try_from(n).unwrap_or(i32::MAX)
-}
+fn clamp_i32(n: i64) -> i32 { i32::try_from(n).unwrap_or(i32::MAX) }
 
 pub const DS_AVAILABLE: i8 = 0;
 pub const DS_ACQUIRED: i8 = 1;
@@ -117,9 +113,7 @@ struct InFlightBatch {
 }
 
 impl InFlightBatch {
-    fn len(&self) -> i64 {
-        self.last_offset.0 - self.first_offset.0 + 1
-    }
+    fn len(&self) -> i64 { self.last_offset.0 - self.first_offset.0 + 1 }
 
     fn acquired_within(&self, first: Offset, last: Offset) -> bool {
         self.first_offset >= first

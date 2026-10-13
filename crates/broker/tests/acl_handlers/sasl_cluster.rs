@@ -3,15 +3,16 @@
 //! enforcing `SimpleAclAuthorizer` in place of the permissive default, so
 //! every test in the suite starts from a cluster that actually checks ACLs.
 
-use krabka_broker::{BrokerConfig, BrokerHandle, authorizer::SimpleAclAuthorizer};
-use krabka_security::SaslMechanism;
-
-use crate::{
-    acl_admin::create_topic_as_admin,
-    support::{
-        acl::{TopicAclSetup, seed_dummy_acl, topic_acl_record},
-        sasl::{sasl_plaintext_mechanisms, start_broker},
+use {
+    crate::{
+        acl_admin::create_topic_as_admin,
+        support::{
+            acl::{TopicAclSetup, seed_dummy_acl, topic_acl_record},
+            sasl::{sasl_plaintext_mechanisms, start_broker},
+        },
     },
+    krabka_broker::{BrokerConfig, BrokerHandle, authorizer::SimpleAclAuthorizer},
+    krabka_security::SaslMechanism,
 };
 
 /// Build a `BrokerConfig` with a single `SASL_PLAINTEXT` listener, PLAIN

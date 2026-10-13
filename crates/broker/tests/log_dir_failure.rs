@@ -17,28 +17,30 @@
 //! cannot do it in this test, because the nodes wait ten minutes before they
 //! call a follower slow.
 
+#![cfg(unix)]
+
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt as _;
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_broker::{
-    BootstrapMode, BrokerConfig, BrokerHandle, config::NodeRole, file_config::FileConfig,
-    log_dir_id::LogDirIds,
-};
-use krabka_client_producer::{Acks, Producer, ProducerRecord};
-use tempfile::TempDir;
-
-use crate::support::{
-    NodeIndex, RoleNodeSetup,
-    client::create_topic_for_broker,
-    producer::{ProducerRecordSetup, producer_record},
-    topics::{CreateTopicSetup, TopicReplicationFactor},
+use std::{os::unix::fs::PermissionsExt as _, path::PathBuf};
+use {
+    crate::support::{
+        NodeIndex, RoleNodeSetup,
+        client::create_topic_for_broker,
+        producer::{ProducerRecordSetup, producer_record},
+        topics::{CreateTopicSetup, TopicReplicationFactor},
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_broker::{
+        BootstrapMode, BrokerConfig, BrokerHandle, config::NodeRole, file_config::FileConfig,
+        log_dir_id::LogDirIds,
+    },
+    krabka_client_producer::{Acks, Producer, ProducerRecord},
+    std::{
+        collections::BTreeMap,
+        path::Path,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    },
+    tempfile::TempDir,
 };
 
 mod support;
@@ -115,14 +117,11 @@ async fn start_cluster() -> Cluster {
     for index in 1..NODES {
         let primary = TempDir::new().unwrap();
         let extra = TempDir::new().unwrap();
-        let mut cfg = topology.config(
-            primary.path(),
-            RoleNodeSetup {
-                index: NodeIndex(index),
-                mode: BootstrapMode::Join,
-                ..Default::default()
-            },
-        );
+        let mut cfg = topology.config(primary.path(), RoleNodeSetup {
+            index: NodeIndex(index),
+            mode: BootstrapMode::Join,
+            ..Default::default()
+        });
         cfg.extra_log_dirs = vec![extra.path().to_path_buf()];
         cfg.replica_lag_time_max = krabka_units::minutes(10);
         apply_server_properties(&mut cfg);
@@ -229,20 +228,6 @@ impl Drop for ReadOnlyTree {
     }
 }
 
-#[cfg(not(unix))]
-struct ReadOnlyTree;
-
-#[cfg(not(unix))]
-impl ReadOnlyTree {
-    fn new(_root: &Path) -> Self {
-        Self
-    }
-
-    fn refuses_writes(&self) -> bool {
-        false
-    }
-}
-
 /// Produces one record to partition 0 of [`TOPIC`] with the timestamp
 /// `timestamp_ms`, and waits for the leader to acknowledge it.
 async fn produce(producer: &Producer, timestamp_ms: i64) {
@@ -264,24 +249,18 @@ async fn produce(producer: &Producer, timestamp_ms: i64) {
 async fn a_follower_whose_log_directory_fails_leaves_the_isr() {
     support::init_tracing();
     let cluster = start_cluster().await;
-    create_topic_for_broker(
-        &cluster.brokers[0].handle,
-        CreateTopicSetup {
-            topic: FILLER,
-            replication_factor: TopicReplicationFactor(3),
-            ..Default::default()
-        },
-    )
+    create_topic_for_broker(&cluster.brokers[0].handle, CreateTopicSetup {
+        topic: FILLER,
+        replication_factor: TopicReplicationFactor(3),
+        ..Default::default()
+    })
     .await;
     wait_until_materialized(&cluster.brokers, &format!("{FILLER}-0")).await;
-    create_topic_for_broker(
-        &cluster.brokers[0].handle,
-        CreateTopicSetup {
-            topic: TOPIC,
-            replication_factor: TopicReplicationFactor(3),
-            ..Default::default()
-        },
-    )
+    create_topic_for_broker(&cluster.brokers[0].handle, CreateTopicSetup {
+        topic: TOPIC,
+        replication_factor: TopicReplicationFactor(3),
+        ..Default::default()
+    })
     .await;
     let target = format!("{TOPIC}-0");
     wait_until_materialized(&cluster.brokers, &target).await;
@@ -339,7 +318,9 @@ async fn a_follower_whose_log_directory_fails_leaves_the_isr() {
         .wait_until_local_log_end_offset(TOPIC, 0, 1)
         .await;
 
+    #[cfg(unix)]
     let read_only = ReadOnlyTree::new(follower.extra.path());
+    #[cfg(unix)]
     if !read_only.refuses_writes() {
         // Root writes through the permission bits, so nothing fails.
         drop(read_only);
@@ -385,6 +366,7 @@ async fn a_follower_whose_log_directory_fails_leaves_the_isr() {
     );
 
     drop(producer);
+    #[cfg(unix)]
     drop(read_only);
     cluster.shutdown().await;
 }

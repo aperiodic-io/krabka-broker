@@ -5,22 +5,22 @@
 //! set comes from an in-memory JWKS. Each is exercised on the accept path
 //! and on the RFC 7628 two-round failure handshake.
 
-use std::io;
-
-use assert2::assert;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
-use ring::{
-    rand::SystemRandom,
-    signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair},
-};
-use tokio::net::TcpStream;
-
-use crate::{
-    harness::metadata_probe,
-    oauthbearer::{
-        now_unix_secs, oauthbearer_authenticate, oauthbearer_fixture, oauthbearer_initial,
-        oauthbearer_session_start, start_oauthbearer_broker, unsecured_jws,
+use {
+    crate::{
+        harness::metadata_probe,
+        oauthbearer::{
+            now_unix_secs, oauthbearer_authenticate, oauthbearer_fixture, oauthbearer_initial,
+            oauthbearer_session_start, start_oauthbearer_broker, unsecured_jws,
+        },
     },
+    assert2::assert,
+    base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64},
+    ring::{
+        rand::SystemRandom,
+        signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair},
+    },
+    std::io,
+    tokio::net::TcpStream,
 };
 
 /// Happy path: a valid unsecured token authenticates in a single round.

@@ -6,9 +6,10 @@
 //!
 //! [`MetadataEvent`]: super::MetadataEvent
 
-use bytes::{BufMut, BytesMut};
-
-use crate::error::CodecError;
+use {
+    crate::error::CodecError,
+    bytes::{BufMut, BytesMut},
+};
 
 /// Unsigned LEB128: 7 data bits per byte, and the MSB is the continuation
 /// flag. It encodes 1 byte for values < 128.
@@ -39,14 +40,10 @@ pub(crate) struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    pub(crate) fn new(buf: &'a [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
+    pub(crate) fn new(buf: &'a [u8]) -> Self { Self { buf, pos: 0 } }
 
     /// Bytes not yet consumed.
-    pub(crate) fn remaining(&self) -> usize {
-        self.buf.len() - self.pos
-    }
+    pub(crate) fn remaining(&self) -> usize { self.buf.len() - self.pos }
 
     pub(crate) fn read_u8(&mut self) -> Result<u8, CodecError> {
         let &b = self

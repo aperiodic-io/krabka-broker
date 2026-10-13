@@ -3,12 +3,13 @@
 //! the epoch boundary the transaction marker reserves, so `EndTxn` and
 //! `InitProducerId` share these rules from one place.
 
-use krabka_log::ProducerId;
-
-use crate::{
-    error::BrokerError,
-    producer_id_manager::ProducerIdManager,
-    txn::{state::TxnEntry, version::TxnVersion},
+use {
+    crate::{
+        error::BrokerError,
+        producer_id_manager::ProducerIdManager,
+        txn::{state::TxnEntry, version::TxnVersion},
+    },
+    krabka_log::ProducerId,
 };
 
 /// KIP-890: the `(producer_id, producer_epoch)` a producer continues with after
@@ -203,12 +204,13 @@ pub(crate) fn prepare_completion_identities_with_fresh(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::txn::{
-        coordinator::completion::apply_completion, handlers::end_txn::test_support::entry,
-        state::TxnState,
+    use {
+        super::*,
+        crate::txn::{
+            coordinator::completion::apply_completion, handlers::end_txn::test_support::entry,
+            state::TxnState,
+        },
+        assert2::assert,
     };
 
     #[tokio::test]

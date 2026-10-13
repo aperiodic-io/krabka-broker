@@ -9,13 +9,13 @@
 //! so that a ghost field added to the struct cannot silently drop out of state
 //! identity.
 
-use std::hash::{Hash, Hasher};
-
-use krabka_verified::isr::{
-    IsrCandidateFacts, IsrEligibilityFacts, IsrMemberRole, isr_candidate_selected,
+use {
+    super::bounds::{NB, model_offset},
+    krabka_verified::isr::{
+        IsrCandidateFacts, IsrEligibilityFacts, IsrMemberRole, isr_candidate_selected,
+    },
+    std::hash::{Hash, Hasher},
 };
-
-use super::bounds::{NB, model_offset};
 
 #[derive(Clone, Debug)]
 pub(super) struct DpState {
@@ -79,6 +79,7 @@ impl DpState {
     pub(super) fn leader_leo(&self) -> i64 {
         model_offset(self.log[usize::from(self.leader)].len())
     }
+
     fn proj(&self) -> StateProjection {
         (
             self.log.to_vec(),
@@ -98,15 +99,11 @@ impl DpState {
     }
 }
 impl PartialEq for DpState {
-    fn eq(&self, o: &Self) -> bool {
-        self.proj() == o.proj()
-    }
+    fn eq(&self, o: &Self) -> bool { self.proj() == o.proj() }
 }
 impl Eq for DpState {}
 impl Hash for DpState {
-    fn hash<H: Hasher>(&self, h: &mut H) {
-        self.proj().hash(h);
-    }
+    fn hash<H: Hasher>(&self, h: &mut H) { self.proj().hash(h); }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]

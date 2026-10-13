@@ -3,27 +3,27 @@
 //! connection, plus an `AddOffsetsToTxn` driver that reuses one such
 //! connection.
 
-use std::net::SocketAddr;
-
-use bytes::BytesMut;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        add_offsets_to_txn_request::AddOffsetsToTxnRequest,
-        add_offsets_to_txn_response::AddOffsetsToTxnResponse, fetch_response::FetchResponse,
-        produce_response::ProduceResponse,
+use {
+    crate::{
+        CLIENT_ID,
+        kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+        support::{
+            topics::consumer_fetch_request,
+            wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+        },
     },
-};
-use tokio::net::TcpStream;
-
-use crate::{
-    CLIENT_ID,
-    kafka_wire::{self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
-    support::{
-        topics::consumer_fetch_request,
-        wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+    bytes::BytesMut,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            add_offsets_to_txn_request::AddOffsetsToTxnRequest,
+            add_offsets_to_txn_response::AddOffsetsToTxnResponse, fetch_response::FetchResponse,
+            produce_response::ProduceResponse,
+        },
     },
+    std::net::SocketAddr,
+    tokio::net::TcpStream,
 };
 
 /// The `AddOffsetsToTxn` version the driver below speaks: the newest the
@@ -85,14 +85,11 @@ pub async fn drive_produce_sasl(
     records: kafka_wire::ZeroFilledRecordsSetup,
     authentication: &PlainAuthenticationSetup<'_>,
 ) -> ProduceResponse {
-    kafka_wire::produce_sasl_with_ids(
-        addr,
-        kafka_wire::SaslProduceSetup {
-            authentication: authentication.clone(),
-            produce_client_id: CLIENT_ID,
-            records,
-        },
-    )
+    kafka_wire::produce_sasl_with_ids(addr, kafka_wire::SaslProduceSetup {
+        authentication: authentication.clone(),
+        produce_client_id: CLIENT_ID,
+        records,
+    })
     .await
 }
 
@@ -109,14 +106,11 @@ pub async fn drive_fetch_sasl(
 
     let req = consumer_fetch_request(topic);
 
-    let mut stream = kafka_wire::sasl_plain_authenticate(
-        addr,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            user,
-            password: (pass).to_vec(),
-        },
-    )
+    let mut stream = kafka_wire::sasl_plain_authenticate(addr, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        user,
+        password: (pass).to_vec(),
+    })
     .await
     .expect("SASL authenticate for Fetch");
     let mut body = BytesMut::new();

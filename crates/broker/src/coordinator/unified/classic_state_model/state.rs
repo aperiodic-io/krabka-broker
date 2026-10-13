@@ -6,9 +6,10 @@
 //! `HashMap`s, which have no stable ordering, so equality and hashing go
 //! through one sorted projection and stateright sees a canonical fingerprint.
 
-use std::time::Instant;
-
-use crate::coordinator::unified::classic_state::{ClassicGroup, GroupState};
+use {
+    crate::coordinator::unified::classic_state::{ClassicGroup, GroupState},
+    std::time::Instant,
+};
 
 /// Model state: a real `ClassicGroup` plus the logical clock. `Hash` and `Eq`
 /// are manual over a canonical projection, because `ClassicGroup` holds

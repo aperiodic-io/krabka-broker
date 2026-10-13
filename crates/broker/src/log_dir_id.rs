@@ -12,15 +12,15 @@
 //! `AssignReplicasToDirs` and `offline_log_dirs` with stable ids that the
 //! controller can map back to partitions.
 
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
+use {
+    crate::NodeId,
+    krabka_format::{ClusterId, DirectoryId, MetaProperties},
+    std::{
+        collections::HashMap,
+        path::{Path, PathBuf},
+    },
+    uuid::Uuid,
 };
-
-use krabka_format::{ClusterId, DirectoryId, MetaProperties};
-use uuid::Uuid;
-
-use crate::NodeId;
 
 /// Immutable per-dir UUID table built once at startup.
 #[derive(Clone, Debug, Default)]
@@ -34,9 +34,7 @@ impl LogDirIds {
     /// gets a new id, as Kafka's `DirectoryId.random` makes one, that only
     /// this table holds.
     #[must_use]
-    pub fn resolve(log_dirs: &[PathBuf]) -> Self {
-        Self::build(log_dirs, None)
-    }
+    pub fn resolve(log_dirs: &[PathBuf]) -> Self { Self::build(log_dirs, None) }
 
     /// [`Self::resolve`], but a new id is also written to the dir: into its
     /// `meta.properties` when the file has no `directory.id`, as Kafka's
@@ -62,9 +60,7 @@ impl LogDirIds {
     }
 
     #[must_use]
-    pub fn id_for(&self, dir: &Path) -> Option<Uuid> {
-        self.by_path.get(dir).copied()
-    }
+    pub fn id_for(&self, dir: &Path) -> Option<Uuid> { self.by_path.get(dir).copied() }
 
     /// All `(path, uuid)` pairs, sorted by path for deterministic output.
     #[must_use]
@@ -120,10 +116,11 @@ fn read_or_mint(dir: &Path, used: &[DirectoryId], identity: Option<(ClusterId, N
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use tempfile::tempdir;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        tempfile::tempdir,
+    };
 
     const CLUSTER: Uuid = Uuid::from_u128(0xc1);
 

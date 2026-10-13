@@ -19,26 +19,26 @@
 //! recovery always completes it. The kernel that decides between the two is
 //! [`krabka_verified::local_recovery::local_recovery_swap_action`].
 
-use std::{
-    collections::BTreeSet,
-    fs::File,
-    io::{ErrorKind, Read, Seek, SeekFrom},
-    path::{Path, PathBuf},
-};
-
-use krabka_protocol::records::{HEADER_LEN, RecordBatchHeader};
-use krabka_verified::local_recovery::{
-    LocalRecoverySwapAction, LocalRecoverySwapFacts, local_recovery_batch_step,
-    local_recovery_swap_action, local_recovery_swap_replaces,
-};
-use tracing::instrument;
-use zerocopy::FromBytes;
-
-use super::canonical_base;
-use crate::{
-    error::LogError,
-    io::{FileIo, IoTarget, LogIo},
-    name,
+use {
+    super::canonical_base,
+    crate::{
+        error::LogError,
+        io::{FileIo, IoTarget, LogIo},
+        name,
+    },
+    krabka_protocol::records::{HEADER_LEN, RecordBatchHeader},
+    krabka_verified::local_recovery::{
+        LocalRecoverySwapAction, LocalRecoverySwapFacts, local_recovery_batch_step,
+        local_recovery_swap_action, local_recovery_swap_replaces,
+    },
+    std::{
+        collections::BTreeSet,
+        fs::File,
+        io::{ErrorKind, Read, Seek, SeekFrom},
+        path::{Path, PathBuf},
+    },
+    tracing::instrument,
+    zerocopy::FromBytes,
 };
 
 /// The file kinds a swap set carries: the log, then its sidecars.
@@ -72,9 +72,7 @@ fn suffixed_path(dir: &Path, base: i64, ext: &str, suffix: &str) -> PathBuf {
     dir.join(format!("{}.{ext}{suffix}", name::format_base_offset(base)))
 }
 
-fn final_path(dir: &Path, base: i64, ext: &str) -> PathBuf {
-    suffixed_path(dir, base, ext, "")
-}
+fn final_path(dir: &Path, base: i64, ext: &str) -> PathBuf { suffixed_path(dir, base, ext, "") }
 
 /// Unlink `path`, which may already be gone.
 ///
@@ -151,9 +149,7 @@ pub fn promote_sidecars(io: &dyn LogIo, dir: &Path, base: i64) -> Result<(), Log
 /// Returns an error when the directory scan or a file operation fails, when a
 /// committed `.log.swap` does not hold whole, contiguous batches, or when
 /// sidecar swaps have no log in any form.
-pub fn swap_orphan_recover(dir: &Path) -> Result<(), LogError> {
-    recover_swaps(&FileIo, dir)
-}
+pub fn swap_orphan_recover(dir: &Path) -> Result<(), LogError> { recover_swaps(&FileIo, dir) }
 
 /// [`swap_orphan_recover`] through an injectable I/O boundary.
 #[instrument(

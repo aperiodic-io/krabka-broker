@@ -105,9 +105,6 @@ mod topic_scope;
 mod trunk_log;
 mod validation;
 
-#[cfg(test)]
-pub(crate) use topic_scope::ELIGIBLE_LEADER_REPLICAS;
-
 pub use self::docs::{TopicConfigDoc, topic_config_docs};
 pub(crate) use self::{
     broker_defaults::{BrokerLogDefaults, dynamic_log_base},
@@ -154,6 +151,8 @@ pub(crate) use self::{
     validation::{REMOTE_STORAGE_POLICY_MESSAGE, validate_topic_config_map},
 };
 use crate::api_catalog::UnstableApiVersions;
+#[cfg(test)]
+pub(crate) use topic_scope::ELIGIBLE_LEADER_REPLICAS;
 pub(crate) const RETENTION_MS: &str = "retention.ms";
 pub(crate) const RETENTION_BYTES: &str = "retention.bytes";
 pub(crate) const SEGMENT_BYTES: &str = "segment.bytes";

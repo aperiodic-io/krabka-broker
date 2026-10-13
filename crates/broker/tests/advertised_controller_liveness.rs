@@ -18,19 +18,20 @@
 //! set. What is unproven there, and proven here, is that a follower's fenced
 //! set tracks a death it only learns about through the metadata log.
 
-use std::{collections::BTreeSet, time::Duration};
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    describe_cluster_request::DescribeClusterRequest,
-    describe_cluster_response::DescribeClusterResponse, metadata_response::MetadataResponse,
-};
-use krabka_units::convert::TimeExt as _;
-
-use crate::support::{
-    client::connect_client, discovery::topic_metadata_request, registered_cluster, shutdown_cluster,
+use {
+    crate::support::{
+        client::connect_client, discovery::topic_metadata_request, registered_cluster,
+        shutdown_cluster,
+    },
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        describe_cluster_request::DescribeClusterRequest,
+        describe_cluster_response::DescribeClusterResponse, metadata_response::MetadataResponse,
+    },
+    krabka_units::convert::TimeExt as _,
+    std::{collections::BTreeSet, time::Duration},
 };
 
 mod support;

@@ -6,19 +6,19 @@
 //! signature against a trusted key. This file holds the report types and the
 //! segment walk; the per-record chain and checkpoint checks live in `walk`.
 
-use std::{collections::HashMap, path::Path};
-
-use krabka_protocol::records::RecordBatch;
-
-use self::walk::{
-    WalkState, check_chained, check_checkpoint, check_records_lost, header,
-    records_lost_body_has_field,
-};
-use crate::{
-    checkpoint::EVENT_CLASS_CHECKPOINT,
-    event::AuditEventClass,
-    ids::{CheckpointCount, RecordCount, Seq},
-    sink::AuditError,
+use {
+    self::walk::{
+        WalkState, check_chained, check_checkpoint, check_records_lost, header,
+        records_lost_body_has_field,
+    },
+    crate::{
+        checkpoint::EVENT_CLASS_CHECKPOINT,
+        event::AuditEventClass,
+        ids::{CheckpointCount, RecordCount, Seq},
+        sink::AuditError,
+    },
+    krabka_protocol::records::RecordBatch,
+    std::{collections::HashMap, path::Path},
 };
 
 mod walk;
@@ -41,9 +41,7 @@ impl TrustedKeys {
     }
 
     #[must_use]
-    pub fn get(&self, key_id: &str) -> Option<&[u8]> {
-        self.keys.get(key_id).map(Vec::as_slice)
-    }
+    pub fn get(&self, key_id: &str) -> Option<&[u8]> { self.keys.get(key_id).map(Vec::as_slice) }
 }
 
 /// First detected break in the chain or signatures.

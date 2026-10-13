@@ -5,22 +5,22 @@
 //! has to be recorded as a bypass. Both answers, and the audit events that
 //! carry them, live here so the manager keeps only the control flow.
 
-use std::sync::Arc;
-
-use krabka_audit::{
-    AuditEndpoint, AuditError, AuditEvent, AuditLog, AuditMode, AuditOutcome, AuditPrincipal,
-    PrivilegedPhase,
-};
-use krabka_metadata::BreakGlassAction;
-use krabka_raft::NodeId;
-
-use super::{Election, RecoveryJob};
-use crate::{
-    break_glass::{action_name, gate::is_gated, metrics as break_glass_metrics},
-    config::{BackgroundUncleanRecovery, BreakGlassConfig},
-    metrics::BrokerMetrics,
-    operator_keys::approver_set_fingerprint,
-    time_util::now_ms,
+use {
+    super::{Election, RecoveryJob},
+    crate::{
+        break_glass::{action_name, gate::is_gated, metrics as break_glass_metrics},
+        config::{BackgroundUncleanRecovery, BreakGlassConfig},
+        metrics::BrokerMetrics,
+        operator_keys::approver_set_fingerprint,
+        time_util::now_ms,
+    },
+    krabka_audit::{
+        AuditEndpoint, AuditError, AuditEvent, AuditLog, AuditMode, AuditOutcome, AuditPrincipal,
+        PrivilegedPhase,
+    },
+    krabka_metadata::BreakGlassAction,
+    krabka_raft::NodeId,
+    std::sync::Arc,
 };
 
 /// KFC-9: the break-glass rule for a recovery that nobody asked for.

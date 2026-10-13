@@ -4,33 +4,33 @@
 //! one into an exit code. A runbook that wraps the tool gets the code; a test
 //! that drives the library keeps the error.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use krabka_audit::FileEd25519Signer;
-use krabka_client_admin::{
-    AdminClient, AdminError, ConfigResource, DescribeConfigsOptions, TopicMetadata,
-    groups::ListGroupsOptions,
-};
-use krabka_client_core::{
-    Client, CoordinatorKeyType, build_find_coordinator, coordinator_endpoint,
-    security::ClientSecurity,
-};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use krabka_remote_storage::{ObjectEntry, Sha256Digest};
-use krabka_remote_storage_topic::{KafkaMetadataEventLog, KafkaMetadataLogConfig};
-
-use crate::{
-    archive::{Archive, ArchiveArgs},
-    capture::{RLMM_SNAPSHOT_RELATIVE, capture_id, capture_key, newest_metadata_checkpoint},
-    cli::{CaptureSigningArgs, CaptureTrustArgs, LATEST},
-    connection::SecurityArgs,
-    diskless::capture_projection,
-    error::BackupError,
-    manifest::{
-        Artifact, CAPTURE_ROOT, DISKLESS_WAL_INDEX, GROUP_OFFSETS, MANIFEST, MANIFEST_VERSION,
-        METADATA_CHECKPOINT, Manifest, RLMM_SNAPSHOT, artifact_problem, sha256_hex,
+use {
+    crate::{
+        archive::{Archive, ArchiveArgs},
+        capture::{RLMM_SNAPSHOT_RELATIVE, capture_id, capture_key, newest_metadata_checkpoint},
+        cli::{CaptureSigningArgs, CaptureTrustArgs, LATEST},
+        connection::SecurityArgs,
+        diskless::capture_projection,
+        error::BackupError,
+        manifest::{
+            Artifact, CAPTURE_ROOT, DISKLESS_WAL_INDEX, GROUP_OFFSETS, MANIFEST, MANIFEST_VERSION,
+            METADATA_CHECKPOINT, Manifest, RLMM_SNAPSHOT, artifact_problem, sha256_hex,
+        },
+        offsets::{GroupOffsetsFile, commit_refusals, commit_request, group_offsets},
     },
-    offsets::{GroupOffsetsFile, commit_refusals, commit_request, group_offsets},
+    krabka_audit::FileEd25519Signer,
+    krabka_client_admin::{
+        AdminClient, AdminError, ConfigResource, DescribeConfigsOptions, TopicMetadata,
+        groups::ListGroupsOptions,
+    },
+    krabka_client_core::{
+        Client, CoordinatorKeyType, build_find_coordinator, coordinator_endpoint,
+        security::ClientSecurity,
+    },
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    krabka_remote_storage::{ObjectEntry, Sha256Digest},
+    krabka_remote_storage_topic::{KafkaMetadataEventLog, KafkaMetadataLogConfig},
+    std::collections::{BTreeMap, BTreeSet},
 };
 
 const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
@@ -451,10 +451,11 @@ fn diskless_index_present(metadata: &TopicMetadata, name: &str) -> Result<bool, 
 
 #[cfg(test)]
 mod diskless_tests {
-    use assert2::check;
-    use krabka_client_admin::{KafkaError, TopicMetadataEntry};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_client_admin::{KafkaError, TopicMetadataEntry},
+    };
 
     fn metadata(error: Option<KafkaError>) -> TopicMetadata {
         TopicMetadata {
@@ -922,19 +923,20 @@ async fn read_manifest(store: &Archive, id: &str) -> Result<Manifest, BackupErro
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::{
-        BackupError, DISKLESS_WAL_INDEX, FileEd25519Signer, GROUP_OFFSETS, MANIFEST,
-        METADATA_CHECKPOINT, RLMM_SNAPSHOT, Sha256Digest, capture, list, restore_offsets, verify,
-        verify_offsets_boundary,
-    };
-    use crate::{
-        archive::{Archive, ArchiveArgs},
-        capture::capture_key,
-        cli::CaptureTrustArgs,
-        manifest::{Artifact, MANIFEST_VERSION, Manifest, sha256_hex},
-        offsets::{CommittedOffset, GROUP_OFFSETS_VERSION, GroupOffsets, GroupOffsetsFile},
+    use {
+        super::{
+            BackupError, DISKLESS_WAL_INDEX, FileEd25519Signer, GROUP_OFFSETS, MANIFEST,
+            METADATA_CHECKPOINT, RLMM_SNAPSHOT, Sha256Digest, capture, list, restore_offsets,
+            verify, verify_offsets_boundary,
+        },
+        crate::{
+            archive::{Archive, ArchiveArgs},
+            capture::capture_key,
+            cli::CaptureTrustArgs,
+            manifest::{Artifact, MANIFEST_VERSION, Manifest, sha256_hex},
+            offsets::{CommittedOffset, GROUP_OFFSETS_VERSION, GroupOffsets, GroupOffsetsFile},
+        },
+        assert2::{assert, check},
     };
 
     /// The RLMM snapshot bytes a fixture node holds. The capture copies bytes

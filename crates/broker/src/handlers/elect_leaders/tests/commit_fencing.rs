@@ -1,17 +1,17 @@
 //! Guarded election admission after a real durable audit acknowledgment.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_audit::{AuditEvent, LifecycleKind};
-use krabka_raft::RaftError;
-
-use super::{super::submit_election_after_audit, *};
-use crate::{
-    handlers::forward_to_controller::guarded_operation_on_source,
-    leader_election::select_new_leader_for_partition,
-    metadata_source::MetadataSource,
-    test_support::{FakeMetadataSource, paused_audit::PausedAudit},
+use {
+    super::{super::submit_election_after_audit, *},
+    crate::{
+        handlers::forward_to_controller::guarded_operation_on_source,
+        leader_election::select_new_leader_for_partition,
+        metadata_source::MetadataSource,
+        test_support::{FakeMetadataSource, paused_audit::PausedAudit},
+    },
+    assert2::assert,
+    krabka_audit::{AuditEvent, LifecycleKind},
+    krabka_raft::RaftError,
+    std::sync::Arc,
 };
 
 #[tokio::test]

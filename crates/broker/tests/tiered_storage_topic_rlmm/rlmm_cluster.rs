@@ -8,18 +8,18 @@
 //! tests gate on: activation of the swapped-in manager and propagation of a
 //! tiered-storage topic config into the partition's `LogConfig`.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_broker::{
-    BrokerConfig, BrokerHandle, KafkaRlmmConfig, RemoteStorageBackend, RlmmKind,
-    config::{InterBrokerCredentials, ListenerSpec},
+use {
+    crate::support,
+    assert2::assert,
+    krabka_broker::{
+        BrokerConfig, BrokerHandle, KafkaRlmmConfig, RemoteStorageBackend, RlmmKind,
+        config::{InterBrokerCredentials, ListenerSpec},
+    },
+    krabka_client_core::Client,
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::time::{Duration, Instant},
+    tempfile::TempDir,
 };
-use krabka_client_core::Client;
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tempfile::TempDir;
-
-use crate::support;
 
 krabka_macros::bound_start_fixture!(config, bare_config, ::krabka_broker);
 

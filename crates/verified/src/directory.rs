@@ -65,17 +65,20 @@ pub fn directory_response_decision(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::{
-        DirectoryAssignmentDecision, DirectoryResponseDecision, directory_assignment_decision,
-        directory_response_decision,
+    use {
+        super::{
+            DirectoryAssignmentDecision, DirectoryResponseDecision, directory_assignment_decision,
+            directory_response_decision,
+        },
+        assert2::check,
     };
 
     #[test]
     fn planning_is_exact_idempotent_and_response_fenced() {
-        use DirectoryAssignmentDecision::{Assign, Ignore, NoOp};
-        use DirectoryResponseDecision::{Accept, ControllerError, StaleController};
+        use {
+            DirectoryAssignmentDecision::{Assign, Ignore, NoOp},
+            DirectoryResponseDecision::{Accept, ControllerError, StaleController},
+        };
 
         check!(directory_assignment_decision(None, false) == Ignore);
         check!(directory_assignment_decision(None, true) == Ignore);

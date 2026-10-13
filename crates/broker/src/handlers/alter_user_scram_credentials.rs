@@ -48,16 +48,18 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    plan::{AlterationPlan, distinct_requested_users, plan_alterations},
-    response::{apply_submit_error, err_result},
-    validation::{CLUSTER_ALTER_DENIED_MESSAGE, SCRAM_UNSUPPORTED_MESSAGE},
-};
-use crate::{
-    broker::Broker,
-    codes,
-    features::{METADATA_VERSION, require_feature},
-    handlers::{RequestContext, audit_admin_success, audit_resource, cluster_alter_denied},
+use {
+    self::{
+        plan::{AlterationPlan, distinct_requested_users, plan_alterations},
+        response::{apply_submit_error, err_result},
+        validation::{CLUSTER_ALTER_DENIED_MESSAGE, SCRAM_UNSUPPORTED_MESSAGE},
+    },
+    crate::{
+        broker::Broker,
+        codes,
+        features::{METADATA_VERSION, require_feature},
+        handlers::{RequestContext, audit_admin_success, audit_resource, cluster_alter_denied},
+    },
 };
 
 context_handler! {

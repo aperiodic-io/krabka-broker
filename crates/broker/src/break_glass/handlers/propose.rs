@@ -11,25 +11,26 @@
 //! Authorization: `Alter` on `Cluster("kafka-cluster")`. A denied request
 //! answers `CLUSTER_AUTHORIZATION_FAILED` (31).
 
-use krabka_audit::{AuditOutcome, PrivilegedPhase};
-use krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord, MetadataRecord};
-use krabka_protocol::krabka::break_glass::{ProposeBreakGlassRequest, ProposeBreakGlassResponse};
-use krabka_units::{Time, convert::TimeExt as _};
-use uuid::Uuid;
-
-use crate::{
-    break_glass::{
-        action_from_wire, action_name,
-        config::BreakGlassPolicy,
-        handlers::{
-            PrivilegedAudit, Refusal, UNKNOWN_ACTION, admit_privileged_request, audit_privileged,
-            principal_name, submit_error, to_wire_uuid,
+use {
+    crate::{
+        break_glass::{
+            action_from_wire, action_name,
+            config::BreakGlassPolicy,
+            handlers::{
+                PrivilegedAudit, Refusal, UNKNOWN_ACTION, admit_privileged_request,
+                audit_privileged, principal_name, submit_error, to_wire_uuid,
+            },
         },
+        broker::Broker,
+        codes,
+        handlers::{RequestContext, cluster_alter_denied, encode_response},
+        time_util::now_ms,
     },
-    broker::Broker,
-    codes,
-    handlers::{RequestContext, cluster_alter_denied, encode_response},
-    time_util::now_ms,
+    krabka_audit::{AuditOutcome, PrivilegedPhase},
+    krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord, MetadataRecord},
+    krabka_protocol::krabka::break_glass::{ProposeBreakGlassRequest, ProposeBreakGlassResponse},
+    krabka_units::{Time, convert::TimeExt as _},
+    uuid::Uuid,
 };
 
 /// The `ttl_ms` value that asks for the configured lifetime.
@@ -125,18 +126,15 @@ async fn propose(
             format!("{} names no break-glass action", req.action),
         )
     })?;
-    let proposal = decide(
-        policy,
-        &ProposalRequest {
-            action,
-            target: &req.target,
-            reason: &req.reason,
-            ttl_ms: req.ttl_ms,
-            proposer: &principal_name(ctx),
-            proposal_id: Uuid::new_v4(),
-            now_ms: now_ms(),
-        },
-    )?;
+    let proposal = decide(policy, &ProposalRequest {
+        action,
+        target: &req.target,
+        reason: &req.reason,
+        ttl_ms: req.ttl_ms,
+        proposer: &principal_name(ctx),
+        proposal_id: Uuid::new_v4(),
+        now_ms: now_ms(),
+    })?;
     admit_privileged_request(
         broker.audit_log.as_ref(),
         ctx,
@@ -251,13 +249,14 @@ fn effective_ttl(configured: Time, requested_ms: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::{minutes, secs};
-
-    use super::*;
-    use crate::{
-        break_glass::gate::tests::{CREATED_MS, config},
-        config::BreakGlassConfig,
+    use {
+        super::*,
+        crate::{
+            break_glass::gate::tests::{CREATED_MS, config},
+            config::BreakGlassConfig,
+        },
+        assert2::{assert, check},
+        krabka_units::{minutes, secs},
     };
 
     fn request<'a>(proposer: &'a str, target: &'a str, ttl_ms: i64) -> ProposalRequest<'a> {

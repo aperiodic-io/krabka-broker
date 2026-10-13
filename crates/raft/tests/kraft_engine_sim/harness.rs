@@ -6,18 +6,20 @@
 //! waiting for agreement, so both halves of that shape are kept here rather
 //! than repeated per test module.
 
-pub(crate) use std::{collections::HashMap, sync::Arc, time::Duration};
-
-pub(crate) use krabka_raft::{
-    ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax,
-    kraft::{
-        KraftConfig, KraftController, KraftLog, NodeId, QuorumState,
-        snapshot_fetch::MetadataSnapshotFetchMax,
-    },
+use {
+    crate::{harness::SimEngineSetup as HarnessSimEngineSetup, sim_net::SimNet},
+    krabka_units::prelude::{Time, millis},
 };
-use krabka_units::prelude::{Time, millis};
-
-use crate::{harness::SimEngineSetup as HarnessSimEngineSetup, sim_net::SimNet};
+pub(crate) use {
+    krabka_raft::{
+        ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax,
+        kraft::{
+            KraftConfig, KraftController, KraftLog, NodeId, QuorumState,
+            snapshot_fetch::MetadataSnapshotFetchMax,
+        },
+    },
+    std::{collections::HashMap, sync::Arc, time::Duration},
+};
 
 pub(crate) fn three_voter_network() -> (SimNet, [NodeId; 3]) {
     (SimNet::new(), [NodeId(1), NodeId(2), NodeId(3)])
@@ -65,16 +67,13 @@ pub(crate) fn start_engines(net: &SimNet, setup: SimClusterSetup<'_>) -> Vec<tem
     } = setup;
     let mut dirs = Vec::new();
     for (i, &id) in ids.iter().enumerate() {
-        let (ctrl, dir) = build_engine(
-            net,
-            HarnessSimEngineSetup {
-                me: id,
-                ids,
-                cluster_id,
-                election_timeout: timeouts[i],
-                ..Default::default()
-            },
-        );
+        let (ctrl, dir) = build_engine(net, HarnessSimEngineSetup {
+            me: id,
+            ids,
+            cluster_id,
+            election_timeout: timeouts[i],
+            ..Default::default()
+        });
         net.register(id, ctrl);
         dirs.push(dir);
     }
@@ -89,14 +88,11 @@ pub(crate) fn start_cluster(
 ) -> HashMap<NodeId, tempfile::TempDir> {
     ids.iter()
         .copied()
-        .zip(start_engines(
-            net,
-            SimClusterSetup {
-                ids,
-                cluster_id,
-                ..Default::default()
-            },
-        ))
+        .zip(start_engines(net, SimClusterSetup {
+            ids,
+            cluster_id,
+            ..Default::default()
+        }))
         .collect()
 }
 

@@ -15,27 +15,28 @@
 //! value came from travels with it, as the synonym chain
 //! [`super::entry::config_entry`] builds.
 
-use krabka_protocol::owned::describe_configs_response::{
-    DescribeConfigsResourceResult, DescribeConfigsResult,
-};
-
-use super::{
-    entry::{DefaultLayer, EntryOptions, Layer, config_entry},
-    static_configs::idle_window_entries,
-    wire::{
-        CONFIG_SOURCE_CLIENT_METRICS, CONFIG_SOURCE_DYNAMIC_BROKER,
-        CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER, CONFIG_SOURCE_DYNAMIC_GROUP,
-        CONFIG_SOURCE_DYNAMIC_TOPIC, CONFIG_SOURCE_STATIC_BROKER, RESOURCE_TYPE_BROKER,
-        RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS, RESOURCE_TYPE_GROUP,
-        RESOURCE_TYPE_TOPIC,
+use {
+    super::{
+        entry::{DefaultLayer, EntryOptions, Layer, config_entry},
+        static_configs::idle_window_entries,
+        wire::{
+            CONFIG_SOURCE_CLIENT_METRICS, CONFIG_SOURCE_DYNAMIC_BROKER,
+            CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER, CONFIG_SOURCE_DYNAMIC_GROUP,
+            CONFIG_SOURCE_DYNAMIC_TOPIC, CONFIG_SOURCE_STATIC_BROKER, RESOURCE_TYPE_BROKER,
+            RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS, RESOURCE_TYPE_GROUP,
+            RESOURCE_TYPE_TOPIC,
+        },
     },
-};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    config_keys::{
-        self, broker_dynamic, kafka_broker,
-        registry::{self, ConfigScope, NODE_ID},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        config_keys::{
+            self, broker_dynamic, kafka_broker,
+            registry::{self, ConfigScope, NODE_ID},
+        },
+    },
+    krabka_protocol::owned::describe_configs_response::{
+        DescribeConfigsResourceResult, DescribeConfigsResult,
     },
 };
 

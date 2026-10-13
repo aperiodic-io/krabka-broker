@@ -5,9 +5,10 @@
 //! ([`crate::auto_topic_creation::AutoTopicCreation`]), as Kafka's
 //! `KafkaApis.getCoordinator` does.
 
-use std::collections::BTreeMap;
-
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
+use {
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::collections::BTreeMap,
+};
 
 pub const TOPIC: &str = "__transaction_state";
 

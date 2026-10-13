@@ -5,16 +5,17 @@
 //! replication factors, and recovery reads, together with the transaction
 //! timeout bounds. `apply_barrier` covers the KFC-4 barrier group knobs.
 
-use krabka_units::{ByteSize, Time, convert::TimeExt, kibibytes};
-
-use super::{
-    FileConfigError, RuntimeFileConfig,
-    validate::{
-        invalid_runtime_value, kafka_int_bytes, positive_i16, positive_i32, positive_time,
-        positive_usize, whole_bytes_usize, whole_millis_i32_time, whole_millis_i64_time,
+use {
+    super::{
+        FileConfigError, RuntimeFileConfig,
+        validate::{
+            invalid_runtime_value, kafka_int_bytes, positive_i16, positive_i32, positive_time,
+            positive_usize, whole_bytes_usize, whole_millis_i32_time, whole_millis_i64_time,
+        },
     },
+    crate::config::BrokerConfig,
+    krabka_units::{ByteSize, Time, convert::TimeExt, kibibytes},
 };
-use crate::config::BrokerConfig;
 
 impl RuntimeFileConfig {
     pub(super) fn apply_transactions(
@@ -181,12 +182,13 @@ fn whole_millis_i32_duration(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{mebibytes, secs};
-
-    use crate::{
-        config::BrokerConfig,
-        file_config::{FileConfig, test_support::configured},
+    use {
+        crate::{
+            config::BrokerConfig,
+            file_config::{FileConfig, test_support::configured},
+        },
+        assert2::assert,
+        krabka_units::{mebibytes, secs},
     };
 
     #[test]
@@ -246,11 +248,10 @@ barrier_max_topics_per_group = 16
     /// coordinator keys: `Some` is the applied value, `None` a refusal.
     #[test]
     fn share_coordinator_keys_follow_kafka_defaults_and_bounds() {
-        use std::time::Duration;
-
-        use krabka_compression::CompressionType;
-
-        use crate::share_coordinator::config::ShareCoordinatorConfig;
+        use {
+            crate::share_coordinator::config::ShareCoordinatorConfig,
+            krabka_compression::CompressionType, std::time::Duration,
+        };
 
         let with = |f: fn(&mut ShareCoordinatorConfig)| {
             let mut config = ShareCoordinatorConfig::default();

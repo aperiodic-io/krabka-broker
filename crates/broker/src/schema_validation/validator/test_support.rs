@@ -6,14 +6,15 @@
 //! need the same registry and the same framed record, and a second copy of
 //! either would be free to drift from the first.
 
-use krabka_units::{minutes, secs};
-use wiremock::{
-    Mock, MockServer, ResponseTemplate,
-    matchers::{method, path},
+use {
+    super::{RejectReason, SchemaValidator, UNAVAILABLE_TTL_MS},
+    crate::{metrics::BrokerMetrics, schema_validation::ValidationMode},
+    krabka_units::{minutes, secs},
+    wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    },
 };
-
-use super::{RejectReason, SchemaValidator, UNAVAILABLE_TTL_MS};
-use crate::{metrics::BrokerMetrics, schema_validation::ValidationMode};
 
 pub(super) const KNOWN_ID: u32 = 42;
 const AVRO: &str = r#"{"type":"record","name":"Order","fields":[{"name":"id","type":"string"}]}"#;
@@ -137,9 +138,7 @@ pub(super) async fn status_registry(status: u16) -> MockServer {
 /// Metrics for a check whose counters the test does not assert on. The
 /// cache-accounting test binds one instance instead, so its hits and
 /// misses accumulate across calls.
-pub(super) fn no_metrics() -> BrokerMetrics {
-    BrokerMetrics::new()
-}
+pub(super) fn no_metrics() -> BrokerMetrics { BrokerMetrics::new() }
 
 /// Validate the orders value fixture when no counters need to be inspected.
 pub(super) async fn value_check(

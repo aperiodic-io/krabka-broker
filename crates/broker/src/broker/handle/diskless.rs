@@ -2,11 +2,11 @@
 //! the projected flush frontier, the object-PUT failure count, and the shard
 //! readiness check that shipping gates poll before they produce.
 
-use std::sync::atomic::Ordering;
-
-use krabka_ids::PartitionIndex;
-
-use crate::broker::{BrokerHandle, DISKLESS_FLUSHER_READY_TIMEOUT};
+use {
+    crate::broker::{BrokerHandle, DISKLESS_FLUSHER_READY_TIMEOUT},
+    krabka_ids::PartitionIndex,
+    std::sync::atomic::Ordering,
+};
 
 impl BrokerHandle {
     /// Test-only: read the `tiered_storage_rlmm_topic_backed` gauge. `1`

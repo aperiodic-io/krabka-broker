@@ -1,15 +1,16 @@
 //! Ordered tiered-topic configuration shared by the tiered-storage suites.
-use krabka_protocol::owned::create_topics_request::CreatableTopicConfig;
-
-use crate::support::{
-    client::{BatchProduceSetup, produce_batch},
-    produce::ProduceTimeoutMillis,
-    records::batch_from_records,
-    topics::{
-        AssignedTopicSetup, ConfiguredTopicSetup, CreateTopicRequestSetup,
-        CreateTopicsTimeoutMillis, assigned_topic, creatable_topic, create_topic_request,
-        create_topic_request_with_setup, topic_configs,
+use {
+    crate::support::{
+        client::{BatchProduceSetup, produce_batch},
+        produce::ProduceTimeoutMillis,
+        records::batch_from_records,
+        topics::{
+            AssignedTopicSetup, ConfiguredTopicSetup, CreateTopicRequestSetup,
+            CreateTopicsTimeoutMillis, assigned_topic, creatable_topic, create_topic_request,
+            create_topic_request_with_setup, topic_configs,
+        },
     },
+    krabka_protocol::owned::create_topics_request::CreatableTopicConfig,
 };
 
 pub fn tiered_configs(segment_bytes: Option<&str>) -> Vec<CreatableTopicConfig> {
@@ -130,16 +131,12 @@ pub async fn produce_records(
             value: Some(value(TieredRecordIndex(index))),
             ..Default::default()
         }]);
-        let response = produce_batch(
-            client,
-            batch,
-            BatchProduceSetup {
-                topic: setup.topic,
-                topic_id: setup.topic_id,
-                timeout: ProduceTimeoutMillis(10_000),
-                ..Default::default()
-            },
-        )
+        let response = produce_batch(client, batch, BatchProduceSetup {
+            topic: setup.topic,
+            topic_id: setup.topic_id,
+            timeout: ProduceTimeoutMillis(10_000),
+            ..Default::default()
+        })
         .await;
         assert2::assert!(response.error_code == 0, "Produce failed: {response:?}");
     }

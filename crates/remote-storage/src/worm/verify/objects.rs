@@ -7,23 +7,23 @@
 //! recorded bytes, because that is what separates a recoverable segment from a
 //! lost one.
 
-use std::{collections::HashSet, sync::Arc};
-
-use futures_util::TryStreamExt as _;
-use krabka_verified::{
-    WormDigestFacts, WormObjectAvailabilityFacts, WormObjectIdentityFacts, WormObjectSetDecision,
-    WormObjectSetFacts, worm_object_set_decision,
-};
-use object_store::{GetOptions, ObjectStore, path::Path};
-use sha2::{Digest as _, Sha256};
-
-use super::{VerifyDepth, listing::DirListing};
-use crate::{
-    storage_manager::parse_segment_file_name,
-    worm::{
-        error::WormError,
-        manifest::{MANIFEST_SUFFIX, ObjectEntry, SegmentManifest, Sha256Digest},
+use {
+    super::{VerifyDepth, listing::DirListing},
+    crate::{
+        storage_manager::parse_segment_file_name,
+        worm::{
+            error::WormError,
+            manifest::{MANIFEST_SUFFIX, ObjectEntry, SegmentManifest, Sha256Digest},
+        },
     },
+    futures_util::TryStreamExt as _,
+    krabka_verified::{
+        WormDigestFacts, WormObjectAvailabilityFacts, WormObjectIdentityFacts,
+        WormObjectSetDecision, WormObjectSetFacts, worm_object_set_decision,
+    },
+    object_store::{GetOptions, ObjectStore, path::Path},
+    sha2::{Digest as _, Sha256},
+    std::{collections::HashSet, sync::Arc},
 };
 
 /// Checks every object a manifest names, to the requested depth.
@@ -229,14 +229,17 @@ async fn pinned_version_note(store: &Arc<dyn ObjectStore>, object: &ObjectEntry)
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::Bytes;
-    use krabka_object_store::ObjectStoreClient;
-
-    use super::*;
-    use crate::worm::verify::{
-        VerifyRequest,
-        test_support::{Archive, PREFIX, VersionedStore, first_break_reason, put_entry, put_raw},
+    use {
+        super::*,
+        crate::worm::verify::{
+            VerifyRequest,
+            test_support::{
+                Archive, PREFIX, VersionedStore, first_break_reason, put_entry, put_raw,
+            },
+        },
+        assert2::check,
+        bytes::Bytes,
+        krabka_object_store::ObjectStoreClient,
     };
 
     async fn overwrite_log_body(archive: &Archive) {

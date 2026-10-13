@@ -6,15 +6,15 @@
 //! index lookup because the index is sparse, and all of the windowing that the
 //! scan needs lives here.
 
-use std::ops::ControlFlow;
-
-use krabka_ids::Offset;
-use krabka_protocol::records::{RecordBatch, TimestampType};
-use krabka_units::prelude::{ByteSize, ByteSizeExt, bytes};
-
-use super::Segment;
-use crate::{
-    config::DEFAULT_TIMESTAMP_SCAN_WINDOW, error::LogError, record_limit::check_records_read,
+use {
+    super::Segment,
+    crate::{
+        config::DEFAULT_TIMESTAMP_SCAN_WINDOW, error::LogError, record_limit::check_records_read,
+    },
+    krabka_ids::Offset,
+    krabka_protocol::records::{RecordBatch, TimestampType},
+    krabka_units::prelude::{ByteSize, ByteSizeExt, bytes},
+    std::ops::ControlFlow,
 };
 
 impl Segment {
@@ -369,17 +369,18 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::Bytes;
-    use krabka_protocol::records::{Record, RecordBatch};
-    use krabka_units::prelude::kibibytes;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::segment::test_support::{
-        DENSE_INDEX, FIVE_OFFSET_TIMESTAMP_BATCHES, ONE_RECORD_BATCH, RecordCount, RecordTimestamp,
-        SampleBatchSetup, SeededSegmentSetup, sample_batch, seeded_fixture, segment_at,
-        test_segment,
+    use {
+        super::*,
+        crate::segment::test_support::{
+            DENSE_INDEX, FIVE_OFFSET_TIMESTAMP_BATCHES, ONE_RECORD_BATCH, RecordCount,
+            RecordTimestamp, SampleBatchSetup, SeededSegmentSetup, sample_batch, seeded_fixture,
+            segment_at, test_segment,
+        },
+        assert2::check,
+        bytes::Bytes,
+        krabka_protocol::records::{Record, RecordBatch},
+        krabka_units::prelude::kibibytes,
+        tempfile::tempdir,
     };
 
     #[test]
@@ -693,14 +694,15 @@ mod tests {
 /// `FileRecords.searchForTimestamp` and `RecordBatch.offsetOfMaxTimestamp`.
 #[cfg(test)]
 mod record_limit_tests {
-    use assert2::check;
-    use bytes::Bytes;
-    use krabka_compression::CompressionType;
-    use krabka_protocol::records::{Attributes, Record, RecordBatch};
-    use krabka_units::prelude::{ByteSize, bytes, kibibytes};
-
-    use super::*;
-    use crate::segment::test_support::{DENSE_INDEX, test_segment};
+    use {
+        super::*,
+        crate::segment::test_support::{DENSE_INDEX, test_segment},
+        assert2::check,
+        bytes::Bytes,
+        krabka_compression::CompressionType,
+        krabka_protocol::records::{Attributes, Record, RecordBatch},
+        krabka_units::prelude::{ByteSize, bytes, kibibytes},
+    };
 
     /// The body size of a record with a `1000`-byte value and nothing else:
     /// its attributes byte, a one-byte timestamp and offset delta, a null key,

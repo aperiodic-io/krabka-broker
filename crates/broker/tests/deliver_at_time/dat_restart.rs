@@ -6,15 +6,17 @@
 //! broker lifetime, which is why it boots on an explicit directory instead of
 //! the shared in-process fixture.
 
-use assert2::check;
-use krabka_broker::NodeId;
-
-use crate::{
-    dat_fixtures::{
-        ALREADY_DUE_MS, IMMEDIATE, Mode, PENDING_HORIZON_MS, SCHEDULED, Visible, batch_at, now_ms,
+use {
+    crate::{
+        dat_fixtures::{
+            ALREADY_DUE_MS, IMMEDIATE, Mode, PENDING_HORIZON_MS, SCHEDULED, Visible, batch_at,
+            now_ms,
+        },
+        dat_wire::{produce, ready_topic, visible, wait_for_delivery_policy},
+        support,
     },
-    dat_wire::{produce, ready_topic, visible, wait_for_delivery_policy},
-    support,
+    assert2::check,
+    krabka_broker::NodeId,
 };
 
 #[tokio::test]

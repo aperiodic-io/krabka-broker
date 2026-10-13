@@ -6,16 +6,16 @@
 //! and the topic id. The cascade itself runs afterwards, so the two steps are
 //! separate functions that the handler calls on either side of the commit.
 
-use std::sync::Arc;
-
-use krabka_ids::PartitionIndex;
-use krabka_remote_storage::TopicIdPartition;
-
-use crate::{
-    broker::Broker,
-    partition_registry::PartitionRegistry,
-    remote_log_manager::{ArchiveMode, cascade_remote_partition_delete},
-    remote_reader::RemoteReader,
+use {
+    crate::{
+        broker::Broker,
+        partition_registry::PartitionRegistry,
+        remote_log_manager::{ArchiveMode, cascade_remote_partition_delete},
+        remote_reader::RemoteReader,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_remote_storage::TopicIdPartition,
+    std::sync::Arc,
 };
 
 /// Snapshots the `(topic_id, partition_id)` of every tiered partition of

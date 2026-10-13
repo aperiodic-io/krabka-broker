@@ -1,19 +1,20 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::control_truncation::physical_truncation_input_valid;
 #[cfg(creusot)]
 use super::control_truncation::whole_batch_frontier;
 #[cfg(creusot)]
 use super::producer_window::retry_row_matches;
-use super::{
-    ProducerDecision, ProducerSnapshotEntryFacts, rebuilt_data_window_bounds_retry,
-    whole_batch_truncation_bounds_controls,
-};
 #[cfg(creusot)]
 use crate::producer_snapshot::{
     nonduplicate_snapshot_decision, recovered_batch_coordinates, retained_producer_row,
     snapshot_sequence_matches,
+};
+use {
+    super::{
+        ProducerDecision, ProducerSnapshotEntryFacts, rebuilt_data_window_bounds_retry,
+        whole_batch_truncation_bounds_controls,
+    },
+    creusot_std::prelude::*,
 };
 
 // Actual end, retained history count, rebuilt window start, decision, retry witness.

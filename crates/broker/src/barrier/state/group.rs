@@ -6,14 +6,14 @@
 //! epoch arithmetic reads all three of those sources, so it lives here with
 //! them.
 
-use std::collections::BTreeMap;
-
-use krabka_units::Time;
-
-use super::NO_EPOCH_YET;
-use crate::{
-    barrier::persistence::{CutValue, GroupValue, InjectionStartValue},
-    metadata_epoch::next_i64,
+use {
+    super::NO_EPOCH_YET,
+    crate::{
+        barrier::persistence::{CutValue, GroupValue, InjectionStartValue},
+        metadata_epoch::next_i64,
+    },
+    krabka_units::Time,
+    std::collections::BTreeMap,
 };
 
 /// The definition a caller supplies for a barrier group.
@@ -98,24 +98,21 @@ impl GroupEntry {
     /// A cut record of a retained epoch can sit before the newest group record
     /// in the log, so the fold creates an entry for it. A group needs at least
     /// one topic, so an entry with no topic saw no group record.
-    pub(crate) fn is_defined(&self) -> bool {
-        !self.definition.topics.is_empty()
-    }
+    pub(crate) fn is_defined(&self) -> bool { !self.definition.topics.is_empty() }
 }
 
 /// The next epoch of a group.
-pub(crate) fn next_epoch(last_epoch: i64) -> Option<i64> {
-    next_i64(last_epoch)
-}
+pub(crate) fn next_epoch(last_epoch: i64) -> Option<i64> { next_i64(last_epoch) }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::barrier::{
-        persistence::CutStatus,
-        state::test_support::{cut_value, start_value},
+    use {
+        super::*,
+        crate::barrier::{
+            persistence::CutStatus,
+            state::test_support::{cut_value, start_value},
+        },
+        assert2::assert,
     };
 
     #[test]

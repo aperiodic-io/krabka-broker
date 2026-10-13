@@ -53,9 +53,7 @@ impl<'a> ActiveConnectionGuard<'a> {
 }
 
 impl Drop for ActiveConnectionGuard<'_> {
-    fn drop(&mut self) {
-        self.metrics.active_connections.dec();
-    }
+    fn drop(&mut self) { self.metrics.active_connections.dec(); }
 }
 
 /// RAII guard for one queued request waiting for / holding execution capacity (#412).

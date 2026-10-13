@@ -1,13 +1,14 @@
 //! The `Produce` ACL preamble, which resolves the transactional-id and the
 //! per-topic `Write` authorization decisions before any partition is appended.
 
-use krabka_metadata::{AclOperation, ResourceType};
-
-use super::framing::ProduceFramed;
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult},
-    broker::Broker,
-    handlers::{RequestContext, denied_topics, requested_topic_name},
+use {
+    super::framing::ProduceFramed,
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult},
+        broker::Broker,
+        handlers::{RequestContext, denied_topics, requested_topic_name},
+    },
+    krabka_metadata::{AclOperation, ResourceType},
 };
 
 /// Kafka's `produceRequest.transactionalId != null && authorize(WRITE,
@@ -34,16 +35,17 @@ pub(super) fn is_authorized_transactional(
     let Some(id) = transactional_id else {
         return false;
     };
-    broker.config.authorizer.authorize(
-        image,
-        &AuthorizationRequest {
+    broker
+        .config
+        .authorizer
+        .authorize(image, &AuthorizationRequest {
             principal: context.principal,
             host: context.peer,
             resource_type: ResourceType::TransactionalId,
             resource_name: id,
             operation: AclOperation::Write,
-        },
-    ) == AuthorizationResult::Allow
+        })
+        == AuthorizationResult::Allow
 }
 
 /// The topic `Write` ACL preamble: every topic named in the request,

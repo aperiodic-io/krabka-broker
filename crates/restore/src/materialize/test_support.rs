@@ -3,20 +3,21 @@
 //! segment from, and the `VerifiedSegment` and `PartitionInventory` values that
 //! stand in for what an archive scan recovered.
 
-use bytes::{Bytes, BytesMut};
-use clap::Parser as _;
-use krabka_ids::Offset;
-use krabka_log::{Log, LogConfig, name};
-use krabka_protocol::records::{Attributes, RecordBatch};
-use krabka_remote_storage::TopicIdPartition;
-use uuid::Uuid;
-
-use crate::{
-    Cli,
-    args::RestoreArgs,
-    bound::Predicates,
-    discover::PartitionInventory,
-    verify::{SegmentFacts, VerifiedSegment},
+use {
+    crate::{
+        Cli,
+        args::RestoreArgs,
+        bound::Predicates,
+        discover::PartitionInventory,
+        verify::{SegmentFacts, VerifiedSegment},
+    },
+    bytes::{Bytes, BytesMut},
+    clap::Parser as _,
+    krabka_ids::Offset,
+    krabka_log::{Log, LogConfig, name},
+    krabka_protocol::records::{Attributes, RecordBatch},
+    krabka_remote_storage::TopicIdPartition,
+    uuid::Uuid,
 };
 
 /// Parses `RestoreArgs` the same way the binary does, with a fixed dummy

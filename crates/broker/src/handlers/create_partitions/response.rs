@@ -2,12 +2,13 @@
 //! KIP-599 throttle that the handler records after it has built the per-topic
 //! result rows.
 
-use krabka_protocol::owned::create_partitions_response::{
-    CreatePartitionsResponse, CreatePartitionsTopicResult,
+use {
+    crate::{handlers::RequestContext, metrics::QuotaType, quota::throttle_time_ms},
+    krabka_protocol::owned::create_partitions_response::{
+        CreatePartitionsResponse, CreatePartitionsTopicResult,
+    },
+    krabka_units::Time,
 };
-use krabka_units::Time;
-
-use crate::{handlers::RequestContext, metrics::QuotaType, quota::throttle_time_ms};
 
 pub(super) fn create_partitions_response(
     results: Vec<CreatePartitionsTopicResult>,

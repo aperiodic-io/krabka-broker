@@ -1,8 +1,9 @@
 //! Wire and socket fixtures shared by network unit tests.
 
-use tokio::net::{TcpListener, TcpStream};
-
-use crate::config::BrokerConfig;
+use {
+    crate::config::BrokerConfig,
+    tokio::net::{TcpListener, TcpStream},
+};
 
 // Build request headers independently of the parser under test. Arbitrary
 // tagged bytes let malformed-header cases exercise the same path.

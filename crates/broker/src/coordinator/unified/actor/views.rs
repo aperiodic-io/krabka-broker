@@ -5,21 +5,21 @@
 //! consumer at any moment, so the projections that hide that difference live
 //! together here.
 
-use std::collections::HashMap;
-
-use bytes::Bytes;
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::MetadataProvider;
-use crate::coordinator::{
-    GroupSnapshot, MemberSnapshot,
-    unified::{
-        classic_state::{ClassicGroup as ClassicState, GroupState as ClassicGroupState},
-        consumer_state::GroupState,
-        group::CoordinatorGroup,
-        migration,
-        reconciler::ReconcileInput,
+use {
+    super::MetadataProvider,
+    crate::coordinator::{
+        GroupSnapshot, MemberSnapshot,
+        unified::{
+            classic_state::{ClassicGroup as ClassicState, GroupState as ClassicGroupState},
+            consumer_state::GroupState,
+            group::CoordinatorGroup,
+            migration,
+            reconciler::ReconcileInput,
+        },
     },
+    bytes::Bytes,
+    krabka_protocol::primitives::uuid::Uuid,
+    std::collections::HashMap,
 };
 
 /// Read-only projection of a classic `Group` for the admin and offset-delete
@@ -255,22 +255,23 @@ pub(super) fn preferred_server_assignor(state: &GroupState) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use crate::{
-        codes,
-        coordinator::unified::{
-            actor::{
-                GroupActorMessage,
-                test_support::{
-                    make_coordinator, make_coordinator_with_topic_policy, marked_classic_handle,
-                    rpc, seed_and_upgrade,
+    use {
+        crate::{
+            codes,
+            coordinator::unified::{
+                actor::{
+                    GroupActorMessage,
+                    test_support::{
+                        make_coordinator, make_coordinator_with_topic_policy,
+                        marked_classic_handle, rpc, seed_and_upgrade,
+                    },
                 },
+                config::ConsumerGroupMigrationPolicy,
+                consumer_state::{GroupState, test_support::member},
+                regex_resolver::no_topic_regex_resolver,
             },
-            config::ConsumerGroupMigrationPolicy,
-            consumer_state::{GroupState, test_support::member},
-            regex_resolver::no_topic_regex_resolver,
         },
+        assert2::{assert, check},
     };
 
     /// Kafka's `preferredServerAssignor` takes the name the most members

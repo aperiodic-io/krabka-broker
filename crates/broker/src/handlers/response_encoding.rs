@@ -3,11 +3,12 @@
 //! It sizes the buffer from `encoded_len` before it encodes, so the encode
 //! writes into a buffer that already holds the whole response.
 
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{Decode, Encode};
-
-use super::wire_types::ApiVersion;
-use crate::{codes::NONE, error::BrokerError};
+use {
+    super::wire_types::ApiVersion,
+    crate::{codes::NONE, error::BrokerError},
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{Decode, Encode},
+};
 
 /// Decode one request body at the supplied version. As at the wire entry
 /// points, bytes beyond that body are left unread.
@@ -177,14 +178,15 @@ impl_resource_error_row!(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::{
-        Decode,
-        owned::api_versions_response::{ApiVersion, ApiVersionsResponse},
+    use {
+        super::*,
+        crate::codes::{NONE, NOT_CONTROLLER},
+        assert2::assert,
+        krabka_protocol::{
+            Decode,
+            owned::api_versions_response::{ApiVersion, ApiVersionsResponse},
+        },
     };
-
-    use super::*;
-    use crate::codes::{NONE, NOT_CONTROLLER};
 
     #[test]
     fn encode_response_round_trips_protocol_body() {

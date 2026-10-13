@@ -2,16 +2,17 @@
 //! invariant, the apply window a high-watermark advance opens, and the
 //! half-open ranges that bound a committed read.
 
-use assert2::assert;
-
-use super::*;
-use crate::kraft::controller::offsets::{
-    append_result_is_consistent, assigned_record_offset, batch_base_in_apply_window,
-    committed_records_since_snapshot, expected_hwm_after_advance, fetch_batch_committed_before_hwm,
-    fetch_offset_has_records, hwm_advanced_as_expected, hwm_reaches_waiter,
-    leader_alone_is_majority, metadata_fetch_offset_in_committed_window, snapshot_bytes_reached,
-    snapshot_interval_reached, snapshot_time_reached, submit_waiter_need_offset,
-    validate_append_result,
+use {
+    super::*,
+    crate::kraft::controller::offsets::{
+        append_result_is_consistent, assigned_record_offset, batch_base_in_apply_window,
+        committed_records_since_snapshot, expected_hwm_after_advance,
+        fetch_batch_committed_before_hwm, fetch_offset_has_records, hwm_advanced_as_expected,
+        hwm_reaches_waiter, leader_alone_is_majority, metadata_fetch_offset_in_committed_window,
+        snapshot_bytes_reached, snapshot_interval_reached, snapshot_time_reached,
+        submit_waiter_need_offset, validate_append_result,
+    },
+    assert2::assert,
 };
 
 #[test]

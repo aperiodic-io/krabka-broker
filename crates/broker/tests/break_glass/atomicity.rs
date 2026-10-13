@@ -6,19 +6,20 @@
 //! the controller listener and asserts on the batch, which is the only place
 //! a second append would show.
 
-use assert2::{assert, check};
-use krabka_broker::{BrokerHandle, NodeId, codes};
-use krabka_metadata::{
-    BreakGlassProposalRecord, MetadataImage, MetadataRecord, UnregisterBrokerRecord,
-};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-use crate::{
-    cluster::boot,
-    principals::ALICE,
-    proposals::{ACTION_UNREGISTER_BROKER, approved_proposal},
-    support::{client::metadata_fetch, records::metadata_batches as decode_metadata_batches},
-    transitions::{BROKER_ID, unregister},
+use {
+    crate::{
+        cluster::boot,
+        principals::ALICE,
+        proposals::{ACTION_UNREGISTER_BROKER, approved_proposal},
+        support::{client::metadata_fetch, records::metadata_batches as decode_metadata_batches},
+        transitions::{BROKER_ID, unregister},
+    },
+    assert2::{assert, check},
+    krabka_broker::{BrokerHandle, NodeId, codes},
+    krabka_metadata::{
+        BreakGlassProposalRecord, MetadataImage, MetadataRecord, UnregisterBrokerRecord,
+    },
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
 };
 
 /// Read the committed metadata log back off the controller listener from

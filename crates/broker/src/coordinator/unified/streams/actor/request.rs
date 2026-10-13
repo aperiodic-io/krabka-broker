@@ -7,12 +7,12 @@
 //! functions do that translation, and they build the [`StreamsMemberState`] a
 //! first-join heartbeat implies.
 
-use std::{collections::BTreeMap, time::Instant};
-
-use krabka_log::Offset;
-use krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest;
-
-use crate::coordinator::unified::streams::state::StreamsMemberState;
+use {
+    crate::coordinator::unified::streams::state::StreamsMemberState,
+    krabka_log::Offset,
+    krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+    std::{collections::BTreeMap, time::Instant},
+};
 
 /// Converts request `TaskIds`, which hold a subtopology and its partitions,
 /// into the in-memory `subtopology -> partitions` task map.
@@ -87,10 +87,10 @@ pub(super) fn build_member(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::common::streams_group_heartbeat_request::task_offset::TaskOffset;
-
-    use super::*;
+    use {
+        super::*, assert2::check,
+        krabka_protocol::owned::common::streams_group_heartbeat_request::task_offset::TaskOffset,
+    };
 
     #[test]
     fn task_offsets_to_map_wraps_each_wire_entry() {

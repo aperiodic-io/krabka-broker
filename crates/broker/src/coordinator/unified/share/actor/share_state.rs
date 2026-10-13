@@ -15,25 +15,25 @@
 //! member subscribes to any more keeps its share state and its share-partition
 //! start offset, so consumers that subscribe again continue from it.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::records::{PendingShareRecords, flush_pending, state_partition_metadata_from};
-use crate::{
-    coordinator::unified::{
-        GroupCoordinator,
-        offsets_log::OffsetsLog,
-        reconciler::ReconcileInput,
-        share::{
-            config::ShareGroupConfig, persistence::ShareGroupStatePartitionMetadataValue,
-            state::ShareGroupState,
+use {
+    super::records::{PendingShareRecords, flush_pending, state_partition_metadata_from},
+    crate::{
+        coordinator::unified::{
+            GroupCoordinator,
+            offsets_log::OffsetsLog,
+            reconciler::ReconcileInput,
+            share::{
+                config::ShareGroupConfig, persistence::ShareGroupStatePartitionMetadataValue,
+                state::ShareGroupState,
+            },
         },
+        share_coordinator::{
+            coordinator::UNINITIALIZED_START_OFFSET, persister_client::SharePersister,
+        },
+        time_util::duration_millis,
     },
-    share_coordinator::{
-        coordinator::UNINITIALIZED_START_OFFSET, persister_client::SharePersister,
-    },
-    time_util::duration_millis,
+    krabka_protocol::primitives::uuid::Uuid,
+    std::collections::{HashMap, HashSet},
 };
 
 /// The share partitions that a heartbeat initializes, and the group epoch
@@ -84,13 +84,10 @@ pub(super) fn prepare_initialize(
             start_offset: UNINITIALIZED_START_OFFSET,
         })
         .collect();
-    Some((
-        state_partition_metadata_from(state),
-        Initialize {
-            calls,
-            state_epoch: state.group_epoch,
-        },
-    ))
+    Some((state_partition_metadata_from(state), Initialize {
+        calls,
+        state_epoch: state.group_epoch,
+    }))
 }
 
 /// Starts the persister calls of `initialize` after the heartbeat's batch
@@ -371,30 +368,31 @@ fn partitions_to_initialize(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{
+    use {
         super::{
-            ShareGroupActorMessage,
-            test_support::{heartbeat, make_coordinator, metadata_with_topic},
-        },
-        *,
-    };
-    use crate::{
-        codes,
-        coordinator::unified::{
-            ShareGroupSeed,
-            share::{
-                actor::test_support::{
-                    ShareSubscriptionSetup, TopicMetadataSetup, subscribed_request,
-                    unavailable_persister_coordinator,
-                },
-                persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
-                state::ShareMemberState,
+            super::{
+                ShareGroupActorMessage,
+                test_support::{heartbeat, make_coordinator, metadata_with_topic},
             },
-            test_support::{fixed_source, make_share_persister},
+            *,
         },
-        test_support::PartitionCount,
+        crate::{
+            codes,
+            coordinator::unified::{
+                ShareGroupSeed,
+                share::{
+                    actor::test_support::{
+                        ShareSubscriptionSetup, TopicMetadataSetup, subscribed_request,
+                        unavailable_persister_coordinator,
+                    },
+                    persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
+                    state::ShareMemberState,
+                },
+                test_support::{fixed_source, make_share_persister},
+            },
+            test_support::PartitionCount,
+        },
+        assert2::assert,
     };
 
     /// Kafka's `subscribedTopicsChangeMap`: every partition of a subscribed

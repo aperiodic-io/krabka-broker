@@ -21,14 +21,15 @@
 //! `scenario_paths` lists the directory itself and asks `Path::is_file`, which
 //! follows the link, so both runners see the same twelve files.
 
-use std::{
-    path::{Path, PathBuf},
-    process::ExitCode,
+use {
+    assert2::{assert, check},
+    krabka_bench_driver::scenario::{LoadMode, Scenario},
+    krabka_units::prelude::*,
+    std::{
+        path::{Path, PathBuf},
+        process::ExitCode,
+    },
 };
-
-use assert2::{assert, check};
-use krabka_bench_driver::scenario::{LoadMode, Scenario};
-use krabka_units::prelude::*;
 
 /// Where the scenario corpus is, under whichever runner started this test.
 ///

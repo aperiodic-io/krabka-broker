@@ -1,9 +1,10 @@
 //! `krabka-parse-benches` — parse Criterion benchmark outputs into a JSON summary.
 
-use std::process::ExitCode;
-
-use clap::Parser;
-use krabka_parse_benches::{Args, compare_summaries, read_summaries, run_from_args};
+use {
+    clap::Parser,
+    krabka_parse_benches::{Args, compare_summaries, read_summaries, run_from_args},
+    std::process::ExitCode,
+};
 
 fn main() -> ExitCode {
     let args = Args::parse();

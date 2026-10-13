@@ -2,13 +2,14 @@
 //! attempt: the SASL or TLS mechanism that carried it, the principal it
 //! claimed, and why it failed when it did.
 
-use serde_json::json;
-
-use super::{
-    ProductInfo,
-    envelope::{metadata, status_id},
+use {
+    super::{
+        ProductInfo,
+        envelope::{metadata, status_id},
+    },
+    crate::event::{AuditEndpoint, AuditOutcome, AuditPrincipal},
+    serde_json::json,
 };
-use crate::event::{AuditEndpoint, AuditOutcome, AuditPrincipal};
 
 pub(super) fn ocsf_authentication(
     outcome: AuditOutcome,

@@ -15,11 +15,11 @@
 //! `batchMissingRequiredVerification` check in
 //! `UnifiedLog.analyzeAndValidateProducerState`.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
-use krabka_ids::ProducerId;
-
-use super::Log;
+use {
+    super::Log,
+    krabka_ids::ProducerId,
+    std::sync::atomic::{AtomicU64, Ordering},
+};
 
 /// A token for one verification of one producer on one partition.
 ///

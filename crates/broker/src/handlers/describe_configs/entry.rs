@@ -29,12 +29,13 @@
 //! come from [`crate::config_keys::registry`], the one table every config
 //! surface reads.
 
-use krabka_protocol::owned::describe_configs_response::{
-    DescribeConfigsResourceResult, DescribeConfigsSynonym,
+use {
+    super::wire::CONFIG_SOURCE_DEFAULT,
+    crate::config_keys::registry::ConfigKey,
+    krabka_protocol::owned::describe_configs_response::{
+        DescribeConfigsResourceResult, DescribeConfigsSynonym,
+    },
 };
-
-use super::wire::CONFIG_SOURCE_DEFAULT;
-use crate::config_keys::registry::ConfigKey;
 
 /// `ConfigDef.Type::UNKNOWN` wire byte, for a key no registry row covers.
 const CONFIG_TYPE_UNKNOWN: i8 = 0;

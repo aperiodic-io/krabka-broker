@@ -3,30 +3,30 @@
 //! rewrite's input and output types. [`atomic_swap`] later renames the
 //! `.cleaned` files to `.swap`, which is the commit point that recovery honours.
 
-use std::{
-    collections::HashMap,
-    fs::{File, OpenOptions},
-    path::{Path, PathBuf},
-};
-
-use bytes::{Bytes, BytesMut};
-use krabka_compression::CompressionType;
-use krabka_ids::{Offset, ProducerId};
-use krabka_protocol::records::{RecordBatch, TimestampType};
-use krabka_units::prelude::{ByteSize, Time, TimeExt};
-use tracing::instrument;
-
-use super::{
-    BatchMeta, CleanedTransactionMetadata, RecordMeta, RetainDecision, TxnDataState,
-    batch_reader::read_all_batches, retain_decision,
-};
-use crate::{
-    error::LogError,
-    io::{IoTarget, LogIo, write_all},
-    record_limit::check_records_read,
-    recovery::swap::cleaned_path,
-    segment::Segment,
-    txn_index::TxnIndex,
+use {
+    super::{
+        BatchMeta, CleanedTransactionMetadata, RecordMeta, RetainDecision, TxnDataState,
+        batch_reader::read_all_batches, retain_decision,
+    },
+    crate::{
+        error::LogError,
+        io::{IoTarget, LogIo, write_all},
+        record_limit::check_records_read,
+        recovery::swap::cleaned_path,
+        segment::Segment,
+        txn_index::TxnIndex,
+    },
+    bytes::{Bytes, BytesMut},
+    krabka_compression::CompressionType,
+    krabka_ids::{Offset, ProducerId},
+    krabka_protocol::records::{RecordBatch, TimestampType},
+    krabka_units::prelude::{ByteSize, Time, TimeExt},
+    std::{
+        collections::HashMap,
+        fs::{File, OpenOptions},
+        path::{Path, PathBuf},
+    },
+    tracing::instrument,
 };
 
 #[cfg(test)]

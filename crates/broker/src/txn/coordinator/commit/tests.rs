@@ -2,32 +2,32 @@
 //! coordinator's map, and its answer reaches the client, only once the high
 //! watermark covers its record in the term that wrote it.
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::assert;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig, Offset, ProducerId};
-use krabka_metadata::{
-    LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicConfigRecord,
-    TopicRecord,
-};
-
-use super::coordinator_append_error;
-use crate::{
-    broker::spawn_partition,
-    codes,
-    config_keys::MIN_INSYNC_REPLICAS,
-    coordinator::test_support::read_batch_epochs,
-    error::BrokerError,
-    log_dir::partition_dir,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    producer_state::ProducerState,
-    test_support::{COORDINATOR_WRITE_ERROR_CASES, FakeMetadataSource},
-    txn::{bootstrap, coordinator::TxnCoordinator, state::TxnEntry, version::TxnVersion},
+use {
+    super::coordinator_append_error,
+    crate::{
+        broker::spawn_partition,
+        codes,
+        config_keys::MIN_INSYNC_REPLICAS,
+        coordinator::test_support::read_batch_epochs,
+        error::BrokerError,
+        log_dir::partition_dir,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        producer_state::ProducerState,
+        test_support::{COORDINATOR_WRITE_ERROR_CASES, FakeMetadataSource},
+        txn::{bootstrap, coordinator::TxnCoordinator, state::TxnEntry, version::TxnVersion},
+    },
+    assert2::assert,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig, Offset, ProducerId},
+    krabka_metadata::{
+        LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicConfigRecord,
+        TopicRecord,
+    },
+    std::{sync::Arc, time::Duration},
 };
 
 /// This broker.

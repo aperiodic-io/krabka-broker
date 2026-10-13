@@ -3,20 +3,20 @@
 //! into the partition log, after it has checked that the two agree byte for byte
 //! on the range they share.
 
-use std::path::PathBuf;
-
-use krabka_ids::Offset;
-use krabka_log::{Log, LogConfig};
-use krabka_raft::NodeId;
-use krabka_verified::broker::DeleteRecordsTrimApplication;
-
-use super::log::{FollowerLog, voter_dir};
-use crate::{
-    BrokerError,
-    wal::quorum::{
-        engine::{read_batches_exact, read_log_batches_covering},
-        registry::ShardId,
+use {
+    super::log::{FollowerLog, voter_dir},
+    crate::{
+        BrokerError,
+        wal::quorum::{
+            engine::{read_batches_exact, read_log_batches_covering},
+            registry::ShardId,
+        },
     },
+    krabka_ids::Offset,
+    krabka_log::{Log, LogConfig},
+    krabka_raft::NodeId,
+    krabka_verified::broker::DeleteRecordsTrimApplication,
+    std::path::PathBuf,
 };
 
 /// Copy this broker's checkpointed follower prefix into a newly promoted
@@ -127,19 +127,20 @@ pub(crate) fn hydrate_on_promotion(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_ids::PartitionIndex;
-    use krabka_protocol::records::{Record, RecordBatch};
-    use krabka_units::mebibytes;
-
-    use super::*;
-    use crate::{
-        log_dir::partition_dir,
-        wal::quorum::{
-            engine::{read_log_batches_exact, split_batches},
-            follower::checkpoint::{DURABLE_OFFSET_FILE, DurableRange, write_durable_offset},
+    use {
+        super::*,
+        crate::{
+            log_dir::partition_dir,
+            wal::quorum::{
+                engine::{read_log_batches_exact, split_batches},
+                follower::checkpoint::{DURABLE_OFFSET_FILE, DurableRange, write_durable_offset},
+            },
         },
+        assert2::assert,
+        bytes::Bytes,
+        krabka_ids::PartitionIndex,
+        krabka_protocol::records::{Record, RecordBatch},
+        krabka_units::mebibytes,
     };
 
     macro_rules! follower_fixture {
@@ -156,13 +157,10 @@ mod tests {
 
     macro_rules! checkpoint_follower {
         ($directory:ident, $start:expr, $end:expr) => {
-            write_durable_offset(
-                &$directory.join(DURABLE_OFFSET_FILE),
-                DurableRange {
-                    start: $start,
-                    end: $end,
-                },
-            )
+            write_durable_offset(&$directory.join(DURABLE_OFFSET_FILE), DurableRange {
+                start: $start,
+                end: $end,
+            })
             .unwrap()
         };
     }
@@ -182,8 +180,7 @@ mod tests {
 
     #[test]
     fn promotion_preserves_control_marker_state_before_and_after_reopen() {
-        use krabka_ids::ProducerId;
-        use krabka_protocol::records::Attributes;
+        use {krabka_ids::ProducerId, krabka_protocol::records::Attributes};
 
         for marker_type in [0i16, 1, 1000, 23] {
             follower_fixture!(root, shard, follower_dir, source; 106);
@@ -260,6 +257,7 @@ mod tests {
             fn write(&self, _file: &std::fs::File, _buf: &[u8]) -> std::io::Result<usize> {
                 Err(std::io::Error::other("promotion copy interrupted"))
             }
+
             fn write_vectored(
                 &self,
                 _file: &std::fs::File,

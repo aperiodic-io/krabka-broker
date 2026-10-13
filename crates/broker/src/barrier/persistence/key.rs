@@ -113,10 +113,7 @@ pub(crate) fn decode_key(bytes: &[u8]) -> Result<RecordKey, codec::ProtocolError
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::persistence::MAX_STRING_BYTES;
+    use {super::*, crate::coordinator::unified::persistence::MAX_STRING_BYTES, assert2::assert};
 
     #[test]
     fn every_key_kind_round_trips() {

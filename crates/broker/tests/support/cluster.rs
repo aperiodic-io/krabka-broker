@@ -7,15 +7,15 @@
 //! enough, to sit in its own file, with the per-broker config builder it is the
 //! only caller of.
 
-use std::{net::SocketAddr, time::Duration};
-
-use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerError, BrokerHandle, NodeId};
-use tempfile::TempDir;
-
-use crate::support::{
-    AddressedNodeSetup, addressed_node_config, client::connect_owned, start_n_node,
-    wait_for_all_brokers_registered,
+use {
+    crate::support::{
+        AddressedNodeSetup, addressed_node_config, client::connect_owned, start_n_node,
+        wait_for_all_brokers_registered,
+    },
+    assert2::assert,
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerError, BrokerHandle, NodeId},
+    std::{net::SocketAddr, time::Duration},
+    tempfile::TempDir,
 };
 
 /// Set the one-based broker and node identities without changing cluster policy.
@@ -151,17 +151,14 @@ pub async fn start_n_node_with(
         // Size the coordinator topics for the cluster, as Kafka's defaults
         // size them for a production one: replication factor `min(n, 3)`.
         // `customize` runs after, so a suite can still override them.
-        let mut cfg = static_voter_broker_config(
-            dir.path(),
-            StaticVoterSetup {
-                node: AddressedNodeSetup {
-                    node: NodeId(u64::try_from((i) + 1).expect("one-based node id")),
-                    client: client_addrs[i],
-                    controller: controller_addrs[i],
-                },
-                voters: controller_voters(&voters),
+        let mut cfg = static_voter_broker_config(dir.path(), StaticVoterSetup {
+            node: AddressedNodeSetup {
+                node: NodeId(u64::try_from((i) + 1).expect("one-based node id")),
+                client: client_addrs[i],
+                controller: controller_addrs[i],
             },
-        )
+            voters: controller_voters(&voters),
+        })
         .with_internal_topics_for(n_usize);
         customize(i, &mut cfg);
         let cfg_for_spawn = cfg.clone();

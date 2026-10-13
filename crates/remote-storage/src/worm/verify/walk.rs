@@ -6,25 +6,25 @@
 //! accumulates what the partition's report needs as it goes, so a walk that
 //! stops early still describes everything it verified before the break.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_verified::{ChainStep, chain_step};
-use object_store::ObjectStore;
-
-use super::{
-    TrustedManifestKeys, VerifyRequest,
-    listing::DirListing,
-    manifest_read::KeyedManifest,
-    objects::check_objects,
-    report::{
-        EpochSpan, ObjectProtectionReport, PartitionVerifyReport, VerifyBreak, extend_span,
-        offset_gaps,
+use {
+    super::{
+        TrustedManifestKeys, VerifyRequest,
+        listing::DirListing,
+        manifest_read::KeyedManifest,
+        objects::check_objects,
+        report::{
+            EpochSpan, ObjectProtectionReport, PartitionVerifyReport, VerifyBreak, extend_span,
+            offset_gaps,
+        },
+        signature::{SignatureState, signature_state},
     },
-    signature::{SignatureState, signature_state},
-};
-use crate::worm::{
-    error::WormError,
-    manifest::{ChainHead, EpochId, ManifestSeq, ObjectEntry, SegmentManifest, manifest_head},
+    crate::worm::{
+        error::WormError,
+        manifest::{ChainHead, EpochId, ManifestSeq, ObjectEntry, SegmentManifest, manifest_head},
+    },
+    krabka_verified::{ChainStep, chain_step},
+    object_store::ObjectStore,
+    std::{collections::BTreeMap, sync::Arc},
 };
 
 /// Everything the chain walk accumulates for one partition.
@@ -250,13 +250,14 @@ fn chain_continuation(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::worm::verify::{
-        VerifyDepth,
-        test_support::{Archive, Tamper},
-        verify_archive,
+    use {
+        super::*,
+        crate::worm::verify::{
+            VerifyDepth,
+            test_support::{Archive, Tamper},
+            verify_archive,
+        },
+        assert2::check,
     };
 
     #[tokio::test]

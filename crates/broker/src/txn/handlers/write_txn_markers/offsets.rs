@@ -12,20 +12,21 @@
 //! publishes nothing. Either way the group stops reporting the partitions as
 //! unstable.
 
-use std::{collections::HashMap, sync::Arc};
-
-use crate::{
-    coordinator::{
-        persistence::{Key, OffsetCommitValue, parse_key},
-        unified::{
-            GroupCoordinator,
-            actor::{GroupActorMessage, GroupKindTag},
-            classic_state::OffsetEntry,
+use {
+    crate::{
+        coordinator::{
+            persistence::{Key, OffsetCommitValue, parse_key},
+            unified::{
+                GroupCoordinator,
+                actor::{GroupActorMessage, GroupKindTag},
+                classic_state::OffsetEntry,
+            },
         },
+        error::BrokerError,
+        partition::Partition,
+        txn::marker::MarkerType,
     },
-    error::BrokerError,
-    partition::Partition,
-    txn::marker::MarkerType,
+    std::{collections::HashMap, sync::Arc},
 };
 
 pub(crate) type CommittedOffsets = HashMap<String, Vec<((String, i32), OffsetEntry)>>;
@@ -226,18 +227,18 @@ pub(super) async fn resolve_pending_offsets(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use assert2::assert;
-    use krabka_log::{Offset, ProducerId};
-    use krabka_protocol::records::{Record, RecordBatch};
-
-    use super::{CommittedOffsets, checked_batch_advance, scan_pending_offset_entries};
-    use crate::coordinator::{
-        persistence::OffsetCommitValue,
-        test_support::{
-            OffsetRecordSetup, offset_entry as entry, offset_record, replay_offset_batch,
+    use {
+        super::{CommittedOffsets, checked_batch_advance, scan_pending_offset_entries},
+        crate::coordinator::{
+            persistence::OffsetCommitValue,
+            test_support::{
+                OffsetRecordSetup, offset_entry as entry, offset_record, replay_offset_batch,
+            },
         },
+        assert2::assert,
+        krabka_log::{Offset, ProducerId},
+        krabka_protocol::records::{Record, RecordBatch},
+        std::collections::HashMap,
     };
 
     fn commit(group: &str, topic: &str, partition: i32, offset: i64) -> Record {
@@ -272,13 +273,10 @@ mod tests {
                 "no tombstone",
                 vec![],
                 HashMap::from([
-                    (
-                        "g".to_string(),
-                        vec![
-                            (("orders".to_string(), 0), entry(10)),
-                            (("orders".to_string(), 1), entry(11)),
-                        ],
-                    ),
+                    ("g".to_string(), vec![
+                        (("orders".to_string(), 0), entry(10)),
+                        (("orders".to_string(), 1), entry(11)),
+                    ]),
                     ("h".to_string(), vec![(("t".to_string(), 0), entry(20))]),
                 ]),
             ),
@@ -286,10 +284,10 @@ mod tests {
                 "one key of one group",
                 vec![tombstone("g", "orders", 0)],
                 HashMap::from([
-                    (
-                        "g".to_string(),
-                        vec![(("orders".to_string(), 1), entry(11))],
-                    ),
+                    ("g".to_string(), vec![(
+                        ("orders".to_string(), 1),
+                        entry(11),
+                    )]),
                     ("h".to_string(), vec![(("t".to_string(), 0), entry(20))]),
                 ]),
             ),
@@ -306,14 +304,11 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let mut log =
                 krabka_log::Log::open(dir.path(), krabka_log::LogConfig::default()).unwrap();
-            log.append(&mut batch(
-                true,
-                vec![
-                    commit("g", "orders", 0, 10),
-                    commit("g", "orders", 1, 11),
-                    commit("h", "t", 0, 20),
-                ],
-            ))
+            log.append(&mut batch(true, vec![
+                commit("g", "orders", 0, 10),
+                commit("g", "orders", 1, 11),
+                commit("h", "t", 0, 20),
+            ]))
             .unwrap();
             if !tombstones.is_empty() {
                 log.append(&mut batch(false, tombstones)).unwrap();

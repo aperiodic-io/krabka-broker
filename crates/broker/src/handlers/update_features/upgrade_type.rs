@@ -21,9 +21,7 @@ pub(super) fn update_type(upgrade_type: i8) -> Option<FeatureUpdateType> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn update_type_follows_from_code() {

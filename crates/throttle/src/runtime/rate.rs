@@ -8,15 +8,15 @@
 //! the event pair stay separate because a token means a different thing in
 //! each.
 
-use std::sync::atomic::Ordering::Relaxed;
-
-use krabka_units::prelude::{
-    ByteRate, ByteRateExt as _, ByteSize, ByteSizeExt as _, Frequency, FrequencyExt as _, Time,
-    secs,
+use {
+    super::{BucketState, MICROS_PER_TOKEN, TokenBucket},
+    krabka_units::prelude::{
+        ByteRate, ByteRateExt as _, ByteSize, ByteSizeExt as _, Frequency, FrequencyExt as _, Time,
+        secs,
+    },
+    num_traits::ToPrimitive as _,
+    std::sync::atomic::Ordering::Relaxed,
 };
-use num_traits::ToPrimitive as _;
-
-use super::{BucketState, MICROS_PER_TOKEN, TokenBucket};
 
 /// The time window that [`TokenBucket::set_byte_rate`] uses for the burst
 /// capacity when the caller does not give one. The burst is the throughput of
@@ -126,16 +126,12 @@ impl TokenBucket {
     /// means no limit, or a rate under one token per second:
     /// [`Self::byte_rate`] reads a fractional rate back exactly.
     #[must_use]
-    pub fn token_rate(&self) -> u64 {
-        self.fast_path_rate() / MICROS_PER_TOKEN
-    }
+    pub fn token_rate(&self) -> u64 { self.fast_path_rate() / MICROS_PER_TOKEN }
 
     /// The configured burst capacity in whole raw tokens, rounded down. This
     /// is the most the bucket holds.
     #[must_use]
-    pub fn token_burst(&self) -> u64 {
-        self.lock_state().micro_burst / MICROS_PER_TOKEN
-    }
+    pub fn token_burst(&self) -> u64 { self.lock_state().micro_burst / MICROS_PER_TOKEN }
 
     /// Updates a byte throughput and bursts one second's worth, keeping the
     /// balance as [`Self::set_token_rate_with_burst`] says.
@@ -204,17 +200,16 @@ impl TokenBucket {
     /// The configured event throughput in whole events per second, rounded
     /// down. Zero means no limit.
     #[must_use]
-    pub fn event_rate(&self) -> Frequency {
-        Frequency::from_per_sec_u64(self.token_rate())
-    }
+    pub fn event_rate(&self) -> Frequency { Frequency::from_per_sec_u64(self.token_rate()) }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{bytes, bytes_per_sec, kibibytes, kibibytes_per_sec, mebibytes};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_units::prelude::{bytes, bytes_per_sec, kibibytes, kibibytes_per_sec, mebibytes},
+    };
 
     // The bucket narrows every rate and burst to raw bytes and bytes-per-second
     // for the verified integer kernel, so the accessors are the only place a
@@ -287,7 +282,7 @@ mod tests {
     fn a_positive_byte_rate_is_never_unlimited() {
         let resolution = ByteRate::from_bytes_per_sec_f64(0.000_001);
         let cases = [
-            (1e-12, resolution),
+            (1.0e-12, resolution),
             (0.000_000_4, resolution),
             (0.0, ByteRate::from_bytes_per_sec(0)),
             (-3.0, ByteRate::from_bytes_per_sec(0)),

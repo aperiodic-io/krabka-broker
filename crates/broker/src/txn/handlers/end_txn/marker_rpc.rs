@@ -3,24 +3,24 @@
 //! request it builds from the transaction's partitions, and the per-partition
 //! result check it applies to the response.
 
-use std::collections::HashMap;
-
-use krabka_metadata::NodeId;
-use krabka_protocol::owned::{
-    write_txn_markers_request::{
-        WritableTxnMarker, WritableTxnMarkerTopic, WriteTxnMarkersRequest,
+use {
+    super::markers::{MarkerDispatchContext, MarkerFanOut},
+    crate::{
+        broker::registered_listener_endpoint,
+        error::BrokerError,
+        txn::{
+            marker::{MarkerCodeClass, MarkerType, classify_marker_code},
+            state::{TopicPartition, TxnEntry},
+        },
     },
-    write_txn_markers_response::WriteTxnMarkersResponse,
-};
-
-use super::markers::{MarkerDispatchContext, MarkerFanOut};
-use crate::{
-    broker::registered_listener_endpoint,
-    error::BrokerError,
-    txn::{
-        marker::{MarkerCodeClass, MarkerType, classify_marker_code},
-        state::{TopicPartition, TxnEntry},
+    krabka_metadata::NodeId,
+    krabka_protocol::owned::{
+        write_txn_markers_request::{
+            WritableTxnMarker, WritableTxnMarkerTopic, WriteTxnMarkersRequest,
+        },
+        write_txn_markers_response::WriteTxnMarkersResponse,
     },
+    std::collections::HashMap,
 };
 
 /// Send a `WriteTxnMarkersRequest` to a remote broker that leads one or more
@@ -229,21 +229,22 @@ fn validate_marker_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{
-        BrokerEndpoint, BrokerRegistrationRecord, MetadataImage, MetadataRecord,
-    };
-    use krabka_protocol::owned::write_txn_markers_response::{
-        WritableTxnMarkerPartitionResult, WritableTxnMarkerResult, WritableTxnMarkerTopicResult,
-    };
-    use krabka_security::ListenerProtocol;
-
-    use super::*;
-    use crate::{
-        codes,
-        network::client::InterBrokerClient,
-        test_support::broker_registration,
-        txn::handlers::end_txn::test_support::{marker_entry, plaintext_client, tps},
+    use {
+        super::*,
+        crate::{
+            codes,
+            network::client::InterBrokerClient,
+            test_support::broker_registration,
+            txn::handlers::end_txn::test_support::{marker_entry, plaintext_client, tps},
+        },
+        assert2::assert,
+        krabka_metadata::{
+            BrokerEndpoint, BrokerRegistrationRecord, MetadataImage, MetadataRecord,
+        },
+        krabka_protocol::owned::write_txn_markers_response::{
+            WritableTxnMarkerPartitionResult, WritableTxnMarkerResult, WritableTxnMarkerTopicResult,
+        },
+        krabka_security::ListenerProtocol,
     };
 
     fn marker_response(codes_by_partition: &[(i32, i16)]) -> WriteTxnMarkersResponse {
@@ -499,12 +500,13 @@ mod tests {
 
     #[tokio::test]
     async fn remote_marker_dispatch_dials_with_configured_server_name() {
-        use std::sync::Arc;
-
-        use tokio::net::TcpListener;
-        use tokio_rustls::{
-            LazyConfigAcceptor,
-            rustls::{ClientConfig, RootCertStore, server::Acceptor},
+        use {
+            std::sync::Arc,
+            tokio::net::TcpListener,
+            tokio_rustls::{
+                LazyConfigAcceptor,
+                rustls::{ClientConfig, RootCertStore, server::Acceptor},
+            },
         };
 
         let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();

@@ -4,32 +4,33 @@
 //! `TxnEntry`, so the tests in more than one submodule build the same fixture
 //! without repeating it.
 
-use std::{path::Path, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use krabka_metadata::{
-    LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicRecord,
-};
-
-use super::TxnCoordinator;
-use crate::{
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    test_support::{PartitionCount, StandalonePartitionSetup, open_partition},
-    txn::{bootstrap, state::TxnEntry},
+use {
+    super::TxnCoordinator,
+    crate::{
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        test_support::{PartitionCount, StandalonePartitionSetup, open_partition},
+        txn::{bootstrap, state::TxnEntry},
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::ProducerId,
+    krabka_metadata::{
+        LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicRecord,
+    },
+    std::{path::Path, sync::Arc},
 };
 
 #[allow(unused_imports)]
 pub(crate) mod test_prelude {
-    pub(crate) use std::{collections::HashSet, sync::Arc};
-
-    pub(crate) use assert2::{assert, check};
-    pub(crate) use krabka_ids::PartitionIndex;
-    pub(crate) use krabka_log::{Log, LogConfig, Offset, ProducerId, ReadOutput};
-    pub(crate) use krabka_metadata::{MetadataImage, NodeId};
-    pub(crate) use tempfile::TempDir;
+    pub(crate) use {
+        assert2::{assert, check},
+        krabka_ids::PartitionIndex,
+        krabka_log::{Log, LogConfig, Offset, ProducerId, ReadOutput},
+        krabka_metadata::{MetadataImage, NodeId},
+        std::{collections::HashSet, sync::Arc},
+        tempfile::TempDir,
+    };
 }
 
 /// The topic of the data partition [`live_coordinator`] hosts.
@@ -78,13 +79,10 @@ pub(super) fn state_registry(dir: &Path) -> Arc<PartitionRegistry> {
     partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),
-        open_partition(
-            dir,
-            StandalonePartitionSetup {
-                topic: bootstrap::TOPIC,
-                ..Default::default()
-            },
-        ),
+        open_partition(dir, StandalonePartitionSetup {
+            topic: bootstrap::TOPIC,
+            ..Default::default()
+        }),
     );
     partitions
 }
@@ -108,13 +106,10 @@ pub(super) async fn hosted_data_partition(
     dir: &Path,
     partitions: &PartitionRegistry,
 ) -> Arc<Partition> {
-    let data = open_partition(
-        dir,
-        StandalonePartitionSetup {
-            topic: DATA_TOPIC,
-            ..Default::default()
-        },
-    );
+    let data = open_partition(dir, StandalonePartitionSetup {
+        topic: DATA_TOPIC,
+        ..Default::default()
+    });
     // The metadata reconcile installs this broker, node 1, as the leader.
     data.install_leader_change(1, 0).await;
     partitions.insert(

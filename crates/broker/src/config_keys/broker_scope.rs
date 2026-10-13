@@ -2,9 +2,10 @@
 //! role, broker fencing state and stretch-site role that `DescribeConfigs`
 //! reports read-only, and the KIP-1075 deadline for remote `ListOffsets` work.
 
-use std::time::Duration;
-
-use super::parse::{check_range, parse_long};
+use {
+    super::parse::{check_range, parse_long},
+    std::time::Duration,
+};
 
 /// Marks a node as a data-bearing witness. The broker publishes this key for
 /// itself, in the same metadata batch that carries its registration record,
@@ -226,13 +227,14 @@ pub(crate) fn resolve_remote_list_offsets_timeout(
 #[cfg(test)]
 mod tests {
 
-    use assert2::assert;
-
-    use super::{
-        super::validation::{is_recognized, validate_topic_config},
-        *,
+    use {
+        super::{
+            super::validation::{is_recognized, validate_topic_config},
+            *,
+        },
+        crate::test_support::broker_registration,
+        assert2::assert,
     };
-    use crate::test_support::broker_registration;
 
     /// Register `node_id` and, when `witness` is set, publish
     /// `broker.witness=true` for it. This is the path the broker takes at
@@ -303,9 +305,7 @@ mod tests {
 
     #[test]
     fn witness_node_ids_collects_every_marked_node() {
-        use std::collections::HashSet;
-
-        use krabka_metadata::NodeId;
+        use {krabka_metadata::NodeId, std::collections::HashSet};
         let mut img = krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
         assert!(witness_node_ids(&img) == HashSet::new());
         register_node(&mut img, 1, None);

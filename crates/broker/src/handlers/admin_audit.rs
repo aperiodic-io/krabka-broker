@@ -4,8 +4,7 @@
 //! every admin RPC reports the principal, the source endpoint, and the changed
 //! resources in the same shape.
 
-use super::RequestContext;
-use crate::time_util::now_ms;
+use {super::RequestContext, crate::time_util::now_ms};
 
 /// Emits an `AdminOperation` audit event for a completed admin request.
 ///
@@ -97,15 +96,11 @@ pub(crate) fn audit_resource(
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert, std::net::SocketAddr};
 
     /// The channel and authenticated caller used by both admin audit paths.
     macro_rules! audit_fixture {
-        (($log:ident, $rx:ident), ($principal:ident, $peer:ident, $ctx:ident)) => {
+        (($log:ident, $rx:ident),($principal:ident, $peer:ident, $ctx:ident)) => {
             let ($log, mut $rx) = krabka_audit::AuditLog::new(8);
             let $principal = crate::test_support::sasl_principal("admin");
             let $peer: SocketAddr = "192.0.2.10:9092".parse().unwrap();
@@ -179,12 +174,9 @@ mod tests {
         audit_admin_success(log.as_ref(), &ctx, "AlterConfigs", Vec::new());
         assert!(rx.try_recv().is_err(), "no resource changed, no record");
 
-        audit_admin_success(
-            log.as_ref(),
-            &ctx,
-            "AlterConfigs",
-            vec![audit_resource("Topic", "orders")],
-        );
+        audit_admin_success(log.as_ref(), &ctx, "AlterConfigs", vec![audit_resource(
+            "Topic", "orders",
+        )]);
 
         let krabka_audit::AuditEvent::AdminOperation {
             outcome,
@@ -197,11 +189,9 @@ mod tests {
         };
         assert!(
             (outcome, operation.as_str(), resources)
-                == (
-                    krabka_audit::AuditOutcome::Success,
-                    "AlterConfigs",
-                    vec![audit_resource("Topic", "orders")],
-                )
+                == (krabka_audit::AuditOutcome::Success, "AlterConfigs", vec![
+                    audit_resource("Topic", "orders")
+                ],)
         );
     }
 }

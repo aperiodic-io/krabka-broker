@@ -2,21 +2,22 @@
 //! reaches it: a snapshot that agrees, a deletion still in flight that is
 //! dropped in silence, and the four disagreements that stop a restore.
 
-use assert2::check;
-use krabka_ids::Offset;
-use krabka_remote_storage::{RlmmCacheDump, TopicIdPartition};
-
-use super::*;
-use crate::{
-    args::RestoreArgs,
-    backend::open_archive,
-    discover::{
-        ArchiveInventory, PartitionInventory, inventory,
-        test_support::{
-            PartitionKey, SegmentSetup, SnapshotSegmentSetup, args_from, single_segment_archive,
-            snapshot_segment, write_full_segment, write_snapshot,
+use {
+    super::*,
+    crate::{
+        args::RestoreArgs,
+        backend::open_archive,
+        discover::{
+            ArchiveInventory, PartitionInventory, inventory,
+            test_support::{
+                PartitionKey, SegmentSetup, SnapshotSegmentSetup, args_from,
+                single_segment_archive, snapshot_segment, write_full_segment, write_snapshot,
+            },
         },
     },
+    assert2::check,
+    krabka_ids::Offset,
+    krabka_remote_storage::{RlmmCacheDump, TopicIdPartition},
 };
 
 /// Partition 0 of `topic` as the snapshot records it, one segment per
@@ -61,12 +62,9 @@ fn partition_dump(setup: SnapshotPartitionSetup<'_>) -> PartitionDump {
 
 /// Write a snapshot at `path` that holds the one [`partition_dump`].
 fn snapshot_of(path: &std::path::Path, setup: SnapshotPartitionSetup<'_>) {
-    write_snapshot(
-        path,
-        RlmmCacheDump {
-            partitions: vec![partition_dump(setup)],
-        },
-    );
+    write_snapshot(path, RlmmCacheDump {
+        partitions: vec![partition_dump(setup)],
+    });
 }
 
 fn snapshot_directory() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -78,28 +76,22 @@ fn snapshot_directory() -> (tempfile::TempDir, std::path::PathBuf) {
 fn two_segment_archive() -> (tempfile::TempDir, Uuid, Uuid, Uuid) {
     let archive = tempfile::tempdir().expect("temp dir");
     let (topic, first, second) = (Uuid::from_u128(1), Uuid::from_u128(10), Uuid::from_u128(11));
-    write_full_segment(
-        archive.path(),
-        SegmentSetup {
-            partition: PartitionKey {
-                topic_id: topic,
-                ..Default::default()
-            },
-            segment_id: first,
+    write_full_segment(archive.path(), SegmentSetup {
+        partition: PartitionKey {
+            topic_id: topic,
             ..Default::default()
         },
-    );
-    write_full_segment(
-        archive.path(),
-        SegmentSetup {
-            partition: PartitionKey {
-                topic_id: topic,
-                ..Default::default()
-            },
-            base_offset: Offset(100),
-            segment_id: second,
+        segment_id: first,
+        ..Default::default()
+    });
+    write_full_segment(archive.path(), SegmentSetup {
+        partition: PartitionKey {
+            topic_id: topic,
+            ..Default::default()
         },
-    );
+        base_offset: Offset(100),
+        segment_id: second,
+    });
     (archive, topic, first, second)
 }
 
@@ -114,17 +106,14 @@ fn two_segment_snapshot(
     let (archive, topic_id, first, second) = two_segment_archive();
     let snapshot_dir = tempfile::tempdir().expect("temp dir");
     let snapshot = snapshot_dir.path().join("snapshot");
-    snapshot_of(
-        &snapshot,
-        SnapshotPartitionSetup {
-            topic_id,
-            segments: &[
-                (first, Offset(0), RemoteLogSegmentState::CopySegmentFinished),
-                (second, Offset(100), second_state),
-            ],
-            ..Default::default()
-        },
-    );
+    snapshot_of(&snapshot, SnapshotPartitionSetup {
+        topic_id,
+        segments: &[
+            (first, Offset(0), RemoteLogSegmentState::CopySegmentFinished),
+            (second, Offset(100), second_state),
+        ],
+        ..Default::default()
+    });
     (archive, snapshot_dir, snapshot, first)
 }
 
@@ -133,18 +122,15 @@ fn authenticated_snapshot(
 ) -> (tempfile::TempDir, std::path::PathBuf, RestoreArgs) {
     let (archive, topic_id, segment_id) = single_segment_archive(Offset(0));
     let snapshot = archive.path().join("snapshot");
-    snapshot_of(
-        &snapshot,
-        SnapshotPartitionSetup {
-            topic_id,
-            segments: &[(segment_id, Offset(0), state)],
-            ..Default::default()
-        },
-    );
-    let mut args = args_from(
-        archive.path(),
-        &["--rlmm-snapshot", &snapshot.display().to_string()],
-    );
+    snapshot_of(&snapshot, SnapshotPartitionSetup {
+        topic_id,
+        segments: &[(segment_id, Offset(0), state)],
+        ..Default::default()
+    });
+    let mut args = args_from(archive.path(), &[
+        "--rlmm-snapshot",
+        &snapshot.display().to_string(),
+    ]);
     args.archive.worm_key_id.push("trusted".into());
     args.archive.worm_public_key.push("unused.pub".into());
     (archive, snapshot, args)
@@ -154,10 +140,10 @@ async fn snapshot_inventory(
     archive: &std::path::Path,
     snapshot: &std::path::Path,
 ) -> Result<ArchiveInventory, RestoreError> {
-    let args = args_from(
-        archive,
-        &["--rlmm-snapshot", &snapshot.display().to_string()],
-    );
+    let args = args_from(archive, &[
+        "--rlmm-snapshot",
+        &snapshot.display().to_string(),
+    ]);
     let store = open_archive(&args).expect("store");
     inventory(&store, &args).await
 }
@@ -235,13 +221,10 @@ async fn a_segment_the_snapshot_does_not_mention_is_a_disagreement() {
 
     let (_snap_dir, snap_path) = snapshot_directory();
     // The snapshot knows nothing about this partition's segment at all.
-    snapshot_of(
-        &snap_path,
-        SnapshotPartitionSetup {
-            topic_id,
-            ..Default::default()
-        },
-    );
+    snapshot_of(&snap_path, SnapshotPartitionSetup {
+        topic_id,
+        ..Default::default()
+    });
 
     let err = snapshot_inventory(archive.path(), &snap_path)
         .await
@@ -258,14 +241,11 @@ async fn a_delete_finished_segment_with_bytes_still_present_is_a_disagreement() 
     let (archive, topic_id, seg) = single_segment_archive(Offset(0));
 
     let (_snap_dir, snap_path) = snapshot_directory();
-    snapshot_of(
-        &snap_path,
-        SnapshotPartitionSetup {
-            topic_id,
-            segments: &[(seg, Offset(0), RemoteLogSegmentState::DeleteSegmentFinished)],
-            ..Default::default()
-        },
-    );
+    snapshot_of(&snap_path, SnapshotPartitionSetup {
+        topic_id,
+        segments: &[(seg, Offset(0), RemoteLogSegmentState::DeleteSegmentFinished)],
+        ..Default::default()
+    });
 
     expect_metadata_disagreement(archive.path(), &snap_path).await;
 }
@@ -288,34 +268,31 @@ async fn a_live_partition_missing_from_the_scan_entirely_is_a_disagreement() {
 
     let orders_id = Uuid::from_u128(1);
     let (_snap_dir, snap_path) = snapshot_directory();
-    write_snapshot(
-        &snap_path,
-        RlmmCacheDump {
-            partitions: vec![
-                // Matches the scan exactly: no disagreement from this one.
-                partition_dump(SnapshotPartitionSetup {
-                    topic: "payments",
-                    topic_id: payments_id,
-                    segments: &[(
-                        payments_seg,
-                        Offset(0),
-                        RemoteLogSegmentState::CopySegmentFinished,
-                    )],
-                }),
-                // Live in the snapshot, but the scan never found this
-                // partition at all.
-                partition_dump(SnapshotPartitionSetup {
-                    topic_id: orders_id,
-                    segments: &[(
-                        Uuid::from_u128(10),
-                        Offset(0),
-                        RemoteLogSegmentState::CopySegmentFinished,
-                    )],
-                    ..Default::default()
-                }),
-            ],
-        },
-    );
+    write_snapshot(&snap_path, RlmmCacheDump {
+        partitions: vec![
+            // Matches the scan exactly: no disagreement from this one.
+            partition_dump(SnapshotPartitionSetup {
+                topic: "payments",
+                topic_id: payments_id,
+                segments: &[(
+                    payments_seg,
+                    Offset(0),
+                    RemoteLogSegmentState::CopySegmentFinished,
+                )],
+            }),
+            // Live in the snapshot, but the scan never found this
+            // partition at all.
+            partition_dump(SnapshotPartitionSetup {
+                topic_id: orders_id,
+                segments: &[(
+                    Uuid::from_u128(10),
+                    Offset(0),
+                    RemoteLogSegmentState::CopySegmentFinished,
+                )],
+                ..Default::default()
+            }),
+        ],
+    });
 
     let err = snapshot_inventory(archive.path(), &snap_path)
         .await
@@ -328,10 +305,10 @@ async fn a_missing_snapshot_file_is_reported_as_io_not_found() {
     let (archive, _topic_id, _) = single_segment_archive(Offset(0));
 
     let missing = archive.path().join("does-not-exist-snapshot");
-    let args = args_from(
-        archive.path(),
-        &["--rlmm-snapshot", &missing.display().to_string()],
-    );
+    let args = args_from(archive.path(), &[
+        "--rlmm-snapshot",
+        &missing.display().to_string(),
+    ]);
     let store = open_archive(&args).expect("store");
     let err = inventory(&store, &args).await.unwrap_err();
     check!(matches!(
@@ -345,25 +322,22 @@ async fn duplicate_segment_keys_in_the_snapshot_are_a_disagreement() {
     let (archive, topic_id, segment_id) = single_segment_archive(Offset(0));
 
     let (_snap_dir, snap_path) = snapshot_directory();
-    snapshot_of(
-        &snap_path,
-        SnapshotPartitionSetup {
-            topic_id,
-            segments: &[
-                (
-                    segment_id,
-                    Offset(0),
-                    RemoteLogSegmentState::CopySegmentFinished,
-                ),
-                (
-                    segment_id,
-                    Offset(0),
-                    RemoteLogSegmentState::CopySegmentFinished,
-                ),
-            ],
-            ..Default::default()
-        },
-    );
+    snapshot_of(&snap_path, SnapshotPartitionSetup {
+        topic_id,
+        segments: &[
+            (
+                segment_id,
+                Offset(0),
+                RemoteLogSegmentState::CopySegmentFinished,
+            ),
+            (
+                segment_id,
+                Offset(0),
+                RemoteLogSegmentState::CopySegmentFinished,
+            ),
+        ],
+        ..Default::default()
+    });
 
     expect_metadata_disagreement(archive.path(), &snap_path).await;
 }
@@ -382,12 +356,9 @@ async fn duplicate_partition_keys_in_the_snapshot_are_a_disagreement() {
         )],
         ..Default::default()
     });
-    write_snapshot(
-        &snap_path,
-        RlmmCacheDump {
-            partitions: vec![duplicate.clone(), duplicate],
-        },
-    );
+    write_snapshot(&snap_path, RlmmCacheDump {
+        partitions: vec![duplicate.clone(), duplicate],
+    });
 
     expect_metadata_disagreement(archive.path(), &snap_path).await;
 }
@@ -397,23 +368,20 @@ async fn maximum_offset_reconciliation_is_stable_across_retry() {
     let (archive, topic_id, segment_id) = single_segment_archive(Offset(i64::MAX));
 
     let (_snap_dir, snap_path) = snapshot_directory();
-    snapshot_of(
-        &snap_path,
-        SnapshotPartitionSetup {
-            topic_id,
-            segments: &[(
-                segment_id,
-                Offset(i64::MAX),
-                RemoteLogSegmentState::CopySegmentFinished,
-            )],
-            ..Default::default()
-        },
-    );
+    snapshot_of(&snap_path, SnapshotPartitionSetup {
+        topic_id,
+        segments: &[(
+            segment_id,
+            Offset(i64::MAX),
+            RemoteLogSegmentState::CopySegmentFinished,
+        )],
+        ..Default::default()
+    });
 
-    let args = args_from(
-        archive.path(),
-        &["--rlmm-snapshot", &snap_path.display().to_string()],
-    );
+    let args = args_from(archive.path(), &[
+        "--rlmm-snapshot",
+        &snap_path.display().to_string(),
+    ]);
     let store = open_archive(&args).expect("store");
     let first = inventory(&store, &args).await.expect("first inventory");
     let retry = inventory(&store, &args).await.expect("retry inventory");

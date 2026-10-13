@@ -5,17 +5,17 @@
 //! The hot fetch path runs through these functions for every read, which is
 //! why they live together in one small module.
 
-use std::{
-    fs::File,
-    io::{IoSlice, Seek, SeekFrom},
-};
-
-use krabka_units::prelude::{ByteSize, ByteSizeExt};
-
-use super::Segment;
-use crate::{
-    error::LogError,
-    io::{LogIo, write_all_with, write_progress},
+use {
+    super::Segment,
+    crate::{
+        error::LogError,
+        io::{LogIo, write_all_with, write_progress},
+    },
+    krabka_units::prelude::{ByteSize, ByteSizeExt},
+    std::{
+        fs::File,
+        io::{IoSlice, Seek, SeekFrom},
+    },
 };
 
 /// Positioned read: fill `buf` from `offset` in `file` without a move of the
@@ -186,9 +186,7 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// The read loop fills the buffer across short reads, retries an
     /// interrupted read, and stops at end of file.
@@ -411,11 +409,12 @@ mod tests {
     /// after it, from the batch it starts at, in one hint.
     #[test]
     fn a_verbatim_read_advises_its_window_and_the_next_in_one_hint() {
-        use krabka_ids::Offset;
-        use krabka_units::prelude::bytes;
-
-        use crate::segment::test_support::{
-            DENSE_INDEX, recording_advice, test_batch_at, test_segment,
+        use {
+            crate::segment::test_support::{
+                DENSE_INDEX, recording_advice, test_batch_at, test_segment,
+            },
+            krabka_ids::Offset,
+            krabka_units::prelude::bytes,
         };
 
         let (_dir, mut seg) = test_segment();

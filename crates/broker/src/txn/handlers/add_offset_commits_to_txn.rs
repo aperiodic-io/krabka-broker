@@ -8,26 +8,27 @@
 //! Request fields: `transactional_id`, `producer_id`, `producer_epoch`, `group_id`.
 //! Response fields: `throttle_time_ms`, `error_code`.
 
-use futures_util::future::BoxFuture;
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    add_offsets_to_txn_request::AddOffsetsToTxnRequest,
-    add_offsets_to_txn_response::AddOffsetsToTxnResponse,
-};
-
-use crate::{
-    broker::Broker,
-    codes,
-    coordinator::{bootstrap::OFFSETS_TOPIC, partitioner::partition_for_group},
-    error::BrokerError,
-    handlers::{ErrorCodeResponse as _, RequestContext, acl_denied, group_read_denied},
-    txn::{
-        coordinator::TxnCoordinator,
-        state::{TopicPartition, TxnEntry, TxnState},
-        util::{now_millis, producer_fenced_wire_code},
-        version::{TxnVersion, resolve_txn_version},
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        coordinator::{bootstrap::OFFSETS_TOPIC, partitioner::partition_for_group},
+        error::BrokerError,
+        handlers::{ErrorCodeResponse as _, RequestContext, acl_denied, group_read_denied},
+        txn::{
+            coordinator::TxnCoordinator,
+            state::{TopicPartition, TxnEntry, TxnState},
+            util::{now_millis, producer_fenced_wire_code},
+            version::{TxnVersion, resolve_txn_version},
+        },
+    },
+    futures_util::future::BoxFuture,
+    krabka_ids::PartitionIndex,
+    krabka_log::ProducerId,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        add_offsets_to_txn_request::AddOffsetsToTxnRequest,
+        add_offsets_to_txn_response::AddOffsetsToTxnResponse,
     },
 };
 

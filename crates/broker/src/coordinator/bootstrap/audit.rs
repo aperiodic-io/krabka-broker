@@ -4,13 +4,13 @@
 //! `__consumer_offsets`, because it is optional and it places one partition on
 //! every registered broker instead of spreading a fixed partition count.
 
-use std::sync::Arc;
-
-use krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord, TopicRecord};
-use krabka_raft::{NodeId, RaftError};
-use krabka_units::convert::TimeExt as _;
-
-use crate::{config::BrokerConfig, error::BrokerError, metadata_source::MetadataSource};
+use {
+    crate::{config::BrokerConfig, error::BrokerError, metadata_source::MetadataSource},
+    krabka_metadata::{MetadataImage, MetadataRecord, PartitionRecord, TopicRecord},
+    krabka_raft::{NodeId, RaftError},
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
+};
 
 #[cfg(test)]
 mod tests;

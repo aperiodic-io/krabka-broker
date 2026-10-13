@@ -70,9 +70,10 @@
 //! Every wait is bounded with `tokio::time::timeout`. CI kills a test at 600s
 //! and reports TIMEOUT with no cause; a bounded wait names the step that hung.
 
-use std::{future::Future, time::Duration};
-
-use support::cluster_lock;
+use {
+    std::{future::Future, time::Duration},
+    support::cluster_lock,
+};
 
 mod support;
 

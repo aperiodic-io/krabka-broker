@@ -6,18 +6,18 @@
 //! `NOT_LEADER_OR_FOLLOWER` on a node with no quorum state. Only the request
 //! checks after that differ.
 
-use std::{ops::ControlFlow, sync::Arc};
-
-use bytes::Bytes;
-use krabka_metadata::MetadataImage;
-use krabka_protocol::{Decode, Encode};
-
-use crate::{
-    authorizer::Authorizer,
-    broker::Broker,
-    codes::CLUSTER_AUTHORIZATION_FAILED,
-    error::BrokerError,
-    handlers::{ErrorResponse, RequestContext, decode_request, encode_response},
+use {
+    crate::{
+        authorizer::Authorizer,
+        broker::Broker,
+        codes::CLUSTER_AUTHORIZATION_FAILED,
+        error::BrokerError,
+        handlers::{ErrorResponse, RequestContext, decode_request, encode_response},
+    },
+    bytes::Bytes,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::{Decode, Encode},
+    std::{ops::ControlFlow, sync::Arc},
 };
 
 /// A cluster ACL gate: `true` when the authorizer denies `ctx`'s principal.
@@ -34,9 +34,10 @@ pub(super) use handler;
 
 /// Add/remove voter RPCs share the Cluster:Alter admission and leader-only refusal.
 macro_rules! leader_handler {
-    (($broker:ident, $version:ident, $bytes:ident, $ctx:ident),
-     ($request:ty, $response:ty, $api:expr, $denied:expr),
-     ($req:ident, $image:ident, $quorum:ident), $body:block) => {
+    (
+        ($broker:ident, $version:ident, $bytes:ident, $ctx:ident),($request:ty, $response:ty, $api:expr, $denied:expr),($req:ident, $image:ident, $quorum:ident),
+        $body:block
+    ) => {
         crate::handlers::raft_voter::handler!($broker, $version, $bytes, $ctx, {
             let crate::handlers::raft_voter::Admitted {
                 req: $req,
@@ -60,7 +61,12 @@ pub(super) use leader_handler;
 
 /// Keep early encoded answers at the caller's entry point, before its own voter checks.
 macro_rules! admit {
-    ($request:ty, ($broker:expr, $version:expr, $bytes:expr, $ctx:expr), $api:expr, $gate:expr, $refusals:expr) => {
+    (
+        $request:ty,($broker:expr, $version:expr, $bytes:expr, $ctx:expr),
+        $api:expr,
+        $gate:expr,
+        $refusals:expr
+    ) => {
         match crate::handlers::raft_voter::prelude::<$request, _>(
             $broker, $version, $bytes, $ctx, $api, $gate, $refusals,
         )
@@ -108,8 +114,19 @@ pub(super) use check_denied_reconfiguration;
 /// An invalid add/remove id is refused before the controller reconfigures.
 #[cfg(test)]
 macro_rules! check_invalid_voter {
-    (($handle:ident, $directory:ident, $broker:ident, $context:ident, $request:ident, $response:ident),
-        $version:expr, $response_type:ident, $message:expr) => {
+    (
+        (
+            $handle:ident,
+            $directory:ident,
+            $broker:ident,
+            $context:ident,
+            $request:ident,
+            $response:ident
+        ),
+        $version:expr,
+        $response_type:ident,
+        $message:expr
+    ) => {
         broker_fixture!(
             ($handle, $directory, $broker),
             allow_all,

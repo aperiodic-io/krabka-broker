@@ -7,37 +7,39 @@
 //! when the group is dirty and then writes the resulting records as one batch,
 //! so a failed log write ends the actor.
 
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
-
-use krabka_protocol::owned::{
-    streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-};
-
-use super::{
-    ActorState, chrono_now_ms,
-    reconciliation::{
-        assignment_delay, configure_after_load, reconcile, validation_or_configs_changed,
-    },
-    records::{StreamsRecorder, flush_pending},
-    request::{build_member, task_ids_to_map, task_offsets_to_map, update_client_tags},
-    response::{ResponseDelta, build_assignment_resp, endpoint_to_partitions, error_resp},
-};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    coordinator::unified::{
-        ClientIdentity, GroupCoordinator,
-        offsets_log::OffsetsLog,
-        streams::{
-            config::StreamsGroupConfig,
-            persistence::{PendingStreamsRecords, StoredSubtopology, StreamsGroupTopologyValue},
-            state::{OwnedTasks, RoleTasks, StoredTopologyHandle, StreamsMemberState},
-            topology,
+use {
+    super::{
+        ActorState, chrono_now_ms,
+        reconciliation::{
+            assignment_delay, configure_after_load, reconcile, validation_or_configs_changed,
         },
+        records::{StreamsRecorder, flush_pending},
+        request::{build_member, task_ids_to_map, task_offsets_to_map, update_client_tags},
+        response::{ResponseDelta, build_assignment_resp, endpoint_to_partitions, error_resp},
     },
-    error::BrokerError,
-    metadata_source::MetadataSource,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        coordinator::unified::{
+            ClientIdentity, GroupCoordinator,
+            offsets_log::OffsetsLog,
+            streams::{
+                config::StreamsGroupConfig,
+                persistence::{
+                    PendingStreamsRecords, StoredSubtopology, StreamsGroupTopologyValue,
+                },
+                state::{OwnedTasks, RoleTasks, StoredTopologyHandle, StreamsMemberState},
+                topology,
+            },
+        },
+        error::BrokerError,
+        metadata_source::MetadataSource,
+    },
+    krabka_protocol::owned::{
+        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
+    std::{collections::BTreeMap, sync::Arc, time::Instant},
 };
 
 /// Fences each member silent past the session timeout, and each member past
@@ -351,17 +353,12 @@ fn accepted_response(
     if let Some(member) = actor.state.members.get_mut(member_id) {
         member.sent_tasks = tasks;
     }
-    build_assignment_resp(
-        &actor.state,
-        member_id,
-        config,
-        ResponseDelta {
-            send_tasks: req.member_epoch == 0 || tasks_changed,
-            assignment_delayed: assignment_delay(actor, config, tokio::time::Instant::now()),
-            endpoint_information_epoch: actor.state.endpoint_information_epoch,
-            partitions_by_user_endpoint,
-        },
-    )
+    build_assignment_resp(&actor.state, member_id, config, ResponseDelta {
+        send_tasks: req.member_epoch == 0 || tasks_changed,
+        assignment_delayed: assignment_delay(actor, config, tokio::time::Instant::now()),
+        endpoint_information_epoch: actor.state.endpoint_information_epoch,
+        partitions_by_user_endpoint,
+    })
 }
 
 /// The `error_message` of a heartbeat that the member epoch check refused, in

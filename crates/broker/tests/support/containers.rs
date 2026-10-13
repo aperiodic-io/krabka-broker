@@ -154,14 +154,11 @@ pub async fn start_jvm_single(
     init_jvm_tracing(default_filter);
     let listeners = jvm_listeners();
     let dir = tempfile::tempdir().expect("broker directory");
-    let mut config = jvm_single_broker_config(
-        dir.path().to_path_buf(),
-        JvmSingleBrokerSetup {
-            listen: &listeners.listen,
-            advertised: &listeners.advertised,
-            controller: &listeners.controller,
-        },
-    );
+    let mut config = jvm_single_broker_config(dir.path().to_path_buf(), JvmSingleBrokerSetup {
+        listen: &listeners.listen,
+        advertised: &listeners.advertised,
+        controller: &listeners.controller,
+    });
     adjust(&mut config);
     let broker = krabka_broker::Broker::start(config)
         .await
@@ -174,13 +171,9 @@ pub async fn start_jvm_single(
 }
 
 /// Initialize tracing with the suite's default filter.
-pub fn init_jvm_tracing(default_filter: &str) {
-    super::init_tracing_with(default_filter);
-}
+pub fn init_jvm_tracing(default_filter: &str) { super::init_tracing_with(default_filter); }
 
-use krabka_broker::NodeId;
-
-use crate::support::controller_voters;
+use {crate::support::controller_voters, krabka_broker::NodeId};
 
 #[derive(krabka_macros::FieldDefaults)]
 pub struct JvmBrokerSetup {
@@ -237,16 +230,13 @@ pub fn jvm_single_broker_config(
     setup: JvmSingleBrokerSetup<'_>,
 ) -> krabka_broker::BrokerConfig {
     let controller: std::net::SocketAddr = setup.controller.parse().expect("controller address");
-    jvm_broker_config(
-        log_dir,
-        JvmBrokerSetup {
-            listen: setup.listen.parse().expect("client address"),
-            controller,
-            advertised: setup.advertised.into(),
-            voters: vec![(NodeId(1), controller.to_string())],
-            ..Default::default()
-        },
-    )
+    jvm_broker_config(log_dir, JvmBrokerSetup {
+        listen: setup.listen.parse().expect("client address"),
+        controller,
+        advertised: setup.advertised.into(),
+        voters: vec![(NodeId(1), controller.to_string())],
+        ..Default::default()
+    })
 }
 
 /// Prepare a tool container with Docker options kept in the caller's order.
@@ -441,18 +431,15 @@ pub async fn start_jvm_cluster<const N: usize>(
         .enumerate()
         .map(|(index, port)| {
             let dir = tempfile::tempdir().expect("broker directory");
-            let mut config = jvm_broker_config(
-                dir.path().to_path_buf(),
-                JvmBrokerSetup {
-                    node: krabka_broker::NodeId(voters[index].0),
-                    listen: format!("0.0.0.0:{port}").parse().expect("client address"),
-                    controller: format!("0.0.0.0:{}", controller_ports[index])
-                        .parse()
-                        .expect("controller address"),
-                    advertised: format!("host.docker.internal:{port}"),
-                    voters: controller_voters(&voters),
-                },
-            );
+            let mut config = jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
+                node: krabka_broker::NodeId(voters[index].0),
+                listen: format!("0.0.0.0:{port}").parse().expect("client address"),
+                controller: format!("0.0.0.0:{}", controller_ports[index])
+                    .parse()
+                    .expect("controller address"),
+                advertised: format!("host.docker.internal:{port}"),
+                voters: controller_voters(&voters),
+            });
             adjust(&mut config);
             (
                 tokio::spawn(async move {

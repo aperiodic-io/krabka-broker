@@ -7,29 +7,29 @@
 //! protocol versions the suite pins live here too, next to the encoders that
 //! read them.
 
-use std::net::SocketAddr;
-
-use bytes::BytesMut;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        alter_replica_log_dirs_request::{
-            AlterReplicaLogDir, AlterReplicaLogDirTopic, AlterReplicaLogDirsRequest,
+use {
+    crate::support::{
+        configs::{
+            ConfigOperation, IncrementalConfigsSetup, incremental_config, incremental_request,
+            incremental_resource,
         },
-        alter_replica_log_dirs_response::AlterReplicaLogDirsResponse,
-        describe_log_dirs_request::DescribeLogDirsRequest,
-        describe_log_dirs_response::DescribeLogDirsResponse,
+        wire::ApiRequestSetup,
     },
-};
-use tokio::net::TcpStream;
-
-use crate::support::{
-    configs::{
-        ConfigOperation, IncrementalConfigsSetup, incremental_config, incremental_request,
-        incremental_resource,
+    bytes::BytesMut,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            alter_replica_log_dirs_request::{
+                AlterReplicaLogDir, AlterReplicaLogDirTopic, AlterReplicaLogDirsRequest,
+            },
+            alter_replica_log_dirs_response::AlterReplicaLogDirsResponse,
+            describe_log_dirs_request::DescribeLogDirsRequest,
+            describe_log_dirs_response::DescribeLogDirsResponse,
+        },
     },
-    wire::ApiRequestSetup,
+    std::net::SocketAddr,
+    tokio::net::TcpStream,
 };
 
 pub(crate) const CLIENT_ID: &str = "krabka-arld-test";
@@ -69,14 +69,10 @@ pub(crate) async fn alter_replica_log_dirs(
         ..Default::default()
     };
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    flexible_exchange(
-        &mut stream,
-        &req,
-        ApiRequestSetup {
-            api_key: WireApiKey(34),
-            version: WireApiVersion(ALTER_VERSION),
-        },
-    )
+    flexible_exchange(&mut stream, &req, ApiRequestSetup {
+        api_key: WireApiKey(34),
+        version: WireApiVersion(ALTER_VERSION),
+    })
     .await
 }
 
@@ -94,14 +90,10 @@ pub(crate) async fn describe_log_dirs_at(
         ..Default::default()
     };
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    flexible_exchange(
-        &mut stream,
-        &req,
-        ApiRequestSetup {
-            api_key: WireApiKey(35),
-            version: WireApiVersion(version),
-        },
-    )
+    flexible_exchange(&mut stream, &req, ApiRequestSetup {
+        api_key: WireApiKey(35),
+        version: WireApiVersion(version),
+    })
     .await
 }
 
@@ -116,27 +108,22 @@ pub(crate) async fn set_broker_config(
     use krabka_protocol::owned::incremental_alter_configs_response::IncrementalAlterConfigsResponse;
     let version: i16 = 1;
     let req = incremental_request(IncrementalConfigsSetup {
-        resources: vec![incremental_resource(
-            4,
-            broker.to_string(),
-            vec![incremental_config(
+        resources: vec![incremental_resource(4, broker.to_string(), vec![
+            incremental_config(
                 name.to_string(),
                 Some(value.to_string()),
                 ConfigOperation::Set,
-            )],
-        )],
+            ),
+        ])],
         ..Default::default()
     });
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let resp: IncrementalAlterConfigsResponse = flexible_exchange(
-        &mut stream,
-        &req,
-        ApiRequestSetup {
+    let resp: IncrementalAlterConfigsResponse =
+        flexible_exchange(&mut stream, &req, ApiRequestSetup {
             api_key: WireApiKey(44),
             version: WireApiVersion(version),
-        },
-    )
-    .await;
+        })
+        .await;
     (
         resp.responses[0].error_code,
         resp.responses[0].error_message.clone(),

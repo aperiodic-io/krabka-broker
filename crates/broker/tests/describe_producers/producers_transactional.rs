@@ -2,50 +2,45 @@
 //! `current_txn_start_offset` and `coordinator_epoch`, tracked across an open
 //! transaction, the `WriteTxnMarkers` that completes it, and the next one.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    produce_request::ProduceRequest, write_txn_markers_request::WriteTxnMarkersRequest,
-};
-
-use crate::{
-    producers_harness::{
-        create_topic, init_transactional_producer, topic_id_for, transactional_batch,
+use {
+    crate::{
+        producers_harness::{
+            create_topic, init_transactional_producer, topic_id_for, transactional_batch,
+        },
+        support::{
+            self,
+            admin::describe_producers_request,
+            produce::{SinglePartitionProduceSetup, batch_request},
+            records::{ProducerSequence, ProducerValuesSetup},
+            topics::CreateTopicSetup,
+            transactions::ProducerEpoch,
+        },
     },
-    support::{
-        self,
-        admin::describe_producers_request,
-        produce::{SinglePartitionProduceSetup, batch_request},
-        records::{ProducerSequence, ProducerValuesSetup},
-        topics::CreateTopicSetup,
-        transactions::ProducerEpoch,
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        produce_request::ProduceRequest, write_txn_markers_request::WriteTxnMarkersRequest,
     },
 };
 
 #[tokio::test]
 async fn transactional_fields_follow_open_and_completed_transactions() {
     let p = support::start().await;
-    create_topic(
-        &p.client,
-        CreateTopicSetup {
-            topic: "transactions",
-            ..Default::default()
-        },
-    )
+    create_topic(&p.client, CreateTopicSetup {
+        topic: "transactions",
+        ..Default::default()
+    })
     .await;
     let topic_id = topic_id_for(&p.client, "transactions").await;
     let (pid, epoch) = init_transactional_producer(&p, "describe-producers-tid").await;
 
     let produce_response = p
         .client
-        .send(transaction_values_request(
-            topic_id,
-            ProducerValuesSetup {
-                pid: krabka_ids::ProducerId(pid),
-                epoch: ProducerEpoch(epoch),
-                values: &["first"],
-                ..Default::default()
-            },
-        ))
+        .send(transaction_values_request(topic_id, ProducerValuesSetup {
+            pid: krabka_ids::ProducerId(pid),
+            epoch: ProducerEpoch(epoch),
+            values: &["first"],
+            ..Default::default()
+        }))
         .await
         .expect("transactional Produce");
     assert!(produce_response.responses[0].partition_responses[0].error_code == 0);
@@ -84,15 +79,12 @@ async fn transactional_fields_follow_open_and_completed_transactions() {
 
     let produce_response = p
         .client
-        .send(transaction_values_request(
-            topic_id,
-            ProducerValuesSetup {
-                pid: krabka_ids::ProducerId(pid),
-                epoch: ProducerEpoch(epoch),
-                base_seq: ProducerSequence(1),
-                values: &["second"],
-            },
-        ))
+        .send(transaction_values_request(topic_id, ProducerValuesSetup {
+            pid: krabka_ids::ProducerId(pid),
+            epoch: ProducerEpoch(epoch),
+            base_seq: ProducerSequence(1),
+            values: &["second"],
+        }))
         .await
         .expect("second transactional Produce");
     assert!(produce_response.responses[0].partition_responses[0].error_code == 0);
@@ -127,13 +119,10 @@ fn transaction_values_request(
 ) -> ProduceRequest {
     ProduceRequest {
         transactional_id: Some("describe-producers-tid".into()),
-        ..batch_request(
-            transactional_batch(values),
-            SinglePartitionProduceSetup {
-                topic: ("transactions").into(),
-                topic_id,
-                ..SinglePartitionProduceSetup::replicated()
-            },
-        )
+        ..batch_request(transactional_batch(values), SinglePartitionProduceSetup {
+            topic: ("transactions").into(),
+            topic_id,
+            ..SinglePartitionProduceSetup::replicated()
+        })
     }
 }

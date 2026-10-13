@@ -19,12 +19,13 @@
 //! after the swap. Separate calls within a larger operation can therefore use
 //! different implementations.
 
-use std::sync::{Arc, RwLock};
-
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{
-    RemoteLogMetadataManager, RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
-    RemotePartitionDeleteMetadata, RemoteStorageError, TopicIdPartition,
+use {
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{
+        RemoteLogMetadataManager, RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
+        RemotePartitionDeleteMetadata, RemoteStorageError, TopicIdPartition,
+    },
+    std::sync::{Arc, RwLock},
 };
 
 /// Hot-swappable [`RemoteLogMetadataManager`] wrapper.
@@ -124,11 +125,12 @@ impl RemoteLogMetadataManager for SwappableRlmm {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_remote_storage::InmemoryRemoteLogMetadataManager;
-
-    use super::*;
-    use crate::manager::test_support::{started, tp};
+    use {
+        super::*,
+        crate::manager::test_support::{started, tp},
+        assert2::assert,
+        krabka_remote_storage::InmemoryRemoteLogMetadataManager,
+    };
 
     #[test]
     fn delegates_to_initial_then_to_swapped() {

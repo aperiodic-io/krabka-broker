@@ -5,10 +5,11 @@
 //! on their own, so this is the one place that writes the payload and no byte
 //! of it moves. The parent module documents the layout the writer follows.
 
-use krabka_metadata::{PatternType, TopicFreezeRecord};
-use krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED};
-
-use crate::signing_domains::{FREEZE_DOMAIN, put_len_prefixed};
+use {
+    crate::signing_domains::{FREEZE_DOMAIN, put_len_prefixed},
+    krabka_metadata::{PatternType, TopicFreezeRecord},
+    krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED},
+};
 
 /// The canonical bytes that an operator signs to author `record` in the
 /// cluster named by `cluster_id`.

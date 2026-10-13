@@ -2,13 +2,13 @@
 //! size budget, the trim safety lag, and the index-projection stall timeout,
 //! in one `FlushConfig` that the broker derives from its own `BrokerConfig`.
 
-use std::time::Duration;
-
-use krabka_units::{ByteSize, convert::TimeExt as _};
-
-use crate::config::{
-    BrokerConfig, DEFAULT_DISKLESS_WAL_FLUSH_INTERVAL, DEFAULT_DISKLESS_WAL_FLUSH_MAX_SIZE,
-    DEFAULT_DISKLESS_WAL_INDEX_PROJECTION_TIMEOUT, DEFAULT_DISKLESS_WAL_TRIM_SAFETY_LAG,
+use {
+    crate::config::{
+        BrokerConfig, DEFAULT_DISKLESS_WAL_FLUSH_INTERVAL, DEFAULT_DISKLESS_WAL_FLUSH_MAX_SIZE,
+        DEFAULT_DISKLESS_WAL_INDEX_PROJECTION_TIMEOUT, DEFAULT_DISKLESS_WAL_TRIM_SAFETY_LAG,
+    },
+    krabka_units::{ByteSize, convert::TimeExt as _},
+    std::time::Duration,
 };
 
 #[derive(Debug, Clone, krabka_macros::FieldDefaults)]
@@ -40,10 +40,7 @@ impl FlushConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::config::BrokerConfig;
+    use {super::*, crate::config::BrokerConfig, assert2::assert};
 
     #[tokio::test]
     async fn default_config_enables_safe_trim_lag() {

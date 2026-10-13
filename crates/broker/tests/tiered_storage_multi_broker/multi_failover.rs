@@ -9,21 +9,21 @@
 //! in the sibling modules; what remains here is the ordering between them and
 //! the discriminating assertion, which must keep requiring every record back.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-
-use crate::{
-    RECORDS, TOPIC,
-    multi_client::fetch_all_records,
-    multi_cluster::{
-        await_all_brokers_registered, await_all_rlmm_active, start_three_tiered_brokers,
+use {
+    crate::{
+        RECORDS, TOPIC,
+        multi_client::fetch_all_records,
+        multi_cluster::{
+            await_all_brokers_registered, await_all_rlmm_active, start_three_tiered_brokers,
+        },
+        multi_workload::{
+            await_follower_local_eviction, create_tiered_topic, produce_and_await_remote_segments,
+        },
+        support::client::connect_owned,
     },
-    multi_workload::{
-        await_follower_local_eviction, create_tiered_topic, produce_and_await_remote_segments,
-    },
-    support::client::connect_owned,
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    std::time::{Duration, Instant},
 };
 
 /// In-process multi-broker tiered metadata-sharing proof.

@@ -5,18 +5,21 @@
 //! primitive, and each drives one request on a freshly authenticated
 //! connection.
 
-use krabka_protocol::owned::{
-    fetch_request::FetchRequest, fetch_response::FetchResponse,
-    init_producer_id_request::InitProducerIdRequest,
-    init_producer_id_response::InitProducerIdResponse, join_group_request::JoinGroupRequest,
-    join_group_response::JoinGroupResponse, metadata_request::MetadataRequest,
-    metadata_response::MetadataResponse,
-};
-
 pub use crate::kafka_wire::{drive_produce_as_plain, single_record_produce_request};
-use crate::{
-    FETCH_VERSION, INIT_PRODUCER_ID_VERSION, JOIN_GROUP_VERSION, METADATA_VERSION,
-    support::classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol},
+use {
+    crate::{
+        FETCH_VERSION, INIT_PRODUCER_ID_VERSION, JOIN_GROUP_VERSION, METADATA_VERSION,
+        support::classic::{
+            ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol,
+        },
+    },
+    krabka_protocol::owned::{
+        fetch_request::FetchRequest, fetch_response::FetchResponse,
+        init_producer_id_request::InitProducerIdRequest,
+        init_producer_id_response::InitProducerIdResponse, join_group_request::JoinGroupRequest,
+        join_group_response::JoinGroupResponse, metadata_request::MetadataRequest,
+        metadata_response::MetadataResponse,
+    },
 };
 
 crate::plain_request_driver_fixture!(pub drive_fetch_as_plain {

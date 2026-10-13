@@ -10,22 +10,23 @@
 //! each field only at the versions that define it, so the conversion drops
 //! the fields the lower version does not have, as Kafka's own encoder does.
 
-use bytes::{Bytes, BytesMut};
-use krabka_ids::ApiKey;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        begin_quorum_epoch_request::BeginQuorumEpochRequest,
-        begin_quorum_epoch_response::BeginQuorumEpochResponse,
-        end_quorum_epoch_request::EndQuorumEpochRequest,
-        end_quorum_epoch_response::EndQuorumEpochResponse, fetch_request::FetchRequest,
-        fetch_response::FetchResponse, fetch_snapshot_request::FetchSnapshotRequest,
-        fetch_snapshot_response::FetchSnapshotResponse, vote_request::VoteRequest,
-        vote_response::VoteResponse,
+use {
+    crate::{kraft::transport::PeerApi, network::addressing::api_version_for},
+    bytes::{Bytes, BytesMut},
+    krabka_ids::ApiKey,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            begin_quorum_epoch_request::BeginQuorumEpochRequest,
+            begin_quorum_epoch_response::BeginQuorumEpochResponse,
+            end_quorum_epoch_request::EndQuorumEpochRequest,
+            end_quorum_epoch_response::EndQuorumEpochResponse, fetch_request::FetchRequest,
+            fetch_response::FetchResponse, fetch_snapshot_request::FetchSnapshotRequest,
+            fetch_snapshot_response::FetchSnapshotResponse, vote_request::VoteRequest,
+            vote_response::VoteResponse,
+        },
     },
 };
-
-use crate::{kraft::transport::PeerApi, network::addressing::api_version_for};
 
 /// The version to send `key` at: the engine's version, or the peer's maximum
 /// when the peer advertises a range that ends below it. A peer that
@@ -101,13 +102,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::fetch_request::{self as fetch_req};
-
-    use super::*;
-    use crate::kraft::transport::{
-        api_key,
-        wire::{FETCH_VERSION, METADATA_TOPIC_ID, VOTE_VERSION},
+    use {
+        super::*,
+        crate::kraft::transport::{
+            api_key,
+            wire::{FETCH_VERSION, METADATA_TOPIC_ID, VOTE_VERSION},
+        },
+        assert2::check,
+        krabka_protocol::owned::fetch_request::{self as fetch_req},
     };
 
     /// A peer whose range ends below the engine's version gets its maximum;

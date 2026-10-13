@@ -1,7 +1,8 @@
-use assert2::assert;
-
-use super::*;
-use crate::schema::{SchemaBatchAdmission, SchemaFailureKind, SchemaFieldRole};
+use {
+    super::*,
+    crate::schema::{SchemaBatchAdmission, SchemaFailureKind, SchemaFieldRole},
+    assert2::assert,
+};
 
 fn check_frontier(
     fields: &[SchemaWalkField],

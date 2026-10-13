@@ -18,16 +18,17 @@
 //! `AccessControlEntry` constructor throw, which fails every creation
 //! ([`has_filter_only_element`]).
 
-use krabka_authz::cidr::Cidr;
-use krabka_metadata::AclEntry;
-use krabka_protocol::owned::create_acls_request::AclCreation;
-
-use crate::{
-    codes,
-    handlers::acl_wire::{
-        CLUSTER_RESOURCE_NAME, operation_concrete, pattern_type_concrete, permission_concrete,
-        resource_type_concrete,
+use {
+    crate::{
+        codes,
+        handlers::acl_wire::{
+            CLUSTER_RESOURCE_NAME, operation_concrete, pattern_type_concrete, permission_concrete,
+            resource_type_concrete,
+        },
     },
+    krabka_authz::cidr::Cidr,
+    krabka_metadata::AclEntry,
+    krabka_protocol::owned::create_acls_request::AclCreation,
 };
 
 /// The message `CreateAcls` answers with when a host containing `/` is
@@ -136,9 +137,7 @@ fn permission_type_name(code: i8) -> &'static str {
     }
 }
 
-fn invalid(message: String) -> (i16, String) {
-    (codes::INVALID_REQUEST, message)
-}
+fn invalid(message: String) -> (i16, String) { (codes::INVALID_REQUEST, message) }
 
 /// What `CreateAcls` checks about the host of a binding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,45 +240,40 @@ fn validate_host(host: &str, cidr_hosts_supported: bool) -> Result<(), (i16, Str
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType};
-    use krabka_protocol::owned::create_acls_request::AclCreation;
-
-    use super::{HostCheck, has_filter_only_element, has_unknown_element};
-    use crate::{
-        codes::{self, INVALID_REQUEST, UNSUPPORTED_VERSION},
-        handlers::create_acls::test_support::{OPERATION_READ, creation, validate},
-        test_support::{AllowAclSetup, allow_acl},
+    use {
+        super::{HostCheck, has_filter_only_element, has_unknown_element},
+        crate::{
+            codes::{self, INVALID_REQUEST, UNSUPPORTED_VERSION},
+            handlers::create_acls::test_support::{OPERATION_READ, creation, validate},
+            test_support::{AllowAclSetup, allow_acl},
+        },
+        assert2::assert,
+        krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType},
+        krabka_protocol::owned::create_acls_request::AclCreation,
     };
 
     #[test]
     fn validate_accepts_any_principal_type_and_the_kafka_cluster_name() {
         type Shape = fn(&mut AclCreation);
         let cases: [(Shape, AclEntry); 4] = [
-            (
-                |_| {},
-                AclEntry {
-                    resource_type: ResourceType::Topic,
-                    resource_name: "topic-a".into(),
-                    pattern_type: PatternType::Literal,
-                    principal: "User:alice".into(),
-                    host: "*".into(),
-                    operation: AclOperation::Read,
-                    permission_type: PermissionType::Allow,
-                },
-            ),
-            (
-                |c| c.principal = "Group:ops".into(),
-                AclEntry {
-                    resource_type: ResourceType::Topic,
-                    resource_name: "topic-a".into(),
-                    pattern_type: PatternType::Literal,
-                    principal: "Group:ops".into(),
-                    host: "*".into(),
-                    operation: AclOperation::Read,
-                    permission_type: PermissionType::Allow,
-                },
-            ),
+            (|_| {}, AclEntry {
+                resource_type: ResourceType::Topic,
+                resource_name: "topic-a".into(),
+                pattern_type: PatternType::Literal,
+                principal: "User:alice".into(),
+                host: "*".into(),
+                operation: AclOperation::Read,
+                permission_type: PermissionType::Allow,
+            }),
+            (|c| c.principal = "Group:ops".into(), AclEntry {
+                resource_type: ResourceType::Topic,
+                resource_name: "topic-a".into(),
+                pattern_type: PatternType::Literal,
+                principal: "Group:ops".into(),
+                host: "*".into(),
+                operation: AclOperation::Read,
+                permission_type: PermissionType::Allow,
+            }),
             (
                 |c| {
                     c.resource_type = 4;
@@ -447,12 +441,9 @@ mod tests {
         for (host, cidr_hosts_supported, expected_err) in cases {
             let mut c = creation("topic-a", "User:alice", OPERATION_READ);
             c.host = (*host).into();
-            let got = super::validate(
-                &c,
-                HostCheck::Trunk {
-                    cidr_hosts_supported: *cidr_hosts_supported,
-                },
-            )
+            let got = super::validate(&c, HostCheck::Trunk {
+                cidr_hosts_supported: *cidr_hosts_supported,
+            })
             .err();
             let expected = expected_err.map(|(code, msg)| (code, msg.to_owned()));
             assert!(

@@ -12,14 +12,14 @@
 //! the whole metadata log — and does not ask a pruned controller for records it
 //! no longer holds.
 
-use std::sync::{Arc, atomic::Ordering};
-
-use krabka_raft::NodeId;
-use krabka_units::convert::TimeExt as _;
-use tokio_util::sync::CancellationToken;
-
-use super::{MetadataObserver, ObserverConfig, fetch::fetch_once, store::ObserverStore};
-use crate::{controller_endpoint::quorum_targets, time_util};
+use {
+    super::{MetadataObserver, ObserverConfig, fetch::fetch_once, store::ObserverStore},
+    crate::{controller_endpoint::quorum_targets, time_util},
+    krabka_raft::NodeId,
+    krabka_units::convert::TimeExt as _,
+    std::sync::{Arc, atomic::Ordering},
+    tokio_util::sync::CancellationToken,
+};
 
 /// Names this loop in the timer-failure logs that [`time_util::arm`] and
 /// [`time_util::fired`] emit.
@@ -280,22 +280,24 @@ pub(super) async fn run_loop(
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::atomic::AtomicUsize, time::Duration};
-
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_protocol::owned::api_versions_request;
-    use krabka_raft::OutboundDialer;
-    use krabka_units::millis;
-    use qubit_clock::{ManualMonotonicClock, MonotonicClock as _, Timer};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        health::metadata_progress,
-        metadata_observer::test_support::{api_versions_response_v0, observer_config},
-        metadata_source::{MetadataWriter, ObserverSource},
-        test_support::{BrokenTimer, TimerFailure, mock_request_broker, single_partition_topic},
+    use {
+        super::*,
+        crate::{
+            health::metadata_progress,
+            metadata_observer::test_support::{api_versions_response_v0, observer_config},
+            metadata_source::{MetadataWriter, ObserverSource},
+            test_support::{
+                BrokenTimer, TimerFailure, mock_request_broker, single_partition_topic,
+            },
+        },
+        assert2::assert,
+        bytes::Bytes,
+        krabka_protocol::owned::api_versions_request,
+        krabka_raft::OutboundDialer,
+        krabka_units::millis,
+        qubit_clock::{ManualMonotonicClock, MonotonicClock as _, Timer},
+        std::{sync::atomic::AtomicUsize, time::Duration},
+        uuid::Uuid,
     };
 
     /// A write side for an `ObserverSource` built only to read offsets
@@ -402,14 +404,11 @@ mod tests {
         let node = NodeId;
         // (target that missed, cursor afterwards)
         let cases = [(1, 2), (2, 3), (3, 1), (9, 1)].map(|(missed, next)| {
-            (
-                missed,
-                Cursor {
-                    current: Some(node(next)),
-                    leader: Some(node(2)),
-                    failed: Some(node(missed)),
-                },
-            )
+            (missed, Cursor {
+                current: Some(node(next)),
+                leader: Some(node(2)),
+                failed: Some(node(missed)),
+            })
         });
         for (missed, expected) in cases {
             let mut cursor = Cursor {

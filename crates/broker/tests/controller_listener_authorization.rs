@@ -13,45 +13,46 @@
 
 mod support;
 
-use assert2::{assert, check};
-use krabka_metadata::{MetadataRecord, TopicRecord};
-use krabka_protocol::owned::{
-    broker_heartbeat_request::{self, BrokerHeartbeatRequest},
-    broker_heartbeat_response::BrokerHeartbeatResponse,
-    create_topics_request::{self},
-    create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
-    describe_cluster_request::{self, DescribeClusterRequest},
-    describe_cluster_response::DescribeClusterResponse,
-    describe_quorum_request::{self},
-    describe_quorum_response::DescribeQuorumResponse,
-    sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
-    sasl_handshake_request::SaslHandshakeRequest,
-    sasl_handshake_response::SaslHandshakeResponse,
-    vote_request::{self, VoteRequest},
-    vote_response::VoteResponse,
-};
-use krabka_raft::{
-    API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE, KrabkaMetadataFetchRequest,
-    KrabkaMetadataFetchResponse, KrabkaSubmitChangeRequest, KrabkaSubmitChangeResponse,
-};
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},
-    net::TcpStream,
-};
-use tokio_rustls::rustls::{
-    ClientConfig,
-    pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject as _},
-};
-
-use crate::support::{
-    acl::{ClusterAclSetup, cluster_acl_record},
-    controller_listener::*,
-    quorum::describe_quorum_request as support_describe_quorum_request,
-    start_with_bound_listeners,
-    tls::{PinnedCertVerifier, fixture_signature_schemes},
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        acl::{ClusterAclSetup, cluster_acl_record},
+        controller_listener::*,
+        quorum::describe_quorum_request as support_describe_quorum_request,
+        start_with_bound_listeners,
+        tls::{PinnedCertVerifier, fixture_signature_schemes},
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    assert2::{assert, check},
+    krabka_metadata::{MetadataRecord, TopicRecord},
+    krabka_protocol::owned::{
+        broker_heartbeat_request::{self, BrokerHeartbeatRequest},
+        broker_heartbeat_response::BrokerHeartbeatResponse,
+        create_topics_request::{self},
+        create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
+        describe_cluster_request::{self, DescribeClusterRequest},
+        describe_cluster_response::DescribeClusterResponse,
+        describe_quorum_request::{self},
+        describe_quorum_response::DescribeQuorumResponse,
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+        sasl_handshake_request::SaslHandshakeRequest,
+        sasl_handshake_response::SaslHandshakeResponse,
+        vote_request::{self, VoteRequest},
+        vote_response::VoteResponse,
+    },
+    krabka_raft::{
+        API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE, KrabkaMetadataFetchRequest,
+        KrabkaMetadataFetchResponse, KrabkaSubmitChangeRequest, KrabkaSubmitChangeResponse,
+    },
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    tokio::{
+        io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},
+        net::TcpStream,
+    },
+    tokio_rustls::rustls::{
+        ClientConfig,
+        pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject as _},
+    },
 };
 
 const CLUSTER_AUTHORIZATION_FAILED: i16 = 31;
@@ -351,10 +352,9 @@ async fn a_sasl_controller_listener_authorizes_each_request_for_its_principal() 
     const REPLICATOR: (&str, &str) = ("replicator", "replicator-secret");
     const READER: (&str, &str) = ("reader", "reader-secret");
 
-    let (broker, _dir) = start(
-        ListenerProtocol::SaslPlaintext,
-        &[CREATOR, REPLICATOR, READER],
-    )
+    let (broker, _dir) = start(ListenerProtocol::SaslPlaintext, &[
+        CREATOR, REPLICATOR, READER,
+    ])
     .await;
     allow(&broker, "User:creator", AclOperation::Create).await;
     allow(&broker, "User:replicator", AclOperation::ClusterAction).await;

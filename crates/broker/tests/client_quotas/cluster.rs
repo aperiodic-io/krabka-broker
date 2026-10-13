@@ -4,14 +4,13 @@
 //! `SimpleAclAuthorizer`, creates topics as the super user, and seeds the ACL
 //! records a test needs before the authorizer lets alice produce or fetch.
 
-use krabka_broker::BrokerHandle;
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Cluster setup helpers
 // ─────────────────────────────────────────────────────────────────────────────
 /// Creates a topic with SASL/PLAIN as admin. Asserts success.
 pub use crate::kafka_wire::create_topic_as_admin;
 pub use crate::support::sasl::start_sasl_plaintext_with_acl_users as start_single_broker_sasl_plaintext_with_users;
+use krabka_broker::BrokerHandle;
 
 /// Waits until `handle` sees `(topic, partition)` in its image.
 pub async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition: i32) {

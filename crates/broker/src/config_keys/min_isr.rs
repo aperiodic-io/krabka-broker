@@ -49,13 +49,15 @@
 //! min ISR -- can only clear the set early. It cannot leave a replica in it
 //! that an accepted write has moved past.
 
-use super::{
-    MIN_INSYNC_REPLICAS,
-    lookup::{topic_node_or_cluster_default, topic_or_cluster_default},
-};
-use crate::{
-    elr::unclean_restart::clear_published_elr_for_topic,
-    features::{ELR_VERSION, feature_enabled},
+use {
+    super::{
+        MIN_INSYNC_REPLICAS,
+        lookup::{topic_node_or_cluster_default, topic_or_cluster_default},
+    },
+    crate::{
+        elr::unclean_restart::clear_published_elr_for_topic,
+        features::{ELR_VERSION, feature_enabled},
+    },
 };
 
 pub(crate) fn clear_elr_records(
@@ -126,14 +128,15 @@ pub(crate) fn effective_min_insync_replicas(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{
-        BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord, NodeId,
-        PartitionElrRecord, PartitionRecord, TopicConfigRecord,
+    use {
+        super::*,
+        crate::test_support::{TopicSetup, finalize_elr_version, topic_image},
+        assert2::check,
+        krabka_metadata::{
+            BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord,
+            NodeId, PartitionElrRecord, PartitionRecord, TopicConfigRecord,
+        },
     };
-
-    use super::*;
-    use crate::test_support::{TopicSetup, finalize_elr_version, topic_image};
 
     fn image(topic_override: Option<&str>, cluster_default: Option<&str>) -> MetadataImage {
         let mut image = topic_image(TopicSetup {

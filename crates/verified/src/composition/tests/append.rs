@@ -1,11 +1,12 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{
-    append_frontiers_agree, reservations_do_not_overlap,
-    reserved_pair_preserves_recovery_and_ack_order,
+use {
+    super::{
+        append_frontiers_agree, reservations_do_not_overlap,
+        reserved_pair_preserves_recovery_and_ack_order,
+    },
+    crate::composition::append::AppendFrontiers,
+    assert2::assert,
+    proptest::prelude::*,
 };
-use crate::composition::append::AppendFrontiers;
 
 fn append_oracle(base: i64, delta: i32) -> Option<AppendFrontiers> {
     let last = i128::from(base) + i128::from(delta);

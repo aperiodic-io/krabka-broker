@@ -1,16 +1,16 @@
 //! Flush thresholds, per-segment roll jitter, and deferred file reclamation.
 
-use std::{
-    collections::hash_map::RandomState,
-    hash::BuildHasher,
-    time::{Duration, Instant, SystemTime},
+use {
+    super::Log,
+    crate::{error::LogError, retention},
+    krabka_ids::Offset,
+    krabka_units::{Time, prelude::TimeExt as _},
+    std::{
+        collections::hash_map::RandomState,
+        hash::BuildHasher,
+        time::{Duration, Instant, SystemTime},
+    },
 };
-
-use krabka_ids::Offset;
-use krabka_units::{Time, prelude::TimeExt as _};
-
-use super::Log;
-use crate::{error::LogError, retention};
 
 impl Log {
     /// Flush dirty data and reclaim retired files whose deadlines have passed.
@@ -131,18 +131,14 @@ impl Log {
         if self.config.read().unwrap().file_delete_delay <= Time::ZERO {
             return retention::delete_segment_files(&*self.io, &self.dir, base);
         }
-        self.retire_files(
-            base,
-            now,
-            &[
-                "log",
-                "index",
-                "timeindex",
-                "txnindex",
-                "stampindex",
-                "snapshot",
-            ],
-        )
+        self.retire_files(base, now, &[
+            "log",
+            "index",
+            "timeindex",
+            "txnindex",
+            "stampindex",
+            "snapshot",
+        ])
     }
 
     pub(super) fn retire_files(

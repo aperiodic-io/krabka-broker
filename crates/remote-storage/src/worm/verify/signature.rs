@@ -6,10 +6,11 @@
 //! continues, but its report cannot be `ok`; a signature that fails against a
 //! trusted key stops the walk.
 
-use krabka_verified::{WormSignatureDecision, worm_signature_decision};
-
-use super::TrustedManifestKeys;
-use crate::worm::manifest::{SegmentManifest, verify_manifest_signature};
+use {
+    super::TrustedManifestKeys,
+    crate::worm::manifest::{SegmentManifest, verify_manifest_signature},
+    krabka_verified::{WormSignatureDecision, worm_signature_decision},
+};
 
 /// What one manifest's signature is worth to this run.
 pub(super) enum SignatureState {

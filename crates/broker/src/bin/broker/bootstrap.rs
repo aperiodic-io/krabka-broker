@@ -1,9 +1,7 @@
 //! The `Bootstrap` or `Rejoin` decision the broker makes from the state it
 //! finds in its metadata log directory.
 
-use std::path::Path;
-
-use krabka_broker::BootstrapMode;
+use {krabka_broker::BootstrapMode, std::path::Path};
 
 /// Pick `Bootstrap` for a fresh cluster or `Rejoin` for a restart on existing
 /// state. The choice depends on whether the metadata partition directory,
@@ -32,10 +30,7 @@ pub fn detect_bootstrap_mode(metadata_log_dir: &Path) -> BootstrapMode {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use tempfile::tempdir;
-
-    use super::*;
+    use {super::*, assert2::check, tempfile::tempdir};
 
     /// Only a `quorum-state` file or a segment that holds bytes, in the
     /// metadata partition directory, marks a restart.

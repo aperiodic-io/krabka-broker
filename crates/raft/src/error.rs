@@ -1,8 +1,4 @@
-use std::path::PathBuf;
-
-use thiserror::Error;
-
-use crate::types::NodeId;
+use {crate::types::NodeId, std::path::PathBuf, thiserror::Error};
 
 /// What is wrong with a node-local file whose layout carries a version
 /// marker. [`RaftError::PersistedFormat`] names the file.

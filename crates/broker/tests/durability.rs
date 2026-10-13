@@ -4,39 +4,39 @@
 //! openraft and `tokio` scheduling on Windows runners cause flakes that have
 //! nothing to do with the protocol under test.
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle};
-use krabka_client_consumer::{AutoOffsetReset, Consumer, IsolationLevel};
-use krabka_protocol::{
-    owned::{
-        fetch_request::FetchRequest,
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+use {
+    crate::support::{
+        client::{BatchProduceSetup, connect_client},
+        durability::{ReplicatedTopicSetup, TopicReplicasSetup, replicated_topic_fixture},
+        fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+        produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
+        producer::{ProducerRecordSetup, producer_record, transactional_producer},
+        registered_cluster, shutdown_cluster,
+        topics::{
+            CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor, configured_topic_request,
+        },
     },
-    records::RecordBatch,
-};
-use support::{
-    client::metric_value,
-    durability::{
-        create_topic_on_replicas as create_topic, produce_acks, produce_batch,
-        record_batch_with_values,
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle},
+    krabka_client_consumer::{AutoOffsetReset, Consumer, IsolationLevel},
+    krabka_protocol::{
+        owned::{
+            fetch_request::FetchRequest,
+            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+        },
+        records::RecordBatch,
     },
-    topic_id_for,
-};
-use tempfile::TempDir;
-
-use crate::support::{
-    client::{BatchProduceSetup, connect_client},
-    durability::{ReplicatedTopicSetup, TopicReplicasSetup, replicated_topic_fixture},
-    fetch::{SinglePartitionFetchSetup, single_partition_fetch},
-    produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
-    producer::{ProducerRecordSetup, producer_record, transactional_producer},
-    registered_cluster, shutdown_cluster,
-    topics::{
-        CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor, configured_topic_request,
+    std::time::{Duration, Instant},
+    support::{
+        client::metric_value,
+        durability::{
+            create_topic_on_replicas as create_topic, produce_acks, produce_batch,
+            record_batch_with_values,
+        },
+        topic_id_for,
     },
+    tempfile::TempDir,
 };
 
 mod support;
@@ -67,14 +67,10 @@ fn idempotent_batch(pid: i64, base_seq: i32, values: &[&str]) -> RecordBatch {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn idempotent_retry_reappends_after_truncation_instead_of_stalling() {
     let (broker, bootstrap, _dir) = boot_single().await;
-    create_topic(
-        &broker,
-        &bootstrap,
-        TopicReplicasSetup {
-            topic: "trunc",
-            ..Default::default()
-        },
-    )
+    create_topic(&broker, &bootstrap, TopicReplicasSetup {
+        topic: "trunc",
+        ..Default::default()
+    })
     .await;
 
     let base = produce_batch(
@@ -125,14 +121,10 @@ async fn disk_backed_restart_recovers_idempotent_producer_state() {
         .await
         .unwrap();
     let bootstrap = broker.listen_addr().to_string();
-    create_topic(
-        &broker,
-        &bootstrap,
-        TopicReplicasSetup {
-            topic: "restart-dedup",
-            ..Default::default()
-        },
-    )
+    create_topic(&broker, &bootstrap, TopicReplicasSetup {
+        topic: "restart-dedup",
+        ..Default::default()
+    })
     .await;
     let produce_setup = BatchProduceSetup {
         topic: "restart-dedup",
@@ -172,24 +164,16 @@ async fn disk_backed_restart_recovers_idempotent_producer_state() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn acks_one_returns_quickly_on_rf1_broker() {
     let (broker, bootstrap, _dir) = boot_single().await;
-    create_topic(
-        &broker,
-        &bootstrap,
-        TopicReplicasSetup {
-            topic: "ack1",
-            ..Default::default()
-        },
-    )
+    create_topic(&broker, &bootstrap, TopicReplicasSetup {
+        topic: "ack1",
+        ..Default::default()
+    })
     .await;
     let start = Instant::now();
-    let offset = produce_acks(
-        &bootstrap,
-        &["a", "b", "c"],
-        BatchProduceSetup {
-            topic: "ack1",
-            ..Default::default()
-        },
-    )
+    let offset = produce_acks(&bootstrap, &["a", "b", "c"], BatchProduceSetup {
+        topic: "ack1",
+        ..Default::default()
+    })
     .await
     .expect("ack=1 success");
     let elapsed = start.elapsed();
@@ -204,25 +188,17 @@ async fn acks_one_returns_quickly_on_rf1_broker() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn acks_all_returns_quickly_on_rf1_broker() {
     let (broker, bootstrap, _dir) = boot_single().await;
-    create_topic(
-        &broker,
-        &bootstrap,
-        TopicReplicasSetup {
-            topic: "ackall",
-            ..Default::default()
-        },
-    )
+    create_topic(&broker, &bootstrap, TopicReplicasSetup {
+        topic: "ackall",
+        ..Default::default()
+    })
     .await;
     let start = Instant::now();
-    let offset = produce_acks(
-        &bootstrap,
-        &["a", "b", "c"],
-        BatchProduceSetup {
-            topic: "ackall",
-            acknowledgements: ProduceAcknowledgements::AllReplicas,
-            ..Default::default()
-        },
-    )
+    let offset = produce_acks(&bootstrap, &["a", "b", "c"], BatchProduceSetup {
+        topic: "ackall",
+        acknowledgements: ProduceAcknowledgements::AllReplicas,
+        ..Default::default()
+    })
     .await
     .expect("ack=-1 success");
     let elapsed = start.elapsed();
@@ -237,24 +213,16 @@ async fn acks_all_returns_quickly_on_rf1_broker() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn consumer_clamps_at_hw_when_followers_lag() {
     let (broker, bootstrap, _dir) = boot_single().await;
-    create_topic(
-        &broker,
-        &bootstrap,
-        TopicReplicasSetup {
-            topic: "clamp",
-            ..Default::default()
-        },
-    )
+    create_topic(&broker, &bootstrap, TopicReplicasSetup {
+        topic: "clamp",
+        ..Default::default()
+    })
     .await;
 
-    let offset = produce_acks(
-        &bootstrap,
-        &["x", "y", "z"],
-        BatchProduceSetup {
-            topic: "clamp",
-            ..Default::default()
-        },
-    )
+    let offset = produce_acks(&bootstrap, &["x", "y", "z"], BatchProduceSetup {
+        topic: "clamp",
+        ..Default::default()
+    })
     .await
     .expect("produce ok");
     assert!(offset == 0);
@@ -291,14 +259,10 @@ async fn consumer_clamps_at_hw_when_followers_lag() {
 // in-flight Produce batches before `EndTxn`).
 async fn read_committed_under_rf1_unchanged() {
     let (broker, bootstrap, _dir) = boot_single().await;
-    create_topic(
-        &broker,
-        &bootstrap,
-        TopicReplicasSetup {
-            topic: "rctxn",
-            ..Default::default()
-        },
-    )
+    create_topic(&broker, &bootstrap, TopicReplicasSetup {
+        topic: "rctxn",
+        ..Default::default()
+    })
     .await;
     // The producer does not retry COORDINATOR_NOT_AVAILABLE from
     // FindCoordinator. Bring the transaction coordinator up first.
@@ -366,16 +330,12 @@ async fn acks_all_completes_via_isr_shrink_when_follower_dead() {
     dead.0.shutdown().await;
 
     let start = Instant::now();
-    let offset = produce_acks(
-        &bootstrap_1,
-        &["x", "y", "z"],
-        BatchProduceSetup {
-            topic: "shrink",
-            acknowledgements: ProduceAcknowledgements::AllReplicas,
-            timeout: ProduceTimeoutMillis(10_000),
-            ..Default::default()
-        },
-    )
+    let offset = produce_acks(&bootstrap_1, &["x", "y", "z"], BatchProduceSetup {
+        topic: "shrink",
+        acknowledgements: ProduceAcknowledgements::AllReplicas,
+        timeout: ProduceTimeoutMillis(10_000),
+        ..Default::default()
+    })
     .await
     .expect("acks=-1 success after shrink");
     let elapsed = start.elapsed();
@@ -414,16 +374,12 @@ async fn acks_all_stalled_follower_wait_lands_in_remote_time_not_local_time() {
     let dead = cluster.pop().expect("3rd broker");
     dead.0.shutdown().await;
 
-    let offset = produce_acks(
-        &bootstrap_1,
-        &["x", "y", "z"],
-        BatchProduceSetup {
-            topic: "phase-stall",
-            acknowledgements: ProduceAcknowledgements::AllReplicas,
-            timeout: ProduceTimeoutMillis(10_000),
-            ..Default::default()
-        },
-    )
+    let offset = produce_acks(&bootstrap_1, &["x", "y", "z"], BatchProduceSetup {
+        topic: "phase-stall",
+        acknowledgements: ProduceAcknowledgements::AllReplicas,
+        timeout: ProduceTimeoutMillis(10_000),
+        ..Default::default()
+    })
     .await
     .expect("acks=-1 success after shrink");
     check!(offset == 0);
@@ -552,16 +508,12 @@ async fn acks_all_waits_for_every_partition_at_once_not_one_after_another() {
     support::init_tracing();
     let mut cluster = registered_cluster(2).await;
     let bootstrap_1 = cluster[0].1.listen_addr.to_string();
-    create_topic_with_partitions(
-        &cluster[0].0,
-        &bootstrap_1,
-        CreateTopicSetup {
-            topic: "overlap",
-            num_partitions: TopicPartitionCount(OVERLAP_PARTITIONS),
-            replication_factor: TopicReplicationFactor(2),
-            ..Default::default()
-        },
-    )
+    create_topic_with_partitions(&cluster[0].0, &bootstrap_1, CreateTopicSetup {
+        topic: "overlap",
+        num_partitions: TopicPartitionCount(OVERLAP_PARTITIONS),
+        replication_factor: TopicReplicationFactor(2),
+        ..Default::default()
+    })
     .await;
     // Both replicas in the ISR before the follower goes away, so the wait
     // below is a follower that stopped acknowledging and not one that never

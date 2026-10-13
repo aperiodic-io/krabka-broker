@@ -6,10 +6,11 @@
 //! `StreamsGroupTopologyValue` alone.
 
 // Alias the request wire module for readability.
-use krabka_protocol::owned::streams_group_heartbeat_request as wire;
-
-use crate::coordinator::unified::streams::persistence::{
-    StoredCopartitionGroup, StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue,
+use {
+    crate::coordinator::unified::streams::persistence::{
+        StoredCopartitionGroup, StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue,
+    },
+    krabka_protocol::owned::streams_group_heartbeat_request as wire,
 };
 
 /// Converts a client-supplied [`wire::Topology`] into a persisted
@@ -78,11 +79,12 @@ fn to_stored_copartition_group(c: &wire::CopartitionGroup) -> StoredCopartitionG
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::streams::topology::test_support::{
-        example_source_topics, example_subtopology,
+    use {
+        super::*,
+        crate::coordinator::unified::streams::topology::test_support::{
+            example_source_topics, example_subtopology,
+        },
+        assert2::assert,
     };
 
     #[test]

@@ -1,11 +1,12 @@
 //! Fixtures the argument tests share: the `PartitionRef` a bound names, and a
 //! `RestoreArgs` parsed the way the binary parses it.
 
-use clap::Parser as _;
-
-use crate::{
-    Cli,
-    args::{PartitionRef, RestoreArgs},
+use {
+    crate::{
+        Cli,
+        args::{PartitionRef, RestoreArgs},
+    },
+    clap::Parser as _,
 };
 
 pub(crate) fn partition(topic: &str, index: i32) -> PartitionRef {

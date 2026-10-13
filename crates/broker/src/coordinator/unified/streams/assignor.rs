@@ -22,13 +22,14 @@
 //! and the previous owners, `active` places the active tasks, `standby` places
 //! the standby copies, and `types` holds the input and output shapes.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use self::{
-    active::assign_active,
-    process::LocalState,
-    standby::assign_standby,
-    types::{Task, to_role_maps},
+use {
+    self::{
+        active::assign_active,
+        process::LocalState,
+        standby::assign_standby,
+        types::{Task, to_role_maps},
+    },
+    std::collections::{BTreeMap, BTreeSet},
 };
 
 mod active;

@@ -8,7 +8,6 @@
 //! [`BucketState::record`] are the whole step on the locked group, so they can
 //! be tested without threads.
 
-use krabka_units::prelude::{Time, TimeExt as _};
 /// The micro-token request a whole-token consume hands to [`plan_consume`].
 ///
 /// `requested` is in whole tokens and `total` is the capped balance in
@@ -24,12 +23,14 @@ use krabka_units::prelude::{Time, TimeExt as _};
 /// # Panics
 /// Panics if `units_per_token` is zero.
 pub use krabka_verified::quota::quota_whole_request as whole_token_request;
-use krabka_verified::{
-    quota::{quota_charge, quota_credit, quota_debt_cap, quota_refill},
-    throttle::{AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume},
+use {
+    super::{BucketState, MICROS_PER_TOKEN, TokenBucket},
+    krabka_units::prelude::{Time, TimeExt as _},
+    krabka_verified::{
+        quota::{quota_charge, quota_credit, quota_debt_cap, quota_refill},
+        throttle::{AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume},
+    },
 };
-
-use super::{BucketState, MICROS_PER_TOKEN, TokenBucket};
 
 impl TokenBucket {
     /// Tries to consume up to `requested` whole tokens.
@@ -84,9 +85,7 @@ impl TokenBucket {
     /// # Panics
     /// Panics if the injected clock reads more than `u64::MAX` nanoseconds
     /// since its origin, about 584 years.
-    pub fn record(&self, tokens: u64) -> u64 {
-        self.record_capped(tokens, None)
-    }
+    pub fn record(&self, tokens: u64) -> u64 { self.record_capped(tokens, None) }
 
     /// Charges `tokens` as [`Self::record`] does, and keeps at most `max_wait`
     /// of debt: the debt the refill repays in `max_wait` at the current rate.
@@ -265,22 +264,22 @@ impl BucketState {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering::Relaxed},
-            mpsc::RecvTimeoutError,
+    use {
+        super::*,
+        assert2::check,
+        krabka_units::prelude::{
+            ByteRate, ByteRateExt as _, ByteSize, ByteSizeExt as _, bytes, bytes_per_sec, secs,
         },
-        time::Duration,
+        qubit_clock::ManualMonotonicClock,
+        std::{
+            sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering::Relaxed},
+                mpsc::RecvTimeoutError,
+            },
+            time::Duration,
+        },
     };
-
-    use assert2::check;
-    use krabka_units::prelude::{
-        ByteRate, ByteRateExt as _, ByteSize, ByteSizeExt as _, bytes, bytes_per_sec, secs,
-    };
-    use qubit_clock::ManualMonotonicClock;
-
-    use super::*;
 
     /// Builds a bucket whose refill clock is a manual timeline starting at its
     /// own zero-duration origin, which is what the refill differences measure

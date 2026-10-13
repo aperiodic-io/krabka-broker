@@ -1,10 +1,11 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{
-    ProducerDecision, ProducerSnapshotEntryFacts, oracle_next_producer_decision,
-    oracle_retry_matches, oracle_sequence as sequence, recovered_window_row as row,
-    truncated_replay_bounds_first_retry,
+use {
+    super::{
+        ProducerDecision, ProducerSnapshotEntryFacts, oracle_next_producer_decision,
+        oracle_retry_matches, oracle_sequence as sequence, recovered_window_row as row,
+        truncated_replay_bounds_first_retry,
+    },
+    assert2::assert,
+    proptest::prelude::*,
 };
 
 fn check(

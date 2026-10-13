@@ -3,23 +3,24 @@
 //! A thaw names one approved proposal, the gate matches that proposal against
 //! the scope and the pattern type of the thaw, and a freeze needs none.
 
-use assert2::{assert, check};
-use krabka_metadata::{
-    BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, MetadataImage, MetadataRecord,
-    PatternType, TopicFreezeRecord,
-};
-use krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL;
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use super::{
-    super::checks::{FreezeEnv, check_approval, consumed_proposal_id, record_of},
-    ALICE, PROPOSAL, alice_key_configuration, config_with_alice, freeze_request, image,
-    with_freeze_env,
-};
-use crate::{
-    codes,
-    config::{BreakGlassConfig, BrokerConfig},
+use {
+    super::{
+        super::checks::{FreezeEnv, check_approval, consumed_proposal_id, record_of},
+        ALICE, PROPOSAL, alice_key_configuration, config_with_alice, freeze_request, image,
+        with_freeze_env,
+    },
+    crate::{
+        codes,
+        config::{BreakGlassConfig, BrokerConfig},
+    },
+    assert2::{assert, check},
+    krabka_metadata::{
+        BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, MetadataImage,
+        MetadataRecord, PatternType, TopicFreezeRecord,
+    },
+    krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL,
+    tempfile::TempDir,
+    uuid::Uuid,
 };
 
 #[test]
@@ -95,13 +96,10 @@ fn with_approved_thaw(proposal_id: Uuid, check: impl FnOnce(&FreezeEnv<'_>, &Top
 #[test]
 fn a_proposal_for_one_scope_does_not_thaw_another() {
     let dir = TempDir::new().expect("tempdir");
-    let (config, image) = approved_context(
-        &dir,
-        &[
-            ("orders", PatternType::Literal),
-            ("orders", PatternType::Prefixed),
-        ],
-    );
+    let (config, image) = approved_context(&dir, &[
+        ("orders", PatternType::Literal),
+        ("orders", PatternType::Prefixed),
+    ]);
     with_freeze_env(&config, &image, |env| {
         for (label, pattern_type, expected) in [
             ("the scope the proposal names", PatternType::Literal, None),

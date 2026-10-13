@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::{Int, invariant, logic};
-use super::{LocalRecoveryStep, LocalRecoverySwapAction, LocalRecoverySwapFacts};
-use crate::restore::restore_batch_step;
+use {
+    super::{LocalRecoveryStep, LocalRecoverySwapAction, LocalRecoverySwapFacts},
+    crate::restore::restore_batch_step,
+    creusot_std::prelude::*,
+};
 
 open_logic! {
 /// A `.log.swap` is authoritative once it exists without its `.log.cleaned`.

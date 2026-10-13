@@ -1,7 +1,4 @@
-use std::vec;
-
-use super::*;
-use crate::list_offsets::ListOffsetsSelectionDecision;
+use {super::*, crate::list_offsets::ListOffsetsSelectionDecision, std::vec};
 
 fn visible_oracle(
     record_offsets: &[u32],

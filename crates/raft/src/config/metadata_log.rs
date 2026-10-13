@@ -8,11 +8,12 @@
 //! keeps the same layout, so the JVM tools and Kafka's system tests find the
 //! files where they look for them.
 
-use std::path::{Path, PathBuf};
-
-use krabka_units::{
-    fmt::Human as _,
-    prelude::{ByteSize, Time, days, gibibytes, mebibytes, millis},
+use {
+    krabka_units::{
+        fmt::Human as _,
+        prelude::{ByteSize, Time, days, gibibytes, mebibytes, millis},
+    },
+    std::path::{Path, PathBuf},
 };
 
 /// The name of the metadata partition's directory under the metadata log
@@ -86,10 +87,11 @@ pub struct MetadataLogConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{ByteSizeExt, TimeExt};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_units::prelude::{ByteSizeExt, TimeExt},
+    };
 
     /// The defaults are the numbers Kafka's `MetadataLogConfig` documents.
     #[test]

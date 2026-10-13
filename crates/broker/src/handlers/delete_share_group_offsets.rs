@@ -13,27 +13,28 @@
 //! `network::dispatch` intercepts this request inline for the per-group
 //! `Delete` ACL gate, which needs the principal and the peer `SocketAddr`.
 
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    owned::{
-        delete_share_group_offsets_request::DeleteShareGroupOffsetsRequest,
-        delete_share_group_offsets_response::{
-            DeleteShareGroupOffsetsResponse, DeleteShareGroupOffsetsResponseTopic,
+use {
+    crate::{
+        authorizer::{AuthorizationResult, authorize_topics},
+        codes,
+        coordinator::unified::{
+            GroupType,
+            share::actor::{DeleteTopicOutcome, ShareGroupActorMessage},
         },
+        error::BrokerError,
+        handlers::ErrorResponse as _,
+        task_util::{AskError, ask},
     },
-    primitives::uuid::Uuid,
-};
-
-use crate::{
-    authorizer::{AuthorizationResult, authorize_topics},
-    codes,
-    coordinator::unified::{
-        GroupType,
-        share::actor::{DeleteTopicOutcome, ShareGroupActorMessage},
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        owned::{
+            delete_share_group_offsets_request::DeleteShareGroupOffsetsRequest,
+            delete_share_group_offsets_response::{
+                DeleteShareGroupOffsetsResponse, DeleteShareGroupOffsetsResponseTopic,
+            },
+        },
+        primitives::uuid::Uuid,
     },
-    error::BrokerError,
-    handlers::ErrorResponse as _,
-    task_util::{AskError, ask},
 };
 
 /// Kafka's message for `TOPIC_AUTHORIZATION_FAILED`, which
@@ -239,41 +240,44 @@ fn top_level(error_code: i16, message: Option<String>) -> DeleteShareGroupOffset
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, sync::Arc};
-
-    use assert2::assert;
-    use krabka_metadata::{AclOperation, ResourceType};
-    use krabka_protocol::{
-        owned::{
-            create_topics_request::{CreatableTopic, CreateTopicsRequest},
-            create_topics_response,
-            delete_share_group_offsets_request::{
-                DeleteShareGroupOffsetsRequest, DeleteShareGroupOffsetsRequestTopic,
+    use {
+        super::{TOPIC_AUTHORIZATION_FAILED_MESSAGE, handle, top_level},
+        crate::{
+            authorizer::{AuthorizationResult, Authorizer},
+            broker::BrokerHandle,
+            codes,
+            coordinator::unified::{
+                ShareGroupSeed,
+                share::{
+                    actor::ShareGroupActorMessage,
+                    persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
+                },
             },
-            delete_share_group_offsets_response::{
-                self, DeleteShareGroupOffsetsResponse, DeleteShareGroupOffsetsResponseTopic,
+            handlers::{RequestContext, create_topics::handle as create_topics_handle},
+            share_coordinator::{
+                handlers::test_support::lead_share_state_partitions,
+                persister_client::SharePersister,
             },
-        },
-        primitives::uuid::Uuid,
-    };
-
-    use super::{TOPIC_AUTHORIZATION_FAILED_MESSAGE, handle, top_level};
-    use crate::{
-        authorizer::{AuthorizationResult, Authorizer},
-        broker::BrokerHandle,
-        codes,
-        coordinator::unified::{
-            ShareGroupSeed,
-            share::{
-                actor::ShareGroupActorMessage,
-                persistence::{ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo},
+            test_support::{
+                DenyAll, ShareApiSupport, ShareBrokerSetup, start_share_broker, test_ctx,
             },
         },
-        handlers::{RequestContext, create_topics::handle as create_topics_handle},
-        share_coordinator::{
-            handlers::test_support::lead_share_state_partitions, persister_client::SharePersister,
+        assert2::assert,
+        krabka_metadata::{AclOperation, ResourceType},
+        krabka_protocol::{
+            owned::{
+                create_topics_request::{CreatableTopic, CreateTopicsRequest},
+                create_topics_response,
+                delete_share_group_offsets_request::{
+                    DeleteShareGroupOffsetsRequest, DeleteShareGroupOffsetsRequestTopic,
+                },
+                delete_share_group_offsets_response::{
+                    self, DeleteShareGroupOffsetsResponse, DeleteShareGroupOffsetsResponseTopic,
+                },
+            },
+            primitives::uuid::Uuid,
         },
-        test_support::{DenyAll, ShareApiSupport, ShareBrokerSetup, start_share_broker, test_ctx},
+        std::{collections::HashSet, sync::Arc},
     };
 
     /// Denies `Read` on the named topics and allows everything else, so group
@@ -434,13 +438,9 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        create_topics(
-            &broker_handle,
-            &ctx,
-            ShareTopicsSetup {
-                names: &["t", "elsewhere"],
-            },
-        )
+        create_topics(&broker_handle, &ctx, ShareTopicsSetup {
+            names: &["t", "elsewhere"],
+        })
         .await;
         // `share-held` holds state for a topic the image has. The actor's
         // session tick drops the state of every topic the image lacks, as
@@ -548,13 +548,9 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        let persister = create_share_topics(
-            &broker_handle,
-            &ctx,
-            ShareTopicsSetup {
-                names: &["delete-topic", "kept-topic"],
-            },
-        )
+        let persister = create_share_topics(&broker_handle, &ctx, ShareTopicsSetup {
+            names: &["delete-topic", "kept-topic"],
+        })
         .await;
         let image = broker.controller.current_image();
         let deleted_id = image
@@ -658,10 +654,9 @@ mod tests {
         // order, and never routes a denied topic to the coordinator.
         type Case<'a> = (&'a str, &'a [&'a str]);
         let cases: Vec<Case<'_>> = vec![
-            (
-                "one allowed, one denied: denied row comes first",
-                &["deny-topic"],
-            ),
+            ("one allowed, one denied: denied row comes first", &[
+                "deny-topic",
+            ]),
             ("all topics denied", &["allow-topic", "deny-topic"]),
             ("all topics allowed", &[]),
         ];
@@ -675,13 +670,9 @@ mod tests {
             .await;
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "alice");
-            let persister = create_share_topics(
-                &broker_handle,
-                &ctx,
-                ShareTopicsSetup {
-                    names: &["allow-topic", "deny-topic"],
-                },
-            )
+            let persister = create_share_topics(&broker_handle, &ctx, ShareTopicsSetup {
+                names: &["allow-topic", "deny-topic"],
+            })
             .await;
             let image = broker.controller.current_image();
             let allow_id = image.topic("allow-topic").expect("allow topic").topic_id;

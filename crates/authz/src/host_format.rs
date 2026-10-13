@@ -47,9 +47,10 @@ fn format_ipv6_groups(addr: Ipv6Addr) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-
-    use super::jdk_host_address;
+    use {
+        super::jdk_host_address,
+        std::net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    };
 
     #[test]
     fn matches_jdk_text_form() {

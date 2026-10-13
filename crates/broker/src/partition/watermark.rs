@@ -3,13 +3,13 @@
 //! scheduled batch out of a consumer's view. Both bound what a fetch may
 //! return, so they are read, advanced, and waited on together.
 
-use std::sync::Arc;
-
-use krabka_log::Offset;
-
-use crate::{
-    delivery::{DeliveryWaker, PartitionDelivery},
-    partition::Partition,
+use {
+    crate::{
+        delivery::{DeliveryWaker, PartitionDelivery},
+        partition::Partition,
+    },
+    krabka_log::Offset,
+    std::sync::Arc,
 };
 
 /// Returned by `await_hw_at_least` when the deadline elapses before
@@ -21,9 +21,7 @@ impl Partition {
     /// Cached High Watermark. Awaits `replica_state` cooperatively, so it
     /// does not block tokio worker threads.
     #[must_use]
-    pub async fn high_watermark(&self) -> Offset {
-        self.replica_state.lock().await.hw
-    }
+    pub async fn high_watermark(&self) -> Offset { self.replica_state.lock().await.hw }
 
     /// Cached deliver-at-time watermark: the first offset that is not visible
     /// to a consumer yet. Reads a mirror, so it takes no lock and does no I/O.
@@ -34,9 +32,7 @@ impl Partition {
     /// log it already holds. This accessor is for a reader that must not take
     /// the log mutex, such as the metric sweep.
     #[must_use]
-    pub(crate) fn delivery_watermark(&self) -> Offset {
-        self.delivery.watermark()
-    }
+    pub(crate) fn delivery_watermark(&self) -> Offset { self.delivery.watermark() }
 
     /// Recompute the deliver-at-time watermark against `now_ms`, publish it to
     /// the mirror, and wake a long poll parked at the old value.

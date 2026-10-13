@@ -9,35 +9,33 @@
 //! `local.retention.bytes` configuration that makes the eviction happen in one
 //! place, beside the two directory walks that observe it.
 
-use std::{
-    path::Path,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-use krabka_client_core::Client;
-use krabka_protocol::records::Record;
-
-use crate::{
-    RECORDS, TOPIC,
-    multi_client::topic_id_for,
-    support::{
-        client::{BatchProduceSetup, produce_batch},
-        produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
-        records::batch_from_records,
-        storage::{local_log_segment_metadata, remote_log_files},
-        topics::AssignedTopicSetup,
+use {
+    crate::{
+        RECORDS, TOPIC,
+        multi_client::topic_id_for,
+        support::{
+            client::{BatchProduceSetup, produce_batch},
+            produce::{ProduceAcknowledgements, ProduceTimeoutMillis},
+            records::batch_from_records,
+            storage::{local_log_segment_metadata, remote_log_files},
+            topics::AssignedTopicSetup,
+        },
+        topic_fixture::{AssignedTieredTopicSetup, await_tiered_replicas, create_assigned_topic},
     },
-    topic_fixture::{AssignedTieredTopicSetup, await_tiered_replicas, create_assigned_topic},
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    krabka_client_core::Client,
+    krabka_protocol::records::Record,
+    std::{
+        path::Path,
+        time::{Duration, Instant},
+    },
 };
 
 /// Counts current `*.log` files and legacy files named `log` under `root`.
 /// Each one is the `LocalTieredStorage` segment-bytes object of a copied
 /// segment. This is the same helper as in `tiered_storage_topic_rlmm.rs`.
-fn count_remote_log_files(root: &std::path::Path) -> usize {
-    remote_log_files(root).len()
-}
+fn count_remote_log_files(root: &std::path::Path) -> usize { remote_log_files(root).len() }
 
 /// Counts `*.log` files directly under one partition's local log directory.
 /// A tiered partition that has evicted everything it copied is down to its
@@ -109,17 +107,14 @@ pub(crate) async fn await_follower_local_eviction(log_dir: &std::path::Path) {
 }
 
 pub(crate) async fn create_tiered_topic(admin: &Client, b1: &BrokerHandle, b2: &BrokerHandle) {
-    let assignment = AssignedTopicSetup::on_replicas(
-        TOPIC,
-        vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
-    );
-    create_assigned_topic(
-        admin,
-        AssignedTieredTopicSetup {
-            topic: assignment,
-            segment_bytes: Some("1024"),
-        },
-    )
+    let assignment = AssignedTopicSetup::on_replicas(TOPIC, vec![
+        krabka_metadata::NodeId(1),
+        krabka_metadata::NodeId(2),
+    ]);
+    create_assigned_topic(admin, AssignedTieredTopicSetup {
+        topic: assignment,
+        segment_bytes: Some("1024"),
+    })
     .await;
 
     await_tiered_replicas(
@@ -141,16 +136,12 @@ pub(crate) async fn produce_and_await_remote_segments(
             value: Some(bytes::Bytes::from(format!("test-record-{index}"))),
             ..Default::default()
         }]);
-        let response = produce_batch(
-            admin,
-            batch,
-            BatchProduceSetup {
-                topic: TOPIC,
-                topic_id,
-                acknowledgements: ProduceAcknowledgements::AllReplicas,
-                timeout: ProduceTimeoutMillis(10_000),
-            },
-        )
+        let response = produce_batch(admin, batch, BatchProduceSetup {
+            topic: TOPIC,
+            topic_id,
+            acknowledgements: ProduceAcknowledgements::AllReplicas,
+            timeout: ProduceTimeoutMillis(10_000),
+        })
         .await;
         assert!(response.error_code == 0, "Produce failed: {response:?}");
     }

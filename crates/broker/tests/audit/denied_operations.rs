@@ -6,15 +6,16 @@
 //! audit topic back to show that the broker still serves. Its own doc comment
 //! records why it stops short of asserting the `AuthorizationDenied` record.
 
-use krabka_broker::coordinator::AUDIT_TOPIC;
-
-use crate::support::{
-    self,
-    fetch::{
-        FetchByteLimit, FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup,
-        single_partition_fetch,
+use {
+    crate::support::{
+        self,
+        fetch::{
+            FetchByteLimit, FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup,
+            single_partition_fetch,
+        },
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
     },
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    krabka_broker::coordinator::AUDIT_TOPIC,
 };
 
 /// Verifies that the authorizer-decorator path denies an unauthorized

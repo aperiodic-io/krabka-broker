@@ -6,28 +6,28 @@
 //! it — the classic k2 snapshot for a classic group, the next-gen record set
 //! plus the respawn-cache update for a consumer group.
 
-use std::collections::HashMap;
-
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::{
-    FALLBACK_REBALANCE_TIMEOUT_MS_I32, FALLBACK_SESSION_TIMEOUT_MS_I32, chrono_now_ms,
-    pending_records::{PartitionMetadataWrite, PendingRecords},
-};
-use crate::{
-    coordinator::unified::{
-        classic_state::ClassicGroup,
-        consumer_state::{GroupState, MemberState},
-        member_records::{MemberValues, append_target_records},
-        offsets_log::OffsetsLog,
-        persistence::{GroupMetadataValue, sorted_assigned_partitions, sorted_partitions},
-        persistence_next_gen::{
-            ClassicMemberMetadata, CurrentMemberAssignmentValue, CurrentTopicPartitions,
-            GroupMetadataValue as NextGenGroupMetadataValue, MemberMetadataValue,
-            TargetAssignmentMemberValue, TargetAssignmentMetadataValue,
-        },
+use {
+    super::{
+        FALLBACK_REBALANCE_TIMEOUT_MS_I32, FALLBACK_SESSION_TIMEOUT_MS_I32, chrono_now_ms,
+        pending_records::{PartitionMetadataWrite, PendingRecords},
     },
-    error::BrokerError,
+    crate::{
+        coordinator::unified::{
+            classic_state::ClassicGroup,
+            consumer_state::{GroupState, MemberState},
+            member_records::{MemberValues, append_target_records},
+            offsets_log::OffsetsLog,
+            persistence::{GroupMetadataValue, sorted_assigned_partitions, sorted_partitions},
+            persistence_next_gen::{
+                ClassicMemberMetadata, CurrentMemberAssignmentValue, CurrentTopicPartitions,
+                GroupMetadataValue as NextGenGroupMetadataValue, MemberMetadataValue,
+                TargetAssignmentMemberValue, TargetAssignmentMetadataValue,
+            },
+        },
+        error::BrokerError,
+    },
+    krabka_protocol::primitives::uuid::Uuid,
+    std::collections::HashMap,
 };
 
 /// Maps a member's in-memory classic facade, if there is one, into the
@@ -318,13 +318,13 @@ crate::coordinator::unified::persistence::flush_pending_records! {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
-    use assert2::{assert, check};
-    use krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest;
-
-    use super::*;
-    use crate::coordinator::unified::{ClientIdentity, actor::member_state::build_member};
+    use {
+        super::*,
+        crate::coordinator::unified::{ClientIdentity, actor::member_state::build_member},
+        assert2::{assert, check},
+        krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        std::time::Instant,
+    };
 
     fn joined(member_id: &str) -> MemberState {
         super::super::test_support::subscribed_member(

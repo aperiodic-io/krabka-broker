@@ -10,48 +10,49 @@
 //! never gets. A share-partition leader then loses or delivers again the
 //! records that the state covered.
 
-use std::time::Duration;
-
-use assert2::assert;
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use krabka_broker::{BrokerConfig, BrokerHandle};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::{
-        delete_share_group_state_request::{
-            DeleteShareGroupStateRequest, DeleteStateData, PartitionData as DeletePart,
-        },
-        delete_share_group_state_response::{
-            DeleteShareGroupStateResponse, DeleteStateResult, PartitionResult as DeleteRow,
-        },
-        initialize_share_group_state_request::{
-            InitializeShareGroupStateRequest, InitializeStateData, PartitionData as InitPart,
-        },
-        initialize_share_group_state_response::{
-            InitializeShareGroupStateResponse, InitializeStateResult, PartitionResult as InitRow,
-        },
-        read_share_group_state_request::{
-            PartitionData as ReadPart, ReadShareGroupStateRequest, ReadStateData,
-        },
-        read_share_group_state_response::{
-            PartitionResult as ReadRow, ReadShareGroupStateResponse, ReadStateResult,
-        },
-        write_share_group_state_request::{
-            PartitionData as WritePart, StateBatch, WriteShareGroupStateRequest, WriteStateData,
-        },
-        write_share_group_state_response::{
-            PartitionResult as WriteRow, WriteShareGroupStateResponse, WriteStateResult,
-        },
+use {
+    crate::support::{
+        client::connect_owned,
+        share::crash_follower,
+        shutdown_cluster,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use tempfile::TempDir;
-
-use crate::support::{
-    client::connect_owned,
-    share::crash_follower,
-    shutdown_cluster,
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    assert2::assert,
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::{
+            delete_share_group_state_request::{
+                DeleteShareGroupStateRequest, DeleteStateData, PartitionData as DeletePart,
+            },
+            delete_share_group_state_response::{
+                DeleteShareGroupStateResponse, DeleteStateResult, PartitionResult as DeleteRow,
+            },
+            initialize_share_group_state_request::{
+                InitializeShareGroupStateRequest, InitializeStateData, PartitionData as InitPart,
+            },
+            initialize_share_group_state_response::{
+                InitializeShareGroupStateResponse, InitializeStateResult,
+                PartitionResult as InitRow,
+            },
+            read_share_group_state_request::{
+                PartitionData as ReadPart, ReadShareGroupStateRequest, ReadStateData,
+            },
+            read_share_group_state_response::{
+                PartitionResult as ReadRow, ReadShareGroupStateResponse, ReadStateResult,
+            },
+            write_share_group_state_request::{
+                PartitionData as WritePart, StateBatch, WriteShareGroupStateRequest, WriteStateData,
+            },
+            write_share_group_state_response::{
+                PartitionResult as WriteRow, WriteShareGroupStateResponse, WriteStateResult,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::time::Duration,
+    tempfile::TempDir,
 };
 
 mod support;
@@ -105,9 +106,7 @@ async fn create_orders(client: &Client) -> uuid::Uuid {
     uuid::Uuid::from_bytes(created.topics[0].topic_id.0)
 }
 
-fn wire(topic_id: uuid::Uuid) -> WireUuid {
-    WireUuid(*topic_id.as_bytes())
-}
+fn wire(topic_id: uuid::Uuid) -> WireUuid { WireUuid(*topic_id.as_bytes()) }
 
 fn position_of(cluster: &Cluster, node_id: u64) -> usize {
     cluster

@@ -3,17 +3,18 @@
 //! that runs `Predicates::decide_batch` and `Predicates::decide_record` over
 //! one batch the way `materialize` does.
 
-use bytes::{Bytes, BytesMut};
-use krabka_ids::ProducerId;
-use krabka_protocol::{
-    DecodeBorrow as _,
-    records::{Attributes, Record, RecordBatch, RecordBatchBorrowed, RecordHeader},
-};
-
-use crate::{
-    args::{PartitionRef, RestoreArgs, test_support::args_from as parse_args_from},
-    bound::{BatchDecision, Predicates, RecordDecision, record_coordinates},
-    error::RestoreError,
+use {
+    crate::{
+        args::{PartitionRef, RestoreArgs, test_support::args_from as parse_args_from},
+        bound::{BatchDecision, Predicates, RecordDecision, record_coordinates},
+        error::RestoreError,
+    },
+    bytes::{Bytes, BytesMut},
+    krabka_ids::ProducerId,
+    krabka_protocol::{
+        DecodeBorrow as _,
+        records::{Attributes, Record, RecordBatch, RecordBatchBorrowed, RecordHeader},
+    },
 };
 
 const BASE_OFFSET: i64 = 1_000;

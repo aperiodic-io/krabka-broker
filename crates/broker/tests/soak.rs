@@ -98,15 +98,16 @@
 //! cargo test -p krabka-broker --test soak
 //! ```
 
-use std::{
-    collections::BTreeSet,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+use {
+    std::{
+        collections::BTreeSet,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicU64, Ordering},
+        },
     },
+    tokio::sync::Mutex,
 };
-
-use tokio::sync::Mutex;
 
 // Cargo compiles this file as its own test binary, so the crate root's module
 // directory is `tests/`. `#[path]` re-bases each declaration onto the sibling
@@ -121,16 +122,17 @@ mod drift;
 #[path = "soak/probe.rs"]
 mod probe;
 
-use assert2::{assert, check};
-
-use crate::{
-    cluster::SoakCluster,
-    drift::{Bound, Series},
-    support::{
-        load_test::*,
-        producer::{ProducerRecordSetup, producer_record},
-        topics::topic_configs,
+use {
+    crate::{
+        cluster::SoakCluster,
+        drift::{Bound, Series},
+        support::{
+            load_test::*,
+            producer::{ProducerRecordSetup, producer_record},
+            topics::topic_configs,
+        },
     },
+    assert2::{assert, check},
 };
 
 /// How long the load runs when `KRABKA_SOAK_SECONDS` is unset.
@@ -265,37 +267,25 @@ async fn producer(bootstrap: &str) -> Producer {
 /// Create the three topics the load runs over.
 async fn create_topics(bootstrap: &str) {
     let topics = vec![
-        topic(
-            RETENTION_TOPIC,
-            6,
-            &[
-                ("cleanup.policy", "delete"),
-                ("internal.segment.bytes", "65536"),
-                ("segment.ms", "5000"),
-                ("retention.ms", "60000"),
-                ("retention.bytes", "4194304"),
-            ],
-        ),
-        topic(
-            COMPACTED_TOPIC,
-            3,
-            &[
-                ("cleanup.policy", "compact"),
-                ("internal.segment.bytes", "65536"),
-                ("segment.ms", "5000"),
-                ("min.cleanable.dirty.ratio", "0.01"),
-                ("min.compaction.lag.ms", "0"),
-            ],
-        ),
-        topic(
-            VERIFY_TOPIC,
-            1,
-            &[
-                ("cleanup.policy", "delete"),
-                ("retention.ms", "-1"),
-                ("retention.bytes", "-1"),
-            ],
-        ),
+        topic(RETENTION_TOPIC, 6, &[
+            ("cleanup.policy", "delete"),
+            ("internal.segment.bytes", "65536"),
+            ("segment.ms", "5000"),
+            ("retention.ms", "60000"),
+            ("retention.bytes", "4194304"),
+        ]),
+        topic(COMPACTED_TOPIC, 3, &[
+            ("cleanup.policy", "compact"),
+            ("internal.segment.bytes", "65536"),
+            ("segment.ms", "5000"),
+            ("min.cleanable.dirty.ratio", "0.01"),
+            ("min.compaction.lag.ms", "0"),
+        ]),
+        topic(VERIFY_TOPIC, 1, &[
+            ("cleanup.policy", "delete"),
+            ("retention.ms", "-1"),
+            ("retention.bytes", "-1"),
+        ]),
     ];
 
     // A cluster that has just booted is still electing; the first attempts are
@@ -354,9 +344,7 @@ impl Load {
         }
     }
 
-    fn running(&self) -> bool {
-        !self.stop.load(Ordering::Relaxed)
-    }
+    fn running(&self) -> bool { !self.stop.load(Ordering::Relaxed) }
 }
 
 /// Produce on `topic` at `pace` until the load stops.

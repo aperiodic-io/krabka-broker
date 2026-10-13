@@ -4,6 +4,7 @@
 //! would otherwise write out by hand two or three times. It is built on
 //! [`moxy`], which supplies the token, syntax-tree, attribute-parsing and
 //! template layers.
+
 //!
 //! # `RegisterMetrics`
 //!
@@ -331,11 +332,13 @@
 //! krabka_macros::cli_main!(krabka_restore, flavor = "multi_thread");
 //! ```
 
-use moxy::{
-    ast::{ItemEnum, ItemStruct, ParseError},
-    token::TokenStream,
+use {
+    moxy::{
+        ast::{ItemEnum, ItemStruct, ParseError},
+        token::TokenStream,
+    },
+    proc_macro::TokenStream as NativeTokenStream,
 };
-use proc_macro::TokenStream as NativeTokenStream;
 
 mod api_names;
 mod async_write_delegate;
@@ -361,6 +364,7 @@ mod network_fixtures;
 mod object_ops;
 mod object_store_config;
 mod object_store_delegate;
+mod prelude;
 mod primitive_cmp;
 mod produce_fixtures;
 mod projection_identity;
@@ -454,9 +458,7 @@ pub fn krabka_env(meta: TokenStream, item: TokenStream) -> Result<TokenStream, P
 /// `EncodeLabelValue`, for an enum whose variants each stand for one text.
 /// The crate documentation lists the `#[enum_str(...)]` arguments.
 #[moxy::derive(EnumStr, attributes(enum_str))]
-pub fn enum_str(item: ItemEnum) -> Result<TokenStream, ParseError> {
-    enum_str::expand(item)
-}
+pub fn enum_str(item: ItemEnum) -> Result<TokenStream, ParseError> { enum_str::expand(item) }
 
 /// Derives `Default` from each field's `#[default(EXPR)]`, or
 /// `Default::default()` for a field without one. The crate documentation

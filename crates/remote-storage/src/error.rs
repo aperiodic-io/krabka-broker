@@ -147,10 +147,11 @@ impl From<krabka_object_store::ObjectStoreError> for RemoteStorageError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use object_store::path::Path;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        object_store::path::Path,
+    };
 
     /// The write-once archive branches on these two, so each must arrive as
     /// its own structured variant and not as an opaque `Backend` string.

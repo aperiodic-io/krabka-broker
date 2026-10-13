@@ -5,17 +5,17 @@
 //! that both paths actually land their records in the log. A seam that
 //! silently stopped appending would still produce a plausible-looking number.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_compression::{CompressionType, RecordDecompressionPolicy};
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch};
-use tempfile::tempdir;
-
-use super::{HotPathSettings, PathChoice, ProducePath, TimestampPolicy, append_one_batch};
-use crate::{codes, handlers::produce::test_support::encode_batch, metrics::BrokerMetrics};
+use {
+    super::{HotPathSettings, PathChoice, ProducePath, TimestampPolicy, append_one_batch},
+    crate::{codes, handlers::produce::test_support::encode_batch, metrics::BrokerMetrics},
+    assert2::assert,
+    bytes::Bytes,
+    krabka_compression::{CompressionType, RecordDecompressionPolicy},
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch},
+    std::sync::Arc,
+    tempfile::tempdir,
+};
 
 const RECORDS: i32 = 4;
 

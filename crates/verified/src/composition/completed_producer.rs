@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
-use super::{
-    ProducerDecision, ProducerEntryFacts, ProducerSnapshotEntryFacts, producer_decision,
-    rebuilt_data_window_bounds_retry,
-};
-use crate::producer::producer_completion_window;
 #[cfg(creusot)]
 use crate::producer_snapshot::{retained_producer_row, snapshot_sequence_matches};
+use {
+    super::{
+        ProducerDecision, ProducerEntryFacts, ProducerSnapshotEntryFacts, producer_decision,
+        rebuilt_data_window_bounds_retry,
+    },
+    crate::producer::producer_completion_window,
+    creusot_std::prelude::*,
+};
 
 open_logic! {
 pub fn completed_row(

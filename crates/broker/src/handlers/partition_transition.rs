@@ -1,17 +1,18 @@
 //! The break-glass approval gate shared by destructive partition operations.
 
-use krabka_metadata::{BreakGlassAction, MetadataImage, MetadataRecord};
-
-use crate::{
-    break_glass::{
-        gate::{self, BreakGlassDenial},
-        handlers::audit::{GatedTransition, audit_transition},
-        metrics::record_refusal,
+use {
+    crate::{
+        break_glass::{
+            gate::{self, BreakGlassDenial},
+            handlers::audit::{GatedTransition, audit_transition},
+            metrics::record_refusal,
+        },
+        broker::Broker,
+        config::BreakGlassConfig,
+        handlers::RequestContext,
+        time_util::now_ms,
     },
-    broker::Broker,
-    config::BreakGlassConfig,
-    handlers::RequestContext,
-    time_util::now_ms,
+    krabka_metadata::{BreakGlassAction, MetadataImage, MetadataRecord},
 };
 
 pub(super) fn partition_target(topic: &str, partition: i32) -> String {

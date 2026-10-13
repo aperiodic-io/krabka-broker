@@ -7,29 +7,29 @@
 //! v1 tagged fields it knows, and ignores bytes after the last field, as
 //! Kafka's generated reader does.
 
-use std::collections::{BTreeMap, HashSet};
-
-use bytes::{Bytes, BytesMut};
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use krabka_protocol::{
-    ProtocolError,
-    primitives::{
-        array::{get_array_len, get_nullable_array_len, put_array_len, put_nullable_array_len},
-        fixed::{get_i8, get_i16, get_i32, get_i64, put_i8, put_i16, put_i32, put_i64},
-        string_bytes::{
-            get_compact_string_owned, get_string_owned, put_compact_string, put_string,
+use {
+    crate::{
+        error::BrokerError,
+        txn::{
+            state::{TopicPartition, TxnEntry, TxnState},
+            version::TxnVersion,
         },
     },
-    tagged_fields::{UnknownTaggedFields, WriteTaggedFields, read_tagged_fields},
-};
-
-use crate::{
-    error::BrokerError,
-    txn::{
-        state::{TopicPartition, TxnEntry, TxnState},
-        version::TxnVersion,
+    bytes::{Bytes, BytesMut},
+    krabka_ids::PartitionIndex,
+    krabka_log::ProducerId,
+    krabka_protocol::{
+        ProtocolError,
+        primitives::{
+            array::{get_array_len, get_nullable_array_len, put_array_len, put_nullable_array_len},
+            fixed::{get_i8, get_i16, get_i32, get_i64, put_i8, put_i16, put_i32, put_i64},
+            string_bytes::{
+                get_compact_string_owned, get_string_owned, put_compact_string, put_string,
+            },
+        },
+        tagged_fields::{UnknownTaggedFields, WriteTaggedFields, read_tagged_fields},
     },
+    std::collections::{BTreeMap, HashSet},
 };
 
 /// Tagged-field tags for `TransactionLogValue` v1.
@@ -279,10 +279,11 @@ pub(crate) fn decode_value(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::txn::version::TxnVersion;
+    use {
+        super::*,
+        crate::txn::version::TxnVersion,
+        assert2::{assert, check},
+    };
 
     /// Real captured v1 record (`TV_1`, Ongoing, 48 bytes).
     #[rustfmt::skip]

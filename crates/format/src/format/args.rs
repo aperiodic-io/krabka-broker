@@ -7,14 +7,14 @@
 //! `--add-acl` parse in the module that owns each of those concerns, and this
 //! module names their parsers in the `value_parser` attributes.
 
-use std::path::PathBuf;
-
-use clap::Args;
-use krabka_metadata::AclEntry;
-use krabka_security::SaslMechanism;
-
-use super::{acl::parse_acl_spec, features::parse_feature_spec, scram::parse_scram_spec};
-use crate::ids::{ClusterId, DirectoryId};
+use {
+    super::{acl::parse_acl_spec, features::parse_feature_spec, scram::parse_scram_spec},
+    crate::ids::{ClusterId, DirectoryId},
+    clap::Args,
+    krabka_metadata::AclEntry,
+    krabka_security::SaslMechanism,
+    std::path::PathBuf,
+};
 
 #[derive(Args, Debug)]
 pub struct FormatArgs {
@@ -208,11 +208,12 @@ pub fn parse_listener_name(s: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
 
-    use assert2::check;
-    use clap::{Parser as _, error::ErrorKind};
-
-    use super::*;
-    use crate::Cli;
+    use {
+        super::*,
+        crate::Cli,
+        assert2::check,
+        clap::{Parser as _, error::ErrorKind},
+    };
 
     /// `--log-dir` takes repeated flags and comma-separated lists alike, and
     /// keeps the order they were given in.

@@ -6,21 +6,21 @@
 //! because the assertion is on the exposition text itself, one
 //! `krabka_broker_share_group_backlog` line with its labels.
 
-use std::{net::SocketAddr, sync::OnceLock};
-
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_protocol::{primitives::uuid::Uuid as WireUuid, records::RecordBatch};
-use tokio::sync::Mutex;
-
-use crate::support::{
-    client::http_get,
-    produce::{SinglePartitionProduceSetup, batch_request},
-    records::{batch_from_records, value_record},
-    topics::{
-        ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor, creatable_topic,
-        create_topic_request,
+use {
+    crate::support::{
+        client::http_get,
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{batch_from_records, value_record},
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor, creatable_topic,
+            create_topic_request,
+        },
     },
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_protocol::{primitives::uuid::Uuid as WireUuid, records::RecordBatch},
+    std::{net::SocketAddr, sync::OnceLock},
+    tokio::sync::Mutex,
 };
 
 pub const TOPIC: &str = "backlog-itest";

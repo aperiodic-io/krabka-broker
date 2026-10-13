@@ -2,10 +2,12 @@
 //! controller. It is its own module because the KIP-903 broker-epoch stamping
 //! and the v2/v3 dual ISR encoding are pure functions of the metadata image.
 
-use krabka_protocol::owned::alter_partition_request::{
-    AlterPartitionRequest, BrokerState, PartitionData, TopicData,
+use {
+    krabka_protocol::owned::alter_partition_request::{
+        AlterPartitionRequest, BrokerState, PartitionData, TopicData,
+    },
+    krabka_raft::NodeId,
 };
-use krabka_raft::NodeId;
 
 /// KIP-903 sentinel for an unknown broker epoch. The broker stamps it when the
 /// metadata image has no epoch for a broker. It tells the controller to skip
@@ -89,10 +91,11 @@ pub(super) fn build_alter_partition_request(
 
 #[cfg(test)]
 mod tests {
-    use krabka_metadata::MetadataImage;
-
-    use super::*;
-    use crate::isr_maintenance::test_support::{reg, topic};
+    use {
+        super::*,
+        crate::isr_maintenance::test_support::{reg, topic},
+        krabka_metadata::MetadataImage,
+    };
 
     #[test]
     fn build_request_preserves_topic_broker_epochs_isr_and_partition_epoch() {
@@ -122,17 +125,13 @@ mod tests {
             },
         ));
 
-        let req = build_alter_partition_request(
-            &image,
-            4,
-            &IsrChange {
-                topic: "orders",
-                partition: 6,
-                new_isr: vec![NodeId(1), NodeId(9)],
-                leader_epoch: 12,
-                partition_epoch: 21,
-            },
-        );
+        let req = build_alter_partition_request(&image, 4, &IsrChange {
+            topic: "orders",
+            partition: 6,
+            new_isr: vec![NodeId(1), NodeId(9)],
+            leader_epoch: 12,
+            partition_epoch: 21,
+        });
 
         let expected = AlterPartitionRequest {
             broker_id: 4,
@@ -176,17 +175,13 @@ mod tests {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
         image.apply(&reg(NodeId(5)));
 
-        let req = build_alter_partition_request(
-            &image,
-            5,
-            &IsrChange {
-                topic: "orders",
-                partition: 0,
-                new_isr: vec![NodeId(5)],
-                leader_epoch: 3,
-                partition_epoch: 0,
-            },
-        );
+        let req = build_alter_partition_request(&image, 5, &IsrChange {
+            topic: "orders",
+            partition: 0,
+            new_isr: vec![NodeId(5)],
+            leader_epoch: 3,
+            partition_epoch: 0,
+        });
 
         assert2::assert!((req.broker_epoch) == (5));
     }

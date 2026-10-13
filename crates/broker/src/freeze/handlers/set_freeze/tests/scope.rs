@@ -3,21 +3,22 @@
 //! The pattern-type byte, the scope it names, the registry ceiling that a new
 //! entry meets, and the registry record that the pair becomes.
 
-use assert2::check;
-use krabka_metadata::{PatternType, TopicFreezeRecord};
-use krabka_protocol::{
-    krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED, SetTopicFreezeRequest},
-    primitives::uuid::Uuid as ProtocolUuid,
-};
-
-use super::{
-    super::checks::{check_limit, check_scope, live_entry, prepare, record_of},
-    ALICE, ALICE_KEY, PROPOSAL, alice_key_configuration, freeze_request, image,
-};
-use crate::{
-    codes,
-    config::{BrokerConfig, FreezeConfig},
-    time_util::now_ms,
+use {
+    super::{
+        super::checks::{check_limit, check_scope, live_entry, prepare, record_of},
+        ALICE, ALICE_KEY, PROPOSAL, alice_key_configuration, freeze_request, image,
+    },
+    crate::{
+        codes,
+        config::{BrokerConfig, FreezeConfig},
+        time_util::now_ms,
+    },
+    assert2::check,
+    krabka_metadata::{PatternType, TopicFreezeRecord},
+    krabka_protocol::{
+        krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED, SetTopicFreezeRequest},
+        primitives::uuid::Uuid as ProtocolUuid,
+    },
 };
 
 #[test]

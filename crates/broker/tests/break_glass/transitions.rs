@@ -6,23 +6,26 @@
 //! response. The two metric readers alongside them are how a case tells a
 //! counted refusal apart from one the broker never saw.
 
-use krabka_broker::{
-    BrokerHandle, codes,
-    metrics::{BreakGlassAction as ActionLabel, BreakGlassActionLabel},
-};
-use krabka_client_core::Client;
-use krabka_metadata::BreakGlassAction as GatedAction;
-use krabka_protocol::owned::{
-    alter_partition_reassignments_request::{
-        AlterPartitionReassignmentsRequest, ReassignablePartition, ReassignableTopic,
+use {
+    crate::{
+        support::offsets::{
+            delete_records_partition, delete_records_request, delete_records_topic,
+        },
+        topics::delete_topic,
     },
-    elect_leaders_request::{ElectLeadersRequest, TopicPartitions},
-    unregister_broker_request::UnregisterBrokerRequest,
-};
-
-use crate::{
-    support::offsets::{delete_records_partition, delete_records_request, delete_records_topic},
-    topics::delete_topic,
+    krabka_broker::{
+        BrokerHandle, codes,
+        metrics::{BreakGlassAction as ActionLabel, BreakGlassActionLabel},
+    },
+    krabka_client_core::Client,
+    krabka_metadata::BreakGlassAction as GatedAction,
+    krabka_protocol::owned::{
+        alter_partition_reassignments_request::{
+            AlterPartitionReassignmentsRequest, ReassignablePartition, ReassignableTopic,
+        },
+        elect_leaders_request::{ElectLeadersRequest, TopicPartitions},
+        unregister_broker_request::UnregisterBrokerRequest,
+    },
 };
 
 /// The one broker id a single-node cluster registers.
@@ -137,10 +140,9 @@ async fn cancel_reassignment(client: &Client, topic: &str) -> i16 {
 async fn trim_records(client: &Client, topic: &str) -> i16 {
     let response = client
         .send(delete_records_request(
-            vec![delete_records_topic(
-                topic.to_owned(),
-                vec![delete_records_partition(0, 0)],
-            )],
+            vec![delete_records_topic(topic.to_owned(), vec![
+                delete_records_partition(0, 0),
+            ])],
             10_000,
         ))
         .await

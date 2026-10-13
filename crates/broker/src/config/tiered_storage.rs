@@ -2,17 +2,17 @@
 //! remote-log metadata manager runs beside it, and the WORM archive pairing
 //! the broker refuses.
 
-use std::path::PathBuf;
-
-use krabka_client_core::security::ClientSecurity;
-use krabka_units::{ByteSize, Time, convert::TimeExt};
-
-use crate::{
-    BrokerError,
-    config::{
-        BrokerConfig, DEFAULT_RLMM_SNAPSHOT_INTERVAL, DEFAULT_RLMM_TOPIC_MIN_ISR,
-        DEFAULT_RLMM_TOPIC_NUM_PARTITIONS, DEFAULT_RLMM_TOPIC_REPLICATION_FACTOR,
+use {
+    crate::{
+        BrokerError,
+        config::{
+            BrokerConfig, DEFAULT_RLMM_SNAPSHOT_INTERVAL, DEFAULT_RLMM_TOPIC_MIN_ISR,
+            DEFAULT_RLMM_TOPIC_NUM_PARTITIONS, DEFAULT_RLMM_TOPIC_REPLICATION_FACTOR,
+        },
     },
+    krabka_client_core::security::ClientSecurity,
+    krabka_units::{ByteSize, Time, convert::TimeExt},
+    std::path::PathBuf,
 };
 
 /// Parameters for the topic-backed
@@ -180,10 +180,11 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::{convert::ByteSizeExt, mebibytes, millis, minutes, secs};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        krabka_units::{convert::ByteSizeExt, mebibytes, millis, minutes, secs},
+    };
 
     #[test]
     fn production_default_selects_topic_backed_rlmm() {
@@ -233,34 +234,22 @@ mod tests {
         valid.validate().unwrap();
 
         for (field, config) in [
-            (
-                "fetch_max_wait",
-                KafkaRlmmConfig {
-                    fetch_max_wait: Time::ZERO,
-                    ..KafkaRlmmConfig::default()
-                },
-            ),
-            (
-                "min_isr",
-                KafkaRlmmConfig {
-                    min_isr: 0,
-                    ..KafkaRlmmConfig::default()
-                },
-            ),
-            (
-                "snapshot_interval",
-                KafkaRlmmConfig {
-                    snapshot_interval: Time::ZERO,
-                    ..KafkaRlmmConfig::default()
-                },
-            ),
-            (
-                "snapshot_interval",
-                KafkaRlmmConfig {
-                    snapshot_interval: Time::from_secs_f64(f64::INFINITY),
-                    ..KafkaRlmmConfig::default()
-                },
-            ),
+            ("fetch_max_wait", KafkaRlmmConfig {
+                fetch_max_wait: Time::ZERO,
+                ..KafkaRlmmConfig::default()
+            }),
+            ("min_isr", KafkaRlmmConfig {
+                min_isr: 0,
+                ..KafkaRlmmConfig::default()
+            }),
+            ("snapshot_interval", KafkaRlmmConfig {
+                snapshot_interval: Time::ZERO,
+                ..KafkaRlmmConfig::default()
+            }),
+            ("snapshot_interval", KafkaRlmmConfig {
+                snapshot_interval: Time::from_secs_f64(f64::INFINITY),
+                ..KafkaRlmmConfig::default()
+            }),
         ] {
             let error = config.validate().expect_err("invalid policy must fail");
             assert!(error.to_string().contains(field), "{error}");

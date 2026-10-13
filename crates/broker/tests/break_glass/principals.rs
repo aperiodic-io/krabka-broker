@@ -30,6 +30,4 @@ pub(super) const MALLORY: &str = "mallory";
 pub(super) const APPROVERS: &[&str] = &[ALICE, BOB, CAROL];
 
 /// `principal` in the `KafkaPrincipal` string form every KFC-9 surface uses.
-pub(super) fn principal(user: &str) -> String {
-    format!("User:{user}")
-}
+pub(super) fn principal(user: &str) -> String { format!("User:{user}") }

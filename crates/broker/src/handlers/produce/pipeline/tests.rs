@@ -1,27 +1,27 @@
 //! Tests for the per-partition pipeline's leadership-gate and write-freeze
 //! response rows.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_metadata::{MetadataRecord, PartitionRecord};
-use krabka_protocol::{
-    owned::produce_response::LeaderIdAndEpoch,
-    records::{Record, RecordBatch},
-};
-use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
-
-use super::*;
-use crate::{
-    handlers::{
-        produce::{
-            framing::PartitionPayload,
-            test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
+use {
+    super::*,
+    crate::{
+        handlers::{
+            produce::{
+                framing::PartitionPayload,
+                test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
+            },
+            test_support::{ReplicatedPartitionSetup, replicated_partition},
         },
-        test_support::{ReplicatedPartitionSetup, replicated_partition},
+        schema_validation::{SchemaGate, SchemaValidator, ValidationMode},
     },
-    schema_validation::{SchemaGate, SchemaValidator, ValidationMode},
+    assert2::assert,
+    bytes::Bytes,
+    krabka_metadata::{MetadataRecord, PartitionRecord},
+    krabka_protocol::{
+        owned::produce_response::LeaderIdAndEpoch,
+        records::{Record, RecordBatch},
+    },
+    std::sync::Arc,
+    wiremock::{Mock, MockServer, ResponseTemplate, matchers::method},
 };
 
 #[tokio::test]

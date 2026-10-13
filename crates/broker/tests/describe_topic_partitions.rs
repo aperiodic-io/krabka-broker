@@ -12,11 +12,12 @@
 //!     `next_cursor` round-trip
 //!   * Stable sort order on fetch-all (alphabetical)
 
-use assert2::{assert, check};
-
-use crate::support::{
-    acl::TOPIC_FULL_MASK,
-    topics::{CreateTopicSetup, TopicPartitionCount},
+use {
+    crate::support::{
+        acl::TOPIC_FULL_MASK,
+        topics::{CreateTopicSetup, TopicPartitionCount},
+    },
+    assert2::{assert, check},
 };
 mod support;
 
@@ -54,14 +55,11 @@ async fn described_topic(
     krabka_protocol::owned::describe_topic_partitions_response::DescribeTopicPartitionsResponse,
 ) {
     let p = support::start().await;
-    create_topic(
-        &p,
-        CreateTopicSetup {
-            topic: name,
-            num_partitions: TopicPartitionCount(partitions),
-            ..Default::default()
-        },
-    )
+    create_topic(&p, CreateTopicSetup {
+        topic: name,
+        num_partitions: TopicPartitionCount(partitions),
+        ..Default::default()
+    })
     .await;
     let response = p
         .client
@@ -80,12 +78,9 @@ async fn create_topic(p: &support::InProcess, setup: CreateTopicSetup<'_>) {
 #[tokio::test]
 async fn named_request_returns_listed_topics_with_partitions() {
     let p = support::start().await;
-    create_alpha_beta(
-        &p,
-        AlphaBetaTopicsSetup {
-            alpha_partitions: TopicPartitionCount(2),
-        },
-    )
+    create_alpha_beta(&p, AlphaBetaTopicsSetup {
+        alpha_partitions: TopicPartitionCount(2),
+    })
     .await;
 
     let resp = p
@@ -122,13 +117,10 @@ async fn named_request_returns_listed_topics_with_partitions() {
 async fn fetch_all_returns_topics_in_alphabetical_order() {
     let p = support::start().await;
     // Create in non-alphabetical order to prove the broker sorts.
-    create_topic(
-        &p,
-        CreateTopicSetup {
-            topic: "gamma",
-            ..Default::default()
-        },
-    )
+    create_topic(&p, CreateTopicSetup {
+        topic: "gamma",
+        ..Default::default()
+    })
     .await;
     create_alpha_beta(&p, AlphaBetaTopicsSetup::default()).await;
 
@@ -157,13 +149,10 @@ async fn fetch_all_returns_topics_in_alphabetical_order() {
 #[tokio::test]
 async fn unknown_topic_in_named_request_returns_error_row() {
     let p = support::start().await;
-    create_topic(
-        &p,
-        CreateTopicSetup {
-            topic: "real-topic",
-            ..Default::default()
-        },
-    )
+    create_topic(&p, CreateTopicSetup {
+        topic: "real-topic",
+        ..Default::default()
+    })
     .await;
 
     let resp = p
@@ -232,13 +221,10 @@ fn describe_request() -> DescribeTopicPartitionsRequest {
 #[tokio::test]
 async fn a_feature_downgrade_empties_the_reported_elr() {
     let p = support::start().await;
-    create_topic(
-        &p,
-        CreateTopicSetup {
-            topic: "t",
-            ..Default::default()
-        },
-    )
+    create_topic(&p, CreateTopicSetup {
+        topic: "t",
+        ..Default::default()
+    })
     .await;
 
     p.broker
@@ -362,14 +348,11 @@ async fn topic_authorized_operations_populated_for_super_user() {
 #[tokio::test]
 async fn pagination_caps_response_at_partition_limit_and_returns_next_cursor() {
     let p = support::start().await;
-    create_topic(
-        &p,
-        CreateTopicSetup {
-            topic: "big",
-            num_partitions: TopicPartitionCount(5),
-            ..Default::default()
-        },
-    )
+    create_topic(&p, CreateTopicSetup {
+        topic: "big",
+        num_partitions: TopicPartitionCount(5),
+        ..Default::default()
+    })
     .await;
 
     // Cap response to 3 partitions; expect 3 returned + a cursor pointing
@@ -425,21 +408,15 @@ struct AlphaBetaTopicsSetup {
 
 /// Keep the shared alpha-before-beta creation order with each case's alpha partition count.
 async fn create_alpha_beta(p: &support::InProcess, setup: AlphaBetaTopicsSetup) {
-    create_topic(
-        p,
-        CreateTopicSetup {
-            topic: "alpha",
-            num_partitions: setup.alpha_partitions,
-            ..Default::default()
-        },
-    )
+    create_topic(p, CreateTopicSetup {
+        topic: "alpha",
+        num_partitions: setup.alpha_partitions,
+        ..Default::default()
+    })
     .await;
-    create_topic(
-        p,
-        CreateTopicSetup {
-            topic: "beta",
-            ..Default::default()
-        },
-    )
+    create_topic(p, CreateTopicSetup {
+        topic: "beta",
+        ..Default::default()
+    })
     .await;
 }

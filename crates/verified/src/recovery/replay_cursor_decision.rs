@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    BarrierRecoveryFinalizeDecision, BarrierRecoveryFoldAction, BarrierRecoveryRecordKind,
-    ReplayCursorDecision, ReplayRecordDecision,
+use {
+    super::{
+        BarrierRecoveryFinalizeDecision, BarrierRecoveryFoldAction, BarrierRecoveryRecordKind,
+        ReplayCursorDecision, ReplayRecordDecision,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

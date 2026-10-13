@@ -4,15 +4,16 @@
 //! they carry — live here with `manifest_head`, which computes the head one
 //! manifest body produces from the head that preceded it.
 
-use derive_more::{Display, From, Into};
-use krabka_audit::chain::{GENESIS_HEAD, chain_hash};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-use super::{
-    ManifestBody,
-    encoding::canonical_manifest_bytes,
-    hex_bytes::{deserialize_hex32, serialize_hex},
+use {
+    super::{
+        ManifestBody,
+        encoding::canonical_manifest_bytes,
+        hex_bytes::{deserialize_hex32, serialize_hex},
+    },
+    derive_more::{Display, From, Into},
+    krabka_audit::chain::{GENESIS_HEAD, chain_hash},
+    serde::{Deserialize, Serialize},
+    uuid::Uuid,
 };
 
 /// Position of one manifest in its partition's hash chain.
@@ -115,9 +116,7 @@ pub fn manifest_head(body: &ManifestBody) -> ChainHead {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn genesis_head_is_the_audit_genesis() {

@@ -1,8 +1,10 @@
 //! Client-producer fixtures with caller-supplied record bytes and routing.
 
-use bytes::Bytes;
-use krabka_client_producer::{Producer, ProducerRecord};
-use krabka_ids::PartitionIndex;
+use {
+    bytes::Bytes,
+    krabka_client_producer::{Producer, ProducerRecord},
+    krabka_ids::PartitionIndex,
+};
 
 #[derive(krabka_macros::FieldDefaults)]
 pub struct ProducerRecordSetup {

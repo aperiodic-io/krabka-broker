@@ -5,19 +5,19 @@
 //! stamp never reaches the wire, so this module is the whole surface of a
 //! feature that leaves the Kafka-visible bytes untouched.
 
-use std::{collections::BTreeMap, path::PathBuf};
-
-use krabka_ids::Offset;
-use krabka_protocol::records::RecordBatch;
-
-use super::{
-    Log,
-    control::{COMMIT_CONTROL_TYPE, batch_control_marker_type},
-};
-use crate::{
-    error::LogError,
-    stamp_index::{StampEntry, StampIndex},
-    stamp_source::StampSource,
+use {
+    super::{
+        Log,
+        control::{COMMIT_CONTROL_TYPE, batch_control_marker_type},
+    },
+    crate::{
+        error::LogError,
+        stamp_index::{StampEntry, StampIndex},
+        stamp_source::StampSource,
+    },
+    krabka_ids::Offset,
+    krabka_protocol::records::RecordBatch,
+    std::{collections::BTreeMap, path::PathBuf},
 };
 
 impl Log {

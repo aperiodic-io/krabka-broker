@@ -2,21 +2,22 @@
 //! startup election deadline, the heartbeat period, and the role predicates
 //! that decide which timer runs and when leadership is lost.
 
-use assert2::{assert, check};
-use krabka_units::prelude::{TimeExt as _, millis, secs};
-
-use super::*;
-use crate::kraft::{
-    controller::{
-        test_support::{EngineSetup, voter_set},
-        timing::{
-            election_timeout_ms, election_timer_starts_election, following_leader_for_role,
-            heartbeat_period, initial_election_at, instant_from_clock_base,
-            should_fail_waiters_on_leadership_change,
+use {
+    super::*,
+    crate::kraft::{
+        controller::{
+            test_support::{EngineSetup, voter_set},
+            timing::{
+                election_timeout_ms, election_timer_starts_election, following_leader_for_role,
+                heartbeat_period, initial_election_at, instant_from_clock_base,
+                should_fail_waiters_on_leadership_change,
+            },
         },
+        core::election_jitter_ms,
+        transport::wire::FETCH_VERSION,
     },
-    core::election_jitter_ms,
-    transport::wire::FETCH_VERSION,
+    assert2::{assert, check},
+    krabka_units::prelude::{TimeExt as _, millis, secs},
 };
 
 #[test]

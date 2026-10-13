@@ -5,17 +5,17 @@
 //! entry-matching tests in [`super::matching`], so they live in one module
 //! instead of being duplicated in each.
 
-use std::{collections::HashSet, net::SocketAddr};
-
-use krabka_metadata::{
-    AclEntry, AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, ResourceType,
-    metadata_version::{CIDR_ACL_MIN_LEVEL, METADATA_VERSION_FEATURE},
+use {
+    super::SimpleAclAuthorizer,
+    crate::{AuthorizationRequest, AuthorizationResult, Authorizer},
+    krabka_metadata::{
+        AclEntry, AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, ResourceType,
+        metadata_version::{CIDR_ACL_MIN_LEVEL, METADATA_VERSION_FEATURE},
+    },
+    krabka_security::Principal,
+    std::{collections::HashSet, net::SocketAddr},
+    uuid::Uuid,
 };
-use krabka_security::Principal;
-use uuid::Uuid;
-
-use super::SimpleAclAuthorizer;
-use crate::{AuthorizationRequest, AuthorizationResult, Authorizer};
 
 /// The default test caller, retaining one authorizer across all decisions in a case.
 pub(super) struct AliceAuthorizer {
@@ -43,15 +43,11 @@ impl AliceAuthorizer {
     ) -> AuthorizationResult {
         self.authorizer.authorize(
             image,
-            &req(
-                &self.principal,
-                &self.host,
-                QuerySetup {
-                    name,
-                    op: operation,
-                    ..Default::default()
-                },
-            ),
+            &req(&self.principal, &self.host, QuerySetup {
+                name,
+                op: operation,
+                ..Default::default()
+            }),
         )
     }
 
@@ -101,15 +97,11 @@ impl AliceAuthorizer {
     ) -> AuthorizationResult {
         self.authorizer.authorize(
             image,
-            &req(
-                &self.principal,
-                &self.host,
-                QuerySetup {
-                    rt: resource_type,
-                    name,
-                    op: operation,
-                },
-            ),
+            &req(&self.principal, &self.host, QuerySetup {
+                rt: resource_type,
+                name,
+                op: operation,
+            }),
         )
     }
 }
@@ -148,9 +140,7 @@ pub(super) fn image_with_acls(
     image
 }
 
-pub(super) fn no_super() -> HashSet<String> {
-    HashSet::new()
-}
+pub(super) fn no_super() -> HashSet<String> { HashSet::new() }
 pub(super) fn one_super(name: &str) -> HashSet<String> {
     let mut s = HashSet::new();
     s.insert(name.to_string());
@@ -165,13 +155,9 @@ pub(super) fn alice() -> Principal {
     }
 }
 
-pub(super) fn addr() -> SocketAddr {
-    "127.0.0.1:0".parse().unwrap()
-}
+pub(super) fn addr() -> SocketAddr { "127.0.0.1:0".parse().unwrap() }
 
-pub(super) fn img() -> MetadataImage {
-    MetadataImage::new(Uuid::nil())
-}
+pub(super) fn img() -> MetadataImage { MetadataImage::new(Uuid::nil()) }
 
 /// An image whose `metadata.version` is high enough (4.4-IV1) for a host
 /// containing `/` to be a CIDR range (KIP-1276).

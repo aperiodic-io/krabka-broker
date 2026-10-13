@@ -26,12 +26,13 @@
 //! Locking discipline: each cache operation releases the mutex before it
 //! returns, and this module holds nothing across an `.await`.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Mutex,
+use {
+    crate::codes,
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Mutex,
+    },
 };
-
-use crate::codes;
 
 /// Epoch value a client sends to close its share session (Kafka's
 /// `ShareRequestMetadata.FINAL_EPOCH`).
@@ -174,14 +175,11 @@ impl ShareSessionCache {
             inner
                 .connections
                 .insert(connection_id.to_string(), key.clone());
-            inner.sessions.insert(
-                key,
-                ShareSession {
-                    epoch: 1,
-                    partitions: ordered,
-                    connection_id: connection_id.to_string(),
-                },
-            );
+            inner.sessions.insert(key, ShareSession {
+                epoch: 1,
+                partitions: ordered,
+                connection_id: connection_id.to_string(),
+            });
             return Ok(ShareFetchSessionUpdate {
                 partitions: fetch,
                 released: HashSet::new(),
@@ -318,15 +316,11 @@ fn session_at_epoch<'a>(
     Ok(session)
 }
 
-fn next_epoch(epoch: i32) -> i32 {
-    epoch.checked_add(1).unwrap_or(1)
-}
+fn next_epoch(epoch: i32) -> i32 { epoch.checked_add(1).unwrap_or(1) }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     fn partition(id: u8, partition: i32) -> SharePartitionKey {
         (uuid::Uuid::from_bytes([id; 16]), partition)
@@ -487,36 +481,24 @@ mod tests {
         fetch(&cache, "m", 0, &[p0, p1], &[]).expect("open");
         // p2 joins at epoch 1, so its first incremental row is carried.
         let joined = fetch(&cache, "m", 1, &[p2], &[]).expect("add");
-        let first = cache.prune_response(
-            "g",
-            "m",
-            &[
-                row(p0, true, false),
-                row(p1, false, true),
-                row(p2, false, false),
-            ],
-        );
+        let first = cache.prune_response("g", "m", &[
+            row(p0, true, false),
+            row(p1, false, true),
+            row(p2, false, false),
+        ]);
         // p1 had an error, so it is carried once more after it clears.
         fetch(&cache, "m", 2, &[], &[]).expect("continue");
-        let second = cache.prune_response(
-            "g",
-            "m",
-            &[
-                row(p0, false, false),
-                row(p1, false, false),
-                row(p2, false, false),
-            ],
-        );
+        let second = cache.prune_response("g", "m", &[
+            row(p0, false, false),
+            row(p1, false, false),
+            row(p2, false, false),
+        ]);
         let after = fetch(&cache, "m", 3, &[], &[]).expect("continue");
-        let third = cache.prune_response(
-            "g",
-            "m",
-            &[
-                row(p0, false, false),
-                row(p1, false, false),
-                row(p2, false, false),
-            ],
-        );
+        let third = cache.prune_response("g", "m", &[
+            row(p0, false, false),
+            row(p1, false, false),
+            row(p2, false, false),
+        ]);
 
         assert!(joined.partitions == vec![p0, p1, p2]);
         assert!(first == vec![true, true, true]);

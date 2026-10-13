@@ -43,13 +43,15 @@
 
 mod support;
 
-use assert2::{assert, check};
-use krabka_broker::BrokerHandle;
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    common::streams_group_heartbeat_request::task_ids::TaskIds as ReqTaskIds,
-    streams_group_heartbeat_request::Topology,
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+use {
+    assert2::{assert, check},
+    krabka_broker::BrokerHandle,
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        common::streams_group_heartbeat_request::task_ids::TaskIds as ReqTaskIds,
+        streams_group_heartbeat_request::Topology,
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
 };
 
 /// Port the broker binds on the host and that the container reaches through
@@ -62,9 +64,7 @@ use krabka_protocol::owned::{
 /// time. A port per process lets them overlap.
 ///
 /// `&'static str`, so these read as the constants they replaced.
-fn bootstrap_addr() -> &'static str {
-    &support::jvm_listeners().advertised
-}
+fn bootstrap_addr() -> &'static str { &support::jvm_listeners().advertised }
 
 /// Official Apache Kafka image. It ships KIP-1071 streams groups plus the
 /// `kafka-streams-groups.sh` admin tool (`StreamsGroupDescribe` / `ListGroups`).
@@ -92,30 +92,23 @@ async fn connect() -> Client {
 /// Create `topic` (`partitions` partitions) and wait until this broker leads
 /// partition 0.
 async fn create_topic(broker: &BrokerHandle, client: &Client, topic: &str, partitions: i32) {
-    support::client::create_led_topic(
-        broker,
-        client,
-        CreateTopicSetup {
-            topic,
-            num_partitions: TopicPartitionCount(partitions),
-            ..Default::default()
-        },
-    )
+    support::client::create_led_topic(broker, client, CreateTopicSetup {
+        topic,
+        num_partitions: TopicPartitionCount(partitions),
+        ..Default::default()
+    })
     .await;
 }
-
-/// Finalize `streams.version` to level 1 so the heartbeat/describe handlers
-/// stop returning `UNSUPPORTED_VERSION`. `upgrade_type: 1` is UPGRADE.
-use support::streams::{active_partition_count, finalize_streams_version, follow_up};
 
 use crate::support::{
     streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
     topics::{CreateTopicSetup, TopicPartitionCount},
 };
+/// Finalize `streams.version` to level 1 so the heartbeat/describe handlers
+/// stop returning `UNSUPPORTED_VERSION`. `upgrade_type: 1` is UPGRADE.
+use support::streams::{active_partition_count, finalize_streams_version, follow_up};
 
-fn topology(source_topic: &str) -> Topology {
-    support::streams::topology(source_topic, Vec::new())
-}
+fn topology(source_topic: &str) -> Topology { support::streams::topology(source_topic, Vec::new()) }
 
 async fn join_and_converge(
     client: &Client,
@@ -149,9 +142,7 @@ async fn keepalive(client: &Client, group: &str, member_id: &str, epoch: i32) {
 /// Run a docker container against the host broker and return its output. The
 /// admin tool may exit non-zero even on a successful round-trip, as the
 /// `jvm_share_groups.rs` note records. So callers check stdout, not exit status.
-fn docker_run(args: &[&str]) -> std::process::Output {
-    support::jvm_docker_run(KAFKA_IMAGE, args)
-}
+fn docker_run(args: &[&str]) -> std::process::Output { support::jvm_docker_run(KAFKA_IMAGE, args) }
 
 /// A DEBUG-level log4j2 config, written into the container at `/tmp/d.yaml`, so
 /// the JVM tool's `NetworkClient`/`KafkaAdminClient` logs every request and

@@ -4,31 +4,33 @@
 //! its new checkpoint floor before deleting a prefix or advancing the log's
 //! own floor, so recovery can finish an interrupted trim.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-
-use bytes::{Bytes, BytesMut};
-use krabka_ids::Offset;
-use krabka_kraft_core::{LogOffsetMetadata, LogView as _};
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::RecordsPayload;
-use krabka_raft::NodeId;
-
-use super::{
-    Config,
-    checkpoint::{DURABLE_OFFSET_FILE, DurableRange, recover_durable_offset, write_durable_offset},
-};
-use crate::{
-    BrokerError,
-    log_dir::place_partition_dir,
-    partition_writer::storage_failure_error,
-    wal::quorum::{
-        engine::{split_batches, sync_replica},
-        log_view::ShardLog,
-        registry::ShardId,
-        shard_dir,
+use {
+    super::{
+        Config,
+        checkpoint::{
+            DURABLE_OFFSET_FILE, DurableRange, recover_durable_offset, write_durable_offset,
+        },
+    },
+    crate::{
+        BrokerError,
+        log_dir::place_partition_dir,
+        partition_writer::storage_failure_error,
+        wal::quorum::{
+            engine::{split_batches, sync_replica},
+            log_view::ShardLog,
+            registry::ShardId,
+            shard_dir,
+        },
+    },
+    bytes::{Bytes, BytesMut},
+    krabka_ids::Offset,
+    krabka_kraft_core::{LogOffsetMetadata, LogView as _},
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::RecordsPayload,
+    krabka_raft::NodeId,
+    std::{
+        path::{Path, PathBuf},
+        sync::Arc,
     },
 };
 
@@ -77,13 +79,10 @@ impl FollowerLog {
     #[cfg(test)]
     pub(super) fn for_log(log: Log) -> Self {
         let durable_offset_path = log.dir().join(DURABLE_OFFSET_FILE);
-        write_durable_offset(
-            &durable_offset_path,
-            DurableRange {
-                start: log.log_start_offset(),
-                end: log.log_end_offset(),
-            },
-        )
+        write_durable_offset(&durable_offset_path, DurableRange {
+            start: log.log_start_offset(),
+            end: log.log_end_offset(),
+        })
         .unwrap();
         Self {
             log: ShardLog::new(Arc::new(std::sync::Mutex::new(log))),
@@ -91,13 +90,9 @@ impl FollowerLog {
         }
     }
 
-    pub(super) fn end_offset(&self) -> Offset {
-        self.log.lock().log_end_offset()
-    }
+    pub(super) fn end_offset(&self) -> Offset { self.log.lock().log_end_offset() }
 
-    pub(super) fn start_offset(&self) -> Offset {
-        self.log.lock().log_start_offset()
-    }
+    pub(super) fn start_offset(&self) -> Offset { self.log.lock().log_start_offset() }
 
     pub(super) fn last_epoch(&self) -> i32 {
         self.log
@@ -126,10 +121,10 @@ impl FollowerLog {
         // failed. Publish the trim intent before the log can remove bytes or
         // write its own floor; either on-disk floor then fits this WAL range.
         log.sync()?;
-        write_durable_offset(
-            &self.durable_offset_path,
-            DurableRange { start: floor, end },
-        )?;
+        write_durable_offset(&self.durable_offset_path, DurableRange {
+            start: floor,
+            end,
+        })?;
         log.trim_to_offset(floor)?;
         log.sync()?;
         Ok(())
@@ -292,10 +287,11 @@ async fn run_blocking<T: Send + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::records::{Record, RecordBatch};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_protocol::records::{Record, RecordBatch},
+    };
 
     fn fresh_follower() -> (tempfile::TempDir, FollowerLog) {
         let dir = tempfile::tempdir().unwrap();
@@ -306,9 +302,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn interrupted_trim_keeps_a_recoverable_durable_range() {
-        use std::sync::atomic::{AtomicU8, Ordering};
-
-        use krabka_log::IoTarget;
+        use {
+            krabka_log::IoTarget,
+            std::sync::atomic::{AtomicU8, Ordering},
+        };
 
         #[derive(Debug)]
         struct InterruptedTrim(Arc<AtomicU8>);
@@ -326,6 +323,7 @@ mod tests {
                 }
                 file.sync_data()
             }
+
             fn rename(&self, target: IoTarget, from: &Path, to: &Path) -> std::io::Result<()> {
                 if target == IoTarget::LogStartOffsetCheckpoint && self.fails(2) {
                     return Err(std::io::Error::other(
@@ -334,6 +332,7 @@ mod tests {
                 }
                 std::fs::rename(from, to)
             }
+
             fn sync_dir(&self, dir: &Path) -> std::io::Result<()> {
                 std::fs::File::open(dir)?.sync_all()?;
                 if self.fails(3) {

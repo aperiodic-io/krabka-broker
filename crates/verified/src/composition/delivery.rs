@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
-use super::{
-    FetchWatermarks, delivery_watermark_advance, earliest_max_timestamp_index, fetch_visibility,
-    restore_batch_step, scheduled_delivery_visible,
-};
-use crate::broker::FetchVisibility;
 #[cfg(creusot)]
 use crate::broker::committed_fetch_response;
+use {
+    super::{
+        FetchWatermarks, delivery_watermark_advance, earliest_max_timestamp_index,
+        fetch_visibility, restore_batch_step, scheduled_delivery_visible,
+    },
+    crate::broker::FetchVisibility,
+    creusot_std::prelude::*,
+};
 
 open_logic! {
 pub fn scheduled_activation_due(activation: Int, uncertainty: Int, now: Int) -> bool {

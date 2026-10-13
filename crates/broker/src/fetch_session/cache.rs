@@ -6,20 +6,20 @@
 //! too, and they live beside the request-classification and eviction logic
 //! they belong to.
 
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering},
+use {
+    super::{
+        epoch::{FIRST_SESSION_ID, FetchSessionEpoch, FetchSessionId},
+        order::SessionOrder,
+        state::{CachedPartitionState, FetchSessionKey},
     },
-};
-
-use qubit_clock::{MonotonicClock, StdMonotonicClock};
-
-use super::{
-    epoch::{FIRST_SESSION_ID, FetchSessionEpoch, FetchSessionId},
-    order::SessionOrder,
-    state::{CachedPartitionState, FetchSessionKey},
+    qubit_clock::{MonotonicClock, StdMonotonicClock},
+    std::{
+        collections::HashMap,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering},
+        },
+    },
 };
 
 pub struct FetchSession {
@@ -101,30 +101,22 @@ impl FetchSessionCache {
     /// Number of live sessions in the cache. This is a lock-free read of an
     /// atomic counter and does not touch the cache mutex.
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.num_sessions.load(Ordering::Relaxed)
-    }
+    pub fn len(&self) -> usize { self.num_sessions.load(Ordering::Relaxed) }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
 
     /// Sum of `session.partitions.len()` across every live session. The
     /// metrics sampler reads it. This is a lock-free read of an atomic counter
     /// and does not touch the cache mutex or scan the session map.
     #[must_use]
-    pub fn total_partitions_cached(&self) -> usize {
-        self.num_partitions.load(Ordering::Relaxed)
-    }
+    pub fn total_partitions_cached(&self) -> usize { self.num_partitions.load(Ordering::Relaxed) }
 
     /// Cumulative count of eviction events since `new()`. There is one
     /// increment for each session that an allocation displaces. It does *not*
     /// count refused allocations, because those displace nothing.
     #[must_use]
-    pub fn evictions_total(&self) -> u64 {
-        self.evictions.load(Ordering::Relaxed)
-    }
+    pub fn evictions_total(&self) -> u64 { self.evictions.load(Ordering::Relaxed) }
 
     /// Updates the `last_*` fields on cached partitions to match what the
     /// handler emitted in the response that just finished. Only the partitions
@@ -171,17 +163,18 @@ impl FetchSessionCache {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-    use super::*;
-    use crate::fetch_session::{
-        SessionDecision,
-        test_support::{
-            ForgottenTopicSetup, NAME_FETCH_VERSION, RequestSessionId, SessionAllocationSetup,
-            SessionKeySetup, SessionRequestSetup, allocate_session, allocated_cache,
-            forgotten_topic, req, session_key, topic,
+    use {
+        super::*,
+        crate::fetch_session::{
+            SessionDecision,
+            test_support::{
+                ForgottenTopicSetup, NAME_FETCH_VERSION, RequestSessionId, SessionAllocationSetup,
+                SessionKeySetup, SessionRequestSetup, allocate_session, allocated_cache,
+                forgotten_topic, req, session_key, topic,
+            },
         },
+        assert2::assert,
+        krabka_protocol::primitives::uuid::Uuid as WireUuid,
     };
 
     #[derive(Clone, Copy)]
@@ -216,22 +209,16 @@ mod tests {
     fn finalize_incremental_updates_last_state() {
         let cache = FetchSessionCache::new(10);
         let key = session_key(SessionKeySetup::default());
-        let id = allocate_session(
-            &cache,
-            SessionAllocationSetup {
-                principal: "a".into(),
-                partitions: vec![(key.clone(), CachedPartitionState::default())],
-                ..Default::default()
-            },
-        );
-        let sent = vec![(
-            key.clone(),
-            CachedPartitionState {
-                last_high_watermark: 42,
-                last_log_start_offset: 7,
-                ..Default::default()
-            },
-        )];
+        let id = allocate_session(&cache, SessionAllocationSetup {
+            principal: "a".into(),
+            partitions: vec![(key.clone(), CachedPartitionState::default())],
+            ..Default::default()
+        });
+        let sent = vec![(key.clone(), CachedPartitionState {
+            last_high_watermark: 42,
+            last_log_start_offset: 7,
+            ..Default::default()
+        })];
         cache.finalize_incremental(id, &sent);
         let g = cache.inner.lock().unwrap();
         let s = g.sessions.get(&id).unwrap().partitions.get(&key).unwrap();
@@ -284,14 +271,11 @@ mod tests {
                 .partition_ids([0, 1])
                 .call(),
         );
-        allocate_session(
-            &cache,
-            SessionAllocationSetup {
-                principal: "b".into(),
-                partitions: cached_partitions(2..=4),
-                ..Default::default()
-            },
-        );
+        allocate_session(&cache, SessionAllocationSetup {
+            principal: "b".into(),
+            partitions: cached_partitions(2..=4),
+            ..Default::default()
+        });
         assert!(cache.total_partitions_cached() == 5);
     }
 
@@ -317,14 +301,11 @@ mod tests {
             ..Default::default()
         })];
         let r = req(SessionRequestSetup {
-            topics: vec![topic(
-                "t",
-                &[
-                    krabka_ids::PartitionIndex(0),
-                    krabka_ids::PartitionIndex(2),
-                    krabka_ids::PartitionIndex(3),
-                ],
-            )],
+            topics: vec![topic("t", &[
+                krabka_ids::PartitionIndex(0),
+                krabka_ids::PartitionIndex(2),
+                krabka_ids::PartitionIndex(3),
+            ])],
             forgotten,
             ..SessionRequestSetup::incremental(RequestSessionId(id))
         });
@@ -341,16 +322,13 @@ mod tests {
         let (cache, id) = two_partition_cache();
 
         let r = req(SessionRequestSetup {
-            topics: vec![topic(
-                "t",
-                &[
-                    krabka_ids::PartitionIndex(0),
-                    krabka_ids::PartitionIndex(1),
-                    krabka_ids::PartitionIndex(2),
-                    krabka_ids::PartitionIndex(3),
-                    krabka_ids::PartitionIndex(4),
-                ],
-            )],
+            topics: vec![topic("t", &[
+                krabka_ids::PartitionIndex(0),
+                krabka_ids::PartitionIndex(1),
+                krabka_ids::PartitionIndex(2),
+                krabka_ids::PartitionIndex(3),
+                krabka_ids::PartitionIndex(4),
+            ])],
             ..SessionRequestSetup::incremental(RequestSessionId(id))
         });
         check_incremental_count(&cache, &r, CachedPartitionCount(5));
@@ -359,14 +337,11 @@ mod tests {
     #[test]
     fn counters_track_large_incremental_forget_delta() {
         let cache = FetchSessionCache::new(10);
-        let id = allocate_session(
-            &cache,
-            SessionAllocationSetup {
-                principal: "a".into(),
-                partitions: cached_partitions(0..=4),
-                ..Default::default()
-            },
-        );
+        let id = allocate_session(&cache, SessionAllocationSetup {
+            principal: "a".into(),
+            partitions: cached_partitions(0..=4),
+            ..Default::default()
+        });
         let forgotten = vec![forgotten_topic(ForgottenTopicSetup {
             partitions: vec![
                 krabka_ids::PartitionIndex(2),

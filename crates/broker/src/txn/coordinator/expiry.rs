@@ -21,10 +21,11 @@
 //! same transaction on a timeout: neither reaper may take the commit-or-abort
 //! decision away from the transaction manager that owns it.
 
-use tracing::{info, warn};
-
-use super::TxnCoordinator;
-use crate::txn::state::TxnState;
+use {
+    super::TxnCoordinator,
+    crate::txn::state::TxnState,
+    tracing::{info, warn},
+};
 
 /// Reports whether `state` is one the coordinator may expire at all.
 ///

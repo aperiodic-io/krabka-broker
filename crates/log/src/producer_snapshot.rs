@@ -1,19 +1,19 @@
 //! Kafka-compatible producer-state snapshot encoding and recovery.
 
-use std::{
-    collections::HashMap,
-    fs,
-    path::{Path, PathBuf},
-};
-
-use bytes::BufMut as _;
-use krabka_ids::{Offset, ProducerId};
-use krabka_verified::producer_snapshot::{self as kernel, ProducerReloadRange};
-
-use crate::{
-    LogError,
-    io::{IoTarget, LogIo, write_atomic},
-    name,
+use {
+    crate::{
+        LogError,
+        io::{IoTarget, LogIo, write_atomic},
+        name,
+    },
+    bytes::BufMut as _,
+    krabka_ids::{Offset, ProducerId},
+    krabka_verified::producer_snapshot::{self as kernel, ProducerReloadRange},
+    std::{
+        collections::HashMap,
+        fs,
+        path::{Path, PathBuf},
+    },
 };
 
 const VERSION: i16 = 1;
@@ -499,8 +499,7 @@ fn take_i64(bytes: &[u8], cursor: &mut usize) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::io::FileIo;
+    use {super::*, crate::io::FileIo};
 
     fn sample_entry() -> ProducerSnapshotEntry {
         ProducerSnapshotEntry {
@@ -529,9 +528,7 @@ mod tests {
         (dir, path)
     }
 
-    fn sample_file() -> (tempfile::TempDir, PathBuf) {
-        snapshot_file(&sample(), 102)
-    }
+    fn sample_file() -> (tempfile::TempDir, PathBuf) { snapshot_file(&sample(), 102) }
 
     fn sample_files(offsets: impl IntoIterator<Item = i64>) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();

@@ -1,8 +1,10 @@
 //! ACL fixtures whose commit/application settling behavior matches quota suites.
 
-use krabka_broker::BrokerHandle;
-use krabka_metadata::{
-    AclEntry, AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
+use {
+    krabka_broker::BrokerHandle,
+    krabka_metadata::{
+        AclEntry, AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
+    },
 };
 
 /// Install the simple authorizer using exactly the broker's current super-user set.
@@ -110,31 +112,23 @@ pub const TOPIC_FULL_MASK: i32 = BIT_READ
     | BIT_ALTER_CONFIGS;
 
 /// A literal `Allow` binding on any resource, with the original wildcard host.
-pub fn resource_allow_acl(setup: AllowAclSetup<'_>) -> MetadataRecord {
-    literal_allow_acl(setup)
-}
+pub fn resource_allow_acl(setup: AllowAclSetup<'_>) -> MetadataRecord { literal_allow_acl(setup) }
 
 pub async fn seed_compat_shim_disable_acl(handle: &BrokerHandle) {
-    seed_topic_acl(
-        handle,
-        TopicAclSetup {
-            topic: "__compat_shim_disable__",
-            principal: "User:admin",
-            ..Default::default()
-        },
-    )
+    seed_topic_acl(handle, TopicAclSetup {
+        topic: "__compat_shim_disable__",
+        principal: "User:admin",
+        ..Default::default()
+    })
     .await;
 }
 
 pub async fn seed_alice_write_acl(handle: &BrokerHandle, topic: &str) {
-    seed_topic_acl(
-        handle,
-        TopicAclSetup {
-            topic,
-            operation: AclOperation::Write,
-            ..Default::default()
-        },
-    )
+    seed_topic_acl(handle, TopicAclSetup {
+        topic,
+        operation: AclOperation::Write,
+        ..Default::default()
+    })
     .await;
 }
 

@@ -11,24 +11,24 @@
 //!
 //! [`MetadataEventLog::subscribe`]: crate::log::MetadataEventLog::subscribe
 
-use std::{
-    collections::HashMap,
-    future::Future,
-    sync::{Arc, Mutex as StdMutex},
-};
-
-use krabka_client_core::{
-    Client, ClientFrameMax, ConnectionDispatchQueueCapacity, FetchMinBytes, IsolatedFetch,
-};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use krabka_units::prelude::{ByteSize, Time, TimeExt as _};
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-use tracing::{instrument, warn};
-
-use crate::{
-    kafka_log::{METADATA_TOPIC_SCOPE, config::MetadataEventQueueCapacity, partition_leader},
-    log::{AssignmentHandle, MetadataEventRecord, PartitionStart},
+use {
+    crate::{
+        kafka_log::{METADATA_TOPIC_SCOPE, config::MetadataEventQueueCapacity, partition_leader},
+        log::{AssignmentHandle, MetadataEventRecord, PartitionStart},
+    },
+    krabka_client_core::{
+        Client, ClientFrameMax, ConnectionDispatchQueueCapacity, FetchMinBytes, IsolatedFetch,
+    },
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    krabka_units::prelude::{ByteSize, Time, TimeExt as _},
+    std::{
+        collections::HashMap,
+        future::Future,
+        sync::{Arc, Mutex as StdMutex},
+    },
+    tokio::sync::mpsc,
+    tokio_util::sync::CancellationToken,
+    tracing::{instrument, warn},
 };
 
 /// Per-subscription live consumer: one cancellable fetch task per assigned
@@ -89,12 +89,10 @@ pub(super) struct KafkaAssignmentHandle {
 }
 
 impl AssignmentHandle for KafkaAssignmentHandle {
-    fn add(&self, start: PartitionStart) {
-        self.state.spawn_partition(start);
-    }
-    fn remove(&self, partition: i32) {
-        self.state.cancel_partition(partition);
-    }
+    fn add(&self, start: PartitionStart) { self.state.spawn_partition(start); }
+
+    fn remove(&self, partition: i32) { self.state.cancel_partition(partition); }
+
     fn assigned(&self) -> Vec<i32> {
         let mut v: Vec<i32> = self
             .state
@@ -262,11 +260,12 @@ async fn partition_fetch_loop(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::prelude::{mebibytes, millis};
-
-    use super::*;
-    use crate::kafka_log::config::METADATA_TOPIC;
+    use {
+        super::*,
+        crate::kafka_log::config::METADATA_TOPIC,
+        assert2::{assert, check},
+        krabka_units::prelude::{mebibytes, millis},
+    };
 
     #[tokio::test]
     async fn initial_connection_retries_without_reassignment() {

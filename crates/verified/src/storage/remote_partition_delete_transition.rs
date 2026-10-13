@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{RemoteCacheAction, RemotePartitionDeleteLifecycle, RemoteSegmentLifecycle};
+use {
+    super::{RemoteCacheAction, RemotePartitionDeleteLifecycle, RemoteSegmentLifecycle},
+    creusot_std::prelude::*,
+};
 
 /// The forward edges of Kafka's segment lifecycle:
 /// `COPY_SEGMENT_STARTED -> COPY_SEGMENT_FINISHED | DELETE_SEGMENT_STARTED`,

@@ -6,12 +6,13 @@
 //! `COORDINATOR_NOT_AVAILABLE`, and the client retries until the lookup names
 //! a broker. A repeated transactional id bumps the epoch.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest;
-
-use crate::support::{
-    self,
-    transactions::{InitProducerSetup, claim_idempotent_producer, new_producer_request},
+use {
+    crate::support::{
+        self,
+        transactions::{InitProducerSetup, claim_idempotent_producer, new_producer_request},
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::find_coordinator_request::FindCoordinatorRequest,
 };
 
 #[tokio::test]

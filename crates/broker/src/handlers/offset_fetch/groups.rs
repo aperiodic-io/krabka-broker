@@ -7,30 +7,32 @@
 //! echoes the id back on the response. The legacy single-group shape lives in
 //! `legacy`.
 
-use krabka_protocol::{
-    owned::{
-        offset_fetch_request::OffsetFetchRequest,
-        offset_fetch_response::{
-            OffsetFetchResponse, OffsetFetchResponseGroup, OffsetFetchResponsePartitions,
-            OffsetFetchResponseTopics,
+use {
+    super::{
+        authz::{group_error, topic_decisions, visible_topics},
+        committed::{
+            committed_topics, fetch_offsets, missing_group_row as missing_offset_row,
+            stable_group_row,
         },
+        unstable,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use super::{
-    authz::{group_error, topic_decisions, visible_topics},
-    committed::{
-        committed_topics, fetch_offsets, missing_group_row as missing_offset_row, stable_group_row,
+    crate::{
+        authorizer::AuthorizationResult,
+        broker::Broker,
+        codes,
+        coordinator::unified::group::GroupOffsets,
+        handlers::{RequestContext, requested_topic_name},
     },
-    unstable,
-};
-use crate::{
-    authorizer::AuthorizationResult,
-    broker::Broker,
-    codes,
-    coordinator::unified::group::GroupOffsets,
-    handlers::{RequestContext, requested_topic_name},
+    krabka_protocol::{
+        owned::{
+            offset_fetch_request::OffsetFetchRequest,
+            offset_fetch_response::{
+                OffsetFetchResponse, OffsetFetchResponseGroup, OffsetFetchResponsePartitions,
+                OffsetFetchResponseTopics,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 /// Per-group fetch for v8 and above.
@@ -289,10 +291,7 @@ fn is_mismatched_topic_id(stored: Option<uuid::Uuid>, requested: Option<uuid::Uu
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::coordinator::unified::classic_state::OffsetEntry;
+    use {super::*, crate::coordinator::unified::classic_state::OffsetEntry, assert2::check};
 
     /// #987, Kafka's `isOffsetInvalid`: an `OffsetFetch` that names the topic
     /// by an id other than the one the offset was committed under reads no

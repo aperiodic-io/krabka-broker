@@ -11,19 +11,20 @@
 //! path, also check the broker's local log end offset via the existing
 //! `BrokerHandle::local_log_end_offset` helper.
 
-use assert2::assert;
-
-use crate::{
-    ERR_TOPIC_AUTHORIZATION_FAILED,
-    client_api::{drive_fetch_as_plain, drive_produce_as_plain, single_record_produce_request},
-    framing::CLIENT_ID,
-    kafka_wire::PlainAuthenticationSetup,
-    polling::retry_produce_until_allowed,
-    sasl_cluster::{start_alice_topic_grant, start_denied_foo},
-    support::{
-        fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
-        produce::single_partition_response,
+use {
+    crate::{
+        ERR_TOPIC_AUTHORIZATION_FAILED,
+        client_api::{drive_fetch_as_plain, drive_produce_as_plain, single_record_produce_request},
+        framing::CLIENT_ID,
+        kafka_wire::PlainAuthenticationSetup,
+        polling::retry_produce_until_allowed,
+        sasl_cluster::{start_alice_topic_grant, start_denied_foo},
+        support::{
+            fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
+            produce::single_partition_response,
+        },
     },
+    assert2::assert,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -87,14 +88,10 @@ async fn fetch_denied_without_topic_read_acl() {
     // alice has NO Read-on-foo binding → Fetch must return 29 on the
     // partition row.
     let req = named_topic_fetch("foo", FetchLimits::one_mebibyte(RequestWaitMillis(0)));
-    let resp = drive_fetch_as_plain(
-        addr,
-        req,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            ..Default::default()
-        },
-    )
+    let resp = drive_fetch_as_plain(addr, req, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        ..Default::default()
+    })
     .await
     .expect("Fetch must round-trip");
     handle.shutdown().await;

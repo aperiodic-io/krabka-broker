@@ -26,24 +26,25 @@
 //! operations that the principal may perform. Every other row keeps the
 //! `i32::MIN` "not present" sentinel.
 
-use bytes::Bytes;
-use krabka_protocol::owned::{
-    describe_groups_request::DescribeGroupsRequest,
-    describe_groups_response::{DescribeGroupsResponse, DescribedGroup, DescribedGroupMember},
-};
-
 #[cfg(test)]
 use crate::authorizer::SimpleAclAuthorizer;
-use crate::{
-    broker::Broker,
-    codes,
-    coordinator::unified::{
-        GroupType,
-        actor::{ClassicView, GroupActorMessage},
-        classic_state::GroupState,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        coordinator::unified::{
+            GroupType,
+            actor::{ClassicView, GroupActorMessage},
+            classic_state::GroupState,
+        },
+        handlers::authorized_operations::fill_group_authorized_operations,
+        task_util::{AskError, ask},
     },
-    handlers::authorized_operations::fill_group_authorized_operations,
-    task_util::{AskError, ask},
+    bytes::Bytes,
+    krabka_protocol::owned::{
+        describe_groups_request::DescribeGroupsRequest,
+        describe_groups_response::{DescribeGroupsResponse, DescribedGroup, DescribedGroupMember},
+    },
 };
 
 /// The first `DescribeGroups` version whose unknown-group row carries
@@ -198,22 +199,22 @@ fn described_classic(view: ClassicView) -> DescribedGroup {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{AclOperation, ResourceType};
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        coordinator::unified::actor::ClassicMemberView,
-        handlers::{
-            acl_wire::operation_to_wire, authorized_operations::authorized_operations_bits,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            coordinator::unified::actor::ClassicMemberView,
+            handlers::{
+                acl_wire::operation_to_wire, authorized_operations::authorized_operations_bits,
+            },
+            test_support::{
+                AllowAclSetup, DenyAll, KafkaErrorCode, allow_acl, peer, principal,
+                request_context, start_group_broker_no_audit, test_ctx,
+            },
         },
-        test_support::{
-            AllowAclSetup, DenyAll, KafkaErrorCode, allow_acl, peer, principal, request_context,
-            start_group_broker_no_audit, test_ctx,
-        },
+        assert2::assert,
+        krabka_metadata::{AclOperation, ResourceType},
+        std::sync::Arc,
     };
 
     const VERSION: krabka_ids::ApiVersion =
@@ -561,9 +562,7 @@ mod tests {
         }))
     }
 
-    fn bit(op: AclOperation) -> i32 {
-        1_i32 << operation_to_wire(op)
-    }
+    fn bit(op: AclOperation) -> i32 { 1_i32 << operation_to_wire(op) }
 
     /// `Empty` classic `allowed`, as `DescribeGroups` answers it with
     /// `authorized_operations` bits.

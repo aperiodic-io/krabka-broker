@@ -5,30 +5,31 @@
 //! KIP-368 in-band re-authentication pair. The OAUTHBEARER suites in
 //! `oauthbearer_tokens` and `oauthbearer_sessions` build on these.
 
-use std::{io, net::SocketAddr};
-
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
-use krabka_broker::{Broker, BrokerHandle};
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::owned::{
-    api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
-    sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
-    sasl_handshake_request::SaslHandshakeRequest, sasl_handshake_response::SaslHandshakeResponse,
-};
-use krabka_security::SaslMechanism;
-use tokio::net::TcpStream;
-
-use crate::{
-    harness::round_trip,
-    kafka_wire::{decode_named, encode_named},
-    support::{
-        sasl::sasl_plaintext_mechanisms,
-        wire::{
-            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-            SocketExchangeSetup,
+use {
+    crate::{
+        harness::round_trip,
+        kafka_wire::{decode_named, encode_named},
+        support::{
+            sasl::sasl_plaintext_mechanisms,
+            wire::{
+                CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+                SocketExchangeSetup,
+            },
         },
     },
+    base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64},
+    krabka_broker::{Broker, BrokerHandle},
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::owned::{
+        api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+        sasl_handshake_request::SaslHandshakeRequest,
+        sasl_handshake_response::SaslHandshakeResponse,
+    },
+    krabka_security::SaslMechanism,
+    std::{io, net::SocketAddr},
+    tokio::net::TcpStream,
 };
 
 /// Build an unsecured JWS (`alg:none`) bearer token with a `sub` principal and

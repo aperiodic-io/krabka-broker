@@ -7,34 +7,34 @@
 //! Kafka's `AclBindingFilter` semantics over a mixed ACL set, and the two ways
 //! Kafka refuses a filter with an `UNKNOWN` element.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType};
-use krabka_protocol::{
-    ProtocolError,
-    owned::{
-        delete_acls_request::{DeleteAclsFilter, DeleteAclsRequest},
-        delete_acls_response::{DeleteAclsFilterResult, DeleteAclsResponse},
-    },
-};
-
-use super::{Doomed, filter::build_filter, handle, match_filter};
-use crate::{
-    broker::BrokerHandle,
-    codes,
-    error::BrokerError,
-    handlers::{
-        acl_test_support::{all_acls, seed_acls},
-        delete_acls::test_support::{
-            OPERATION_ANY, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PATTERN_TYPE_MATCH,
-            PATTERN_TYPE_PREFIXED, PERMISSION_ANY, RESOURCE_TYPE_TOPIC, VERSION, acl,
-            configured_authorizer, filter, named_filters, request, test_context,
+use {
+    super::{Doomed, filter::build_filter, handle, match_filter},
+    crate::{
+        broker::BrokerHandle,
+        codes,
+        error::BrokerError,
+        handlers::{
+            acl_test_support::{all_acls, seed_acls},
+            delete_acls::test_support::{
+                OPERATION_ANY, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PATTERN_TYPE_MATCH,
+                PATTERN_TYPE_PREFIXED, PERMISSION_ANY, RESOURCE_TYPE_TOPIC, VERSION, acl,
+                configured_authorizer, filter, named_filters, request, test_context,
+            },
+        },
+        test_support::{
+            AllowAclSetup, DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
         },
     },
-    test_support::{
-        AllowAclSetup, DenyAll, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+    assert2::{assert, check},
+    krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType},
+    krabka_protocol::{
+        ProtocolError,
+        owned::{
+            delete_acls_request::{DeleteAclsFilter, DeleteAclsRequest},
+            delete_acls_response::{DeleteAclsFilterResult, DeleteAclsResponse},
+        },
     },
+    std::sync::Arc,
 };
 
 fn orders_and_payments_request() -> DeleteAclsRequest {
@@ -533,11 +533,10 @@ fn match_filter_bounds_the_removals_of_a_request() {
     let bound = 3;
     // (label, filters in order, how many ACLs each matched; `None` is refused)
     let cases = [
-        (
-            "under the bound",
-            vec![&topic_0, &topic_1],
-            vec![Some(1), Some(1)],
-        ),
+        ("under the bound", vec![&topic_0, &topic_1], vec![
+            Some(1),
+            Some(1),
+        ]),
         // A repeat adds no distinct removal, so it is never past the bound.
         (
             "repeats",

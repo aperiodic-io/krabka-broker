@@ -5,32 +5,25 @@
 //! The helpers the transitions call live in the sibling modules. This file only
 //! sequences them and states what must hold.
 
-use stateright::Model;
-
-use super::{
-    config::ReconModel,
-    projection::{assert_epoch_monotonic, project, rebuild_group},
-    state::{ReconAction, ReconState, member},
-};
-use crate::coordinator::unified::{
-    actor::reconciliation_model_support::{
-        advertised_disjoint, enqueue_member_actions, exclusive_ownership, handoff_witness,
-        member_next_state, model_properties, overlaps_others,
+use {
+    super::{
+        config::ReconModel,
+        projection::{assert_epoch_monotonic, project, rebuild_group},
+        state::{ReconAction, ReconState, member},
     },
-    persistence_next_gen::MemberAssignmentState,
+    crate::coordinator::unified::{
+        actor::reconciliation_model_support::{
+            advertised_disjoint, enqueue_member_actions, exclusive_ownership, handoff_witness,
+            member_next_state, model_properties, overlaps_others,
+        },
+        persistence_next_gen::MemberAssignmentState,
+    },
+    stateright::Model,
 };
 
 impl Model for ReconModel {
-    type State = ReconState;
     type Action = ReconAction;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![ReconState::empty()]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        enqueue_member_actions!(self, state, actions, ReconAction, member; |m| {});
-    }
+    type State = ReconState;
 
     member_next_state! {
         fn next_state(self, last, action; ReconAction);
@@ -72,7 +65,11 @@ impl Model for ReconModel {
         },
     }
 
-    fn within_boundary(&self, state: &Self::State) -> bool {
-        state.group_epoch <= self.max_epoch
+    fn init_states(&self) -> Vec<Self::State> { vec![ReconState::empty()] }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        enqueue_member_actions!(self, state, actions, ReconAction, member; |m| {});
     }
+
+    fn within_boundary(&self, state: &Self::State) -> bool { state.group_epoch <= self.max_epoch }
 }

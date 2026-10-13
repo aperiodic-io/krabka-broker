@@ -3,8 +3,10 @@
 //! The bounds sit next to the assertions that prove a run was exhaustive,
 //! because a truncated search proves nothing and the two must move together.
 
-use super::config::ReconModel;
-use crate::coordinator::unified::actor::reconciliation_model_support::pinned_model_runner;
+use {
+    super::config::ReconModel,
+    crate::coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
+};
 
 const MAX_STATES: usize = 200_000;
 const MAX_DEPTH: usize = 60;

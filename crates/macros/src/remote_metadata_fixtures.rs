@@ -1,10 +1,11 @@
 //! Metadata fixtures shared by in-memory and topic-backed manager tests.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::{
-    fixtures::{name as fixture_name, named_arguments, named_root},
-    meta::{arguments, mode},
+use {
+    crate::{
+        fixtures::{name as fixture_name, named_arguments, named_root},
+        meta::{arguments, mode},
+    },
+    moxy::{ast::ParseError, token::TokenStream},
 };
 
 fn started_metadata(
@@ -145,9 +146,7 @@ pub(crate) fn wal_capture_topic_fixture(input: TokenStream) -> Result<TokenStrea
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::segment;
+    use {super::segment, assert2::assert};
 
     #[test]
     fn timestamp_policy_is_explicit_and_bounded_to_the_supported_fixtures() {

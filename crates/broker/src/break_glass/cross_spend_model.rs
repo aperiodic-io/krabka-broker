@@ -55,14 +55,15 @@
 //! The clock is a small integer of logical milliseconds, bounded exactly as the
 //! sibling model bounds it, so the state graph stays exhaustive.
 
-use krabka_metadata::BreakGlassAction;
-
-use self::{
-    transitions::CrossSpendModel,
-    universe::{EXPIRES_AT, ProposalSpec, Request},
+use {
+    self::{
+        transitions::CrossSpendModel,
+        universe::{EXPIRES_AT, ProposalSpec, Request},
+    },
+    super::state_model::config,
+    crate::model_check::check_model,
+    krabka_metadata::BreakGlassAction,
 };
-use super::state_model::config;
-use crate::model_check::check_model;
 
 mod properties;
 mod transitions;

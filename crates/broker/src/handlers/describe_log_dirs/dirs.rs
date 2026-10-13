@@ -6,9 +6,10 @@
 //! inside it, and two of them are platform-specific, so they sit apart from the
 //! scan loop.
 
-use krabka_protocol::owned::describe_log_dirs_response::DescribeLogDirsResult;
-
-use crate::{codes, cordoned_log_dirs::CordonedLogDirs};
+use {
+    crate::{codes, cordoned_log_dirs::CordonedLogDirs},
+    krabka_protocol::owned::describe_log_dirs_response::DescribeLogDirsResult,
+};
 
 /// The directories `DescribeLogDirs` reports with `is_cordoned = true`.
 ///
@@ -85,17 +86,16 @@ fn disk_stats(dir: &std::path::Path) -> Option<(i64, i64)> {
 }
 
 #[cfg(not(unix))]
-fn disk_stats(_dir: &std::path::Path) -> Option<(i64, i64)> {
-    None
-}
+fn disk_stats(_dir: &std::path::Path) -> Option<(i64, i64)> { None }
 
 // Both tests below are unix-only, so the module itself is gated: on another
 // platform there would be no test left to use the `assert2` imports.
 #[cfg(all(test, unix))]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     /// On unix, `statvfs` against any tempdir must return sensible positive
     /// numbers.

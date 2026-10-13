@@ -1,11 +1,12 @@
-use assert2::assert;
-
-use super::{
-    oracle::{expected_membership, grant_sets},
-    *,
-};
-use crate::{
-    composition::reconfiguration::SupportedControl, reconfiguration::ReconfigurationState,
+use {
+    super::{
+        oracle::{expected_membership, grant_sets},
+        *,
+    },
+    crate::{
+        composition::reconfiguration::SupportedControl, reconfiguration::ReconfigurationState,
+    },
+    assert2::assert,
 };
 
 pub(super) fn expected_control(

@@ -1,11 +1,12 @@
 //! Item generators for fixtures shared across crate boundaries.
 
-use moxy::{
-    ast::ParseError,
-    token::{Ident, Span, TokenStream, TokenTree},
+use {
+    crate::meta::{arguments, item_body, mode, required_tokens},
+    moxy::{
+        ast::ParseError,
+        token::{Ident, Span, TokenStream, TokenTree},
+    },
 };
-
-use crate::meta::{arguments, item_body, mode, required_tokens};
 
 /// Top-level comma splitting that retains the input's diagnostic span.
 pub(crate) struct CommaArguments {

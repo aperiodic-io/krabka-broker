@@ -2,14 +2,14 @@
 //! builders over a temporary data directory, a recording [`PeerSender`], and
 //! the election and submission helpers the behaviour tests drive them with.
 
-use std::time::Duration as StdDuration;
-
-use krabka_units::prelude::{TimeExt as _, secs};
-
-use super::*;
-use crate::{
-    MetadataLogConfig,
-    kraft::{Activation, transport::NullPeerSender},
+use {
+    super::*,
+    crate::{
+        MetadataLogConfig,
+        kraft::{Activation, transport::NullPeerSender},
+    },
+    krabka_units::prelude::{TimeExt as _, secs},
+    std::time::Duration as StdDuration,
 };
 
 /// Deadline every test-side channel receive is bounded by.
@@ -126,14 +126,11 @@ pub fn open_test_controller(
     cluster_id: uuid::Uuid,
     voters: VoterSet,
 ) -> Result<KraftController, RaftError> {
-    open_test_controller_with(
-        data_dir,
-        ControllerOpenSetup {
-            cluster_id,
-            voters,
-            ..Default::default()
-        },
-    )
+    open_test_controller_with(data_dir, ControllerOpenSetup {
+        cluster_id,
+        voters,
+        ..Default::default()
+    })
 }
 
 #[derive(krabka_macros::FieldDefaults)]

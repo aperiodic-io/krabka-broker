@@ -8,29 +8,29 @@
 //! render the in-memory `subtopology -> partitions` task maps back into the
 //! wire `TaskIds` shape.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-
-use krabka_log::Offset;
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::{
-    common::streams_group_heartbeat_response::{
-        endpoint::Endpoint, status::Status, task_ids::TaskIds as RespTaskIds,
-        topic_partition::TopicPartition,
+use {
+    super::{StreamsDescribeMember, StreamsDescribeView},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        coordinator::unified::streams::{
+            config::StreamsGroupConfig,
+            persistence::StreamsGroupTopologyValue,
+            state::{StreamsGroupState, StreamsMemberState},
+            topology::{ConfiguredSubtopology, ConfiguredTopology, status as topo_status},
+        },
     },
-    streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-    streams_group_heartbeat_response::{EndpointToPartitions, StreamsGroupHeartbeatResponse},
-};
-
-use super::{StreamsDescribeMember, StreamsDescribeView};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    coordinator::unified::streams::{
-        config::StreamsGroupConfig,
-        persistence::StreamsGroupTopologyValue,
-        state::{StreamsGroupState, StreamsMemberState},
-        topology::{ConfiguredSubtopology, ConfiguredTopology, status as topo_status},
+    krabka_log::Offset,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::{
+        common::streams_group_heartbeat_response::{
+            endpoint::Endpoint, status::Status, task_ids::TaskIds as RespTaskIds,
+            topic_partition::TopicPartition,
+        },
+        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+        streams_group_heartbeat_response::{EndpointToPartitions, StreamsGroupHeartbeatResponse},
     },
+    std::collections::{BTreeMap, BTreeSet, HashMap},
 };
 
 /// Renders a `subtopology -> partitions` task map as a response

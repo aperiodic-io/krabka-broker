@@ -2,19 +2,19 @@
 //! slice this node serves out of its own log, and the one-shot outbound fetch a
 //! broker-only observer issues against a controller listener.
 
-use std::net::SocketAddr;
-
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-
-use super::{ControllerHandle, connection_options};
-use crate::{
-    error::RaftError,
-    kraft::MetadataFetchSlice,
-    types::NodeId,
-    wire::{
-        API_KEY_METADATA_FETCH, KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse,
-        PRIVATE_UNSUPPORTED_VERSION, private_request_version,
+use {
+    super::{ControllerHandle, connection_options},
+    crate::{
+        error::RaftError,
+        kraft::MetadataFetchSlice,
+        types::NodeId,
+        wire::{
+            API_KEY_METADATA_FETCH, KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse,
+            PRIVATE_UNSUPPORTED_VERSION, private_request_version,
+        },
     },
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
+    std::net::SocketAddr,
 };
 
 impl ControllerHandle {
@@ -100,24 +100,24 @@ impl ControllerHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use krabka_metadata::{MetadataImage, MetadataRecord, from_kraft_value};
-    use krabka_protocol::records::RecordBatch;
-    use krabka_units::prelude::{TimeExt as _, mebibytes};
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::{
-        config::ControllerConfig,
-        controller::{
-            Controller,
-            test_support::{
-                FAST_ELECTION_TIMEOUT, RecordingDialer, TEST_OP_TIMEOUT, UNBOUNDED_FETCH,
-                bootstrap_controller, committable_topic_record, submit_change_with_timeout,
-                wait_for_leader,
+    use {
+        super::*,
+        crate::{
+            config::ControllerConfig,
+            controller::{
+                Controller,
+                test_support::{
+                    FAST_ELECTION_TIMEOUT, RecordingDialer, TEST_OP_TIMEOUT, UNBOUNDED_FETCH,
+                    bootstrap_controller, committable_topic_record, submit_change_with_timeout,
+                    wait_for_leader,
+                },
             },
         },
+        krabka_metadata::{MetadataImage, MetadataRecord, from_kraft_value},
+        krabka_protocol::records::RecordBatch,
+        krabka_units::prelude::{TimeExt as _, mebibytes},
+        std::sync::Arc,
+        tempfile::TempDir,
     };
 
     fn contains_topic(records: &[u8], name: &str) -> bool {

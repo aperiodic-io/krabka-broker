@@ -14,30 +14,31 @@
 //! `DefaultKafkaPrincipalBuilder.serialize(new KafkaPrincipal("User",
 //! "alice"))` is the byte string [`JVM_USER_ALICE`] holds.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    allocate_producer_ids_request::{self, AllocateProducerIdsRequest},
-    allocate_producer_ids_response::AllocateProducerIdsResponse,
-    api_versions_response::ApiVersionsResponse,
-    create_delegation_token_request::{self, CreateDelegationTokenRequest},
-    create_delegation_token_response::CreateDelegationTokenResponse,
-    create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
-    envelope_request::{self, EnvelopeRequest},
-    envelope_response::EnvelopeResponse,
-    produce_request::ProduceRequest,
-    sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
-    sasl_handshake_request::SaslHandshakeRequest,
-    sasl_handshake_response::SaslHandshakeResponse,
-};
-use krabka_security::{ListenerProtocol, SaslMechanism, SecretBytes};
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-
-use crate::support::{
-    acl::{ClusterAclSetup, cluster_acl_record},
-    controller_listener::*,
-    start_with_bound_listeners,
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        acl::{ClusterAclSetup, cluster_acl_record},
+        controller_listener::*,
+        start_with_bound_listeners,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        allocate_producer_ids_request::{self, AllocateProducerIdsRequest},
+        allocate_producer_ids_response::AllocateProducerIdsResponse,
+        api_versions_response::ApiVersionsResponse,
+        create_delegation_token_request::{self, CreateDelegationTokenRequest},
+        create_delegation_token_response::CreateDelegationTokenResponse,
+        create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
+        envelope_request::{self, EnvelopeRequest},
+        envelope_response::EnvelopeResponse,
+        produce_request::ProduceRequest,
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+        sasl_handshake_request::SaslHandshakeRequest,
+        sasl_handshake_response::SaslHandshakeResponse,
+    },
+    krabka_security::{ListenerProtocol, SaslMechanism, SecretBytes},
+    tokio::io::{AsyncReadExt as _, AsyncWriteExt as _},
 };
 
 mod support;
@@ -76,9 +77,7 @@ const REMOTE_CLIENT: &[u8] = &[10, 1, 2, 3];
 /// hop cannot match the relayed bytes to the client that is waiting.
 const EMBEDDED_CORRELATION_ID: i32 = 0x5A5A_1234;
 
-async fn start_broker() -> (BrokerHandle, tempfile::TempDir) {
-    start_broker_with(|_| {}).await
-}
+async fn start_broker() -> (BrokerHandle, tempfile::TempDir) { start_broker_with(|_| {}).await }
 
 async fn start_broker_with(
     customize: impl FnOnce(&mut BrokerConfig),
@@ -495,11 +494,9 @@ async fn an_unparseable_client_host_address_is_an_invalid_request() {
 
     let response = send_envelope(
         broker.controller_addr(),
-        &envelope_from(
-            embedded_create_topics(TOPIC),
-            Some(JVM_USER_ALICE),
-            &[10, 1, 2],
-        ),
+        &envelope_from(embedded_create_topics(TOPIC), Some(JVM_USER_ALICE), &[
+            10, 1, 2,
+        ]),
     )
     .await;
 
@@ -552,28 +549,20 @@ async fn a_forwarded_allocate_producer_ids_needs_cluster_action_for_the_embedded
     .slice(4..);
 
     let cases = [
-        (
-            "User:bob",
-            JVM_USER_BOB,
-            AllocateProducerIdsResponse {
-                throttle_time_ms: 0,
-                error_code: 31,
-                producer_id_start: 0,
-                producer_id_len: 0,
-                unknown_tagged_fields: UnknownTaggedFields::default(),
-            },
-        ),
-        (
-            "User:alice",
-            JVM_USER_ALICE,
-            AllocateProducerIdsResponse {
-                throttle_time_ms: 0,
-                error_code: 0,
-                producer_id_start: 0,
-                producer_id_len: 1_000,
-                unknown_tagged_fields: UnknownTaggedFields::default(),
-            },
-        ),
+        ("User:bob", JVM_USER_BOB, AllocateProducerIdsResponse {
+            throttle_time_ms: 0,
+            error_code: 31,
+            producer_id_start: 0,
+            producer_id_len: 0,
+            unknown_tagged_fields: UnknownTaggedFields::default(),
+        }),
+        ("User:alice", JVM_USER_ALICE, AllocateProducerIdsResponse {
+            throttle_time_ms: 0,
+            error_code: 0,
+            producer_id_start: 0,
+            producer_id_len: 1_000,
+            unknown_tagged_fields: UnknownTaggedFields::default(),
+        }),
     ];
     for (name, principal, expected) in cases {
         let response = send_envelope(

@@ -17,14 +17,15 @@
 //! cover the finalized version is `INVALID_REQUEST (42)`, and a candidate that
 //! is not caught up is `REQUEST_TIMED_OUT (7)`.
 
-use krabka_metadata::{Voter, VoterEndpoint};
-use krabka_protocol::owned::{
-    add_raft_voter_request::AddRaftVoterRequest, add_raft_voter_response::AddRaftVoterResponse,
-    api_versions_request::ApiVersionsRequest,
+use {
+    crate::{broker::Broker, codes, handlers::raft_voter::respond},
+    krabka_metadata::{Voter, VoterEndpoint},
+    krabka_protocol::owned::{
+        add_raft_voter_request::AddRaftVoterRequest, add_raft_voter_response::AddRaftVoterResponse,
+        api_versions_request::ApiVersionsRequest,
+    },
+    krabka_raft::{reconfig::AddVoter, voter_requests},
 };
-use krabka_raft::{reconfig::AddVoter, voter_requests};
-
-use crate::{broker::Broker, codes, handlers::raft_voter::respond};
 
 crate::handlers::raft_voter::leader_handler!(
     (broker, version, req_bytes, ctx),
@@ -168,15 +169,15 @@ async fn probe_candidate(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_protocol::{
-        owned::{add_raft_voter_request::Listener, add_raft_voter_response},
-        primitives::uuid::Uuid as ProtoUuid,
+    use {
+        crate::test_support::{DenyAll, round_trip_response},
+        assert2::assert,
+        krabka_protocol::{
+            owned::{add_raft_voter_request::Listener, add_raft_voter_response},
+            primitives::uuid::Uuid as ProtoUuid,
+        },
+        std::sync::Arc,
     };
-
-    use crate::test_support::{DenyAll, round_trip_response};
 
     fn request(voter_id: i32) -> AddRaftVoterRequest {
         AddRaftVoterRequest {
@@ -197,8 +198,10 @@ mod tests {
 
     crate::handlers::raft_voter::test_dispatch!(80, AddRaftVoterRequest, AddRaftVoterResponse);
 
-    use super::*;
-    use crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx};
+    use {
+        super::*,
+        crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx},
+    };
 
     /// Decode→encode round-trip at min and max versions. Guards against
     /// the response failing to encode at either end of the version range

@@ -7,8 +7,6 @@
 //! two starters and their two matching `CreateTopics` drivers are collected
 //! here rather than duplicated per test module.
 
-use krabka_broker::BrokerHandle;
-
 /// Create a topic through PLAINTEXT. There is no SASL, and the compat shim
 /// allows everything.
 pub use crate::kafka_wire::create_automatic_topic_plaintext as create_topic_plaintext;
@@ -19,6 +17,7 @@ pub use crate::kafka_wire::create_topic_as_admin;
 /// Returns `(handle, _dir, addr)`.
 pub use crate::support::sasl::start_single_broker_plaintext;
 pub use crate::support::sasl::start_single_broker_sasl_plaintext_with_users;
+use krabka_broker::BrokerHandle;
 
 /// Await until `handle` sees `(topic, partition)` present in its image.
 pub async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition: i32) {

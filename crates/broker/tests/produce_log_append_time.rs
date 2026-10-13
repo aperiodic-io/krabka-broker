@@ -26,24 +26,27 @@
 //! hardcoded constant, a producer timestamp echoed back, and the `-1` sentinel
 //! all fail it.
 
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_broker::{BrokerHandle, codes};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
-        list_offsets_request::ListOffsetsRequest,
-        produce_response::{BatchIndexAndErrorMessage, LeaderIdAndEpoch, PartitionProduceResponse},
+use {
+    crate::support::{
+        offsets::{list_offset_partition, single_partition_list_offsets},
+        produce::{SinglePartitionProduceSetup, send_batch},
+        records::{batch_from_records, value_record},
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch, TimestampType},
-};
-
-use crate::support::{
-    offsets::{list_offset_partition, single_partition_list_offsets},
-    produce::{SinglePartitionProduceSetup, send_batch},
-    records::{batch_from_records, value_record},
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_broker::{BrokerHandle, codes},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::{
+            create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
+            list_offsets_request::ListOffsetsRequest,
+            produce_response::{
+                BatchIndexAndErrorMessage, LeaderIdAndEpoch, PartitionProduceResponse,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::{Record, RecordBatch, TimestampType},
+    },
 };
 
 mod support;
@@ -71,12 +74,10 @@ krabka_macros::unix_millis_fixture!(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_log_append_time_topic_reports_the_stamp_it_wrote() {
     let p = support::start().await;
-    let topic_id = ready_topic(
-        &p.broker,
-        &p.client,
-        "audit",
-        &[("message.timestamp.type", "LogAppendTime")],
-    )
+    let topic_id = ready_topic(&p.broker, &p.client, "audit", &[(
+        "message.timestamp.type",
+        "LogAppendTime",
+    )])
     .await;
 
     let before = now_ms();
@@ -131,12 +132,10 @@ async fn a_create_time_topic_reports_no_stamp() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_timestamp_older_than_the_window_is_refused() {
     let p = support::start().await;
-    let topic_id = ready_topic(
-        &p.broker,
-        &p.client,
-        "metrics",
-        &[("message.timestamp.before.max.ms", &WINDOW_MS.to_string())],
-    )
+    let topic_id = ready_topic(&p.broker, &p.client, "metrics", &[(
+        "message.timestamp.before.max.ms",
+        &WINDOW_MS.to_string(),
+    )])
     .await;
 
     let refused = produce(&p.client, "metrics", topic_id, PRODUCER_TIMESTAMP_MS).await;
@@ -158,12 +157,10 @@ async fn a_timestamp_older_than_the_window_is_refused() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_timestamp_newer_than_the_window_is_refused() {
     let p = support::start().await;
-    let topic_id = ready_topic(
-        &p.broker,
-        &p.client,
-        "forecasts",
-        &[("message.timestamp.after.max.ms", &WINDOW_MS.to_string())],
-    )
+    let topic_id = ready_topic(&p.broker, &p.client, "forecasts", &[(
+        "message.timestamp.after.max.ms",
+        &WINDOW_MS.to_string(),
+    )])
     .await;
 
     let ahead_ms = now_ms() + 2 * WINDOW_MS;
@@ -182,15 +179,10 @@ async fn a_timestamp_newer_than_the_window_is_refused() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn log_append_time_ignores_the_timestamp_windows() {
     let p = support::start().await;
-    let topic_id = ready_topic(
-        &p.broker,
-        &p.client,
-        "traces",
-        &[
-            ("message.timestamp.type", "LogAppendTime"),
-            ("message.timestamp.before.max.ms", &WINDOW_MS.to_string()),
-        ],
-    )
+    let topic_id = ready_topic(&p.broker, &p.client, "traces", &[
+        ("message.timestamp.type", "LogAppendTime"),
+        ("message.timestamp.before.max.ms", &WINDOW_MS.to_string()),
+    ])
     .await;
 
     let before = now_ms();
@@ -345,15 +337,11 @@ async fn produce(
             ..value_record(0, Some(Bytes::from_static(b"frame")))
         }])
     };
-    let response = send_batch(
-        &client,
-        batch,
-        SinglePartitionProduceSetup {
-            topic: topic.to_owned(),
-            topic_id,
-            ..Default::default()
-        },
-    )
+    let response = send_batch(&client, batch, SinglePartitionProduceSetup {
+        topic: topic.to_owned(),
+        topic_id,
+        ..Default::default()
+    })
     .await;
     response.responses[0].partition_responses[0].clone()
 }

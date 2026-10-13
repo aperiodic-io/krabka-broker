@@ -1,22 +1,22 @@
 //! Unit tests for the classic `LeaveGroup` and `DeleteGroups` paths.
 
-use std::time::Instant;
-
-use assert2::check;
-use krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest;
-
-use super::*;
-use crate::coordinator::unified::{
-    ClientIdentity,
-    actor::{
-        GroupActorHandle, GroupActorMessage,
-        member_state::build_member,
-        test_support::{
-            bidirectional_coordinator, bidirectional_with_members, last_classic_metadata,
-            make_coordinator, rpc, seed_completing_classic, seed_stable_classic,
+use {
+    super::*,
+    crate::coordinator::unified::{
+        ClientIdentity,
+        actor::{
+            GroupActorHandle, GroupActorMessage,
+            member_state::build_member,
+            test_support::{
+                bidirectional_coordinator, bidirectional_with_members, last_classic_metadata,
+                make_coordinator, rpc, seed_completing_classic, seed_stable_classic,
+            },
         },
+        classic_state::GroupState as ClassicGroupState,
     },
-    classic_state::GroupState as ClassicGroupState,
+    assert2::check,
+    krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+    std::time::Instant,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

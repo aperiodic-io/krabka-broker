@@ -39,12 +39,12 @@ pub(crate) async fn fetch_jwks(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::oauth_jwks::test_support::{JWKS_BODY, serve_jwks};
+    use {
+        super::*,
+        crate::oauth_jwks::test_support::{JWKS_BODY, serve_jwks},
+        assert2::assert,
+        std::time::Duration,
+    };
 
     #[tokio::test]
     async fn fetch_jwks_parses_served_keyset() {

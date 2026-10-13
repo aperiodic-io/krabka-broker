@@ -5,11 +5,13 @@
 //! the bus, and reads back a serializable [`SimSnapshot`] after every action.
 //! The accessors here are the whole of what that UI needs.
 
-use super::{
-    Sim,
-    trace::{InFlight, SimSnapshot, TraceAction, TraceStep, event_label},
+use {
+    super::{
+        Sim,
+        trace::{InFlight, SimSnapshot, TraceAction, TraceStep, event_label},
+    },
+    crate::types::NodeId,
 };
-use crate::types::NodeId;
 
 impl Sim {
     /// Advance the simulation by one scheduler microstep.
@@ -62,35 +64,25 @@ impl Sim {
     /// "reorder" fault.
     ///
     /// This method returns the number of messages delivered.
-    pub fn reorder(&mut self) -> usize {
-        self.deliver_queue_reversed()
-    }
+    pub fn reorder(&mut self) -> usize { self.deliver_queue_reversed() }
 
     /// Deliver the front-of-bus message twice: the "duplicate" fault.
     ///
     /// This method returns `false` if the bus is empty.
-    pub fn duplicate_next(&mut self) -> bool {
-        self.deliver_front_twice()
-    }
+    pub fn duplicate_next(&mut self) -> bool { self.deliver_front_twice() }
 
     /// The current logical clock, in milliseconds.
     #[must_use]
-    pub fn clock_ms(&self) -> u64 {
-        self.now.0
-    }
+    pub fn clock_ms(&self) -> u64 { self.now.0 }
 
     /// The voter ids of this cluster, ascending.
     #[must_use]
-    pub fn voter_ids(&self) -> Vec<NodeId> {
-        self.voter_ids.clone()
-    }
+    pub fn voter_ids(&self) -> Vec<NodeId> { self.voter_ids.clone() }
 
     /// The recorded event timeline: every delivery, fault, timeout, and
     /// election the simulation has taken so far.
     #[must_use]
-    pub fn steps(&self) -> &[TraceStep] {
-        &self.steps
-    }
+    pub fn steps(&self) -> &[TraceStep] { &self.steps }
 
     /// The messages currently in flight on the bus, front (next to deliver) first.
     #[must_use]
@@ -124,9 +116,7 @@ impl Sim {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// Step the bus and the timers one microstep at a time until a leader
     /// appears, with a bounded number of steps.

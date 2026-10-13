@@ -1,14 +1,15 @@
-use creusot_std::prelude::*;
-
-use super::{
-    ProducerDecision, ProducerEntryFacts, ProducerSnapshotEntryFacts, RetainedSequenceRange,
-    decrement_sequence, increment_sequence, local_append_coordinates, produce_durability_frontier,
-    producer_decision, producer_snapshot_entry_valid,
-};
 #[cfg(creusot)]
 use crate::producer_snapshot::{
     nonduplicate_snapshot_decision, recovered_batch_coordinates, retained_producer_row,
     snapshot_sequence_matches,
+};
+use {
+    super::{
+        ProducerDecision, ProducerEntryFacts, ProducerSnapshotEntryFacts, RetainedSequenceRange,
+        decrement_sequence, increment_sequence, local_append_coordinates,
+        produce_durability_frontier, producer_decision, producer_snapshot_entry_valid,
+    },
+    creusot_std::prelude::*,
 };
 
 /// A valid snapshot's retained data batch reconstructs its sequence and

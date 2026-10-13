@@ -13,43 +13,47 @@
 //! mutation shows that the coordinator state did not change. Every request
 //! goes through the dispatch registry.
 
-use std::sync::Arc;
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::{
-        delete_share_group_state_request::{self, DeleteShareGroupStateRequest, DeleteStateData},
-        delete_share_group_state_response::{
-            self, DeleteShareGroupStateResponse, DeleteStateResult,
+use {
+    crate::{
+        codes,
+        coordinator::test_support::single_replica_partition,
+        test_support::{
+            ControllerPeerAllowed, GrantsInPrincipalName, decode_response, dispatch_context,
+            encode_request, peer, principal, request_context, start_broker_no_audit_with,
         },
-        initialize_share_group_state_request::{
-            self, InitializeShareGroupStateRequest, InitializeStateData,
-        },
-        initialize_share_group_state_response::{
-            self, InitializeShareGroupStateResponse, InitializeStateResult,
-        },
-        read_share_group_state_request::{self, ReadShareGroupStateRequest, ReadStateData},
-        read_share_group_state_response::{self, ReadShareGroupStateResponse, ReadStateResult},
-        read_share_group_state_summary_request::{
-            self, ReadShareGroupStateSummaryRequest, ReadStateSummaryData,
-        },
-        read_share_group_state_summary_response::{
-            self, ReadShareGroupStateSummaryResponse, ReadStateSummaryResult,
-        },
-        write_share_group_state_request::{self, WriteShareGroupStateRequest, WriteStateData},
-        write_share_group_state_response::{self, WriteShareGroupStateResponse, WriteStateResult},
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    codes,
-    coordinator::test_support::single_replica_partition,
-    test_support::{
-        ControllerPeerAllowed, GrantsInPrincipalName, decode_response, dispatch_context,
-        encode_request, peer, principal, request_context, start_broker_no_audit_with,
+    assert2::check,
+    bytes::Bytes,
+    krabka_protocol::{
+        owned::{
+            delete_share_group_state_request::{
+                self, DeleteShareGroupStateRequest, DeleteStateData,
+            },
+            delete_share_group_state_response::{
+                self, DeleteShareGroupStateResponse, DeleteStateResult,
+            },
+            initialize_share_group_state_request::{
+                self, InitializeShareGroupStateRequest, InitializeStateData,
+            },
+            initialize_share_group_state_response::{
+                self, InitializeShareGroupStateResponse, InitializeStateResult,
+            },
+            read_share_group_state_request::{self, ReadShareGroupStateRequest, ReadStateData},
+            read_share_group_state_response::{self, ReadShareGroupStateResponse, ReadStateResult},
+            read_share_group_state_summary_request::{
+                self, ReadShareGroupStateSummaryRequest, ReadStateSummaryData,
+            },
+            read_share_group_state_summary_response::{
+                self, ReadShareGroupStateSummaryResponse, ReadStateSummaryResult,
+            },
+            write_share_group_state_request::{self, WriteShareGroupStateRequest, WriteStateData},
+            write_share_group_state_response::{
+                self, WriteShareGroupStateResponse, WriteStateResult,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
+    std::sync::Arc,
 };
 
 const GROUP: &str = "authorized-share-group";

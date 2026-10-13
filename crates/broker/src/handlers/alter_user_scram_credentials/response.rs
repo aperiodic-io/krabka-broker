@@ -5,9 +5,10 @@
 //! the rows still marked accepted into a server error when the metadata
 //! submit fails.
 
-use krabka_protocol::owned::alter_user_scram_credentials_response::AlterUserScramCredentialsResult;
-
-use crate::{codes, handlers::stamp_unset};
+use {
+    crate::{codes, handlers::stamp_unset},
+    krabka_protocol::owned::alter_user_scram_credentials_response::AlterUserScramCredentialsResult,
+};
 
 pub(super) fn ok_result(name: String) -> AlterUserScramCredentialsResult {
     AlterUserScramCredentialsResult {
@@ -33,10 +34,10 @@ pub(super) fn apply_submit_error(results: &mut [AlterUserScramCredentialsResult]
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::handlers::alter_user_scram_credentials::test_support::expected_result;
+    use {
+        super::*, crate::handlers::alter_user_scram_credentials::test_support::expected_result,
+        assert2::assert,
+    };
 
     #[test]
     fn err_result_carries_code_and_message() {

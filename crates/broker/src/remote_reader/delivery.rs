@@ -1,20 +1,20 @@
 //! Scheduled delivery over archived batches, using stored activation headers.
 
-use std::sync::Arc;
-
-use krabka_ids::Offset;
-use krabka_log::{DeliveryPolicy, batch_is_deliverable};
-use krabka_protocol::records::{HEADER_LEN, RecordBatchHeader};
-use krabka_remote_storage::{
-    RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError, RemoteStorageManager,
-    TopicIdPartition,
+use {
+    super::RemoteReader,
+    crate::blocking::spawn_blocking,
+    krabka_ids::Offset,
+    krabka_log::{DeliveryPolicy, batch_is_deliverable},
+    krabka_protocol::records::{HEADER_LEN, RecordBatchHeader},
+    krabka_remote_storage::{
+        RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError, RemoteStorageManager,
+        TopicIdPartition,
+    },
+    krabka_units::{Time, convert::TimeExt as _},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
+    zerocopy::FromBytes as _,
 };
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio_util::sync::CancellationToken;
-use zerocopy::FromBytes as _;
-
-use super::RemoteReader;
-use crate::blocking::spawn_blocking;
 
 impl RemoteReader {
     /// The first pending archived offset below `local_start`, or `None` when
@@ -150,15 +150,17 @@ pub(crate) fn segment_activation_frontier(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_ids::LeaderEpoch;
-    use krabka_remote_storage::{
-        LogSegmentData, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadataUpdate,
+    use {
+        super::*,
+        crate::remote_reader::test_support::{empty_reader, sparse_remote_segment_reader, tp},
+        assert2::assert,
+        krabka_ids::LeaderEpoch,
+        krabka_remote_storage::{
+            LogSegmentData, RemoteLogSegmentDetails, RemoteLogSegmentId,
+            RemoteLogSegmentMetadataUpdate,
+        },
+        krabka_units::millis,
     };
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::remote_reader::test_support::{empty_reader, sparse_remote_segment_reader, tp};
 
     krabka_macros::timestamped_batch!(batch_at);
 
@@ -203,17 +205,14 @@ mod tests {
             .unwrap();
         reader
             .rsm
-            .copy_log_segment_data(
-                &metadata,
-                &LogSegmentData {
-                    log_segment: log_path,
-                    offset_index: index_path.clone(),
-                    time_index: index_path,
-                    transaction_index: None,
-                    producer_snapshot_index: None,
-                    leader_epoch_index: bytes::Bytes::new(),
-                },
-            )
+            .copy_log_segment_data(&metadata, &LogSegmentData {
+                log_segment: log_path,
+                offset_index: index_path.clone(),
+                time_index: index_path,
+                transaction_index: None,
+                producer_snapshot_index: None,
+                leader_epoch_index: bytes::Bytes::new(),
+            })
             .unwrap();
         reader
             .rlmm
@@ -320,9 +319,7 @@ mod tests {
     }
 
     impl Drop for PausingRsm {
-        fn drop(&mut self) {
-            self.finished.notify_one();
-        }
+        fn drop(&mut self) { self.finished.notify_one(); }
     }
 
     impl RemoteStorageManager for PausingRsm {

@@ -1,12 +1,13 @@
 //! What `#[derive(FieldDefaults)]` fills each field with.
 
-use std::{
-    sync::atomic::{AtomicU32, Ordering},
-    time::Duration,
+use {
+    assert2::assert,
+    krabka_macros::FieldDefaults,
+    std::{
+        sync::atomic::{AtomicU32, Ordering},
+        time::Duration,
+    },
 };
-
-use assert2::assert;
-use krabka_macros::FieldDefaults;
 
 /// Literals, calls, a constant, and fields with no attribute.
 #[derive(Debug, PartialEq, FieldDefaults)]
@@ -67,9 +68,7 @@ fn keeps_the_struct_generics() {
 
 static CALLS: AtomicU32 = AtomicU32::new(0);
 
-fn next_id() -> u32 {
-    CALLS.fetch_add(1, Ordering::SeqCst) + 1
-}
+fn next_id() -> u32 { CALLS.fetch_add(1, Ordering::SeqCst) + 1 }
 
 /// An expression with a side effect.
 #[derive(Debug, PartialEq, FieldDefaults)]

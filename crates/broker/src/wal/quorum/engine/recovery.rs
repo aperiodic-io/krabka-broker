@@ -6,14 +6,15 @@
 //! and copy the donor's bytes back over the shorter ones, so the choice of
 //! prefix and its enforcement stay together.
 
-use krabka_ids::Offset;
-use krabka_kraft_core::NodeId;
-
-use super::{
-    BatchBytes, WalReplica, read_batches_exact, replica_end_offset,
-    replica_io::sync_replica_blocking, replica_start_offset,
+use {
+    super::{
+        BatchBytes, WalReplica, read_batches_exact, replica_end_offset,
+        replica_io::sync_replica_blocking, replica_start_offset,
+    },
+    crate::error::BrokerError,
+    krabka_ids::Offset,
+    krabka_kraft_core::NodeId,
 };
-use crate::error::BrokerError;
 
 /// Open on the longest prefix that a byte-identical majority of `replicas`
 /// holds, and make every replica hold exactly that prefix.

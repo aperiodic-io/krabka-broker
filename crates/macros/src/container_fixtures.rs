@@ -1,8 +1,6 @@
 //! External `MinIO` process primitives shared by acceptance and restore fixtures.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::fixtures::name;
+use crate::{fixtures::name, prelude::*};
 
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
     let name = name(input)?;

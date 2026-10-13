@@ -1,9 +1,11 @@
 //! Wire assertions for a topic configuration recovered from an archive.
 
-use assert2::{assert, check};
-use krabka_client_core::Client;
-use krabka_protocol::owned::describe_configs_request::{
-    DescribeConfigsRequest, DescribeConfigsResource,
+use {
+    assert2::{assert, check},
+    krabka_client_core::Client,
+    krabka_protocol::owned::describe_configs_request::{
+        DescribeConfigsRequest, DescribeConfigsResource,
+    },
 };
 
 pub(crate) async fn check_topic_configuration(

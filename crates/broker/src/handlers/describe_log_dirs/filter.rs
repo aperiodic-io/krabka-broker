@@ -6,9 +6,10 @@
 //! This module turns that wire shape into a single predicate, so the directory
 //! scan in the parent module stays about directories.
 
-use std::collections::BTreeSet;
-
-use krabka_protocol::owned::describe_log_dirs_request::DescribeLogDirsRequest;
+use {
+    krabka_protocol::owned::describe_log_dirs_request::DescribeLogDirsRequest,
+    std::collections::BTreeSet,
+};
 
 /// Filter that the handler derives from the request `topics` field.
 ///
@@ -49,10 +50,10 @@ pub(super) fn request_filter(req: DescribeLogDirsRequest) -> Filter {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::describe_log_dirs_request::DescribableLogDirTopic;
-
-    use super::*;
+    use {
+        super::*, assert2::check,
+        krabka_protocol::owned::describe_log_dirs_request::DescribableLogDirTopic,
+    };
 
     #[test]
     fn filter_matches_kafka_partition_set() {

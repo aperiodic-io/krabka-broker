@@ -6,10 +6,11 @@
 //! magic byte, a negative length, or bytes left over after the value each
 //! map to a distinct [`LegacyRecordsError`] variant.
 
-use bytes::{Buf, Bytes};
-
-use super::{Magic, Message};
-use crate::error::LegacyRecordsError;
+use {
+    super::{Magic, Message},
+    crate::error::LegacyRecordsError,
+    bytes::{Buf, Bytes},
+};
 
 impl Message {
     /// Decode a message from `buf`.
@@ -113,10 +114,7 @@ fn get_nullable_bytes(
 #[cfg(test)]
 mod tests {
 
-    use bytes::BytesMut;
-
-    use super::*;
-    use crate::message::test_support::fixture_v1;
+    use {super::*, crate::message::test_support::fixture_v1, bytes::BytesMut};
 
     #[test]
     fn rejects_bad_crc() {

@@ -11,9 +11,10 @@
 
 mod support;
 
-use assert2::{assert, check};
-
-use crate::support::{client::connect_owned, shutdown_cluster, start_n_node_with_retry};
+use {
+    crate::support::{client::connect_owned, shutdown_cluster, start_n_node_with_retry},
+    assert2::{assert, check},
+};
 
 /// Kafka's `NOT_LEADER_OR_FOLLOWER`.
 const NOT_LEADER_OR_FOLLOWER: i16 = 6;

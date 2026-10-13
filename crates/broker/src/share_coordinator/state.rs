@@ -9,11 +9,11 @@
 //! Batches merge through [`combine_state_batches`], a port of Kafka's
 //! `PersisterStateBatchCombiner`.
 
-use std::{cmp::Reverse, collections::BTreeMap};
-
-use krabka_log::Offset;
-
-use crate::share_coordinator::persistence::{ShareSnapshotValue, ShareUpdateValue, StateBatch};
+use {
+    crate::share_coordinator::persistence::{ShareSnapshotValue, ShareUpdateValue, StateBatch},
+    krabka_log::Offset,
+    std::{cmp::Reverse, collections::BTreeMap},
+};
 
 /// The state of one share key, with the bookkeeping that Kafka's shard keeps
 /// beside it.
@@ -239,11 +239,12 @@ fn append_coalesced(out: &mut Vec<StateBatch>, from: i64, to: i64, winner: Prior
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::share_coordinator::coordinator::test_support::{
-        DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch as batch,
+    use {
+        super::*,
+        crate::share_coordinator::coordinator::test_support::{
+            DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch as batch,
+        },
+        assert2::{assert, check},
     };
 
     type CombinerRow = (
@@ -537,20 +538,17 @@ mod tests {
     #[test]
     fn snapshot_then_update_merges_as_kafka() {
         let mut s = SharePartitionState::from_snapshot(
-            &snapshot(
-                0,
-                vec![
-                    batch(StateBatchSetup::default()),
-                    batch(StateBatchSetup {
-                        bounds: Offset(10)..=Offset(19),
-                        ..Default::default()
-                    }),
-                    batch(StateBatchSetup {
-                        bounds: Offset(20)..=Offset(29),
-                        ..Default::default()
-                    }),
-                ],
-            ),
+            &snapshot(0, vec![
+                batch(StateBatchSetup::default()),
+                batch(StateBatchSetup {
+                    bounds: Offset(10)..=Offset(19),
+                    ..Default::default()
+                }),
+                batch(StateBatchSetup {
+                    bounds: Offset(20)..=Offset(29),
+                    ..Default::default()
+                }),
+            ]),
             Offset(7),
         );
         s.apply_update(&ShareUpdateValue {

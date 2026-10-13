@@ -19,21 +19,21 @@
 
 mod support;
 
-use std::time::Duration;
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_protocol::owned::{
-    describe_groups_request::DescribeGroupsRequest,
-    describe_groups_response::DescribeGroupsResponse, join_group_request::JoinGroupRequest,
-};
-
-use crate::support::{
-    classic::{
-        ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
-        classic_sync_request, join_protocol, sync_assignment,
+use {
+    crate::support::{
+        classic::{
+            ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId,
+            classic_join_request, classic_sync_request, join_protocol, sync_assignment,
+        },
+        client::connect_owned,
     },
-    client::connect_owned,
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_protocol::owned::{
+        describe_groups_request::DescribeGroupsRequest,
+        describe_groups_response::DescribeGroupsResponse, join_group_request::JoinGroupRequest,
+    },
+    std::time::Duration,
 };
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

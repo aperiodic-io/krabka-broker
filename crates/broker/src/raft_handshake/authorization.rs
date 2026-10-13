@@ -6,18 +6,18 @@
 //! metadata image, so an ACL change applies to the next request of an open
 //! connection.
 
-use std::sync::Arc;
-
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_raft::{ClusterGrants, ClusterOperation};
-
-use super::ControllerHandleArc;
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
-    handlers::{
-        RequestContext, acl_wire::CLUSTER_RESOURCE_NAME,
-        authorized_operations::authorized_operations_bits,
+use {
+    super::ControllerHandleArc,
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+        handlers::{
+            RequestContext, acl_wire::CLUSTER_RESOURCE_NAME,
+            authorized_operations::authorized_operations_bits,
+        },
     },
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_raft::{ClusterGrants, ClusterOperation},
+    std::sync::Arc,
 };
 
 /// The cluster grants of one controller-listener connection.
@@ -42,16 +42,13 @@ impl ClusterGrants for ControllerPeerGrants {
             ClusterOperation::Describe => AclOperation::Describe,
         };
         let image = controller.current_image();
-        self.authorizer.authorize(
-            &*image,
-            &AuthorizationRequest {
-                principal: &self.principal,
-                host: &self.peer,
-                resource_type: ResourceType::Cluster,
-                resource_name: CLUSTER_RESOURCE_NAME,
-                operation,
-            },
-        ) == AuthorizationResult::Allow
+        self.authorizer.authorize(&*image, &AuthorizationRequest {
+            principal: &self.principal,
+            host: &self.peer,
+            resource_type: ResourceType::Cluster,
+            resource_name: CLUSTER_RESOURCE_NAME,
+            operation,
+        }) == AuthorizationResult::Allow
     }
 
     fn cluster_authorized_operations(&self) -> i32 {
@@ -73,11 +70,12 @@ impl ClusterGrants for ControllerPeerGrants {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use tokio::sync::OnceCell;
-
-    use super::*;
-    use crate::test_support::{GrantsInPrincipalName, peer, principal};
+    use {
+        super::*,
+        crate::test_support::{GrantsInPrincipalName, peer, principal},
+        assert2::check,
+        tokio::sync::OnceCell,
+    };
 
     /// Each cluster operation maps to the ACL operation of the same name, the
     /// principal and peer of the connection reach the authorizer, and a

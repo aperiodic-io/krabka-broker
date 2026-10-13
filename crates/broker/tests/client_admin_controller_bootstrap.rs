@@ -1,9 +1,10 @@
 mod support;
 
-use assert2::check;
-use krabka_client_admin::{AdminClient, AdminError, ConfigResource, DescribeConfigsOptions};
-
-use crate::support::admin::topic_spec;
+use {
+    crate::support::admin::topic_spec,
+    assert2::check,
+    krabka_client_admin::{AdminClient, AdminError, ConfigResource, DescribeConfigsOptions},
+};
 
 krabka_macros::bound_start_fixture!(config, bound_config, ::krabka_broker);
 krabka_macros::bound_start_fixture!(start, start_bound, ::krabka_broker, unwrap, bound_config);

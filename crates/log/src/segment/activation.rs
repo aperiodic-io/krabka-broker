@@ -5,12 +5,12 @@
 //! gaps behind it. Both answers come from the same header-only walk, which is
 //! why they sit together.
 
-use std::ops::ControlFlow;
-
-use krabka_ids::Offset;
-
-use super::{ActivationScan, Segment};
-use crate::error::LogError;
+use {
+    super::{ActivationScan, Segment},
+    crate::error::LogError,
+    krabka_ids::Offset,
+    std::ops::ControlFlow,
+};
 
 impl Segment {
     /// Walk forward from `from` and find where the active prefix ends.
@@ -135,11 +135,12 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::segment::test_support::{
-        RecordTimestamp, SampleBatchSetup, SeededSegmentSetup, seeded_segment, test_segment,
+    use {
+        super::*,
+        crate::segment::test_support::{
+            RecordTimestamp, SampleBatchSetup, SeededSegmentSetup, seeded_segment, test_segment,
+        },
+        tempfile::tempdir,
     };
 
     fn check_pending_ranges(seg: &Segment, expected: &[(Offset, Offset)]) {
@@ -162,16 +163,13 @@ mod tests {
     #[test]
     fn a_segment_with_an_unknown_maximum_is_never_skipped_as_active() {
         let dir = tempdir().unwrap();
-        drop(seeded_segment(
-            dir.path(),
-            SeededSegmentSetup {
-                batches: &[SampleBatchSetup {
-                    timestamp: RecordTimestamp(9_000),
-                    ..Default::default()
-                }],
+        drop(seeded_segment(dir.path(), SeededSegmentSetup {
+            batches: &[SampleBatchSetup {
+                timestamp: RecordTimestamp(9_000),
                 ..Default::default()
-            },
-        ));
+            }],
+            ..Default::default()
+        }));
 
         // The no-scan load: real bytes on disk, maximum still unknown.
         let seg = Segment::open_unscanned(dir.path(), Offset(0)).unwrap();

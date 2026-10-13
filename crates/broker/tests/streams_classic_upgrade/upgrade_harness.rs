@@ -5,19 +5,19 @@
 //! the source topic and then read back topic ids or committed offsets, so those
 //! steps live here rather than being repeated per scenario module.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-use crate::support::{
-    client::{connect as connect_client, create_topic as create_support_topic},
-    offsets::{offset_fetch_group, offset_fetch_request, offset_fetch_topic},
-    streams::{
-        ElectionReadiness, boot as boot_streams,
-        finalize_streams_version as finalize_streams_version_request,
+use {
+    crate::support::{
+        client::{connect as connect_client, create_topic as create_support_topic},
+        offsets::{offset_fetch_group, offset_fetch_request, offset_fetch_topic},
+        streams::{
+            ElectionReadiness, boot as boot_streams,
+            finalize_streams_version as finalize_streams_version_request,
+        },
     },
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    std::sync::Arc,
 };
 
 // ── error codes ──────────────────────────────────────────────────────────────
@@ -31,9 +31,7 @@ pub async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) 
     boot_streams(ElectionReadiness::BrokerElectable).await
 }
 
-pub async fn connect(bootstrap: &str) -> Arc<Client> {
-    connect_client(bootstrap, "c1").await
-}
+pub async fn connect(bootstrap: &str) -> Arc<Client> { connect_client(bootstrap, "c1").await }
 
 pub async fn assert_committed_offset(client: &Client, topic_id: WireUuid, expected: i64) {
     let response = client

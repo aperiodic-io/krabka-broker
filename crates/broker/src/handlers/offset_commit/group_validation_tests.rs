@@ -3,41 +3,41 @@
 //! `ClassicGroup.validateOffsetCommit` and `ConsumerGroup.validateOffsetCommit`,
 //! and how it refuses a partition whose metadata is too large.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_metadata::ResourceType;
-use krabka_protocol::owned::{
-    create_topics_request::{self},
-    offset_commit_request::{
-        OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
-    },
-    offset_commit_response::{
-        OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
-    },
-};
-
-use super::WireUuid;
-use crate::{
-    authorizer::{AllowAllAuthorizer, AuthorizationResult},
-    broker::{Broker, BrokerHandle},
-    codes,
-    coordinator::unified::{
-        GroupSeed,
-        actor::{GroupActorMessage, GroupKindTag, test_support::classic_member},
-        classic_state::{ClassicGroup, GroupState},
-        group::{CoordinatorGroup, GroupKind},
-        persistence_next_gen::{
-            AssignedTopicPartitions, ClassicMemberMetadata, CurrentMemberAssignmentValue,
-            CurrentTopicPartitions, MemberAssignmentState, MemberMetadataValue,
-            TargetAssignmentMemberValue,
+use {
+    super::WireUuid,
+    crate::{
+        authorizer::{AllowAllAuthorizer, AuthorizationResult},
+        broker::{Broker, BrokerHandle},
+        codes,
+        coordinator::unified::{
+            GroupSeed,
+            actor::{GroupActorMessage, GroupKindTag, test_support::classic_member},
+            classic_state::{ClassicGroup, GroupState},
+            group::{CoordinatorGroup, GroupKind},
+            persistence_next_gen::{
+                AssignedTopicPartitions, ClassicMemberMetadata, CurrentMemberAssignmentValue,
+                CurrentTopicPartitions, MemberAssignmentState, MemberMetadataValue,
+                TargetAssignmentMemberValue,
+            },
+        },
+        handlers::test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+        test_support::{
+            dispatch_context, dispatch_wire, encode_request, peer, principal,
+            start_group_broker_no_audit,
         },
     },
-    handlers::test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
-    test_support::{
-        dispatch_context, dispatch_wire, encode_request, peer, principal,
-        start_group_broker_no_audit,
+    assert2::assert,
+    krabka_metadata::ResourceType,
+    krabka_protocol::owned::{
+        create_topics_request::{self},
+        offset_commit_request::{
+            OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+        },
+        offset_commit_response::{
+            OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
+        },
     },
+    std::sync::Arc,
 };
 
 const TOPIC: &str = "group-validation";
@@ -70,9 +70,7 @@ struct Case {
 /// assigned to no member.
 const KIP_1251_TOPIC_PARTITIONS: i32 = 3;
 
-async fn create_topic(broker: &Broker) {
-    create_topic_with_partitions(broker, 1).await;
-}
+async fn create_topic(broker: &Broker) { create_topic_with_partitions(broker, 1).await; }
 
 async fn create_topic_with_partitions(broker: &Broker, num_partitions: i32) {
     request_identity!(
@@ -289,21 +287,16 @@ async fn topic_read_is_checked_before_the_group() {
     };
     let cases = [
         // One denied topic and one allowed topic with a wrong generation.
-        (
-            "authz-mixed",
-            vec![row(DENIED_TOPIC), row(TOPIC)],
-            vec![
-                answer(DENIED_TOPIC, codes::TOPIC_AUTHORIZATION_FAILED),
-                answer(TOPIC, codes::ILLEGAL_GENERATION),
-            ],
-        ),
+        ("authz-mixed", vec![row(DENIED_TOPIC), row(TOPIC)], vec![
+            answer(DENIED_TOPIC, codes::TOPIC_AUTHORIZATION_FAILED),
+            answer(TOPIC, codes::ILLEGAL_GENERATION),
+        ]),
         // Every topic denied on a group that does not exist: the coordinator
         // is not called, so neither GROUP_ID_NOT_FOUND nor a new group.
-        (
-            "authz-all-denied",
-            vec![row(DENIED_TOPIC)],
-            vec![answer(DENIED_TOPIC, codes::TOPIC_AUTHORIZATION_FAILED)],
-        ),
+        ("authz-all-denied", vec![row(DENIED_TOPIC)], vec![answer(
+            DENIED_TOPIC,
+            codes::TOPIC_AUTHORIZATION_FAILED,
+        )]),
     ];
     request_identity!(
         (user, address, ctx),

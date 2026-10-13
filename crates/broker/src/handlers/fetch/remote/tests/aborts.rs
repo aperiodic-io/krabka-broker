@@ -1,15 +1,16 @@
-use assert2::assert;
-use krabka_ids::{LeaderEpoch, Offset, PartitionIndex};
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::{
-    owned::fetch_response::AbortedTransaction,
-    records::{Attributes, Record, RecordBatch},
-};
-
-use super::{TIERED_TOPIC, out_of_range_at, tiered_broker, tiered_topic_id};
-use crate::{
-    broker::spawn_partition,
-    remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier},
+use {
+    super::{TIERED_TOPIC, out_of_range_at, tiered_broker, tiered_topic_id},
+    crate::{
+        broker::spawn_partition,
+        remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier},
+    },
+    assert2::assert,
+    krabka_ids::{LeaderEpoch, Offset, PartitionIndex},
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::{
+        owned::fetch_response::AbortedTransaction,
+        records::{Attributes, Record, RecordBatch},
+    },
 };
 
 fn data_batch(transactional: bool) -> RecordBatch {
@@ -47,14 +48,11 @@ async fn remote_fetch_reports_an_abort_in_a_later_segment_or_the_local_tail() {
         let (handle, dir, _remote) = tiered_broker().await;
         let broker = handle.broker_arc_for_test();
         let part_dir = dir.path().join(format!("{TIERED_TOPIC}-0"));
-        let mut log = Log::open(
-            &part_dir,
-            LogConfig {
-                segment_size: krabka_units::bytes(1),
-                remote_storage_enable: true,
-                ..Default::default()
-            },
-        )
+        let mut log = Log::open(&part_dir, LogConfig {
+            segment_size: krabka_units::bytes(1),
+            remote_storage_enable: true,
+            ..Default::default()
+        })
         .unwrap();
         log.append(&mut data_batch(true)).unwrap();
         log.append(&mut data_batch(false)).unwrap();

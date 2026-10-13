@@ -1,22 +1,22 @@
 //! Auto-join mock-controller frames and the default voter-update driver.
 
-use std::{net::SocketAddr, sync::Arc};
-
-use krabka_protocol::{
-    Encode,
-    owned::api_versions_response::{ApiVersion, ApiVersionsResponse},
-};
-use krabka_raft::NodeId;
-use krabka_units::{millis, secs};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
-
-use super::AutoJoinParams;
-use crate::{
-    metadata_source::MetadataSource, network::client::InterBrokerClient,
-    test_support::FakeMetadataSource,
+use {
+    super::AutoJoinParams,
+    crate::{
+        metadata_source::MetadataSource, network::client::InterBrokerClient,
+        test_support::FakeMetadataSource,
+    },
+    krabka_protocol::{
+        Encode,
+        owned::api_versions_response::{ApiVersion, ApiVersionsResponse},
+    },
+    krabka_raft::NodeId,
+    krabka_units::{millis, secs},
+    std::{net::SocketAddr, sync::Arc},
+    tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
+    },
 };
 
 pub(super) async fn read_frame(socket: &mut TcpStream) -> std::io::Result<Vec<u8>> {

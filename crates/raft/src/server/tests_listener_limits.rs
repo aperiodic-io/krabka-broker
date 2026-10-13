@@ -3,17 +3,17 @@
 //! `connections.max.idle.ms`, and `max.connections` with
 //! `max.connections.per.ip`.
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::check;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+use {
+    super::{ConnectionContext, Unstable, handle_conn, run, test_support::single_voter_engine},
+    crate::{AllowAllGrants, ListenerLimits, RaftError, kraft::KraftController},
+    assert2::check,
+    std::{sync::Arc, time::Duration},
+    tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    },
+    tokio_util::sync::CancellationToken,
 };
-use tokio_util::sync::CancellationToken;
-
-use super::{ConnectionContext, Unstable, handle_conn, run, test_support::single_voter_engine};
-use crate::{AllowAllGrants, ListenerLimits, RaftError, kraft::KraftController};
 
 mod session_expiry;
 

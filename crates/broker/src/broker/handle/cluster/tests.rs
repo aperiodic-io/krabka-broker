@@ -1,14 +1,14 @@
-use std::net::SocketAddr;
-
-use assert2::{assert, check};
-use krabka_raft::NodeId;
-use tokio::net::TcpListener;
-
-use super::*;
-use crate::{
-    broker::test_support::{MetadataPartitionSetup, submit_metadata_topic_partition},
-    config::BrokerConfig,
-    test_support::start_broker_with,
+use {
+    super::*,
+    crate::{
+        broker::test_support::{MetadataPartitionSetup, submit_metadata_topic_partition},
+        config::BrokerConfig,
+        test_support::start_broker_with,
+    },
+    assert2::{assert, check},
+    krabka_raft::NodeId,
+    std::net::SocketAddr,
+    tokio::net::TcpListener,
 };
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -61,24 +61,18 @@ async fn broker_handle_reports_non_default_node_and_voter_state() {
     let controller8 = controller_listener8.local_addr().unwrap();
     let voters = [(NodeId(7), controller7), (NodeId(8), controller8)];
 
-    let config7 = static_voter_test_config(
-        dir7.path(),
-        StaticVoterSetup {
-            node_id: NodeId(7),
-            listen_addr: listen7,
-            controller_addr: controller7,
-            voters: &voters,
-        },
-    );
-    let config8 = static_voter_test_config(
-        dir8.path(),
-        StaticVoterSetup {
-            node_id: NodeId(8),
-            listen_addr: listen8,
-            controller_addr: controller8,
-            voters: &voters,
-        },
-    );
+    let config7 = static_voter_test_config(dir7.path(), StaticVoterSetup {
+        node_id: NodeId(7),
+        listen_addr: listen7,
+        controller_addr: controller7,
+        voters: &voters,
+    });
+    let config8 = static_voter_test_config(dir8.path(), StaticVoterSetup {
+        node_id: NodeId(8),
+        listen_addr: listen8,
+        controller_addr: controller8,
+        voters: &voters,
+    });
     let start = Box::pin(tokio::time::timeout(
         std::time::Duration::from_secs(10),
         async {
@@ -264,18 +258,15 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
         ),
     ];
     for (topic, topic_id, leader, replicas, leader_epoch, excluded) in leader_changed_cases {
-        submit_metadata_topic_partition(
-            &handle,
-            MetadataPartitionSetup {
-                topic,
-                topic_id: uuid::Uuid::from_u128(topic_id),
-                leader: krabka_ids::NodeId(leader),
-                replicas: (replicas).iter().copied().map(krabka_ids::NodeId).collect(),
-                isr: (replicas).iter().copied().map(krabka_ids::NodeId).collect(),
-                leader_epoch: krabka_ids::LeaderEpoch(leader_epoch),
-                ..Default::default()
-            },
-        )
+        submit_metadata_topic_partition(&handle, MetadataPartitionSetup {
+            topic,
+            topic_id: uuid::Uuid::from_u128(topic_id),
+            leader: krabka_ids::NodeId(leader),
+            replicas: (replicas).iter().copied().map(krabka_ids::NodeId).collect(),
+            isr: (replicas).iter().copied().map(krabka_ids::NodeId).collect(),
+            leader_epoch: krabka_ids::LeaderEpoch(leader_epoch),
+            ..Default::default()
+        })
         .await;
         assert!(
             tokio::time::timeout(
@@ -294,16 +285,13 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
             .is_none()
     );
 
-    submit_metadata_topic_partition(
-        &handle,
-        MetadataPartitionSetup {
-            topic: "isr-len-mutant-topic",
-            topic_id: uuid::Uuid::from_u128(0xF005),
-            replicas: [1, 2].iter().copied().map(krabka_ids::NodeId).collect(),
-            isr: [1, 2].iter().copied().map(krabka_ids::NodeId).collect(),
-            ..Default::default()
-        },
-    )
+    submit_metadata_topic_partition(&handle, MetadataPartitionSetup {
+        topic: "isr-len-mutant-topic",
+        topic_id: uuid::Uuid::from_u128(0xF005),
+        replicas: [1, 2].iter().copied().map(krabka_ids::NodeId).collect(),
+        isr: [1, 2].iter().copied().map(krabka_ids::NodeId).collect(),
+        ..Default::default()
+    })
     .await;
     assert!(
         tokio::time::timeout(

@@ -2,12 +2,12 @@
 //! `RecordsPayload` into exactly one owned v2 record batch, up-converting a
 //! v0/v1 `MessageSet` on the way.
 
-use std::sync::Arc;
-
-use krabka_compression::RecordDecompressionPolicy;
-use krabka_protocol::records::{RecordBatch, RecordsPayload};
-
-use crate::{codes, metrics::BrokerMetrics};
+use {
+    crate::{codes, metrics::BrokerMetrics},
+    krabka_compression::RecordDecompressionPolicy,
+    krabka_protocol::records::{RecordBatch, RecordsPayload},
+    std::sync::Arc,
+};
 
 /// Decode or up-convert a legacy or pre-decoded `RecordsPayload` into one
 /// owned record batch.
@@ -73,21 +73,21 @@ fn exactly_one_v2_batch(mut batches: Vec<RecordBatch>) -> Result<RecordBatch, i1
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use bytes::{Bytes, BytesMut};
-    use krabka_ids::Offset;
-    use krabka_protocol::records::Record;
-
-    use super::*;
-    use crate::{
-        handlers::produce::{
-            framing::PartitionPayload,
-            hot_path::TimestampPolicy,
-            prepare::{DecodeEnv, PreparedSource, prepare_batch},
+    use {
+        super::*,
+        crate::{
+            handlers::produce::{
+                framing::PartitionPayload,
+                hot_path::TimestampPolicy,
+                prepare::{DecodeEnv, PreparedSource, prepare_batch},
+            },
+            metrics::BrokerMetrics,
         },
-        metrics::BrokerMetrics,
+        assert2::{assert, check},
+        bytes::{Bytes, BytesMut},
+        krabka_ids::Offset,
+        krabka_protocol::records::Record,
+        std::sync::Arc,
     };
 
     #[test]

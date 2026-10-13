@@ -1,11 +1,12 @@
 //! The `kafka-cluster` tool, whose `cluster-id` subcommand exercises
 //! `DescribeCluster`.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image, nc_check_connectivity,
-    start_host_broker,
+use {
+    crate::jvm_acceptance::{
+        KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image,
+        nc_check_connectivity, start_host_broker,
+    },
+    assert2::assert,
 };
 
 /// `kafka-cluster cluster-id` exercises `DescribeCluster` (`api_key` 60).
@@ -20,15 +21,12 @@ async fn kafka_cluster_describe() {
     let (_broker, _dir) = start_host_broker().await;
     nc_check_connectivity();
 
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-cluster",
-            "cluster-id",
-            "--bootstrap-server",
-            broker0_advertised(),
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-cluster",
+        "cluster-id",
+        "--bootstrap-server",
+        broker0_advertised(),
+    ]);
     let s = String::from_utf8_lossy(&out.stdout);
     // `kafka-cluster cluster-id` prints a line like:
     //   "Cluster ID: <uuid>"

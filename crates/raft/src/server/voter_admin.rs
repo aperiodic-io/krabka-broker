@@ -6,20 +6,21 @@
 //! those checks, probes an `AddRaftVoter` candidate, applies the change and
 //! encodes the response.
 
-use bytes::{Bytes, BytesMut};
-
 #[cfg(test)]
 use crate::voter_requests::valid_wire_listeners;
-use crate::{
-    NodeId,
-    error::RaftError,
-    kraft::KraftController,
-    reconfig::{AddVoter, RemoveVoter, UpdateVoter, VoterChange},
-    voter_requests::{
-        Refusal, VoterOperation, add_voter_refusal, candidate_kraft_version_refusal,
-        candidate_unavailable_refusal, reconfiguration_refusal, remove_voter_refusal,
-        update_voter_current_leader, update_voter_refusal,
+use {
+    crate::{
+        NodeId,
+        error::RaftError,
+        kraft::KraftController,
+        reconfig::{AddVoter, RemoveVoter, UpdateVoter, VoterChange},
+        voter_requests::{
+            Refusal, VoterOperation, add_voter_refusal, candidate_kraft_version_refusal,
+            candidate_unavailable_refusal, reconfiguration_refusal, remove_voter_refusal,
+            update_voter_current_leader, update_voter_refusal,
+        },
     },
+    bytes::{Bytes, BytesMut},
 };
 
 macro_rules! voter_endpoints {

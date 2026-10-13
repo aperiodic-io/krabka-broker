@@ -3,11 +3,12 @@
 //! that block until the image or a metric reaches an expected value. They are
 //! grouped here so the handle's production surface stays readable.
 
-use std::sync::Arc;
-
-use crate::broker::{Broker, BrokerHandle, TEST_AWAITER_TIMEOUT};
 #[cfg(any(test, feature = "test-helpers"))]
 use crate::{error::BrokerError, metrics::BrokerMetrics};
+use {
+    crate::broker::{Broker, BrokerHandle, TEST_AWAITER_TIMEOUT},
+    std::sync::Arc,
+};
 
 impl BrokerHandle {
     /// Test-only: the controller's current quorum state (leader epoch, HWM,
@@ -104,9 +105,7 @@ impl BrokerHandle {
     /// broker-internal background routines directly.
     #[cfg(any(test, feature = "test-helpers"))]
     #[must_use]
-    pub fn broker_arc_for_test(&self) -> Arc<Broker> {
-        self.broker.clone()
-    }
+    pub fn broker_arc_for_test(&self) -> Arc<Broker> { self.broker.clone() }
 
     /// Test-only: the controller voter set's size as seen by this broker's
     /// committed `MetadataImage`. KIP-853 dynamic-voters tests poll this to
@@ -231,9 +230,7 @@ impl BrokerHandle {
     #[doc(hidden)]
     #[cfg(any(test, feature = "test-helpers"))]
     #[must_use]
-    pub fn metrics(&self) -> &BrokerMetrics {
-        &self.broker.metrics
-    }
+    pub fn metrics(&self) -> &BrokerMetrics { &self.broker.metrics }
 
     /// Test-only: poll `predicate` against this broker's live metrics every
     /// ~25ms until it returns `true` or [`TEST_AWAITER_TIMEOUT`] elapses.

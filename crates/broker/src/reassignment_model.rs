@@ -12,14 +12,14 @@
 //! each run is fenced with `within_boundary` and `target_state_count`. While
 //! bounds are tuned, every run MUST execute under the host memory watchdog.
 
-use std::collections::{BTreeSet, HashSet};
-
-use krabka_metadata::PartitionRecord;
-use krabka_raft::NodeId;
-use stateright::{Model, Property};
-
-use super::reassign_one;
-use crate::model_check::check_model;
+use {
+    super::reassign_one,
+    crate::model_check::check_model,
+    krabka_metadata::PartitionRecord,
+    krabka_raft::NodeId,
+    stateright::{Model, Property},
+    std::collections::{BTreeSet, HashSet},
+};
 
 const MAX_STATES: usize = 200_000;
 const MAX_DEPTH: usize = 80;
@@ -74,13 +74,9 @@ enum ReassignAction {
 }
 
 impl ReassignModel {
-    fn basic() -> Self {
-        Self::builder().build()
-    }
+    fn basic() -> Self { Self::builder().build() }
 
-    fn leader_handoff() -> Self {
-        Self::builder().leader(krabka_audit::NodeId(2)).build()
-    }
+    fn leader_handoff() -> Self { Self::builder().leader(krabka_audit::NodeId(2)).build() }
 
     /// A replication factor decrease with nothing to add: broker 2, a target
     /// replica, is not in the ISR, and completing early would shrink the ISR.
@@ -132,9 +128,7 @@ impl ReassignModel {
     }
 }
 
-fn in_flight(s: &ReassignState) -> bool {
-    !s.adding.is_empty() || !s.removing.is_empty()
-}
+fn in_flight(s: &ReassignState) -> bool { !s.adding.is_empty() || !s.removing.is_empty() }
 
 /// The target replica set that the reassignment converges to, which is
 /// replicas − removing.
@@ -253,46 +247,8 @@ fn assert_step(pre: &ReassignState, next: &PartitionRecord) {
 }
 
 impl Model for ReassignModel {
-    type State = ReassignState;
     type Action = ReassignAction;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![ReassignState {
-            replicas: self.replicas.clone(),
-            isr: self.initial_isr.clone(),
-            adding: self.adding.clone(),
-            removing: self.removing.clone(),
-            leader: self.leader,
-            leader_epoch: 0,
-            alive: self.replicas.iter().copied().collect(),
-        }]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        // AdmitToIsr: any replica not yet in ISR (models a catch-up + admit).
-        for &r in &state.replicas {
-            if !state.isr.contains(&r) {
-                actions.push(ReassignAction::AdmitToIsr(r));
-            }
-        }
-        // Die / Revive over the replica set (keep >= 1 alive).
-        if state.alive.len() > 1 {
-            for &r in &state.replicas {
-                if state.alive.contains(&r) {
-                    actions.push(ReassignAction::Die(r));
-                }
-            }
-        }
-        for &r in &state.replicas {
-            if !state.alive.contains(&r) {
-                actions.push(ReassignAction::Revive(r));
-            }
-        }
-        // ReassignStep when in flight, under the epoch cap.
-        if in_flight(state) && state.leader_epoch < self.max_epoch {
-            actions.push(ReassignAction::ReassignStep);
-        }
-    }
+    type State = ReassignState;
 
     krabka_macros::model_transition!(last, action, state; {
             match action {
@@ -340,6 +296,44 @@ impl Model for ReassignModel {
 
     });
 
+    fn init_states(&self) -> Vec<Self::State> {
+        vec![ReassignState {
+            replicas: self.replicas.clone(),
+            isr: self.initial_isr.clone(),
+            adding: self.adding.clone(),
+            removing: self.removing.clone(),
+            leader: self.leader,
+            leader_epoch: 0,
+            alive: self.replicas.iter().copied().collect(),
+        }]
+    }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        // AdmitToIsr: any replica not yet in ISR (models a catch-up + admit).
+        for &r in &state.replicas {
+            if !state.isr.contains(&r) {
+                actions.push(ReassignAction::AdmitToIsr(r));
+            }
+        }
+        // Die / Revive over the replica set (keep >= 1 alive).
+        if state.alive.len() > 1 {
+            for &r in &state.replicas {
+                if state.alive.contains(&r) {
+                    actions.push(ReassignAction::Die(r));
+                }
+            }
+        }
+        for &r in &state.replicas {
+            if !state.alive.contains(&r) {
+                actions.push(ReassignAction::Revive(r));
+            }
+        }
+        // ReassignStep when in flight, under the epoch cap.
+        if in_flight(state) && state.leader_epoch < self.max_epoch {
+            actions.push(ReassignAction::ReassignStep);
+        }
+    }
+
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
             Property::always("isr_subset_replicas", |_, s: &ReassignState| {
@@ -371,9 +365,7 @@ impl Model for ReassignModel {
         ]
     }
 
-    fn within_boundary(&self, state: &Self::State) -> bool {
-        state.leader_epoch <= self.max_epoch
-    }
+    fn within_boundary(&self, state: &Self::State) -> bool { state.leader_epoch <= self.max_epoch }
 }
 
 fn run(model: ReassignModel, label: &str, pinned_unique_states: usize) {

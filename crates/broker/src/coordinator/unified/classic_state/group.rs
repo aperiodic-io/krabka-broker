@@ -4,13 +4,14 @@
 //! change membership or drive a rebalance round. The transitions live in the
 //! `membership` and `rebalance` siblings.
 
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
+use {
+    super::member::Member,
+    crate::codes::{FENCED_INSTANCE_ID, UNKNOWN_MEMBER_ID},
+    std::{
+        collections::HashMap,
+        time::{Duration, Instant},
+    },
 };
-
-use super::member::Member;
-use crate::codes::{FENCED_INSTANCE_ID, UNKNOWN_MEMBER_ID};
 
 /// Four-state machine for a live consumer group, matching the Apache Kafka
 /// classic protocol (KIP-62 / KIP-394).

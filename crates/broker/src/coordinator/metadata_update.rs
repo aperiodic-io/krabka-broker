@@ -31,11 +31,11 @@
 //! groups whose `__consumer_offsets` partition it leads. Kafka also applies an
 //! image only to its active coordinator shards.
 
-use std::{collections::BTreeSet, sync::Arc};
-
-use krabka_metadata::MetadataImage;
-
-use super::{GroupCoordinator, unified::actor::GroupActorMessage};
+use {
+    super::{GroupCoordinator, unified::actor::GroupActorMessage},
+    krabka_metadata::MetadataImage,
+    std::{collections::BTreeSet, sync::Arc},
+};
 
 #[cfg(test)]
 mod tests;

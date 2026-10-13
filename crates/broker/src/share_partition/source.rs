@@ -1,8 +1,9 @@
 //! The logical diskless floor shared by share acquisition and initialization.
 
-use krabka_log::Offset;
-
-use crate::{diskless::read::DisklessReadHandle, error::BrokerError, partition::Partition};
+use {
+    crate::{diskless::read::DisklessReadHandle, error::BrokerError, partition::Partition},
+    krabka_log::Offset,
+};
 
 /// Local trimming leaves WAL records readable. Only the index's deletion
 /// floor and oldest surviving range can raise a diskless share position.
@@ -29,19 +30,19 @@ pub(crate) async fn diskless_logical_start(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::sync::Arc;
-
-    use bytes::{Bytes, BytesMut};
-    use krabka_log::Offset;
-    use krabka_protocol::records::{Record, RecordBatch};
-    use object_store::{ObjectStoreExt as _, PutPayload, memory::InMemory, path::Path};
-
-    use crate::{
-        diskless::{
-            read::DisklessReadHandle,
-            wal_index::{WalFlushRecord, WalIndexCache, WalIndexEntry},
+    use {
+        crate::{
+            diskless::{
+                read::DisklessReadHandle,
+                wal_index::{WalFlushRecord, WalIndexCache, WalIndexEntry},
+            },
+            partition::{Partition, test_support::test_partition},
         },
-        partition::{Partition, test_support::test_partition},
+        bytes::{Bytes, BytesMut},
+        krabka_log::Offset,
+        krabka_protocol::records::{Record, RecordBatch},
+        object_store::{ObjectStoreExt as _, PutPayload, memory::InMemory, path::Path},
+        std::sync::Arc,
     };
 
     /// Real batch bytes survive local trimming in an object and a replayed WAL index.

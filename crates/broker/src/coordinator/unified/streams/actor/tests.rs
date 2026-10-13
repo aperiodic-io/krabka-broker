@@ -2,31 +2,32 @@
 //! heartbeat epoch sequence with no connected `MetadataSource`, and the
 //! resolution of a persisted per-group config override.
 
-use assert2::{assert, check};
-
-use super::{
-    test_support::{
-        coordinator_with_log, describe, heartbeat_result_at, make_coordinator, member_request,
-        response_tasks, undelayed,
-    },
-    *,
-};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    coordinator::unified::{
-        offsets_log::fake::InMemoryOffsetsLog,
-        persistence::parse_key,
-        streams::{
-            config::KEY_NUM_STANDBY_REPLICAS,
-            persistence::{
-                DescriptionEpochs, LastAssignmentConfig, PendingStreamsRecords,
-                StreamsGroupMetadataValue,
-            },
-            state::{StreamsGroupState, StreamsMemberState},
+use {
+    super::{
+        test_support::{
+            coordinator_with_log, describe, heartbeat_result_at, make_coordinator, member_request,
+            response_tasks, undelayed,
         },
-        test_support::{MemberEpoch, assert_single_member_limit, heartbeat_write_failures},
+        *,
     },
-    test_support::{StreamsJoinSetup, streams_join_request},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        coordinator::unified::{
+            offsets_log::fake::InMemoryOffsetsLog,
+            persistence::parse_key,
+            streams::{
+                config::KEY_NUM_STANDBY_REPLICAS,
+                persistence::{
+                    DescriptionEpochs, LastAssignmentConfig, PendingStreamsRecords,
+                    StreamsGroupMetadataValue,
+                },
+                state::{StreamsGroupState, StreamsMemberState},
+            },
+            test_support::{MemberEpoch, assert_single_member_limit, heartbeat_write_failures},
+        },
+        test_support::{StreamsJoinSetup, streams_join_request},
+    },
+    assert2::{assert, check},
 };
 
 krabka_macros::single_replica_partition_fixture!(partition_record);
@@ -277,15 +278,12 @@ async fn leave_of_an_unknown_member_is_refused_and_writes_nothing() {
     check!(joined.error_code == codes::NONE);
     let before = log.batches().await;
 
-    let resp = heartbeat(
-        &handle,
-        StreamsGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: "m9".into(),
-            member_epoch: -1,
-            ..Default::default()
-        },
-    )
+    let resp = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: "m9".into(),
+        member_epoch: -1,
+        ..Default::default()
+    })
     .await;
 
     check!(
@@ -333,28 +331,22 @@ async fn a_failed_write_answers_its_code_and_writes_no_partial_batch() {
 async fn leave_removes_member() {
     let (coord, log) = make_coordinator();
     let handle = coord.get_or_create_streams("g");
-    let join = heartbeat(
-        &handle,
-        StreamsGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: String::new(),
-            member_epoch: 0,
-            ..Default::default()
-        },
-    )
+    let join = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: String::new(),
+        member_epoch: 0,
+        ..Default::default()
+    })
     .await;
     let mid = join.member_id.clone();
     let pre_leave = log.batches().await.len();
 
-    let resp = heartbeat(
-        &handle,
-        StreamsGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: mid,
-            member_epoch: -1,
-            ..Default::default()
-        },
-    )
+    let resp = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: mid,
+        member_epoch: -1,
+        ..Default::default()
+    })
     .await;
     assert!(resp.error_code == codes::NONE);
     assert!(resp.member_epoch == -1);
@@ -550,10 +542,11 @@ fn one_subtopology(
 /// compares the whole response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() {
-    use krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status;
-
-    use crate::{
-        coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
+    use {
+        crate::{
+            coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
+        },
+        krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status,
     };
 
     enum Change {
@@ -632,10 +625,10 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
             name: "the internal topic is created",
             initial: image_of(None, &[("in", 1, 1)]),
             storage: TopologyStorage::StoreChangelog,
-            change: Change::Image(Box::new(image_of(
-                None,
-                &[("in", 1, 1), ("store-changelog", 2, 1)],
-            ))),
+            change: Change::Image(Box::new(image_of(None, &[
+                ("in", 1, 1),
+                ("store-changelog", 2, 1),
+            ]))),
             owned_active: Some(vec![]),
             epoch: 3,
             active: Some(vec![0]),
@@ -657,15 +650,12 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
             rebalance_timeout_ms: 1_000,
             ..Default::default()
         };
-        let joined = heartbeat(
-            &handle,
-            StreamsGroupHeartbeatRequest {
-                topology: Some(one_subtopology(SingleSubtopologySetup {
-                    storage: row.storage,
-                })),
-                ..request(0, "rack-a", "process-a")
-            },
-        )
+        let joined = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+            topology: Some(one_subtopology(SingleSubtopologySetup {
+                storage: row.storage,
+            })),
+            ..request(0, "rack-a", "process-a")
+        })
         .await;
         check!(joined.member_epoch == 2, "{}", row.name);
 
@@ -686,15 +676,12 @@ async fn a_heartbeat_after_a_topic_or_member_change_recomputes_the_assignment() 
                 },
             ]
         });
-        let resp = heartbeat(
-            &handle,
-            StreamsGroupHeartbeatRequest {
-                standby_tasks: owned.as_ref().map(|_| vec![]),
-                warmup_tasks: owned.as_ref().map(|_| vec![]),
-                active_tasks: owned,
-                ..request(joined.member_epoch, rack, process)
-            },
-        )
+        let resp = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+            standby_tasks: owned.as_ref().map(|_| vec![]),
+            warmup_tasks: owned.as_ref().map(|_| vec![]),
+            active_tasks: owned,
+            ..request(joined.member_epoch, rack, process)
+        })
         .await;
 
         let expected = super::test_support::expected_active_response(
@@ -775,11 +762,12 @@ async fn a_new_target_persists_the_target_of_every_member() {
 /// carries the metadata hash, so the hash alone does not trigger it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_seeded_group_asks_for_its_missing_internal_topics_again() {
-    use krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status;
-
-    use crate::{
-        coordinator::unified::streams::topology::{InternalTopicSpec, status},
-        test_support::FakeMetadataSource,
+    use {
+        crate::{
+            coordinator::unified::streams::topology::{InternalTopicSpec, status},
+            test_support::FakeMetadataSource,
+        },
+        krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status,
     };
 
     let image = || image_of(None, &[("in", 1, 1)]);
@@ -846,9 +834,10 @@ async fn a_seeded_group_asks_for_its_missing_internal_topics_again() {
 /// the loaded member revokes both of its tasks instead.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() {
-    use krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds as OwnedTaskIds;
-
-    use crate::test_support::FakeMetadataSource;
+    use {
+        crate::test_support::FakeMetadataSource,
+        krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds as OwnedTaskIds,
+    };
 
     struct Row {
         member_id: &'static str,
@@ -965,17 +954,18 @@ async fn a_group_loaded_before_the_metadata_source_connects_assigns_its_tasks() 
 /// that the heartbeat asks `CreateTopics` for, and the whole response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_join_sizes_the_internal_topics_as_kafka_does() {
-    use krabka_protocol::owned::{
-        common::{
-            streams_group_heartbeat_request::topic_info::TopicInfo,
-            streams_group_heartbeat_response::status::Status,
+    use {
+        crate::{
+            coordinator::unified::streams::topology::{InternalTopicSpec, status},
+            test_support::FakeMetadataSource,
         },
-        streams_group_heartbeat_request::{CopartitionGroup, Subtopology, Topology},
-    };
-
-    use crate::{
-        coordinator::unified::streams::topology::{InternalTopicSpec, status},
-        test_support::FakeMetadataSource,
+        krabka_protocol::owned::{
+            common::{
+                streams_group_heartbeat_request::topic_info::TopicInfo,
+                streams_group_heartbeat_response::status::Status,
+            },
+            streams_group_heartbeat_request::{CopartitionGroup, Subtopology, Topology},
+        },
     };
 
     struct Row {
@@ -1007,13 +997,10 @@ async fn a_join_sizes_the_internal_topics_as_kafka_does() {
     for row in rows {
         let source = Arc::new(
             FakeMetadataSource::builder()
-                .image(image_of(
-                    None,
-                    &[
-                        ("orders", 1, row.partitions.0),
-                        ("customers", 2, row.partitions.1),
-                    ],
-                ))
+                .image(image_of(None, &[
+                    ("orders", 1, row.partitions.0),
+                    ("customers", 2, row.partitions.1),
+                ]))
                 .build(),
         );
         let (coord, _log) = make_coordinator();
@@ -1021,45 +1008,39 @@ async fn a_join_sizes_the_internal_topics_as_kafka_does() {
         let handle = coord.get_or_create_streams("g");
         let topology = Topology {
             epoch: 1,
-            subtopologies: vec![
-                crate::test_support::source_to_repartition(),
-                Subtopology {
-                    subtopology_id: "1".into(),
-                    source_topics: vec!["customers".into()],
-                    repartition_source_topics: vec![TopicInfo {
-                        name: "rp".into(),
-                        ..Default::default()
-                    }],
-                    state_changelog_topics: vec![TopicInfo {
-                        name: "store-changelog".into(),
-                        ..Default::default()
-                    }],
-                    copartition_groups: if row.copartitioned {
-                        vec![CopartitionGroup {
-                            source_topics: vec![0],
-                            repartition_source_topics: vec![0],
-                            ..Default::default()
-                        }]
-                    } else {
-                        vec![]
-                    },
+            subtopologies: vec![crate::test_support::source_to_repartition(), Subtopology {
+                subtopology_id: "1".into(),
+                source_topics: vec!["customers".into()],
+                repartition_source_topics: vec![TopicInfo {
+                    name: "rp".into(),
                     ..Default::default()
+                }],
+                state_changelog_topics: vec![TopicInfo {
+                    name: "store-changelog".into(),
+                    ..Default::default()
+                }],
+                copartition_groups: if row.copartitioned {
+                    vec![CopartitionGroup {
+                        source_topics: vec![0],
+                        repartition_source_topics: vec![0],
+                        ..Default::default()
+                    }]
+                } else {
+                    vec![]
                 },
-            ],
+                ..Default::default()
+            }],
             ..Default::default()
         };
 
-        let result = heartbeat_result(
-            &handle,
-            StreamsGroupHeartbeatRequest {
-                group_id: "g".into(),
-                member_id: "m1".into(),
-                member_epoch: 0,
-                rebalance_timeout_ms: 1_000,
-                topology: Some(topology),
-                ..Default::default()
-            },
-        )
+        let result = heartbeat_result(&handle, StreamsGroupHeartbeatRequest {
+            group_id: "g".into(),
+            member_id: "m1".into(),
+            member_epoch: 0,
+            rebalance_timeout_ms: 1_000,
+            topology: Some(topology),
+            ..Default::default()
+        })
         .await;
 
         let spec = |name: &str, partitions| InternalTopicSpec {
@@ -1099,15 +1080,15 @@ async fn a_join_sizes_the_internal_topics_as_kafka_does() {
 /// response of the last one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_heartbeat_status_list_follows_kafka() {
-    use std::collections::HashMap;
-
-    use krabka_protocol::owned::{
-        common::streams_group_heartbeat_response::status::Status,
-        streams_group_heartbeat_request::{Subtopology, Topology},
-    };
-
-    use crate::{
-        coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
+    use {
+        crate::{
+            coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
+        },
+        krabka_protocol::owned::{
+            common::streams_group_heartbeat_response::status::Status,
+            streams_group_heartbeat_request::{Subtopology, Topology},
+        },
+        std::collections::HashMap,
     };
 
     #[derive(Clone, Copy)]
@@ -1240,26 +1221,23 @@ async fn the_heartbeat_status_list_follows_kafka() {
                 Beat::Heartbeat(member, shutdown) => (member, epochs[member], shutdown, None),
                 Beat::Leave(member, shutdown) => (member, -1, shutdown, None),
             };
-            let resp = heartbeat(
-                &handle,
-                StreamsGroupHeartbeatRequest {
-                    group_id: "g".into(),
-                    member_id: member.into(),
-                    member_epoch,
-                    rebalance_timeout_ms: 1_000,
-                    shutdown_application: shutdown,
-                    topology: topology_epoch.map(|epoch| Topology {
-                        epoch,
-                        subtopologies: vec![Subtopology {
-                            subtopology_id: "0".into(),
-                            source_topics: row.sources.iter().map(|s| (*s).to_string()).collect(),
-                            ..Default::default()
-                        }],
+            let resp = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+                group_id: "g".into(),
+                member_id: member.into(),
+                member_epoch,
+                rebalance_timeout_ms: 1_000,
+                shutdown_application: shutdown,
+                topology: topology_epoch.map(|epoch| Topology {
+                    epoch,
+                    subtopologies: vec![Subtopology {
+                        subtopology_id: "0".into(),
+                        source_topics: row.sources.iter().map(|s| (*s).to_string()).collect(),
                         ..Default::default()
-                    }),
+                    }],
                     ..Default::default()
-                },
-            )
+                }),
+                ..Default::default()
+            })
             .await;
             check!(resp.error_code == codes::NONE, "{}", row.name);
             epochs.insert(member, resp.member_epoch);
@@ -1300,19 +1278,19 @@ async fn the_heartbeat_status_list_follows_kafka() {
 /// of the last one.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_heartbeat_response_carries_what_kafka_sends() {
-    use std::collections::HashMap;
-
-    use krabka_protocol::owned::{
-        common::{
-            streams_group_heartbeat_request::endpoint::Endpoint as RequestEndpoint,
-            streams_group_heartbeat_response::{
-                endpoint::Endpoint, topic_partition::TopicPartition,
+    use {
+        crate::test_support::FakeMetadataSource,
+        krabka_protocol::owned::{
+            common::{
+                streams_group_heartbeat_request::endpoint::Endpoint as RequestEndpoint,
+                streams_group_heartbeat_response::{
+                    endpoint::Endpoint, topic_partition::TopicPartition,
+                },
             },
+            streams_group_heartbeat_response::EndpointToPartitions,
         },
-        streams_group_heartbeat_response::EndpointToPartitions,
+        std::collections::HashMap,
     };
-
-    use crate::test_support::FakeMetadataSource;
 
     #[derive(Clone, Copy)]
     enum Beat {
@@ -1455,23 +1433,20 @@ async fn the_heartbeat_response_carries_what_kafka_sends() {
                 }
                 Beat::Leave(member) => (member, -1, None),
             };
-            let resp = heartbeat(
-                &handle,
-                StreamsGroupHeartbeatRequest {
-                    group_id: "g".into(),
-                    member_id: member.into(),
-                    member_epoch,
-                    rebalance_timeout_ms: 1_000,
-                    user_endpoint: port.map(|port| RequestEndpoint {
-                        host: "localhost".into(),
-                        port,
-                        ..Default::default()
-                    }),
-                    topology: (member_epoch == 0)
-                        .then(|| one_subtopology(SingleSubtopologySetup::default())),
+            let resp = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+                group_id: "g".into(),
+                member_id: member.into(),
+                member_epoch,
+                rebalance_timeout_ms: 1_000,
+                user_endpoint: port.map(|port| RequestEndpoint {
+                    host: "localhost".into(),
+                    port,
                     ..Default::default()
-                },
-            )
+                }),
+                topology: (member_epoch == 0)
+                    .then(|| one_subtopology(SingleSubtopologySetup::default())),
+                ..Default::default()
+            })
             .await;
             epochs.insert(member, resp.member_epoch);
             last = Some(resp);
@@ -1489,9 +1464,10 @@ async fn the_heartbeat_response_carries_what_kafka_sends() {
 /// heartbeat of `m1` and then of `m2`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_member_keeps_its_epoch_until_it_revokes_and_is_fenced_after_its_timeout() {
-    use krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds as OwnedTaskIds;
-
-    use crate::test_support::FakeMetadataSource;
+    use {
+        crate::test_support::FakeMetadataSource,
+        krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds as OwnedTaskIds,
+    };
 
     let accepted = accepted_tasks;
     // (name, rebalance timeout of m1, m1 revokes task 1, expected last m1 and
@@ -1591,21 +1567,19 @@ async fn a_member_keeps_its_epoch_until_it_revokes_and_is_fenced_after_its_timeo
 /// afterwards.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_topology_update_or_an_invalid_owned_task_is_refused() {
-    use krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds;
-
-    use crate::test_support::FakeMetadataSource;
+    use {
+        crate::test_support::FakeMetadataSource,
+        krabka_protocol::owned::common::streams_group_heartbeat_request::task_ids::TaskIds,
+    };
 
     let join = |member_id: &str, epoch, source: &str| {
         let mut topology = one_subtopology(SingleSubtopologySetup::default());
         topology.epoch = epoch;
         topology.subtopologies[0].source_topics = vec![source.into()];
-        streams_join_request(
-            topology,
-            StreamsJoinSetup {
-                member_id,
-                ..Default::default()
-            },
-        )
+        streams_join_request(topology, StreamsJoinSetup {
+            member_id,
+            ..Default::default()
+        })
     };
     let owning = |subtopology: &str, partition| StreamsGroupHeartbeatRequest {
         group_id: "g".into(),
@@ -2045,13 +2019,14 @@ fn older_epoch_commit_checks_each_tasks_assignment_epoch() {
 /// ready group and compares the whole status list of the last response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_member_missing_a_rack_aware_tag_gets_missing_client_tags_at_version_1() {
-    use krabka_protocol::owned::common::{
-        streams_group_heartbeat_request::key_value::KeyValue,
-        streams_group_heartbeat_response::status::Status,
-    };
-
-    use crate::{
-        coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
+    use {
+        crate::{
+            coordinator::unified::streams::topology::status, test_support::FakeMetadataSource,
+        },
+        krabka_protocol::owned::common::{
+            streams_group_heartbeat_request::key_value::KeyValue,
+            streams_group_heartbeat_response::status::Status,
+        },
     };
 
     /// One heartbeat of member `m1`: its request version, whether it joins,
@@ -2269,35 +2244,32 @@ fn the_task_offset_interval_of_a_heartbeat_response_is_trunks_alone() {
 /// task partitions a topic does not have, and drops an entry with no partition.
 #[test]
 fn endpoint_partitions_follow_the_endpoint_to_partitions_manager_of_each_release() {
-    use std::collections::{BTreeMap, BTreeSet};
-
-    use krabka_protocol::owned::{
-        common::streams_group_heartbeat_response::{
-            endpoint::Endpoint, topic_partition::TopicPartition,
+    use {
+        crate::{
+            api_catalog::UnstableApiVersions::{Disabled, Enabled},
+            coordinator::unified::streams::{
+                state::{StreamsGroupState, StreamsMemberState},
+                topology::ConfiguredSubtopology,
+            },
         },
-        streams_group_heartbeat_response::EndpointToPartitions,
-    };
-
-    use crate::{
-        api_catalog::UnstableApiVersions::{Disabled, Enabled},
-        coordinator::unified::streams::{
-            state::{StreamsGroupState, StreamsMemberState},
-            topology::ConfiguredSubtopology,
+        krabka_protocol::owned::{
+            common::streams_group_heartbeat_response::{
+                endpoint::Endpoint, topic_partition::TopicPartition,
+            },
+            streams_group_heartbeat_response::EndpointToPartitions,
         },
+        std::collections::{BTreeMap, BTreeSet},
     };
 
     // The topic `in` has two partitions.
     let image = image_of(None, &[("in", 1, 2)]);
-    let subtopologies = BTreeMap::from([(
-        "0".to_string(),
-        ConfiguredSubtopology {
-            number_of_tasks: 4,
-            source_topics: BTreeSet::from(["in".to_string()]),
-            repartition_source_topics: BTreeMap::new(),
-            repartition_sink_topics: BTreeSet::new(),
-            state_changelog_topics: BTreeMap::new(),
-        },
-    )]);
+    let subtopologies = BTreeMap::from([("0".to_string(), ConfiguredSubtopology {
+        number_of_tasks: 4,
+        source_topics: BTreeSet::from(["in".to_string()]),
+        repartition_source_topics: BTreeMap::new(),
+        repartition_sink_topics: BTreeSet::new(),
+        state_changelog_topics: BTreeMap::new(),
+    })]);
     let entry = |active: &[i32], standby: &[i32]| {
         let partitions = |partitions: &[i32]| {
             vec![TopicPartition {
@@ -2390,11 +2362,12 @@ fn endpoint_partitions_follow_the_endpoint_to_partitions_manager_of_each_release
 /// assignment, so its next heartbeat is not a join.
 #[tokio::test(start_paused = true)]
 async fn assignment_waits_for_the_initial_delay_and_the_interval() {
-    use std::time::Duration;
-
-    use crate::coordinator::unified::streams::{
-        actor::reconciliation::{ASSIGNMENT_INTERVAL_DETAIL, INITIAL_DELAY_DETAIL},
-        topology::status::ASSIGNMENT_DELAYED,
+    use {
+        crate::coordinator::unified::streams::{
+            actor::reconciliation::{ASSIGNMENT_INTERVAL_DETAIL, INITIAL_DELAY_DETAIL},
+            topology::status::ASSIGNMENT_DELAYED,
+        },
+        std::time::Duration,
     };
 
     // (member id, member epoch sent, clock advance before the heartbeat,
@@ -2426,12 +2399,10 @@ async fn assignment_waits_for_the_initial_delay_and_the_interval() {
                 ("m2", 2, 900, 3, None),
             ],
         ),
-        (
-            "no delay assigns at once",
-            0,
-            0,
-            vec![("m1", 0, 0, 2, None), ("m2", 0, 200, 3, None)],
-        ),
+        ("no delay assigns at once", 0, 0, vec![
+            ("m1", 0, 0, 2, None),
+            ("m2", 0, 200, 3, None),
+        ]),
     ];
 
     for (name, delay_ms, interval_ms, steps) in rows {
@@ -2446,16 +2417,13 @@ async fn assignment_waits_for_the_initial_delay_and_the_interval() {
         let handle = coord.get_or_create_streams("g");
         for (member_id, member_epoch, advance_ms, want_epoch, want_delay) in steps {
             tokio::time::sleep(Duration::from_millis(advance_ms)).await;
-            let resp = heartbeat(
-                &handle,
-                StreamsGroupHeartbeatRequest {
-                    group_id: "g".into(),
-                    member_id: member_id.into(),
-                    member_epoch,
-                    rebalance_timeout_ms: 1_000,
-                    ..Default::default()
-                },
-            )
+            let resp = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+                group_id: "g".into(),
+                member_id: member_id.into(),
+                member_epoch,
+                rebalance_timeout_ms: 1_000,
+                ..Default::default()
+            })
             .await;
             let delayed: Vec<(i8, String)> = resp
                 .status
@@ -2506,14 +2474,16 @@ fn accepted_tasks(
 /// interval lets it run, which writes the time it finished.
 #[tokio::test(start_paused = true)]
 async fn the_replayed_assignment_timestamp_holds_the_interval() {
-    use std::time::Duration;
-
-    use crate::coordinator::unified::{
-        StreamsGroupSeed,
-        streams::{
-            actor::reconciliation::ASSIGNMENT_INTERVAL_DETAIL, topology::status::ASSIGNMENT_DELAYED,
+    use {
+        crate::coordinator::unified::{
+            StreamsGroupSeed,
+            streams::{
+                actor::reconciliation::ASSIGNMENT_INTERVAL_DETAIL,
+                topology::status::ASSIGNMENT_DELAYED,
+            },
+            wall_clock_ms,
         },
-        wall_clock_ms,
+        std::time::Duration,
     };
 
     // (case, milliseconds before now of the stored timestamp, or `None` for
@@ -2550,16 +2520,13 @@ async fn the_replayed_assignment_timestamp_holds_the_interval() {
             .await
             .unwrap();
         let before = wall_clock_ms();
-        let resp = heartbeat(
-            &handle,
-            StreamsGroupHeartbeatRequest {
-                group_id: "g".into(),
-                member_id: "m1".into(),
-                member_epoch: 0,
-                rebalance_timeout_ms: 1_000,
-                ..Default::default()
-            },
-        )
+        let resp = heartbeat(&handle, StreamsGroupHeartbeatRequest {
+            group_id: "g".into(),
+            member_id: "m1".into(),
+            member_epoch: 0,
+            rebalance_timeout_ms: 1_000,
+            ..Default::default()
+        })
         .await;
         let after = wall_clock_ms();
         let delayed = resp
@@ -2630,44 +2597,35 @@ async fn a_changed_validation_or_assignment_config_bumps_the_epoch() {
                 validated_topology_epoch: validated,
                 last_assignment_configs: last_configs,
                 assignment_epoch: 2,
-                members: [(
-                    "m1".to_owned(),
-                    StreamsGroupMemberMetadataValue {
-                        instance_id: None,
-                        rack_id: None,
-                        client_id: "client".into(),
-                        client_host: "/127.0.0.1".into(),
-                        process_id: "p1".into(),
-                        user_endpoint: None,
-                        client_tags: vec![],
-                        rebalance_timeout_ms: 60_000,
-                        topology_epoch: 0,
-                    },
-                )]
+                members: [("m1".to_owned(), StreamsGroupMemberMetadataValue {
+                    instance_id: None,
+                    rack_id: None,
+                    client_id: "client".into(),
+                    client_host: "/127.0.0.1".into(),
+                    process_id: "p1".into(),
+                    user_endpoint: None,
+                    client_tags: vec![],
+                    rebalance_timeout_ms: 60_000,
+                    topology_epoch: 0,
+                })]
                 .into(),
-                current_per_member: [(
-                    "m1".to_owned(),
-                    StreamsGroupCurrentMemberAssignmentValue {
-                        member_epoch: 2,
-                        previous_member_epoch: 1,
-                        state: StreamsMemberWireState::Stable,
-                        ..StreamsGroupCurrentMemberAssignmentValue::default()
-                    },
-                )]
+                current_per_member: [("m1".to_owned(), StreamsGroupCurrentMemberAssignmentValue {
+                    member_epoch: 2,
+                    previous_member_epoch: 1,
+                    state: StreamsMemberWireState::Stable,
+                    ..StreamsGroupCurrentMemberAssignmentValue::default()
+                })]
                 .into(),
                 ..StreamsGroupSeed::default()
             }))
             .await
             .unwrap();
-        heartbeat(
-            &handle,
-            StreamsGroupHeartbeatRequest {
-                group_id: "g".into(),
-                member_id: "m1".into(),
-                member_epoch: 2,
-                ..Default::default()
-            },
-        )
+        heartbeat(&handle, StreamsGroupHeartbeatRequest {
+            group_id: "g".into(),
+            member_id: "m1".into(),
+            member_epoch: 2,
+            ..Default::default()
+        })
         .await;
         let written = coord.cached_streams_seed("g").map(|seed| {
             (
@@ -2702,17 +2660,14 @@ async fn a_bump_records_the_validated_topology_epoch() {
         let (coord, _log) = make_coordinator();
         coord.set_metadata_source(source);
         let handle = coord.get_or_create_streams("g");
-        heartbeat(
-            &handle,
-            StreamsGroupHeartbeatRequest {
-                group_id: "g".into(),
-                member_id: "m1".into(),
-                member_epoch: 0,
-                rebalance_timeout_ms: 1_000,
-                topology: Some(one_subtopology(SingleSubtopologySetup::default())),
-                ..Default::default()
-            },
-        )
+        heartbeat(&handle, StreamsGroupHeartbeatRequest {
+            group_id: "g".into(),
+            member_id: "m1".into(),
+            member_epoch: 0,
+            rebalance_timeout_ms: 1_000,
+            topology: Some(one_subtopology(SingleSubtopologySetup::default())),
+            ..Default::default()
+        })
         .await;
         let seed = coord.cached_streams_seed("g").unwrap();
         // The member got its active tasks at its epoch, and its current
@@ -2722,10 +2677,10 @@ async fn a_bump_records_the_validated_topology_epoch() {
             .active
             .iter()
             .map(|(subtopology, partitions)| {
-                (
-                    subtopology.clone(),
-                    vec![current.member_epoch; partitions.len()],
-                )
+                (subtopology.clone(), vec![
+                    current.member_epoch;
+                    partitions.len()
+                ])
             })
             .collect();
         check!(current.active_epochs == at_member_epoch, "{case}");

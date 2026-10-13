@@ -4,8 +4,7 @@
 
 mod support;
 
-use assert2::assert;
-use support::jvm_docker_run as docker_run;
+use {assert2::assert, support::jvm_docker_run as docker_run};
 
 /// Ports for this test process, allocated once rather than fixed at 9092.
 ///
@@ -15,9 +14,7 @@ use support::jvm_docker_run as docker_run;
 /// time. A port per process lets them overlap.
 ///
 /// `&'static str`, so these read as the constants they replaced.
-fn bootstrap_addr() -> &'static str {
-    &support::jvm_listeners().advertised
-}
+fn bootstrap_addr() -> &'static str { &support::jvm_listeners().advertised }
 
 const KAFKA_IMAGE_NEXT_GEN: &str = "mirror.gcr.io/apache/kafka:4.0.0";
 /// Kafka 4.3.1 is the oracle for broker-side subscription regexes: from 4.1 the
@@ -33,22 +30,19 @@ async fn start_host_broker() -> (krabka_broker::BrokerHandle, tempfile::TempDir)
 /// not auto-create topics on the produce path, so tests must create them
 /// explicitly. This matches the existing `jvm_acceptance.rs` convention.
 fn create_topic(name: &str, partitions: i32) {
-    let out = docker_run(
-        KAFKA_IMAGE_CLASSIC,
-        &[
-            "kafka-topics",
-            "--create",
-            "--if-not-exists",
-            "--bootstrap-server",
-            bootstrap_addr(),
-            "--topic",
-            name,
-            "--partitions",
-            &partitions.to_string(),
-            "--replication-factor",
-            "1",
-        ],
-    );
+    let out = docker_run(KAFKA_IMAGE_CLASSIC, &[
+        "kafka-topics",
+        "--create",
+        "--if-not-exists",
+        "--bootstrap-server",
+        bootstrap_addr(),
+        "--topic",
+        name,
+        "--partitions",
+        &partitions.to_string(),
+        "--replication-factor",
+        "1",
+    ]);
     assert!(
         out.status.success(),
         "create topic {name} failed: stdout={:?} stderr={:?}",
@@ -108,28 +102,22 @@ async fn jvm_kip848_single_consumer_round_trip() {
     let bootstrap = bootstrap_addr();
     let (_broker, _dir) = start_host_broker().await;
     create_topic("kip848-rt", 1);
-    let produced = docker_run(
-        KAFKA_IMAGE_CLASSIC,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "printf 'a\\nb\\nc\\n' | kafka-console-producer --bootstrap-server {bootstrap} --topic kip848-rt --producer-property max.block.ms=10000"
-            ),
-        ],
-    );
+    let produced = docker_run(KAFKA_IMAGE_CLASSIC, &[
+        "bash",
+        "-c",
+        &format!(
+            "printf 'a\\nb\\nc\\n' | kafka-console-producer --bootstrap-server {bootstrap} --topic kip848-rt --producer-property max.block.ms=10000"
+        ),
+    ]);
     assert!(produced.status.success(), "producer failed: {produced:?}");
 
-    let consumed = docker_run(
-        KAFKA_IMAGE_NEXT_GEN,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server {bootstrap} --topic kip848-rt --group g-rt --consumer-property group.protocol=consumer --from-beginning --timeout-ms 10000 --max-messages 3"
-            ),
-        ],
-    );
+    let consumed = docker_run(KAFKA_IMAGE_NEXT_GEN, &[
+        "bash",
+        "-c",
+        &format!(
+            "/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server {bootstrap} --topic kip848-rt --group g-rt --consumer-property group.protocol=consumer --from-beginning --timeout-ms 10000 --max-messages 3"
+        ),
+    ]);
     let stdout = String::from_utf8_lossy(&consumed.stdout);
     assert!(
         stdout.contains('a') && stdout.contains('b') && stdout.contains('c'),
@@ -143,36 +131,27 @@ async fn jvm_kip848_describe_group() {
     let bootstrap = bootstrap_addr();
     let (_broker, _dir) = start_host_broker().await;
     create_topic("kip848-d", 1);
-    docker_run(
-        KAFKA_IMAGE_CLASSIC,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "printf '1\\n2\\n' | kafka-console-producer --bootstrap-server {bootstrap} --topic kip848-d"
-            ),
-        ],
-    );
-    let _ = docker_run(
-        KAFKA_IMAGE_NEXT_GEN,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server {bootstrap} --topic kip848-d --group g-d --consumer-property group.protocol=consumer --from-beginning --timeout-ms 10000 --max-messages 2"
-            ),
-        ],
-    );
-    let described = docker_run(
-        KAFKA_IMAGE_NEXT_GEN,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server {bootstrap} --describe --group g-d"
-            ),
-        ],
-    );
+    docker_run(KAFKA_IMAGE_CLASSIC, &[
+        "bash",
+        "-c",
+        &format!(
+            "printf '1\\n2\\n' | kafka-console-producer --bootstrap-server {bootstrap} --topic kip848-d"
+        ),
+    ]);
+    let _ = docker_run(KAFKA_IMAGE_NEXT_GEN, &[
+        "bash",
+        "-c",
+        &format!(
+            "/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server {bootstrap} --topic kip848-d --group g-d --consumer-property group.protocol=consumer --from-beginning --timeout-ms 10000 --max-messages 2"
+        ),
+    ]);
+    let described = docker_run(KAFKA_IMAGE_NEXT_GEN, &[
+        "bash",
+        "-c",
+        &format!(
+            "/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server {bootstrap} --describe --group g-d"
+        ),
+    ]);
     let stdout = String::from_utf8_lossy(&described.stdout);
     assert!(
         stdout.contains("g-d"),
@@ -186,36 +165,27 @@ async fn jvm_kip848_delete_group() {
     let bootstrap = bootstrap_addr();
     let (_broker, _dir) = start_host_broker().await;
     create_topic("kip848-del", 1);
-    docker_run(
-        KAFKA_IMAGE_CLASSIC,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "printf 'x\\n' | kafka-console-producer --bootstrap-server {bootstrap} --topic kip848-del"
-            ),
-        ],
-    );
-    let _ = docker_run(
-        KAFKA_IMAGE_NEXT_GEN,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server {bootstrap} --topic kip848-del --group g-del --consumer-property group.protocol=consumer --from-beginning --timeout-ms 10000 --max-messages 1"
-            ),
-        ],
-    );
-    let deleted = docker_run(
-        KAFKA_IMAGE_NEXT_GEN,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server {bootstrap} --delete --group g-del"
-            ),
-        ],
-    );
+    docker_run(KAFKA_IMAGE_CLASSIC, &[
+        "bash",
+        "-c",
+        &format!(
+            "printf 'x\\n' | kafka-console-producer --bootstrap-server {bootstrap} --topic kip848-del"
+        ),
+    ]);
+    let _ = docker_run(KAFKA_IMAGE_NEXT_GEN, &[
+        "bash",
+        "-c",
+        &format!(
+            "/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server {bootstrap} --topic kip848-del --group g-del --consumer-property group.protocol=consumer --from-beginning --timeout-ms 10000 --max-messages 1"
+        ),
+    ]);
+    let deleted = docker_run(KAFKA_IMAGE_NEXT_GEN, &[
+        "bash",
+        "-c",
+        &format!(
+            "/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server {bootstrap} --delete --group g-del"
+        ),
+    ]);
     assert!(deleted.status.success(), "delete failed: {deleted:?}");
 }
 
@@ -225,39 +195,30 @@ async fn jvm_kip848_coexists_with_classic() {
     let bootstrap = bootstrap_addr();
     let (_broker, _dir) = start_host_broker().await;
     create_topic("kip848-coex", 1);
-    docker_run(
-        KAFKA_IMAGE_CLASSIC,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "printf 'p\\nq\\n' | kafka-console-producer --bootstrap-server {bootstrap} --topic kip848-coex"
-            ),
-        ],
-    );
-    let classic = docker_run(
-        KAFKA_IMAGE_CLASSIC,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "kafka-console-consumer --bootstrap-server {bootstrap} --topic kip848-coex --group g-classic --from-beginning --timeout-ms 10000 --max-messages 2"
-            ),
-        ],
-    );
+    docker_run(KAFKA_IMAGE_CLASSIC, &[
+        "bash",
+        "-c",
+        &format!(
+            "printf 'p\\nq\\n' | kafka-console-producer --bootstrap-server {bootstrap} --topic kip848-coex"
+        ),
+    ]);
+    let classic = docker_run(KAFKA_IMAGE_CLASSIC, &[
+        "bash",
+        "-c",
+        &format!(
+            "kafka-console-consumer --bootstrap-server {bootstrap} --topic kip848-coex --group g-classic --from-beginning --timeout-ms 10000 --max-messages 2"
+        ),
+    ]);
     let cs = String::from_utf8_lossy(&classic.stdout);
     assert!(cs.contains('p') && cs.contains('q'));
 
-    let next_gen = docker_run(
-        KAFKA_IMAGE_NEXT_GEN,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server {bootstrap} --topic kip848-coex --group g-next --consumer-property group.protocol=consumer --from-beginning --timeout-ms 10000 --max-messages 2"
-            ),
-        ],
-    );
+    let next_gen = docker_run(KAFKA_IMAGE_NEXT_GEN, &[
+        "bash",
+        "-c",
+        &format!(
+            "/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server {bootstrap} --topic kip848-coex --group g-next --consumer-property group.protocol=consumer --from-beginning --timeout-ms 10000 --max-messages 2"
+        ),
+    ]);
     let ns = String::from_utf8_lossy(&next_gen.stdout);
     assert!(ns.contains('p') && ns.contains('q'));
 }
@@ -295,19 +256,16 @@ async fn jvm_kip848_classic_and_consumer_in_one_group_migrate() {
     // default partitioner is murmur2(key) % numPartitions, so keyed records land
     // on a fixed partition: "0"->0, "4"->1, "5"->2, "1"->3.
     let produce = |label: &str| {
-        let out = docker_run(
-            KAFKA_IMAGE_CLASSIC,
-            &[
-                "bash",
-                "-c",
-                &format!(
-                    "printf '0:a\\n4:b\\n5:c\\n1:d\\n0:e\\n4:f\\n5:g\\n1:h\\n' | \
+        let out = docker_run(KAFKA_IMAGE_CLASSIC, &[
+            "bash",
+            "-c",
+            &format!(
+                "printf '0:a\\n4:b\\n5:c\\n1:d\\n0:e\\n4:f\\n5:g\\n1:h\\n' | \
                      kafka-console-producer --bootstrap-server {bootstrap} --topic mig \
                      --property parse.key=true --property key.separator=: \
                      --producer-property max.block.ms=15000"
-                ),
-            ],
-        );
+            ),
+        ]);
         assert!(out.status.success(), "{label} producer failed: {out:?}");
     };
 
@@ -351,16 +309,13 @@ async fn jvm_kip848_classic_and_consumer_in_one_group_migrate() {
     );
 
     // The migrated group must describe coherently to the JVM admin tooling.
-    let describe = docker_run(
-        KAFKA_IMAGE_NEXT_GEN,
-        &[
-            "bash",
-            "-c",
-            &format!(
-                "/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server {bootstrap} --describe --group {group}"
-            ),
-        ],
-    );
+    let describe = docker_run(KAFKA_IMAGE_NEXT_GEN, &[
+        "bash",
+        "-c",
+        &format!(
+            "/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server {bootstrap} --describe --group {group}"
+        ),
+    ]);
     assert!(
         String::from_utf8_lossy(&describe.stdout).contains("mig"),
         "describe mentions topic mig: {}",

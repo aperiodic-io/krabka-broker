@@ -10,15 +10,16 @@
 //! the same way. Both take one task of the remote reader pool, so both take
 //! one permit of [`super::ReaderPool`] here.
 
-use bytes::Bytes;
-use krabka_ids::LeaderEpoch;
-use krabka_log::Offset;
-use krabka_remote_storage::{RemoteStorageError, TopicIdPartition};
-
-use super::{AbortedTxnEntry, RemoteReader};
-use crate::{
-    metrics::{BrokerMetrics, RemoteTierPath},
-    partition::Partition,
+use {
+    super::{AbortedTxnEntry, RemoteReader},
+    crate::{
+        metrics::{BrokerMetrics, RemoteTierPath},
+        partition::Partition,
+    },
+    bytes::Bytes,
+    krabka_ids::LeaderEpoch,
+    krabka_log::Offset,
+    krabka_remote_storage::{RemoteStorageError, TopicIdPartition},
 };
 
 impl RemoteReader {

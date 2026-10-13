@@ -7,25 +7,26 @@
 //! `Produce` v12 that one call adds every partition with one
 //! `__transaction_state` record.
 
-use assert2::assert;
-use krabka_ids::PartitionIndex;
-use krabka_protocol::owned::{
-    create_topics_request::{self},
-    init_producer_id_request::InitProducerIdRequest,
-};
-
-use super::{test_support::one_transactional_batch, *};
-use crate::{
-    codes,
-    handlers::{
-        init_producer_id::handle as init_producer_id_handle,
-        test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+use {
+    super::{test_support::one_transactional_batch, *},
+    crate::{
+        codes,
+        handlers::{
+            init_producer_id::handle as init_producer_id_handle,
+            test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+        },
+        test_support::{
+            decode_response, dispatch_context, encode_request, peer, principal,
+            start_broker_no_audit_with,
+        },
+        txn::{bootstrap::TOPIC as TXN_BOOTSTRAP_TOPIC, state::TopicPartition},
     },
-    test_support::{
-        decode_response, dispatch_context, encode_request, peer, principal,
-        start_broker_no_audit_with,
+    assert2::assert,
+    krabka_ids::PartitionIndex,
+    krabka_protocol::owned::{
+        create_topics_request::{self},
+        init_producer_id_request::InitProducerIdRequest,
     },
-    txn::{bootstrap::TOPIC as TXN_BOOTSTRAP_TOPIC, state::TopicPartition},
 };
 
 const TOPIC: &str = "orders";

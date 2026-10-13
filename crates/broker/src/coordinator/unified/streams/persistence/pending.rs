@@ -6,29 +6,30 @@
 //! single `RecordBatch` that is ready for `OffsetsLog::append`, so the
 //! transition lands in the log atomically.
 
-use krabka_protocol::records::RecordBatch;
-
-use super::{
-    assignment::{
-        StreamsGroupCurrentMemberAssignmentValue, StreamsGroupTargetAssignmentMemberValue,
-    },
-    epochs::{StreamsGroupMetadataValue, StreamsGroupTargetAssignmentMetadataValue},
-    keys::{
-        encode_current_member_assignment_key, encode_group_metadata_key,
-        encode_member_metadata_key, encode_target_assignment_member_key,
-        encode_target_assignment_metadata_key, encode_topology_key,
-    },
-    member::StreamsGroupMemberMetadataValue,
-    topology::StreamsGroupTopologyValue,
-};
-use crate::{
-    coordinator::unified::{
-        OffsetRecordBatchBuilder,
-        member_records::{
-            MemberRecordFamilies, MemberRecordLists, MemberTombstone, append_removed_members,
+use {
+    super::{
+        assignment::{
+            StreamsGroupCurrentMemberAssignmentValue, StreamsGroupTargetAssignmentMemberValue,
         },
+        epochs::{StreamsGroupMetadataValue, StreamsGroupTargetAssignmentMetadataValue},
+        keys::{
+            encode_current_member_assignment_key, encode_group_metadata_key,
+            encode_member_metadata_key, encode_target_assignment_member_key,
+            encode_target_assignment_metadata_key, encode_topology_key,
+        },
+        member::StreamsGroupMemberMetadataValue,
+        topology::StreamsGroupTopologyValue,
     },
-    error::BrokerError,
+    crate::{
+        coordinator::unified::{
+            OffsetRecordBatchBuilder,
+            member_records::{
+                MemberRecordFamilies, MemberRecordLists, MemberTombstone, append_removed_members,
+            },
+        },
+        error::BrokerError,
+    },
+    krabka_protocol::records::RecordBatch,
 };
 
 #[derive(Debug, Default)]
@@ -44,9 +45,9 @@ pub struct PendingStreamsRecords {
 }
 
 impl MemberRecordFamilies for PendingStreamsRecords {
+    type Current = StreamsGroupCurrentMemberAssignmentValue;
     type Metadata = StreamsGroupMemberMetadataValue;
     type Target = StreamsGroupTargetAssignmentMemberValue;
-    type Current = StreamsGroupCurrentMemberAssignmentValue;
 
     fn member_record_families(&mut self) -> MemberRecordLists<'_, Self> {
         (
@@ -142,9 +143,10 @@ impl PendingStreamsRecords {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn pending_records_into_batch_emits_one_record_per_key() {

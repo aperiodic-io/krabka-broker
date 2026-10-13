@@ -3,12 +3,12 @@
 //! client-metrics subscription, a stock `ClientAttributes` value, and the
 //! unwrapper for a successful `SubscriptionDecision`.
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::{ClientMetricsConfigRecord, MetadataImage, MetadataRecord};
-use uuid::Uuid;
-
-use super::{ClientAttributes, SubscriptionAssignment, SubscriptionDecision};
+use {
+    super::{ClientAttributes, SubscriptionAssignment, SubscriptionDecision},
+    krabka_metadata::{ClientMetricsConfigRecord, MetadataImage, MetadataRecord},
+    std::collections::BTreeMap,
+    uuid::Uuid,
+};
 
 pub(super) fn img_with(name: &str, kvs: &[(&str, &str)]) -> MetadataImage {
     let mut img = MetadataImage::new(Uuid::nil());

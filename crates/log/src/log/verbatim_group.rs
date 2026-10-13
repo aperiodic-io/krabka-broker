@@ -1,11 +1,12 @@
 //! Bounded Direct I/O groups for ordinary producer batches.
 
-use krabka_ids::Offset;
-use krabka_protocol::records::{Attributes, CRC_COVERAGE_START, HEADER_LEN, TimestampType};
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes};
-
-use super::{Log, VerbatimBatch};
-use crate::{DeliveryPolicy, LogError, SegmentAllocation};
+use {
+    super::{Log, VerbatimBatch},
+    crate::{DeliveryPolicy, LogError, SegmentAllocation},
+    krabka_ids::Offset,
+    krabka_protocol::records::{Attributes, CRC_COVERAGE_START, HEADER_LEN, TimestampType},
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes},
+};
 
 impl Log {
     /// Try to append ordinary producer batches with one aligned Direct I/O write.

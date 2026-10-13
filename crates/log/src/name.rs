@@ -4,18 +4,17 @@
 //!
 //! The module is public because a tool that opens a log directory needs the same paths the broker uses, and it must not have to link the broker to compute them.
 
-use std::path::{Path, PathBuf};
-
-use crate::error::LogError;
+use {
+    crate::error::LogError,
+    std::path::{Path, PathBuf},
+};
 
 /// Digit count of a segment filename stem. Kafka zero-pads the base offset to this width.
 pub const FILENAME_DIGITS: usize = 20;
 
 /// `0` → `"00000000000000000000"`. `1847` → `"00000000000000001847"`.
 #[must_use]
-pub fn format_base_offset(base_offset: i64) -> String {
-    format!("{base_offset:020}")
-}
+pub fn format_base_offset(base_offset: i64) -> String { format!("{base_offset:020}") }
 
 /// Parse a `.log` filename and return its base offset.
 /// `"00000000000000001847.log"` → `Ok(1847)`.
@@ -73,9 +72,7 @@ pub fn stampindex_path(dir: &Path, base_offset: i64) -> PathBuf {
 
 /// Path to the per-partition `.leader-epoch-checkpoint` file.
 #[must_use]
-pub fn leader_epoch_checkpoint_path(dir: &Path) -> PathBuf {
-    dir.join("leader-epoch-checkpoint")
-}
+pub fn leader_epoch_checkpoint_path(dir: &Path) -> PathBuf { dir.join("leader-epoch-checkpoint") }
 
 /// Path to the per-partition `log-start-offset-checkpoint` file.
 ///
@@ -119,9 +116,7 @@ pub fn parse_partition_dir(name: &str) -> Option<(String, i32)> {
 #[cfg(test)]
 mod tests {
 
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     macro_rules! offset_case {
         ($name:ident, $offset:expr, $expected_filename:expr) => {

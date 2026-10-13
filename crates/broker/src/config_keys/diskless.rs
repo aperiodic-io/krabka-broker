@@ -2,11 +2,12 @@
 //! WAL data path, its value check, the two exclusivity rules it carries, and
 //! the immutability rule both alter paths enforce.
 
-use std::collections::BTreeMap;
-
-use super::{
-    REMOTE_STORAGE_ENABLE,
-    delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED},
+use {
+    super::{
+        REMOTE_STORAGE_ENABLE,
+        delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED},
+    },
+    std::collections::BTreeMap,
 };
 
 /// Krabka extension: per-topic opt-in to the diskless data path.
@@ -115,11 +116,12 @@ pub(super) fn validate_diskless_combination(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::{
-        super::validation::{is_recognized, validate_topic_config, validate_topic_config_map},
-        *,
+    use {
+        super::{
+            super::validation::{is_recognized, validate_topic_config, validate_topic_config_map},
+            *,
+        },
+        assert2::{assert, check},
     };
 
     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {

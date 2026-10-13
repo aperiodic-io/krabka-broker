@@ -2,26 +2,27 @@
 //! caller-supplied `append_at` offset, the leader-epoch transitions all
 //! four append paths record, and the size-driven segment roll.
 
-use assert2::{assert, check};
-use krabka_units::prelude::bytes;
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    config::{DeliveryPolicy, LogConfig, ScheduleOrder},
-    io::{FileIo, LogIo},
-    leader_epoch_checkpoint::EpochEntry,
-    log::test_support::{
-        abort_marker, append_transaction, assert_empty_append_state, assert_only_active,
-        check_append_time_lookup, configured_test_log, gzip_value, install_stamps,
-        log_append_time_log, rolling_test_log, sample_batch, sample_batch_with_epoch, sample_log,
-        stamped_test_log, test_batch_at, test_log, tiny_segments, transactional_batch,
-        verbatim_from, write_with_budget,
+use {
+    super::*,
+    crate::{
+        config::{DeliveryPolicy, LogConfig, ScheduleOrder},
+        io::{FileIo, LogIo},
+        leader_epoch_checkpoint::EpochEntry,
+        log::test_support::{
+            abort_marker, append_transaction, assert_empty_append_state, assert_only_active,
+            check_append_time_lookup, configured_test_log, gzip_value, install_stamps,
+            log_append_time_log, rolling_test_log, sample_batch, sample_batch_with_epoch,
+            sample_log, stamped_test_log, test_batch_at, test_log, tiny_segments,
+            transactional_batch, verbatim_from, write_with_budget,
+        },
+        name::log_path,
+        retention::now_ms,
+        stamp_index::{StampEntry, StampIndex},
+        test_support::{log_file_count, open_log},
     },
-    name::log_path,
-    retention::now_ms,
-    stamp_index::{StampEntry, StampIndex},
-    test_support::{log_file_count, open_log},
+    assert2::{assert, check},
+    krabka_units::prelude::bytes,
+    tempfile::tempdir,
 };
 
 #[derive(Debug)]
@@ -258,13 +259,10 @@ fn append_at_uses_reconciled_frontier_floor() {
     let mut gap_batch = test_batch_at(0);
     let mut rejected = gap_batch.clone();
     let err = log.append_at(&mut rejected, Offset(1)).unwrap_err();
-    assert!(matches!(
-        err,
-        LogError::OffsetMismatch {
-            expected: Offset(3),
-            actual: Offset(1)
-        }
-    ));
+    assert!(matches!(err, LogError::OffsetMismatch {
+        expected: Offset(3),
+        actual: Offset(1)
+    }));
 
     log.append_at(&mut gap_batch, Offset(3)).unwrap();
     assert!(log.log_end_offset() == Offset(4));
@@ -448,13 +446,10 @@ fn append_at_below_the_log_end_offset_errors() {
     log.append(&mut sample_batch(3)).unwrap();
     let mut b = sample_batch(2);
     let err = log.append_at(&mut b, Offset(2)).unwrap_err();
-    assert2::assert!(matches!(
-        err,
-        LogError::OffsetMismatch {
-            expected: Offset(3),
-            actual: Offset(2)
-        }
-    ));
+    assert2::assert!(matches!(err, LogError::OffsetMismatch {
+        expected: Offset(3),
+        actual: Offset(2)
+    }));
     // Failure must not advance the log.
     assert2::assert!(log.log_end_offset() == 3);
 }
@@ -782,14 +777,11 @@ fn offset_for_timestamp_answers_in_append_time() {
 /// `delivery.schedule.monotonic=true`.
 fn scheduled_log(monotonic: ScheduleOrder) -> (tempfile::TempDir, Log) {
     let dir = tempdir().unwrap();
-    let log = Log::open(
-        dir.path(),
-        LogConfig {
-            delivery_policy: DeliveryPolicy::Scheduled,
-            schedule_order: monotonic,
-            ..LogConfig::default()
-        },
-    )
+    let log = Log::open(dir.path(), LogConfig {
+        delivery_policy: DeliveryPolicy::Scheduled,
+        schedule_order: monotonic,
+        ..LogConfig::default()
+    })
     .unwrap();
     (dir, log)
 }

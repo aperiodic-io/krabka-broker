@@ -7,26 +7,26 @@
 //! in one piece. Keeping them together puts every wire shape this suite pins
 //! down in one file.
 
-use std::collections::BTreeSet;
-
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::{
-        fetch_request::{FetchPartition, FetchRequest},
-        produce_request::ProduceRequest,
-        produce_response::ProduceResponse,
+use {
+    crate::{
+        TOPIC,
+        support::{
+            client::{ValueBatchSetup, ValueRecordCount, create_replicated_topic, value_batch},
+            discovery::{metadata_first_partition, named_topic_metadata},
+            fetch::fetch_topic_row,
+            produce::{ProduceTimeoutMillis, SinglePartitionProduceSetup, batch_request},
+        },
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    TOPIC,
-    support::{
-        client::{ValueBatchSetup, ValueRecordCount, create_replicated_topic, value_batch},
-        discovery::{metadata_first_partition, named_topic_metadata},
-        fetch::fetch_topic_row,
-        produce::{ProduceTimeoutMillis, SinglePartitionProduceSetup, batch_request},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::{
+            fetch_request::{FetchPartition, FetchRequest},
+            produce_request::ProduceRequest,
+            produce_response::ProduceResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
+    std::collections::BTreeSet,
 };
 
 /// Create `TOPIC` with one partition and rf=3, and return its id.
@@ -77,17 +77,13 @@ pub(crate) fn consumer_fetch(topic_id: WireUuid, rack: &str) -> FetchRequest {
         session_id: 0,
         session_epoch: -1, // sessionless full fetch
         rack_id: rack.to_string(),
-        topics: vec![fetch_topic_row(
-            TOPIC,
-            topic_id,
-            vec![FetchPartition {
-                partition: 0,
-                fetch_offset: 0,
-                current_leader_epoch: -1,
-                partition_max_bytes: 1_048_576,
-                ..Default::default()
-            }],
-        )],
+        topics: vec![fetch_topic_row(TOPIC, topic_id, vec![FetchPartition {
+            partition: 0,
+            fetch_offset: 0,
+            current_leader_epoch: -1,
+            partition_max_bytes: 1_048_576,
+            ..Default::default()
+        }])],
         ..Default::default()
     }
 }

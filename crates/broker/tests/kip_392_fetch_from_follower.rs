@@ -18,29 +18,29 @@
 // Rust 1.95 annotate-snippets ICE on `clippy::pedantic` in test files; the
 // sibling integration tests allow it wholesale for the same reason.
 
-use std::{
-    collections::BTreeSet,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use krabka_broker::{BrokerConfig, BrokerHandle, replica_selector::ReplicaSelectorKind};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::{
-        create_topics_request::CreateTopicsRequest,
-        fetch_request::{FetchPartition, FetchRequest},
+use {
+    crate::support::{
+        client::{ValueBatchSetup, ValueRecordCount, connect_client},
+        fetch::fetch_topic_row,
+        produce::{SinglePartitionProduceSetup, send_batch},
+        shutdown_cluster,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use support::cluster_lock;
-use tempfile::TempDir;
-
-use crate::support::{
-    client::{ValueBatchSetup, ValueRecordCount, connect_client},
-    fetch::fetch_topic_row,
-    produce::{SinglePartitionProduceSetup, send_batch},
-    shutdown_cluster,
+    assert2::assert,
+    krabka_broker::{BrokerConfig, BrokerHandle, replica_selector::ReplicaSelectorKind},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::{
+            create_topics_request::CreateTopicsRequest,
+            fetch_request::{FetchPartition, FetchRequest},
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::{
+        collections::BTreeSet,
+        time::{Duration, Instant},
+    },
+    support::cluster_lock,
+    tempfile::TempDir,
 };
 
 mod support;
@@ -133,17 +133,13 @@ fn consumer_fetch(setup: ConsumerFetchSetup<'_>) -> FetchRequest {
         session_id: 0,
         session_epoch: -1, // sessionless full fetch
         rack_id: rack.to_string(),
-        topics: vec![fetch_topic_row(
-            topic,
-            topic_id,
-            vec![FetchPartition {
-                partition: 0,
-                fetch_offset: offset.0,
-                current_leader_epoch: -1,
-                partition_max_bytes: 1_048_576,
-                ..Default::default()
-            }],
-        )],
+        topics: vec![fetch_topic_row(topic, topic_id, vec![FetchPartition {
+            partition: 0,
+            fetch_offset: offset.0,
+            current_leader_epoch: -1,
+            partition_max_bytes: 1_048_576,
+            ..Default::default()
+        }])],
         ..Default::default()
     }
 }

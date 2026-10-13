@@ -4,9 +4,10 @@
 //! A refused request changes no group: Kafka answers it with the error code
 //! and message and never schedules the write operation.
 
-use krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest;
-
-use crate::{api_catalog::UnstableApiVersions, codes};
+use {
+    crate::{api_catalog::UnstableApiVersions, codes},
+    krabka_protocol::owned::streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+};
 
 /// `LEAVE_GROUP_STATIC_MEMBER_EPOCH`: the epoch of a static member's leave.
 const LEAVE_GROUP_STATIC_MEMBER_EPOCH: i32 = -2;
@@ -126,20 +127,19 @@ pub(super) fn request_error(
 
 /// Kafka's `throwIfEmptyString`: Java's `String.trim` removes every leading
 /// and trailing character at or below U+0020.
-fn is_blank(value: &str) -> bool {
-    value.trim_matches(|c: char| c <= ' ').is_empty()
-}
+fn is_blank(value: &str) -> bool { value.trim_matches(|c: char| c <= ' ').is_empty() }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::{
-        common::streams_group_heartbeat_request::{task_ids::TaskIds, topic_info::TopicInfo},
-        streams_group_heartbeat_request::{Subtopology, Topology},
+    use {
+        super::*,
+        crate::handlers::group_heartbeat_test_support::streams_request,
+        assert2::check,
+        krabka_protocol::owned::{
+            common::streams_group_heartbeat_request::{task_ids::TaskIds, topic_info::TopicInfo},
+            streams_group_heartbeat_request::{Subtopology, Topology},
+        },
     };
-
-    use super::*;
-    use crate::handlers::group_heartbeat_test_support::streams_request;
 
     fn topology() -> Topology {
         Topology {
@@ -155,9 +155,7 @@ mod tests {
 
     /// A valid join: a member id, a rebalance timeout, three empty task lists
     /// and a topology.
-    fn join() -> StreamsGroupHeartbeatRequest {
-        streams_request("g", "m1")
-    }
+    fn join() -> StreamsGroupHeartbeatRequest { streams_request("g", "m1") }
 
     fn heartbeat(member_epoch: i32) -> StreamsGroupHeartbeatRequest {
         StreamsGroupHeartbeatRequest {
@@ -182,9 +180,7 @@ mod tests {
         Option<(i16, String)>,
     );
 
-    fn invalid(message: &str) -> (i16, String) {
-        (codes::INVALID_REQUEST, message.to_string())
-    }
+    fn invalid(message: &str) -> (i16, String) { (codes::INVALID_REQUEST, message.to_string()) }
 
     /// The rows of the checks on every request and on a join.
     fn join_rows() -> Vec<Row> {

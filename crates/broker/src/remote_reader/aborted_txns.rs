@@ -6,13 +6,14 @@
 //! keeps entries overlapping the requested range. A segment owning no abort
 //! marker has no index object; those missing optional objects are skipped.
 
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{
-    IndexType, LogOffset, RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError,
-    TopicIdPartition, parse_txn_index, txn_overlaps,
+use {
+    super::{AbortedTxnEntry, RemoteReader},
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{
+        IndexType, LogOffset, RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError,
+        TopicIdPartition, parse_txn_index, txn_overlaps,
+    },
 };
-
-use super::{AbortedTxnEntry, RemoteReader};
 
 impl RemoteReader {
     /// Returns the aborted transactions that overlap the inclusive offset
@@ -75,10 +76,11 @@ impl RemoteReader {
 #[cfg(test)]
 mod tests {
 
-    use assert2::assert;
-
-    use super::*;
-    use crate::remote_reader::test_support::{empty_reader, populated_reader_with_abort, tp};
+    use {
+        super::*,
+        crate::remote_reader::test_support::{empty_reader, populated_reader_with_abort, tp},
+        assert2::assert,
+    };
 
     #[tokio::test]
     async fn aborted_transactions_returns_copied_abort() {

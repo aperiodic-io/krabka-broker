@@ -25,15 +25,18 @@
 //! `PreviousMemberEpoch` is the member epoch before the last bump, which the
 //! heartbeat still accepts (`throwIfShareGroupMemberEpochIsInvalid`).
 
-use bytes::{BufMut, BytesMut};
-use krabka_protocol::primitives::uuid::Uuid;
-
-use crate::{
-    coordinator::unified::persistence::{
-        flex::{array_value_codec, get_assigned_topics, get_i8, put_assigned_topics, value_codec},
-        get_i32,
+use {
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{
+                array_value_codec, get_assigned_topics, get_i8, put_assigned_topics, value_codec,
+            },
+            get_i32,
+        },
+        error::BrokerError,
     },
-    error::BrokerError,
+    bytes::{BufMut, BytesMut},
+    krabka_protocol::primitives::uuid::Uuid,
 };
 
 /// `org.apache.kafka.coordinator.group.modern.MemberState.STABLE`.
@@ -89,14 +92,16 @@ fn decode_topic_partitions(buf: &mut &[u8]) -> Result<Vec<(Uuid, Vec<i32>)>, Bro
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        share::persistence::{
-            KEY_SHARE_CURRENT_MEMBER_ASSIGNMENT, KEY_SHARE_TARGET_ASSIGNMENT_MEMBER, ShareGroupKey,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            share::persistence::{
+                KEY_SHARE_CURRENT_MEMBER_ASSIGNMENT, KEY_SHARE_TARGET_ASSIGNMENT_MEMBER,
+                ShareGroupKey,
+            },
+            test_support::wire_bytes,
         },
-        test_support::wire_bytes,
+        assert2::assert,
     };
 
     #[test]

@@ -2,25 +2,25 @@
 //! aborted transaction, the abort markers and `.txnindex` entries that stay,
 //! and the per-transaction aging of commit markers.
 
-use std::{collections::HashMap, fs};
-
-use krabka_ids::{Offset, ProducerId};
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::millis;
-
-use super::{
-    CleanedTransactionMetadata, ProducerLastRecord, RewriteOutput, RewriteRetention, Segment,
-    tests::decode_all,
-};
-use crate::{
-    compact::{
-        build_offset_map,
-        test_support::{
-            RETENTION, TransactionalRecordSetup, control_batch, make_record, rewrite_all,
-            rewrite_with_map, round_over, transactional_record, write_sealed_batches,
-        },
+use {
+    super::{
+        CleanedTransactionMetadata, ProducerLastRecord, RewriteOutput, RewriteRetention, Segment,
+        tests::decode_all,
     },
-    txn_index::{AbortedTxn, TxnIndex},
+    crate::{
+        compact::{
+            build_offset_map,
+            test_support::{
+                RETENTION, TransactionalRecordSetup, control_batch, make_record, rewrite_all,
+                rewrite_with_map, round_over, transactional_record, write_sealed_batches,
+            },
+        },
+        txn_index::{AbortedTxn, TxnIndex},
+    },
+    krabka_ids::{Offset, ProducerId},
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::millis,
+    std::{collections::HashMap, fs},
 };
 
 fn aborted_entry(producer_id: i64, start: i64, marker: i64) -> AbortedTxn {
@@ -76,16 +76,13 @@ fn an_aborted_transactions_records_are_dropped_and_the_committed_value_survives(
         payload: (b"j", b"aborted"),
     });
     let abort_marker = control_batch(12, 2000, 0 /* ABORT */);
-    let seg = write_sealed_batches(
-        dir.path(),
-        &[
-            committed.clone(),
-            commit_marker.clone(),
-            aborted_k,
-            aborted_j,
-            abort_marker.clone(),
-        ],
-    );
+    let seg = write_sealed_batches(dir.path(), &[
+        committed.clone(),
+        commit_marker.clone(),
+        aborted_k,
+        aborted_j,
+        abort_marker.clone(),
+    ]);
     let segment_refs = vec![&seg];
     let entry = aborted_entry(2000, 10, 12);
     let map = build_offset_map(&segment_refs, vec![entry], None).unwrap();
@@ -168,12 +165,11 @@ fn a_marker_ages_out_once_its_own_transactions_data_is_gone() {
             100,
             vec![(0, Some(150)), (1, None), (2, None)],
         ),
-        (
-            "horizon not reached: keep as it is",
-            Some(500),
-            100,
-            vec![(0, Some(500)), (1, None), (2, None)],
-        ),
+        ("horizon not reached: keep as it is", Some(500), 100, vec![
+            (0, Some(500)),
+            (1, None),
+            (2, None),
+        ]),
         (
             "horizon reached: drop the marker, keep the live data and its marker",
             Some(100),

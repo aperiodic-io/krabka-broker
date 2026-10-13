@@ -12,19 +12,19 @@
 //! [`append_one_batch`] applies the writer's compression rewrite in the same
 //! place [`crate::partition_writer`] applies it.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_compression::{CompressionType, RecordDecompressionPolicy};
-use krabka_log::Log;
-
 pub use super::topic_settings::TimestampPolicy;
-use super::{
-    append::build_produce_data,
-    framing::PartitionPayload,
-    prepare::{DecodeEnv, owned_fallback, prepare_batch},
+use {
+    super::{
+        append::build_produce_data,
+        framing::PartitionPayload,
+        prepare::{DecodeEnv, owned_fallback, prepare_batch},
+    },
+    crate::{codes, error::BrokerError, metrics::BrokerMetrics, partition::ProduceData},
+    bytes::Bytes,
+    krabka_compression::{CompressionType, RecordDecompressionPolicy},
+    krabka_log::Log,
+    std::sync::Arc,
 };
-use crate::{codes, error::BrokerError, metrics::BrokerMetrics, partition::ProduceData};
 
 /// The path a records field took through [`prepare_batch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

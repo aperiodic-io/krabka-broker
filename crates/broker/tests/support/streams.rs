@@ -1,18 +1,18 @@
 //! Canonical streams topology and heartbeat drivers for integration suites.
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    common::streams_group_heartbeat_request::{
-        task_ids::TaskIds as ReqTaskIds, topic_info::TopicInfo,
+use {
+    crate::support::{configs::feature_update, standalone_broker},
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        common::streams_group_heartbeat_request::{
+            task_ids::TaskIds as ReqTaskIds, topic_info::TopicInfo,
+        },
+        streams_group_heartbeat_request::{StreamsGroupHeartbeatRequest, Subtopology, Topology},
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+        update_features_request::UpdateFeaturesRequest,
     },
-    streams_group_heartbeat_request::{StreamsGroupHeartbeatRequest, Subtopology, Topology},
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-    update_features_request::UpdateFeaturesRequest,
+    std::time::Duration,
 };
-
-use crate::support::{configs::feature_update, standalone_broker};
 pub async fn finalize_streams_version(client: &Client) {
     let resp = client
         .send(UpdateFeaturesRequest {

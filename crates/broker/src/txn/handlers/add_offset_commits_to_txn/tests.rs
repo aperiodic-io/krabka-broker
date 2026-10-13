@@ -1,14 +1,14 @@
-use std::sync::Arc;
-
-use assert2::{assert, check};
-
-use super::*;
-use crate::{
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    test_support::{StandalonePartitionSetup, open_partition},
-    txn::bootstrap,
+use {
+    super::*,
+    crate::{
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        test_support::{StandalonePartitionSetup, open_partition},
+        txn::bootstrap,
+    },
+    assert2::{assert, check},
+    std::sync::Arc,
 };
 
 const TID: &str = "tid-offsets";
@@ -173,13 +173,10 @@ fn coordinator_with_log(directory: &std::path::Path) -> (Arc<TxnCoordinator>, Ar
         1,
         krabka_units::mebibytes(1),
     ));
-    let partition = open_partition(
-        directory,
-        StandalonePartitionSetup {
-            topic: bootstrap::TOPIC,
-            ..Default::default()
-        },
-    );
+    let partition = open_partition(directory, StandalonePartitionSetup {
+        topic: bootstrap::TOPIC,
+        ..Default::default()
+    });
     coordinator.partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),

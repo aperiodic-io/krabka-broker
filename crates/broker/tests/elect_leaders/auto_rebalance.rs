@@ -6,16 +6,18 @@
 //! `support::start_n_node`, because the rebalance settings have to be applied
 //! to each `BrokerConfig` before the broker starts.
 
-use std::net::SocketAddr;
-
-use krabka_broker::Broker;
-use tokio::net::TcpSocket;
-
-use crate::{
-    cluster_lock,
-    support::{self, ClusterNodeSetup, NodeIndex, controller_voters, topics::AssignedTopicSetup},
-    wait::{wait_isr_contains, wait_partition_exists, wait_partition_leader},
-    wire::create_topic_plaintext,
+use {
+    crate::{
+        cluster_lock,
+        support::{
+            self, ClusterNodeSetup, NodeIndex, controller_voters, topics::AssignedTopicSetup,
+        },
+        wait::{wait_isr_contains, wait_partition_exists, wait_partition_leader},
+        wire::create_topic_plaintext,
+    },
+    krabka_broker::Broker,
+    std::net::SocketAddr,
+    tokio::net::TcpSocket,
 };
 
 /// A 3-broker PLAINTEXT cluster with automatic leader rebalance on.
@@ -55,42 +57,33 @@ async fn auto_rebalance_restores_preferred_leader() {
     let dir1 = tempfile::TempDir::new().unwrap();
     let dir2 = tempfile::TempDir::new().unwrap();
 
-    let mut cfg0 = support::broker_config(
-        dir0.path(),
-        ClusterNodeSetup {
-            client_addrs: &client_addrs,
-            controller_addrs: &controller_addrs,
-            voters: controller_voters(&voters),
-            mode: krabka_broker::BootstrapMode::Bootstrap,
-            ..Default::default()
-        },
-    );
+    let mut cfg0 = support::broker_config(dir0.path(), ClusterNodeSetup {
+        client_addrs: &client_addrs,
+        controller_addrs: &controller_addrs,
+        voters: controller_voters(&voters),
+        mode: krabka_broker::BootstrapMode::Bootstrap,
+        ..Default::default()
+    });
     cfg0.features.auto_leader_rebalance_enable = true;
     cfg0.leader_imbalance_check_interval = krabka_units::secs(1);
 
-    let mut cfg1 = support::broker_config(
-        dir1.path(),
-        ClusterNodeSetup {
-            index: NodeIndex(1),
-            client_addrs: &client_addrs,
-            controller_addrs: &controller_addrs,
-            voters: controller_voters(&voters),
-            mode: krabka_broker::BootstrapMode::Bootstrap,
-        },
-    );
+    let mut cfg1 = support::broker_config(dir1.path(), ClusterNodeSetup {
+        index: NodeIndex(1),
+        client_addrs: &client_addrs,
+        controller_addrs: &controller_addrs,
+        voters: controller_voters(&voters),
+        mode: krabka_broker::BootstrapMode::Bootstrap,
+    });
     cfg1.features.auto_leader_rebalance_enable = true;
     cfg1.leader_imbalance_check_interval = krabka_units::secs(1);
 
-    let mut cfg2 = support::broker_config(
-        dir2.path(),
-        ClusterNodeSetup {
-            index: NodeIndex(2),
-            client_addrs: &client_addrs,
-            controller_addrs: &controller_addrs,
-            voters: controller_voters(&voters),
-            mode: krabka_broker::BootstrapMode::Bootstrap,
-        },
-    );
+    let mut cfg2 = support::broker_config(dir2.path(), ClusterNodeSetup {
+        index: NodeIndex(2),
+        client_addrs: &client_addrs,
+        controller_addrs: &controller_addrs,
+        voters: controller_voters(&voters),
+        mode: krabka_broker::BootstrapMode::Bootstrap,
+    });
     cfg2.features.auto_leader_rebalance_enable = true;
     cfg2.leader_imbalance_check_interval = krabka_units::secs(1);
 
@@ -125,13 +118,10 @@ async fn auto_rebalance_restores_preferred_leader() {
     // ── Phase 2: create rf=2 topic via PLAINTEXT wire. ────────────────────
     // With 3 registered brokers sorted [1, 2, 3] and rf=2, the round-robin
     // assignment for partition 0 is replicas=[1, 2]. Broker 1 is preferred.
-    create_topic_plaintext(
-        addr,
-        AssignedTopicSetup {
-            name: (topic).into(),
-            replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
-        },
-    )
+    create_topic_plaintext(addr, AssignedTopicSetup {
+        name: (topic).into(),
+        replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
+    })
     .await;
 
     wait_partition_exists(&h0, topic, 0).await;

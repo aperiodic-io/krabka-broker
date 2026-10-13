@@ -1,13 +1,14 @@
 //! Behaviour of the typed key registry: the rows every surface reads, the
 //! wire bytes they carry, and the defaults they must agree with.
 
-use assert2::{assert, check};
-use krabka_units::convert::{ByteSizeExt as _, RatioExt as _, TimeExt as _};
-
-use super::*;
-use crate::throttle::{
-    ALTER_LOG_DIRS_THROTTLED_RATE_KEY, FOLLOWER_THROTTLED_RATE_KEY,
-    FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_RATE_KEY, LEADER_THROTTLED_REPLICAS_KEY,
+use {
+    super::*,
+    crate::throttle::{
+        ALTER_LOG_DIRS_THROTTLED_RATE_KEY, FOLLOWER_THROTTLED_RATE_KEY,
+        FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_RATE_KEY, LEADER_THROTTLED_REPLICAS_KEY,
+    },
+    assert2::{assert, check},
+    krabka_units::convert::{ByteSizeExt as _, RatioExt as _, TimeExt as _},
 };
 
 #[test]

@@ -26,9 +26,7 @@ pub fn redundant_offset(per_key_last_snapshot: &[Offset]) -> Option<Offset> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn empty_is_none() {

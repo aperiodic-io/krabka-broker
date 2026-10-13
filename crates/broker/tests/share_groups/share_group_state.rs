@@ -6,10 +6,11 @@
 //! `ShareGroupDescribe` reports about members, so they are kept apart from the
 //! membership scenarios.
 
-use assert2::assert;
-
-use crate::share_group_harness::{
-    boot, connect, create_topic, describe, heartbeat, rejoin, start, topic_id,
+use {
+    crate::share_group_harness::{
+        boot, connect, create_topic, describe, heartbeat, rejoin, start, topic_id,
+    },
+    assert2::assert,
 };
 
 /// Kafka's `PartitionFactory.UNINITIALIZED_START_OFFSET`: the share state

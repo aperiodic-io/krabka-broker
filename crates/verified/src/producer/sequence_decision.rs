@@ -1,7 +1,6 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::{ProducerDecision, ProducerEntryFacts, RetainedSequenceRange};
+use creusot_std::prelude::*;
 
 open_logic! {
 pub fn sequence_modulo_2_31(sequence: Int) -> Int {

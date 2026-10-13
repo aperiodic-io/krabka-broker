@@ -6,16 +6,16 @@
 //! in `limits`, and the router seams the broker installs on a controller live
 //! in `routing`.
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
-
-use krabka_kraft_core::snapshot_fetch::METADATA_SNAPSHOT_FETCH_HARD_MAX;
-use krabka_units::{
-    fmt::Human as _,
-    prelude::{ByteSize, Time, hours, mebibytes, millis, secs},
+use {
+    crate::{RaftListenerHandshake, network::OutboundDialer, types::NodeId},
+    krabka_kraft_core::snapshot_fetch::METADATA_SNAPSHOT_FETCH_HARD_MAX,
+    krabka_units::{
+        fmt::Human as _,
+        prelude::{ByteSize, Time, hours, mebibytes, millis, secs},
+    },
+    std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration},
+    uuid::Uuid,
 };
-use uuid::Uuid;
-
-use crate::{RaftListenerHandshake, network::OutboundDialer, types::NodeId};
 
 mod kafka_release;
 mod limits;
@@ -301,10 +301,11 @@ impl ControllerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{ByteSizeExt as _, TimeExt as _};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_units::prelude::{ByteSizeExt as _, TimeExt as _},
+    };
 
     #[test]
     fn for_tests_uses_expected_snapshot_defaults() {

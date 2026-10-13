@@ -2,16 +2,28 @@
 //! and how one event is fed to a node's consensus machine. This is the part of
 //! the harness that makes the simulation deterministic.
 
-use krabka_raft::kraft::{action::Action, event::Event, types::NodeId};
-
-use super::{
-    cluster::Sim,
-    node::Message,
-    node_log::SimNodeLog,
-    timers::{HEARTBEAT_MS, SimTimer, election_timeout_ms_of},
+use {
+    super::{
+        cluster::Sim,
+        node::Message,
+        node_log::SimNodeLog,
+        timers::{HEARTBEAT_MS, SimTimer, election_timeout_ms_of},
+    },
+    krabka_raft::kraft::{action::Action, event::Event, types::NodeId},
 };
 
 impl<L: SimNodeLog> Sim<L> {
+    // A leader's periodic heartbeat. It re-broadcasts `BeginQuorumEpoch` to
+    // every peer, faithful to the `KRaft` resend to non-fetching voters, and
+    // re-arms the heartbeat. This is how a stale leader that rejoins after a
+    // partition learns of the newer epoch from the current leader and steps
+    // down to follower.
+    krabka_macros::simulation_heartbeat!(krabka_kraft_core, HEARTBEAT_MS);
+
+    // Feeds one event to a node and translates the resulting actions into new
+    // messages, timer arming, and log and HWM bookkeeping.
+    krabka_macros::simulation_step!(krabka_kraft_core);
+
     /// Finds the earliest armed timer across all nodes, advances the clock to
     /// it, and fires it. A partitioned node still ticks internally and still
     /// counts here. Returns `false` if no timer is armed.
@@ -20,15 +32,12 @@ impl<L: SimNodeLog> Sim<L> {
         // (BTreeMap iteration is ascending by id, so the first minimum wins).
         let best = krabka_kraft_core::simulation_support::earliest_timer(self.nodes.values().map(
             |node| {
-                (
-                    node.id,
-                    [
-                        node.election_deadline,
-                        node.fetch_deadline,
-                        node.heartbeat_deadline,
-                        node.check_quorum_deadline,
-                    ],
-                )
+                (node.id, [
+                    node.election_deadline,
+                    node.fetch_deadline,
+                    node.heartbeat_deadline,
+                    node.check_quorum_deadline,
+                ])
             },
         ));
         let Some((deadline, id, kind)) = best else {
@@ -80,13 +89,6 @@ impl<L: SimNodeLog> Sim<L> {
         }
     }
 
-    // A leader's periodic heartbeat. It re-broadcasts `BeginQuorumEpoch` to
-    // every peer, faithful to the `KRaft` resend to non-fetching voters, and
-    // re-arms the heartbeat. This is how a stale leader that rejoins after a
-    // partition learns of the newer epoch from the current leader and steps
-    // down to follower.
-    krabka_macros::simulation_heartbeat!(krabka_kraft_core, HEARTBEAT_MS);
-
     /// Delivers a queued message, and drops it if either endpoint is
     /// partitioned.
     pub(super) fn deliver(&mut self, msg: Message) {
@@ -98,10 +100,6 @@ impl<L: SimNodeLog> Sim<L> {
         }
         self.step(msg.dst, msg.event);
     }
-
-    // Feeds one event to a node and translates the resulting actions into new
-    // messages, timer arming, and log and HWM bookkeeping.
-    krabka_macros::simulation_step!(krabka_kraft_core);
 
     /// Enforces per-role timer ownership, which the core does not fully manage
     /// through `ResetTimer` actions alone:

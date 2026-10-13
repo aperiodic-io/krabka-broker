@@ -5,32 +5,32 @@
 //! schema resolves, and refuses each partition row of a frozen topic with
 //! `POLICY_VIOLATION` (44) before it parses the batch.
 
-use std::sync::Arc;
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_metadata::{MetadataImage, MetadataRecord, PatternType, TopicRecord};
-use krabka_protocol::owned::produce_response::PartitionProduceResponse;
-use uuid::Uuid;
-
-use super::{
-    super::{PartitionInput, process_partition},
-    seed_batch,
-};
-use crate::{
-    broker::spawn_partition,
-    codes::{NONE, POLICY_VIOLATION},
-    freeze::resolve::{FreezeVerdict, resolve_freeze_mutation, resolve_topic_freeze},
-    handlers::{
-        produce::{
-            framing::PartitionPayload,
-            test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
-        },
-        test_support::single_replica_partition,
+use {
+    super::{
+        super::{PartitionInput, process_partition},
+        seed_batch,
     },
-    log_dir::partition_dir,
-    metrics::TopicLabel,
-    test_support::{FreezeSetup, topic_freeze_record},
+    crate::{
+        broker::spawn_partition,
+        codes::{NONE, POLICY_VIOLATION},
+        freeze::resolve::{FreezeVerdict, resolve_freeze_mutation, resolve_topic_freeze},
+        handlers::{
+            produce::{
+                framing::PartitionPayload,
+                test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
+            },
+            test_support::single_replica_partition,
+        },
+        log_dir::partition_dir,
+        metrics::TopicLabel,
+        test_support::{FreezeSetup, topic_freeze_record},
+    },
+    assert2::check,
+    bytes::Bytes,
+    krabka_metadata::{MetadataImage, MetadataRecord, PatternType, TopicRecord},
+    krabka_protocol::owned::produce_response::PartitionProduceResponse,
+    std::sync::Arc,
+    uuid::Uuid,
 };
 
 // Put one live entry in the registry for the resolve below to find.
@@ -66,15 +66,12 @@ fn add_topic(image: &mut MetadataImage, topic: &str, topic_id: Uuid) {
 fn the_produce_path_resolves_one_freeze_per_topic() {
     let mut image = image_with_topic("orders", &[1]);
     frozen(&mut image, FreezeSetup::default());
-    frozen(
-        &mut image,
-        FreezeSetup {
-            scope: "tenant-a.",
-            pattern_type: PatternType::Prefixed,
-            reason: "offboarding",
-            ..Default::default()
-        },
-    );
+    frozen(&mut image, FreezeSetup {
+        scope: "tenant-a.",
+        pattern_type: PatternType::Prefixed,
+        reason: "offboarding",
+        ..Default::default()
+    });
 
     let cases = [
         (
@@ -124,13 +121,10 @@ async fn a_frozen_topic_is_refused_and_its_log_end_offset_does_not_move() {
     let dir = tempfile::tempdir().expect("log root");
     let mut image = image_with_topic("frozen", &[1]);
     add_topic(&mut image, "control", Uuid::from_u128(2));
-    frozen(
-        &mut image,
-        FreezeSetup {
-            scope: "frozen",
-            ..Default::default()
-        },
-    );
+    frozen(&mut image, FreezeSetup {
+        scope: "frozen",
+        ..Default::default()
+    });
     let image = Arc::new(image);
 
     let fixture = PipelineFixture::new(krabka_ids::NodeId(1));

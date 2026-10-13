@@ -13,13 +13,13 @@
 //! subset of partitions, each with its own start offset. It returns an
 //! [`AssignmentHandle`] that can mutate the live assignment at runtime.
 
-use std::{pin::Pin, sync::Arc};
-
-use async_trait::async_trait;
-use bytes::Bytes;
-use futures_util::stream::Stream;
-
-use crate::error::MetadataLogError;
+use {
+    crate::error::MetadataLogError,
+    async_trait::async_trait,
+    bytes::Bytes,
+    futures_util::stream::Stream,
+    std::{pin::Pin, sync::Arc},
+};
 
 mod in_process;
 
@@ -205,9 +205,7 @@ mod tests {
 
     #[async_trait]
     impl MetadataEventLog for AppendOnlyLog {
-        fn partition_count(&self) -> i32 {
-            1
-        }
+        fn partition_count(&self) -> i32 { 1 }
 
         async fn publish(&self, _partition: i32, _event: Bytes) -> Result<i64, MetadataLogError> {
             Ok(7)
@@ -220,9 +218,7 @@ mod tests {
             unreachable!("not used by these tests")
         }
 
-        async fn high_water_marks(&self) -> Result<Vec<i64>, MetadataLogError> {
-            Ok(vec![0])
-        }
+        async fn high_water_marks(&self) -> Result<Vec<i64>, MetadataLogError> { Ok(vec![0]) }
     }
 
     #[tokio::test]

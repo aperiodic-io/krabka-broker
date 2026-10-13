@@ -7,27 +7,27 @@
 //! broker, and each key's value check -- are shared with `AlterConfigs` and
 //! live in [`crate::config_keys::broker_dynamic`].
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::{BrokerConfigRecord, MetadataImage, MetadataRecord, NodeId};
-use krabka_protocol::owned::{
-    incremental_alter_configs_request::AlterConfigsResource,
-    incremental_alter_configs_response::AlterConfigsResourceResponse,
-};
-
-use super::{OP_APPEND, OP_DELETE, OP_SET, OP_SUBTRACT};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    config_keys::{
-        self,
-        broker_dynamic::{
-            BrokerConfigContext, BrokerKeyKind, CLUSTER_DEFAULT_ONLY, broker_key_kind,
-            cordoned_log_dirs_disabled_error, cordoned_log_dirs_error, elr_min_isr_error,
-            validate_dynamic_broker_configs,
+use {
+    super::{OP_APPEND, OP_DELETE, OP_SET, OP_SUBTRACT},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        config_keys::{
+            self,
+            broker_dynamic::{
+                BrokerConfigContext, BrokerKeyKind, CLUSTER_DEFAULT_ONLY, broker_key_kind,
+                cordoned_log_dirs_disabled_error, cordoned_log_dirs_error, elr_min_isr_error,
+                validate_dynamic_broker_configs,
+            },
         },
+        cordoned_log_dirs::CORDONED_LOG_DIRS,
     },
-    cordoned_log_dirs::CORDONED_LOG_DIRS,
+    krabka_metadata::{BrokerConfigRecord, MetadataImage, MetadataRecord, NodeId},
+    krabka_protocol::owned::{
+        incremental_alter_configs_request::AlterConfigsResource,
+        incremental_alter_configs_response::AlterConfigsResourceResponse,
+    },
+    std::collections::BTreeMap,
 };
 
 /// The default a `LIST` broker key starts from when the resource does not
@@ -213,40 +213,35 @@ pub(super) fn handle_broker_scoped(
     out: &mut AlterConfigsResourceResponse,
     to_submit: &mut Vec<MetadataRecord>,
 ) {
-    match broker_records(
-        resource,
-        BrokerConfigContext {
-            image,
-            serving,
-            log_dirs,
-            unstable,
-        },
-    ) {
+    match broker_records(resource, BrokerConfigContext {
+        image,
+        serving,
+        log_dirs,
+        unstable,
+    }) {
         Ok(records) => to_submit.extend(records),
-        Err((code, message)) => {
-            out.error_code = code;
-            out.error_message = Some(message);
-        }
+        Err(error) => super::set_error_response(out, error),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig;
-
-    use super::*;
-    use crate::{
-        cordoned_log_dirs::CORDONED_LOG_DIRS,
-        features::{ELR_VERSION, METADATA_VERSION},
-        handlers::{
-            incremental_alter_configs::test_support::{
-                make_del_cfg, make_image_with_broker, make_resource, make_set_cfg,
+    use {
+        super::*,
+        crate::{
+            cordoned_log_dirs::CORDONED_LOG_DIRS,
+            features::{ELR_VERSION, METADATA_VERSION},
+            handlers::{
+                incremental_alter_configs::test_support::{
+                    make_del_cfg, make_image_with_broker, make_resource, make_set_cfg,
+                },
+                test_support::{BrokerConfigMutationSetup, broker_config_context},
             },
-            test_support::{BrokerConfigMutationSetup, broker_config_context},
+            test_support::broker_registration,
+            throttle::LEADER_THROTTLED_RATE_KEY,
         },
-        test_support::broker_registration,
-        throttle::LEADER_THROTTLED_RATE_KEY,
+        assert2::check,
+        krabka_protocol::owned::incremental_alter_configs_request::AlterableConfig,
     };
 
     const SERVING: NodeId = NodeId(1);
@@ -662,12 +657,9 @@ mod tests {
                 Err(disabled),
             ),
         ];
-        check_broker_record_cases(
-            cases,
-            BrokerConfigMutationSetup {
-                log_dirs: &log_dirs,
-                ..Default::default()
-            },
-        );
+        check_broker_record_cases(cases, BrokerConfigMutationSetup {
+            log_dirs: &log_dirs,
+            ..Default::default()
+        });
     }
 }

@@ -1,26 +1,26 @@
 //! Exercise real appends against a disk-sync gate, not a timing-only workload.
 
-use std::{
-    collections::HashSet,
-    fs::File,
-    io,
-    sync::{Arc, Condvar, Mutex, mpsc},
-    time::Duration,
-};
-
-use assert2::assert;
-use krabka_ids::{Offset, ProducerId};
-use krabka_units::bytes;
-use tempfile::tempdir;
-
-use crate::{
-    Log, LogConfig, LogError, LogIo, Segment,
-    log::test_support::{
-        append_samples, install_stamps, sample_batch, tiny_segments, verbatim_from,
+use {
+    crate::{
+        Log, LogConfig, LogError, LogIo, Segment,
+        log::test_support::{
+            append_samples, install_stamps, sample_batch, tiny_segments, verbatim_from,
+        },
+        name,
+        producer_snapshot::{self, ProducerSnapshotEntry},
+        test_support::open_log,
     },
-    name,
-    producer_snapshot::{self, ProducerSnapshotEntry},
-    test_support::open_log,
+    assert2::assert,
+    krabka_ids::{Offset, ProducerId},
+    krabka_units::bytes,
+    std::{
+        collections::HashSet,
+        fs::File,
+        io,
+        sync::{Arc, Condvar, Mutex, mpsc},
+        time::Duration,
+    },
+    tempfile::tempdir,
 };
 
 fn check_boundary_snapshot(
@@ -86,14 +86,11 @@ impl LogIo for GatedIo {
 }
 
 fn first_append(dir: &std::path::Path, strict: bool) -> Log {
-    let mut log = Log::open(
-        dir,
-        LogConfig {
-            flush_on_append: strict,
-            retention: None,
-            ..tiny_segments()
-        },
-    )
+    let mut log = Log::open(dir, LogConfig {
+        flush_on_append: strict,
+        retention: None,
+        ..tiny_segments()
+    })
     .unwrap();
     let mut first = sample_batch(1);
     first.producer_id = 41;

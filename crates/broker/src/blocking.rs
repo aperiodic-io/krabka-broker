@@ -20,16 +20,17 @@
 //! [`inline_blocking_on_this_thread`], and so drives the WASI path on every
 //! target.
 
-use std::{
-    future::Future,
-    panic::{AssertUnwindSafe, catch_unwind},
-    pin::Pin,
-    task::{Context, Poll},
-};
-
-use tokio::{
-    runtime::{Handle, RuntimeFlavor},
-    task::JoinHandle,
+use {
+    std::{
+        future::Future,
+        panic::{AssertUnwindSafe, catch_unwind},
+        pin::Pin,
+        task::{Context, Poll},
+    },
+    tokio::{
+        runtime::{Handle, RuntimeFlavor},
+        task::JoinHandle,
+    },
 };
 
 /// Blocking work that did not return its value.
@@ -191,9 +192,7 @@ impl<R> Future for BlockingHandle<R> {
 }
 
 /// Whether blocking work runs inline on this thread.
-fn runs_inline() -> bool {
-    cfg!(target_os = "wasi") || forced_inline::active()
-}
+fn runs_inline() -> bool { cfg!(target_os = "wasi") || forced_inline::active() }
 
 #[cfg(any(test, feature = "test-helpers"))]
 mod forced_inline {
@@ -203,9 +202,7 @@ mod forced_inline {
         static ACTIVE: Cell<bool> = const { Cell::new(false) };
     }
 
-    pub(super) fn active() -> bool {
-        ACTIVE.with(Cell::get)
-    }
+    pub(super) fn active() -> bool { ACTIVE.with(Cell::get) }
 
     /// Makes the blocking work of this thread run inline until it drops.
     #[must_use = "blocking work runs inline only while the guard lives"]
@@ -217,9 +214,7 @@ mod forced_inline {
     }
 
     impl Drop for InlineBlockingGuard {
-        fn drop(&mut self) {
-            ACTIVE.with(|active| active.set(self.previous));
-        }
+        fn drop(&mut self) { ACTIVE.with(|active| active.set(self.previous)); }
     }
 
     /// Run the blocking work of this thread inline, as `wasm32-wasip1` does,
@@ -238,9 +233,7 @@ mod forced_inline {
 
 #[cfg(not(any(test, feature = "test-helpers")))]
 mod forced_inline {
-    pub(super) const fn active() -> bool {
-        false
-    }
+    pub(super) const fn active() -> bool { false }
 }
 
 #[cfg(any(test, feature = "test-helpers"))]
@@ -248,17 +241,17 @@ pub use self::forced_inline::{InlineBlockingGuard, inline_blocking_on_this_threa
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
+    use {
+        super::*,
+        assert2::{assert, check},
+        std::{
+            sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            },
+            thread::ThreadId,
         },
-        thread::ThreadId,
     };
-
-    use assert2::{assert, check};
-
-    use super::*;
 
     /// A runtime that counts the threads it starts. A current-thread runtime
     /// starts no worker, so there the count is the blocking-pool threads.
@@ -320,9 +313,7 @@ mod tests {
     }
 
     /// Blocking work that panics.
-    fn panics() -> u8 {
-        panic!("the blocking work panics")
-    }
+    fn panics() -> u8 { panic!("the blocking work panics") }
 
     /// Inline, no shape of the seam starts a blocking-pool thread, which is
     /// the property the WASI build needs: its runtime cannot start one.

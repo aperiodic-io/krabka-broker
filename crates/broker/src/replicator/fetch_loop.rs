@@ -9,28 +9,28 @@
 //! fetcher follows, and after the first round the request names only the
 //! partitions whose desired state moved.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_client_core::{ClientError, Connection};
-use krabka_protocol::owned::{
-    fetch_request::{FetchPartition, FetchRequest, ReplicaState},
-    fetch_response::FetchResponse,
-};
-use krabka_units::{
-    ByteSize, Time,
-    convert::{ByteSizeExt, TimeExt},
-};
-use tracing::{info, warn};
-
-use super::{
-    Config, FetcherConfig, FollowedKey,
-    connection::{connect_with_backoff, sleep_or_cancel},
-    ensure_local_partition,
-    follower_throttle::{FetchThrottleDecision, follower_partition_fetch_cap},
-    raw_fetch::RawFetchRequest,
-    replication_target_changed,
-    response::{FollowedIndex, RoundEntry, RowAction, apply_response_indexed},
-    session::{FollowerFetchSession, SessionKey, SessionOutcome, WantedRows},
+use {
+    super::{
+        Config, FetcherConfig, FollowedKey,
+        connection::{connect_with_backoff, sleep_or_cancel},
+        ensure_local_partition,
+        follower_throttle::{FetchThrottleDecision, follower_partition_fetch_cap},
+        raw_fetch::RawFetchRequest,
+        replication_target_changed,
+        response::{FollowedIndex, RoundEntry, RowAction, apply_response_indexed},
+        session::{FollowerFetchSession, SessionKey, SessionOutcome, WantedRows},
+    },
+    krabka_client_core::{ClientError, Connection},
+    krabka_protocol::owned::{
+        fetch_request::{FetchPartition, FetchRequest, ReplicaState},
+        fetch_response::FetchResponse,
+    },
+    krabka_units::{
+        ByteSize, Time,
+        convert::{ByteSizeExt, TimeExt},
+    },
+    std::{collections::BTreeMap, sync::Arc},
+    tracing::{info, warn},
 };
 
 /// When each partition may next be asked about.
@@ -262,9 +262,7 @@ pub(super) async fn run_fetcher_loop(fetcher: &FetcherConfig) -> Result<(), Stri
 
 /// Stops following one partition. The supervisor re-adds it if the next image
 /// still says this broker follows it from this leader.
-fn drop_partition(fetcher: &FetcherConfig, key: &FollowedKey) {
-    fetcher.followed.remove(key);
-}
+fn drop_partition(fetcher: &FetcherConfig, key: &FollowedKey) { fetcher.followed.remove(key); }
 
 /// Decides what this round asks for, partition by partition.
 ///
@@ -426,21 +424,22 @@ fn build_fetch_request(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-    use krabka_raft::NodeId;
-    use krabka_units::{bytes, millis};
-
-    use super::*;
-    use crate::{
-        codes::NONE,
-        replicator::{
-            FollowedPartitions,
-            test_support::{
-                LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID, image_with_follower_throttle,
-                image_with_leader, test_config,
+    use {
+        super::*,
+        crate::{
+            codes::NONE,
+            replicator::{
+                FollowedPartitions,
+                test_support::{
+                    LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID,
+                    image_with_follower_throttle, image_with_leader, test_config,
+                },
             },
         },
+        assert2::{assert, check},
+        krabka_protocol::primitives::uuid::Uuid as WireUuid,
+        krabka_raft::NodeId,
+        krabka_units::{bytes, millis},
     };
 
     fn followed_partition(

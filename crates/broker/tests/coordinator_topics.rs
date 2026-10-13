@@ -14,23 +14,23 @@
 //! replication factor is never lowered to fit the cluster. The third proves
 //! that a broker stopped by a controlled shutdown still counts toward it.
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use krabka_broker::{BrokerConfig, BrokerHandle, NodeId};
-use krabka_client_core::Client;
-use krabka_protocol::owned::find_coordinator_response::FindCoordinatorResponse;
-use tempfile::TempDir;
-
-use crate::support::{
-    client::connect_owned,
-    discovery::coordinator_lookup_request,
-    shutdown_cluster,
-    topics::{
-        ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor, creatable_topic,
-        create_topic_request,
+use {
+    crate::support::{
+        client::connect_owned,
+        discovery::coordinator_lookup_request,
+        shutdown_cluster,
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor, creatable_topic,
+            create_topic_request,
+        },
     },
+    assert2::{assert, check},
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    krabka_broker::{BrokerConfig, BrokerHandle, NodeId},
+    krabka_client_core::Client,
+    krabka_protocol::owned::find_coordinator_response::FindCoordinatorResponse,
+    std::time::{Duration, Instant},
+    tempfile::TempDir,
 };
 
 mod support;

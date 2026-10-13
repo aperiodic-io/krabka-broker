@@ -16,25 +16,27 @@
 //! partition over to the survivor, produces and tiers again, and reads the
 //! tier back out of the shared object store.
 
-use std::{
-    collections::BTreeSet,
-    path::Path,
-    time::{Duration, Instant},
-};
-
-use assert2::{assert, check};
-use krabka_broker::{BrokerHandle, NodeId, metrics::TopicLabel};
-use krabka_client_core::Client;
-use krabka_protocol::{primitives::uuid::Uuid as WireUuid, records::RecordBatch};
-
-use crate::{
-    multi_client::topic_id_for,
-    multi_cluster::{ready_admin, start_three_tiered_brokers_with_segment_sizes},
-    multi_workload::local_segment_bases,
-    support::{client::connect_owned, storage::topic_remote_log_files, topics::AssignedTopicSetup},
-    topic_fixture::{
-        AssignedTieredTopicSetup, TieredRecordCount, TieredRecordsSetup, await_tiered_replicas,
-        create_assigned_topic, produce_records as produce_tiered_records,
+use {
+    crate::{
+        multi_client::topic_id_for,
+        multi_cluster::{ready_admin, start_three_tiered_brokers_with_segment_sizes},
+        multi_workload::local_segment_bases,
+        support::{
+            client::connect_owned, storage::topic_remote_log_files, topics::AssignedTopicSetup,
+        },
+        topic_fixture::{
+            AssignedTieredTopicSetup, TieredRecordCount, TieredRecordsSetup, await_tiered_replicas,
+            create_assigned_topic, produce_records as produce_tiered_records,
+        },
+    },
+    assert2::{assert, check},
+    krabka_broker::{BrokerHandle, NodeId, metrics::TopicLabel},
+    krabka_client_core::Client,
+    krabka_protocol::{primitives::uuid::Uuid as WireUuid, records::RecordBatch},
+    std::{
+        collections::BTreeSet,
+        path::Path,
+        time::{Duration, Instant},
     },
 };
 
@@ -109,17 +111,14 @@ async fn produce_records(client: &Client, topic_id: WireUuid, prefix: &str, coun
 /// its `CopySegmentStarted` write before it uploaded anything. Kafka reads a
 /// manual assignment as `num_partitions = -1, replication_factor = -1`.
 async fn create_misaligned_topic(admin: &Client, b1: &BrokerHandle, b2: &BrokerHandle) {
-    let assignment = AssignedTopicSetup::on_replicas(
-        TOPIC,
-        vec![krabka_metadata::NodeId(2), krabka_metadata::NodeId(1)],
-    );
-    create_assigned_topic(
-        admin,
-        AssignedTieredTopicSetup {
-            topic: assignment,
-            segment_bytes: None,
-        },
-    )
+    let assignment = AssignedTopicSetup::on_replicas(TOPIC, vec![
+        krabka_metadata::NodeId(2),
+        krabka_metadata::NodeId(1),
+    ]);
+    create_assigned_topic(admin, AssignedTieredTopicSetup {
+        topic: assignment,
+        segment_bytes: None,
+    })
     .await;
 
     await_tiered_replicas(

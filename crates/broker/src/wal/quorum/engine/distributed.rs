@@ -6,12 +6,12 @@
 //! local replica harness in the module root. The state that only this rule
 //! reads, and every method that writes it, live here.
 
-use std::{collections::HashMap, sync::atomic::Ordering};
-
-use krabka_ids::Offset;
-use krabka_kraft_core::NodeId;
-
-use super::{DistributedQuorum, WalShardEngine, strict_majority};
+use {
+    super::{DistributedQuorum, WalShardEngine, strict_majority},
+    krabka_ids::Offset,
+    krabka_kraft_core::NodeId,
+    std::{collections::HashMap, sync::atomic::Ordering},
+};
 
 impl WalShardEngine {
     /// Install the metadata-selected broker voter set. Production registries
@@ -220,13 +220,13 @@ impl WalShardEngine {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use assert2::assert;
-    use krabka_log::Log;
-
-    use super::*;
-    use crate::wal::quorum::test_support::{batch, distributed_engine, source_log};
+    use {
+        super::*,
+        crate::wal::quorum::test_support::{batch, distributed_engine, source_log},
+        assert2::assert,
+        krabka_log::Log,
+        std::sync::{Arc, Mutex},
+    };
 
     fn unfsynced_three_voter_engine(
         records: i32,

@@ -1,11 +1,12 @@
 //! Explicit delegation of an object-store wrapper's unchanged methods.
 
-use moxy::{
-    ast::ParseError,
-    token::{Ident, Span, TokenStream, TokenTree},
+use {
+    crate::meta::item_body,
+    moxy::{
+        ast::ParseError,
+        token::{Ident, Span, TokenStream, TokenTree},
+    },
 };
-
-use crate::meta::item_body;
 
 fn methods(meta: TokenStream) -> Result<Vec<Ident>, ParseError> {
     let mut names = Vec::new();
@@ -135,9 +136,7 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::expand;
+    use {super::expand, assert2::assert};
 
     #[test]
     fn preserves_custom_methods_and_generics() {

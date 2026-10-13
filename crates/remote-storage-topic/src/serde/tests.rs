@@ -4,23 +4,22 @@
 //!
 //! [`MetadataEvent`]: super::MetadataEvent
 
-use assert2::assert;
-use krabka_ids::{LeaderEpoch, Offset};
-use krabka_remote_storage::{
-    CustomMetadata, RemoteLogSegmentId, RemoteLogSegmentState, RemotePartitionDeleteState,
-    TopicIdPartition,
+use {
+    super::*,
+    assert2::assert,
+    krabka_ids::{LeaderEpoch, Offset},
+    krabka_remote_storage::{
+        CustomMetadata, RemoteLogSegmentId, RemoteLogSegmentState, RemotePartitionDeleteState,
+        TopicIdPartition,
+    },
+    uuid::Uuid,
 };
-use uuid::Uuid;
-
-use super::*;
 
 fn tp() -> TopicIdPartition {
     TopicIdPartition::new(Uuid::from_u128(0xCAFE_BABE), "orders-📦", 7)
 }
 
-fn seg_id(id: Uuid) -> RemoteLogSegmentId {
-    RemoteLogSegmentId::new(tp(), id)
-}
+fn seg_id(id: Uuid) -> RemoteLogSegmentId { RemoteLogSegmentId::new(tp(), id) }
 
 #[derive(krabka_macros::FieldDefaults)]
 struct AddSegmentSetup {

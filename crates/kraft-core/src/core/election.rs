@@ -5,13 +5,14 @@
 //! here, from the timer that starts the pre-vote to the `LeaderChange`
 //! append that announces the new epoch.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use super::QuorumStateMachine;
-use crate::{
-    action::{Action, TimerKind},
-    role::{ReplicaProgress, Role},
-    types::{Epoch, LogView, NodeId, ReplicaKey, SimInstant},
+use {
+    super::QuorumStateMachine,
+    crate::{
+        action::{Action, TimerKind},
+        role::{ReplicaProgress, Role},
+        types::{Epoch, LogView, NodeId, ReplicaKey, SimInstant},
+    },
+    std::collections::{BTreeMap, BTreeSet},
 };
 
 #[cfg(test)]

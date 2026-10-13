@@ -1,15 +1,15 @@
 //! Reserve request bytes after the size prefix and before reading the body.
 
-use std::{io, time::Duration};
-
-use bytes::{Bytes, BytesMut};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt as _},
-    sync::OwnedSemaphorePermit,
+use {
+    super::RequestByteBudget,
+    crate::time_util::sleep_until_opt,
+    bytes::{Bytes, BytesMut},
+    std::{io, time::Duration},
+    tokio::{
+        io::{AsyncRead, AsyncReadExt as _},
+        sync::OwnedSemaphorePermit,
+    },
 };
-
-use super::RequestByteBudget;
-use crate::time_util::sleep_until_opt;
 
 pub(super) struct RequestFrame {
     pub(super) bytes: Bytes,
@@ -23,9 +23,7 @@ pub(super) enum ReceiveError {
 }
 
 impl From<io::Error> for ReceiveError {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
+    fn from(error: io::Error) -> Self { Self::Io(error) }
 }
 
 impl RequestByteBudget {

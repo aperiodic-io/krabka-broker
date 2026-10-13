@@ -17,15 +17,16 @@
 //! async, so a cache miss is a plain `.await` on one HTTP round trip and no
 //! runtime worker is parked.
 
-use std::{
-    num::NonZeroUsize,
-    sync::{Arc, Mutex},
+use {
+    base64::{Engine as _, engine::general_purpose::STANDARD},
+    krabka_schema_serde::registry::RegistryClient,
+    krabka_units::{Time, convert::TimeExt as _},
+    lru::LruCache,
+    std::{
+        num::NonZeroUsize,
+        sync::{Arc, Mutex},
+    },
 };
-
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use krabka_schema_serde::registry::RegistryClient;
-use krabka_units::{Time, convert::TimeExt as _};
-use lru::LruCache;
 
 mod cache;
 mod check;
@@ -33,11 +34,10 @@ mod reject;
 #[cfg(test)]
 mod test_support;
 
-/// Which field of a record a check reads, and so which subject it names.
-pub use krabka_schema_serde::subject::Role;
-
 use self::cache::Cached;
 pub use self::reject::RejectReason;
+/// Which field of a record a check reads, and so which subject it names.
+pub use krabka_schema_serde::subject::Role;
 
 /// How long a "the registry could not answer" result stays cached.
 ///
@@ -193,10 +193,11 @@ impl SchemaValidator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{minutes, secs};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_units::{minutes, secs},
+    };
 
     #[test]
     fn a_zero_sized_cache_is_a_configuration_error() {

@@ -11,9 +11,7 @@
 //! ([`crate::auto_topic_creation::AutoTopicCreation`]), as the other
 //! coordinator topics are created.
 
-use std::collections::BTreeMap;
-
-use crate::config_keys::CLEANUP_POLICY;
+use {crate::config_keys::CLEANUP_POLICY, std::collections::BTreeMap};
 
 /// The topic configs `__barrier_state` is created with.
 ///

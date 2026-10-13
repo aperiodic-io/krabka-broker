@@ -4,14 +4,15 @@
 //! eviction happen inside the test's wall clock rather than at the production
 //! default.
 
-use krabka_broker::{Broker, BrokerConfig};
-use krabka_log::LogConfig;
-
-use super::{
-    ports::{broker0_advertised, broker0_listen},
-    tiered_workload::TIERED_SEGMENT_SIZE,
+use {
+    super::{
+        ports::{broker0_advertised, broker0_listen},
+        tiered_workload::TIERED_SEGMENT_SIZE,
+    },
+    crate::{jvm_acceptance::host_broker_config, support::init_jvm_tracing},
+    krabka_broker::{Broker, BrokerConfig},
+    krabka_log::LogConfig,
 };
-use crate::{jvm_acceptance::host_broker_config, support::init_jvm_tracing};
 
 /// Same shape as [`start_host_broker`] but with the S3 tiered-storage
 /// backend wired in and a lower `RemoteLogManager` tick, so the acceptance

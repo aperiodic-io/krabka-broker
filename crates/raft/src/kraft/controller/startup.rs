@@ -2,43 +2,43 @@
 //! seeded state, and [`KraftController::open`], which recovers the image,
 //! the control state and the durable quorum state from a data directory first.
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
-
-use krabka_ids::Offset;
-use krabka_metadata::{MetadataImage, MetadataRecord, VotersRecord};
-use krabka_units::{
-    fmt::Human as _,
-    prelude::{ByteSize, Time},
-};
-use tokio::{
-    sync::{mpsc, watch},
-    time::Instant,
-};
-use uuid::Uuid;
-
-use super::{
-    Engine, KraftConfig, KraftControlState, KraftController, METADATA_LOG_CLEAN_INTERVAL,
-    PendingDowngradeSnapshot,
-    activation::{Activation, check_bootstrap_records},
-    checkpoint::{BOOTSTRAP_SNAPSHOT_ID, latest_checkpoint_id, load_latest_checkpoint},
-    quorum_state_file::load_quorum_state,
-    recovery::{control_state_at, replay_committed_with_timestamp, replay_control_records},
-    timing::initial_election_at,
-};
-use crate::{
-    config::{
-        ControllerFetchMissLimit, MetadataLogConfig, MetadataRaftCommandQueueCapacity,
-        MetadataRaftFetchMax,
+use {
+    super::{
+        Engine, KraftConfig, KraftControlState, KraftController, METADATA_LOG_CLEAN_INTERVAL,
+        PendingDowngradeSnapshot,
+        activation::{Activation, check_bootstrap_records},
+        checkpoint::{BOOTSTRAP_SNAPSHOT_ID, latest_checkpoint_id, load_latest_checkpoint},
+        quorum_state_file::load_quorum_state,
+        recovery::{control_state_at, replay_committed_with_timestamp, replay_control_records},
+        timing::initial_election_at,
     },
-    error::RaftError,
-    kraft::{
-        core::QuorumStateMachine,
-        log::KraftLog,
-        snapshot_fetch::MetadataSnapshotFetchMax,
-        transport::PeerSender,
-        types::{NodeId, QuorumState},
+    crate::{
+        config::{
+            ControllerFetchMissLimit, MetadataLogConfig, MetadataRaftCommandQueueCapacity,
+            MetadataRaftFetchMax,
+        },
+        error::RaftError,
+        kraft::{
+            core::QuorumStateMachine,
+            log::KraftLog,
+            snapshot_fetch::MetadataSnapshotFetchMax,
+            transport::PeerSender,
+            types::{NodeId, QuorumState},
+        },
+        snapshot::SnapshotReader,
     },
-    snapshot::SnapshotReader,
+    krabka_ids::Offset,
+    krabka_metadata::{MetadataImage, MetadataRecord, VotersRecord},
+    krabka_units::{
+        fmt::Human as _,
+        prelude::{ByteSize, Time},
+    },
+    std::{collections::BTreeMap, path::PathBuf, sync::Arc},
+    tokio::{
+        sync::{mpsc, watch},
+        time::Instant,
+    },
+    uuid::Uuid,
 };
 
 /// Metadata recovered before the controller engine is spawned.
@@ -69,18 +69,13 @@ impl KraftController {
     pub fn spawn(config: KraftConfig, log: KraftLog, data_dir: PathBuf) -> Self {
         let cluster_id = config.cluster_id;
         let image = MetadataImage::new(cluster_id);
-        Self::spawn_with_image(
-            config,
-            log,
-            data_dir,
-            RecoveredMetadata {
-                image,
-                last_snapshot_end_offset: Offset(0),
-                last_snapshot_timestamp_ms: 0,
-                last_applied_record_timestamp_ms: 0,
-                downgrade_snapshot_pending: None,
-            },
-        )
+        Self::spawn_with_image(config, log, data_dir, RecoveredMetadata {
+            image,
+            last_snapshot_end_offset: Offset(0),
+            last_snapshot_timestamp_ms: 0,
+            last_applied_record_timestamp_ms: 0,
+            downgrade_snapshot_pending: None,
+        })
         .expect("fresh controller cannot have a pending downgrade checkpoint")
     }
 

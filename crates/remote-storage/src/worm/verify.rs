@@ -35,12 +35,13 @@
 //! manifest supplies. A damaged or hostile archive produces a report, never a
 //! panic.
 
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    sync::Arc,
+use {
+    object_store::ObjectStore,
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap},
+        sync::Arc,
+    },
 };
-
-use object_store::ObjectStore;
 
 mod listing;
 mod manifest_read;
@@ -55,7 +56,6 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{listing::list_archive, partition::verify_partition};
 pub use self::{
     manifest_read::MAX_MANIFEST_BYTES,
     report::{
@@ -63,11 +63,14 @@ pub use self::{
         VerifyBreak,
     },
 };
-use crate::{
-    storage_manager::parse_partition_dir_name,
-    worm::{
-        error::WormError,
-        manifest::{ChainHead, ObjectEntry},
+use {
+    self::{listing::list_archive, partition::verify_partition},
+    crate::{
+        storage_manager::parse_partition_dir_name,
+        worm::{
+            error::WormError,
+            manifest::{ChainHead, ObjectEntry},
+        },
     },
 };
 
@@ -84,15 +87,11 @@ pub struct AuthenticatedArchive {
 impl AuthenticatedArchive {
     /// The ordinary WORM verification report.
     #[must_use]
-    pub fn report(&self) -> &ArchiveVerifyReport {
-        &self.report
-    }
+    pub fn report(&self) -> &ArchiveVerifyReport { &self.report }
 
     /// Signed size and digest claims, keyed by full object-store key.
     #[must_use]
-    pub fn objects(&self) -> &BTreeMap<String, ObjectEntry> {
-        &self.objects
-    }
+    pub fn objects(&self) -> &BTreeMap<String, ObjectEntry> { &self.objects }
 }
 
 /// Public keys the verifier accepts, keyed by `key_id`.
@@ -128,9 +127,7 @@ impl TrustedManifestKeys {
 
     /// The raw Ed25519 public key registered under `key_id`.
     #[must_use]
-    pub fn get(&self, key_id: &str) -> Option<&[u8]> {
-        self.keys.get(key_id).map(Vec::as_slice)
-    }
+    pub fn get(&self, key_id: &str) -> Option<&[u8]> { self.keys.get(key_id).map(Vec::as_slice) }
 
     /// `true` when no key is trusted.
     ///
@@ -138,9 +135,7 @@ impl TrustedManifestKeys {
     /// object, and it counts every signed manifest as untrusted. It proves
     /// internal consistency and says nothing about who wrote the archive.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.keys.is_empty() }
 }
 
 /// How hard the verifier works.

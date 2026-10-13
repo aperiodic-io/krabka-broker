@@ -3,19 +3,22 @@
 //! owned by another principal, and the authorization gate that stops everyone
 //! else from doing the same.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    create_delegation_token_request::CreateDelegationTokenRequest,
-    describe_delegation_token_request::{
-        DescribeDelegationTokenOwner, DescribeDelegationTokenRequest,
+use {
+    crate::{
+        DELEGATION_TOKEN_AUTHORIZATION_FAILED,
+        cluster::{start_admin_alice, start_broker_with_super_users, wait_for_token},
+        rpc::{
+            check_created_identity, send_create_delegation_token, send_describe_delegation_token,
+        },
+        wire::{admin_plain, sasl_plain_authenticate, token_session},
     },
-};
-
-use crate::{
-    DELEGATION_TOKEN_AUTHORIZATION_FAILED,
-    cluster::{start_admin_alice, start_broker_with_super_users, wait_for_token},
-    rpc::{check_created_identity, send_create_delegation_token, send_describe_delegation_token},
-    wire::{admin_plain, sasl_plain_authenticate, token_session},
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        create_delegation_token_request::CreateDelegationTokenRequest,
+        describe_delegation_token_request::{
+            DescribeDelegationTokenOwner, DescribeDelegationTokenRequest,
+        },
+    },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,20 +89,17 @@ async fn act_as_super_user_mints_token_owned_by_target() {
         // `owners=[admin]` finds the token by its requester, and the
         // DescribeDelegationToken v3 row names admin as the requester, alice
         // as the owner.
-        let described = send_describe_delegation_token(
-            &mut admin,
-            150,
-            &DescribeDelegationTokenRequest {
+        let described =
+            send_describe_delegation_token(&mut admin, 150, &DescribeDelegationTokenRequest {
                 owners: Some(vec![DescribeDelegationTokenOwner {
                     principal_type: "User".to_string(),
                     principal_name: "admin".to_string(),
                     ..Default::default()
                 }]),
                 ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| format!("DescribeDelegationToken(admin, owners=[admin]): {e}"))?;
+            })
+            .await
+            .map_err(|e| format!("DescribeDelegationToken(admin, owners=[admin]): {e}"))?;
         check!(described.error_code == 0);
         assert!(
             described.tokens.len() == 1,

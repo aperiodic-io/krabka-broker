@@ -1,12 +1,12 @@
 //! Shared audit event and signing fixtures.
 
-use std::sync::Arc;
-
-use ring::signature::{Ed25519KeyPair, KeyPair};
-
-use crate::{
-    AuditEndpoint, AuditEvent, AuditOutcome, AuditPrincipal, AuditResource, FileEd25519Signer,
-    PrivilegedPhase,
+use {
+    crate::{
+        AuditEndpoint, AuditEvent, AuditOutcome, AuditPrincipal, AuditResource, FileEd25519Signer,
+        PrivilegedPhase,
+    },
+    ring::signature::{Ed25519KeyPair, KeyPair},
+    std::sync::Arc,
 };
 
 pub(crate) fn signer() -> (FileEd25519Signer, Vec<u8>) {

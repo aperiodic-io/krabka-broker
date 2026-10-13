@@ -5,10 +5,11 @@
 //! value and leaves an already-set key — the one the environment supplies —
 //! in place.
 
-use krabka_units::{Time, convert::TimeExt as _};
-
-use super::{FileConfigError, validate::positive_i64};
-use crate::config::BrokerConfig;
+use {
+    super::{FileConfigError, validate::positive_i64},
+    crate::config::BrokerConfig,
+    krabka_units::{Time, convert::TimeExt as _},
+};
 
 /// TOML shape of `[delegation_token]`. Maps to the three `delegation_token_*`
 /// fields on [`crate::BrokerConfig`].
@@ -64,23 +65,21 @@ pub(super) fn apply_delegation_tokens(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Mutex, OnceLock};
-
-    use assert2::{assert, check};
-    use krabka_units::{days, hours};
-
-    use crate::{
-        config::BrokerConfig,
-        file_config::{FileConfig, test_support::configured_unwrap_parse},
+    use {
+        crate::{
+            config::BrokerConfig,
+            file_config::{FileConfig, test_support::configured_unwrap_parse},
+        },
+        assert2::{assert, check},
+        krabka_units::{days, hours},
+        std::sync::{Mutex, OnceLock},
     };
 
     /// Serializes any test that mutates process-wide env vars. Tests in
     /// the same `cargo test` process run on multiple threads by default,
     /// and `set_var`/`remove_var` are global side-effects.
     static ENV_LOCK_CELL: OnceLock<Mutex<()>> = OnceLock::new();
-    fn env_lock() -> &'static Mutex<()> {
-        ENV_LOCK_CELL.get_or_init(|| Mutex::new(()))
-    }
+    fn env_lock() -> &'static Mutex<()> { ENV_LOCK_CELL.get_or_init(|| Mutex::new(())) }
     #[test]
     fn delegation_token_section_parses_secret_key_and_defaults() {
         // Hold the lock so a concurrently-running env-var test can't

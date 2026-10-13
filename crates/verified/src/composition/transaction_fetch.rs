@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
-use super::{
-    FetchWatermarks, LogBatchKind, aborted_transaction_interval, fetch_visibility,
-    first_unstable_offset, local_append_coordinates, log_batch_kind, transaction_marker_closes,
-};
-use crate::broker::FetchVisibility;
 #[cfg(creusot)]
 use crate::transaction::first_unstable_frontier;
+use {
+    super::{
+        FetchWatermarks, LogBatchKind, aborted_transaction_interval, fetch_visibility,
+        first_unstable_offset, local_append_coordinates, log_batch_kind, transaction_marker_closes,
+    },
+    crate::broker::FetchVisibility,
+    creusot_std::prelude::*,
+};
 
 /// Return the actual unstable frontier and read-committed visibility. The
 /// limit is the largest prefix bounded by every live/unreplicated transaction,

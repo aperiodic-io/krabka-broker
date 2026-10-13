@@ -55,11 +55,12 @@
 //! [`fuzz`](super::fuzz) drives the same step function over random schedules
 //! at a scale this search cannot reach.
 
-use krabka_ids::{LeaderEpoch, Offset};
-use stateright::{Checker, Model, Property};
-
-use super::{EpochEntry, epoch_and_offset_for_entries, truncate_to};
-use crate::model_check::run_bfs;
+use {
+    super::{EpochEntry, epoch_and_offset_for_entries, truncate_to},
+    crate::model_check::run_bfs,
+    krabka_ids::{LeaderEpoch, Offset},
+    stateright::{Checker, Model, Property},
+};
 
 const MAX_STATES: usize = 2_000_000;
 const MAX_DEPTH: usize = 64;
@@ -382,8 +383,8 @@ struct ReconcileModel {
 }
 
 impl Model for ReconcileModel {
-    type State = Cluster;
     type Action = Action;
+    type State = Cluster;
 
     fn init_states(&self) -> Vec<Self::State> {
         vec![Cluster::new(self.replicas, self.assign_on_election)]

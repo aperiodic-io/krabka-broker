@@ -1,7 +1,4 @@
-use std::collections::HashSet;
-
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
+use {krabka_ids::PartitionIndex, krabka_log::ProducerId, std::collections::HashSet};
 
 /// Transaction state machine. It mirrors Apache Kafka's classic transaction
 /// states (KIP-98), extended for KIP-1319 v2.
@@ -133,9 +130,7 @@ pub struct TxnEntry {
 }
 
 impl TxnEntry {
-    pub fn has_staged_producer_identity(&self) -> bool {
-        self.next_producer_epoch >= 0
-    }
+    pub fn has_staged_producer_identity(&self) -> bool { self.next_producer_epoch >= 0 }
 
     /// Fresh entry for a tid that's never been seen, or the entry after an
     /// epoch bump.
@@ -172,9 +167,7 @@ impl TxnEntry {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn empty_to_ongoing_allowed() {

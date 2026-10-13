@@ -1,8 +1,9 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{FetchWatermarks, scheduled_prefix_bounds_fetch, scheduled_stable_prefix_bounds_fetch};
-use crate::broker::FetchVisibility;
+use {
+    super::{FetchWatermarks, scheduled_prefix_bounds_fetch, scheduled_stable_prefix_bounds_fetch},
+    crate::broker::FetchVisibility,
+    assert2::assert,
+    proptest::prelude::*,
+};
 
 fn delivery_oracle(
     batches: &[(i64, i32)],
@@ -169,18 +170,11 @@ fn schedules_reject_corrupt_tails_and_ignore_stale_gate_fields() {
         ),
         (0, i64::MAX, &[(i64::MAX, 0)][..], &[0][..]),
     ] {
-        check_witness(
-            batches,
-            times,
-            &[],
-            0,
-            i64::MAX,
-            FetchWatermarks {
-                log_start: start,
-                log_end: end,
-                hw: end,
-                ..w
-            },
-        );
+        check_witness(batches, times, &[], 0, i64::MAX, FetchWatermarks {
+            log_start: start,
+            log_end: end,
+            hw: end,
+            ..w
+        });
     }
 }

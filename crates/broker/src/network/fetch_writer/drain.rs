@@ -12,12 +12,13 @@
 //! [`FetchDrainPath`] label is recorded here, from the arm that ran, and not
 //! from the decision the fetch handler made earlier.
 
-use tokio::io::{AsyncWrite, AsyncWriteExt};
-
-use super::{WriteOp, sink::SendfileSink};
-use crate::{
-    error::BrokerError,
-    metrics::{BrokerMetrics, FetchDrainPath},
+use {
+    super::{WriteOp, sink::SendfileSink},
+    crate::{
+        error::BrokerError,
+        metrics::{BrokerMetrics, FetchDrainPath},
+    },
+    tokio::io::{AsyncWrite, AsyncWriteExt},
 };
 
 crate::sendfile_cfg! {
@@ -149,8 +150,7 @@ crate::sendfile_cfg! {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::metrics::FetchDrainPathLabel;
+    use {super::*, crate::metrics::FetchDrainPathLabel};
 
     /// The count this drain's counter carries for `path`.
     fn drained(metrics: &BrokerMetrics, path: FetchDrainPath) -> u64 {
@@ -191,8 +191,7 @@ mod tests {
     /// platform.
     #[tokio::test]
     async fn inline_only_plan_counts_as_the_vectored_path() {
-        use bytes::Bytes;
-        use tokio::io::AsyncReadExt as _;
+        use {bytes::Bytes, tokio::io::AsyncReadExt as _};
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

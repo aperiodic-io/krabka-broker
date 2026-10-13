@@ -12,14 +12,14 @@
 //! [`RangeFetcher`] is the seam between that loop and the broker: the Kafka log
 //! implements it over its broker pool, and the tests here script it.
 
-use std::time::Duration;
-
-use krabka_client_core::{ClientError, FetchPartitionResult, FetchedRecord};
-use tracing::warn;
-
-use crate::{
-    error::MetadataLogError,
-    log::{MetadataEventRecord, RangeVisitor},
+use {
+    crate::{
+        error::MetadataLogError,
+        log::{MetadataEventRecord, RangeVisitor},
+    },
+    krabka_client_core::{ClientError, FetchPartitionResult, FetchedRecord},
+    std::time::Duration,
+    tracing::warn,
 };
 
 /// The leader lookup and the `Fetch` that a range read makes.
@@ -230,13 +230,13 @@ async fn fetch_page<F: RangeFetcher>(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, sync::Mutex};
-
-    use assert2::{assert, check};
-    use bytes::Bytes;
-    use krabka_units::prelude::secs;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        bytes::Bytes,
+        krabka_units::prelude::secs,
+        std::{collections::VecDeque, sync::Mutex},
+    };
 
     const TOPIC: RangeTopic<'static> = RangeTopic {
         name: "__diskless_wal_index",
@@ -365,9 +365,7 @@ mod tests {
             }
         }
 
-        fn calls(&self) -> Vec<Call> {
-            std::mem::take(&mut *self.calls.lock().unwrap())
-        }
+        fn calls(&self) -> Vec<Call> { std::mem::take(&mut *self.calls.lock().unwrap()) }
     }
 
     impl RangeFetcher for ScriptedFetcher {
@@ -417,14 +415,11 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_retriable_fetch_failure_looks_the_leader_up_again_and_resumes() {
-        let fetcher = ScriptedFetcher::new(
-            [Ok(1), Ok(2)],
-            [
-                Ok(page(0..2)),
-                Err(ClientError::Server { error_code: 6 }),
-                Ok(page(2..4)),
-            ],
-        );
+        let fetcher = ScriptedFetcher::new([Ok(1), Ok(2)], [
+            Ok(page(0..2)),
+            Err(ClientError::Server { error_code: 6 }),
+            Ok(page(2..4)),
+        ]);
 
         let records = read(&fetcher, 1, 0, 4).await.unwrap();
 
@@ -470,14 +465,10 @@ mod tests {
         assert!(records == vec![record(0, Some(b"v")), record(1, Some(b"v"))]);
         assert!(
             fetcher.calls()
-                == vec![
-                    Call::Leader,
-                    Call::Leader,
-                    Call::Fetch {
-                        leader: 3,
-                        offset: 0
-                    },
-                ]
+                == vec![Call::Leader, Call::Leader, Call::Fetch {
+                    leader: 3,
+                    offset: 0
+                },]
         );
     }
 
@@ -510,13 +501,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_fetch_that_makes_no_progress_stalls_the_read() {
-        let fetcher = ScriptedFetcher::new(
-            [Ok(1)],
-            [Ok(FetchPartitionResult {
-                records: Vec::new(),
-                next_offset: None,
-            })],
-        );
+        let fetcher = ScriptedFetcher::new([Ok(1)], [Ok(FetchPartitionResult {
+            records: Vec::new(),
+            next_offset: None,
+        })]);
 
         let error = read(&fetcher, 1, 4, 10).await.unwrap_err();
 
@@ -543,13 +531,10 @@ mod tests {
         check!(seen == vec![0]);
         check!(
             fetcher.calls()
-                == vec![
-                    Call::Leader,
-                    Call::Fetch {
-                        leader: 1,
-                        offset: 0
-                    }
-                ]
+                == vec![Call::Leader, Call::Fetch {
+                    leader: 1,
+                    offset: 0
+                }]
         );
     }
 

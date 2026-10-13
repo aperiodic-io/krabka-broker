@@ -6,15 +6,16 @@
 //! keep their own original offsets, and a batch archived after a filtered one
 //! is untouched.
 
-use assert2::check;
-use krabka_ids::Offset;
-use krabka_log::LogConfig;
-use krabka_protocol::records::RecordBatch;
-
-use crate::{
-    archive::build_archive,
-    fixtures::{headered_record, keyed_record, plain_batch, value_record},
-    harness::{check_batches, empty_first_batch, reopen, restore_excluding_keys, run_restore},
+use {
+    crate::{
+        archive::build_archive,
+        fixtures::{headered_record, keyed_record, plain_batch, value_record},
+        harness::{check_batches, empty_first_batch, reopen, restore_excluding_keys, run_restore},
+    },
+    assert2::check,
+    krabka_ids::Offset,
+    krabka_log::LogConfig,
+    krabka_protocol::records::RecordBatch,
 };
 
 // ---------------------------------------------------------------------

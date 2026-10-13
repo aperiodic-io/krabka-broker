@@ -1,16 +1,13 @@
 //! What `#[derive(RuntimeOverlay)]` copies onto its target.
 
-use assert2::assert;
-use krabka_macros::RuntimeOverlay;
+use {assert2::assert, krabka_macros::RuntimeOverlay};
 
 /// A refined newtype, as `krabka_broker::config_value` writes them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Positive(u32);
 
 impl Positive {
-    const fn into_value(self) -> u32 {
-        self.0
-    }
+    const fn into_value(self) -> u32 { self.0 }
 }
 
 #[derive(Debug, Default, PartialEq)]

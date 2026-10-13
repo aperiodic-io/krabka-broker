@@ -7,21 +7,21 @@
 //! and the partition counts it gathered, so every branch of the specification
 //! is testable without a broker.
 
-use std::collections::HashMap;
-
-use krabka_protocol::{
-    owned::{
-        offset_delete_request::OffsetDeleteRequestTopic,
-        offset_delete_response::{OffsetDeleteResponsePartition, OffsetDeleteResponseTopic},
+use {
+    crate::{
+        authorizer::AuthorizationResult,
+        codes,
+        coordinator::{persistence::OffsetCommitValue, unified::actor::SubscribedTopics},
+        error::BrokerError,
     },
-    records::Record,
-};
-
-use crate::{
-    authorizer::AuthorizationResult,
-    codes,
-    coordinator::{persistence::OffsetCommitValue, unified::actor::SubscribedTopics},
-    error::BrokerError,
+    krabka_protocol::{
+        owned::{
+            offset_delete_request::OffsetDeleteRequestTopic,
+            offset_delete_response::{OffsetDeleteResponsePartition, OffsetDeleteResponseTopic},
+        },
+        records::Record,
+    },
+    std::collections::HashMap,
 };
 
 /// The per-partition rows of an `OffsetDelete` response, the tombstones to
@@ -138,13 +138,13 @@ fn push_row(out: &mut Vec<OffsetDeleteResponseTopic>, name: &str, index: i32, co
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use assert2::check;
-
-    use super::*;
-    use crate::handlers::offset_delete::test_support::{
-        expected_row, expected_topic, req_with_topics,
+    use {
+        super::*,
+        crate::handlers::offset_delete::test_support::{
+            expected_row, expected_topic, req_with_topics,
+        },
+        assert2::check,
+        std::collections::HashSet,
     };
 
     type Request<'a> = &'a [(&'a str, &'a [i32])];
@@ -210,13 +210,10 @@ mod tests {
                 "denied topic",
                 &[("denied", &[0, 1])],
                 none.clone(),
-                &[(
-                    "denied",
-                    &[
-                        (0, codes::TOPIC_AUTHORIZATION_FAILED),
-                        (1, codes::TOPIC_AUTHORIZATION_FAILED),
-                    ],
-                )],
+                &[("denied", &[
+                    (0, codes::TOPIC_AUTHORIZATION_FAILED),
+                    (1, codes::TOPIC_AUTHORIZATION_FAILED),
+                ])],
                 vec![],
             ),
             (
@@ -254,15 +251,12 @@ mod tests {
                 "out-of-range partitions come first, then the coordinator's",
                 &[("t1", &[0, 99, -1, 3])],
                 named(&["t2"]),
-                &[(
-                    "t1",
-                    &[
-                        (99, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                        (-1, codes::UNKNOWN_TOPIC_OR_PARTITION),
-                        (0, codes::NONE),
-                        (3, codes::NONE),
-                    ],
-                )],
+                &[("t1", &[
+                    (99, codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    (-1, codes::UNKNOWN_TOPIC_OR_PARTITION),
+                    (0, codes::NONE),
+                    (3, codes::NONE),
+                ])],
                 vec![("t1", 0), ("t1", 3)],
             ),
             (

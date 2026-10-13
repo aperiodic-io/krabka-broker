@@ -47,9 +47,7 @@ impl FetchBound {
     /// `ListOffsetsRequest.DEBUGGING_REPLICA_ID` (-2) is the one value the
     /// gate lets read a follower's local log instead of redirecting to the
     /// leader.
-    pub(super) const fn replica_id(self) -> i32 {
-        self.replica_id
-    }
+    pub(super) const fn replica_id(self) -> i32 { self.replica_id }
 }
 
 /// Reads the offset a [`FetchBound`] names.
@@ -131,9 +129,7 @@ fn checked_bound(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// Kafka reads a `ListOffsets` request's `isolation_level` only when the
     /// request came from a client, so choosing the bound that decides every
@@ -172,39 +168,24 @@ mod tests {
             // replica id, and it has to: a replica copies uncommitted records
             // too, so bounding it would stall replication behind an open
             // transaction until that transaction resolved.
-            (
-                "follower replica",
-                3,
-                READ_COMMITTED,
-                FetchBound {
-                    replica_id: 3,
-                    isolation_level: READ_COMMITTED,
-                },
-            ),
+            ("follower replica", 3, READ_COMMITTED, FetchBound {
+                replica_id: 3,
+                isolation_level: READ_COMMITTED,
+            }),
             // The same follower with the byte it actually sends. `None` is
             // chosen by the replica id alone, so the isolation level cannot
             // reach the answer either way.
-            (
-                "follower replica, read_uncommitted",
-                3,
-                0,
-                FetchBound {
-                    replica_id: 3,
-                    isolation_level: 0,
-                },
-            ),
+            ("follower replica, read_uncommitted", 3, 0, FetchBound {
+                replica_id: 3,
+                isolation_level: 0,
+            }),
             // `ListOffsetsRequest.DEBUGGING_REPLICA_ID`. It is not -1, so Kafka
             // files it with the replicas rather than with the clients even
             // though no follower sends it.
-            (
-                "debugging replica",
-                -2,
-                READ_COMMITTED,
-                FetchBound {
-                    replica_id: -2,
-                    isolation_level: READ_COMMITTED,
-                },
-            ),
+            ("debugging replica", -2, READ_COMMITTED, FetchBound {
+                replica_id: -2,
+                isolation_level: READ_COMMITTED,
+            }),
         ];
         for (label, replica_id, isolation_level, expected) in cases {
             check!(

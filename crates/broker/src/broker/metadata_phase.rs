@@ -3,36 +3,36 @@
 //! phase. It is separate from the rest of startup because the metadata source
 //! must exist before storage recovery, the coordinators, or the listeners.
 
-use std::sync::Arc;
-
-use krabka_units::convert::{ByteSizeExt as _, TimeExt as _};
-use tokio::net::TcpListener;
-
-use crate::{
-    auto_join::{AutoJoinParams, run, run_voter_updates},
-    bootstrap::{initial_voters, load_bootstrap_records},
-    broker::{
-        endpoints::static_controller_voter_set,
-        registration::{
-            register_broker, register_controller, spawn_deferred_controller_registration,
-            submit_stretch_defaults,
+use {
+    crate::{
+        auto_join::{AutoJoinParams, run, run_voter_updates},
+        bootstrap::{initial_voters, load_bootstrap_records},
+        broker::{
+            endpoints::static_controller_voter_set,
+            registration::{
+                register_broker, register_controller, spawn_deferred_controller_registration,
+                submit_stretch_defaults,
+            },
         },
+        clean_shutdown::take,
+        config::BrokerConfig,
+        controller_admin::BrokerControllerAdminRouter,
+        controller_endpoint::CONTROLLER_LISTENER_NAME,
+        error::BrokerError,
+        features::LATEST_PRODUCTION_METADATA_VERSION,
+        host_port::parse_host_port,
+        incarnation::load_or_generate,
+        metadata_observer::{MetadataObserver, ObserverConfig},
+        metadata_source::{MetadataSource, ObserverSource, QuorumForwarder, or_fatal_fault},
+        network::client::{InterBrokerClient, InterBrokerDialer},
+        platform::{Sockets, bind_listener},
+        raft_handshake::{AuditLogArc, BrokerRaftHandshake},
+        time_util::system_timer,
+        wal::quorum::registry::{WalShardRegistry, WalShardRouter},
     },
-    clean_shutdown::take,
-    config::BrokerConfig,
-    controller_admin::BrokerControllerAdminRouter,
-    controller_endpoint::CONTROLLER_LISTENER_NAME,
-    error::BrokerError,
-    features::LATEST_PRODUCTION_METADATA_VERSION,
-    host_port::parse_host_port,
-    incarnation::load_or_generate,
-    metadata_observer::{MetadataObserver, ObserverConfig},
-    metadata_source::{MetadataSource, ObserverSource, QuorumForwarder, or_fatal_fault},
-    network::client::{InterBrokerClient, InterBrokerDialer},
-    platform::{Sockets, bind_listener},
-    raft_handshake::{AuditLogArc, BrokerRaftHandshake},
-    time_util::system_timer,
-    wal::quorum::registry::{WalShardRegistry, WalShardRouter},
+    krabka_units::convert::{ByteSizeExt as _, TimeExt as _},
+    std::sync::Arc,
+    tokio::net::TcpListener,
 };
 
 struct RaftTransport {
@@ -512,15 +512,16 @@ async fn join_metadata_quorum(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_raft::NodeId;
-    use krabka_security::ListenerProtocol;
-    use tracing::Level;
-
-    use super::*;
-    use crate::{
-        config::NodeRole, features::LATEST_PRODUCTION_METADATA_VERSION,
-        network::client::InterBrokerClient, test_support::LogCapture,
+    use {
+        super::*,
+        crate::{
+            config::NodeRole, features::LATEST_PRODUCTION_METADATA_VERSION,
+            network::client::InterBrokerClient, test_support::LogCapture,
+        },
+        assert2::assert,
+        krabka_raft::NodeId,
+        krabka_security::ListenerProtocol,
+        tracing::Level,
     };
 
     // A node warns that its controller listener is PLAINTEXT only when it has
@@ -536,11 +537,9 @@ mod tests {
         );
         let combined = vec![NodeRole::Broker, NodeRole::Controller];
         let cases = [
-            (
-                combined.clone(),
-                ListenerProtocol::Plaintext,
-                vec![warning.clone()],
-            ),
+            (combined.clone(), ListenerProtocol::Plaintext, vec![
+                warning.clone(),
+            ]),
             (
                 vec![NodeRole::Controller],
                 ListenerProtocol::Plaintext,
@@ -595,11 +594,9 @@ mod tests {
         // (what, the bootstrap stream, the records the controller writes)
         let cases = [
             ("no stream", vec![], defaults.clone()),
-            (
-                "a formatted stream",
-                vec![selected.clone()],
-                vec![selected.clone()],
-            ),
+            ("a formatted stream", vec![selected.clone()], vec![
+                selected.clone(),
+            ]),
             (
                 "a stream of controls and a selected level",
                 vec![controls[0].clone(), selected.clone(), controls[1].clone()],
@@ -618,9 +615,10 @@ mod tests {
     /// the wait.
     #[tokio::test(start_paused = true)]
     async fn a_broker_waits_until_its_image_finalizes_the_metadata_version() {
-        use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-
-        use crate::test_support::FakeMetadataSource;
+        use {
+            crate::test_support::FakeMetadataSource,
+            krabka_metadata::{FeatureLevelRecord, MetadataRecord},
+        };
 
         let feature = |name: &str| {
             MetadataRecord::V1FeatureLevel(FeatureLevelRecord {

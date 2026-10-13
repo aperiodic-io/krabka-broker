@@ -2,13 +2,14 @@
 //! read by the JVM tools, so both schema versions keep their exact field set
 //! and Kafka field order here.
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use uuid::Uuid;
-
-use super::QUORUM_STATE_FILE;
-use crate::{
-    error::{PersistedFormatError, RaftError},
-    kraft::types::{NodeId, QuorumState, ReplicaKey},
+use {
+    super::QUORUM_STATE_FILE,
+    crate::{
+        error::{PersistedFormatError, RaftError},
+        kraft::types::{NodeId, QuorumState, ReplicaKey},
+    },
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    uuid::Uuid,
 };
 
 /// The lowest `data_version` of Kafka's `QuorumStateData` this build reads,

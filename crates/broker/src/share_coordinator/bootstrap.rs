@@ -5,11 +5,10 @@
 //! replication factor (`crate::auto_topic_creation`), as
 //! Kafka's `KafkaApis.getCoordinator` does.
 
-use std::collections::BTreeMap;
-
-use krabka_units::convert::ByteSizeExt as _;
-
-use crate::share_coordinator::config::ShareCoordinatorConfig;
+use {
+    crate::share_coordinator::config::ShareCoordinatorConfig,
+    krabka_units::convert::ByteSizeExt as _, std::collections::BTreeMap,
+};
 
 pub const TOPIC: &str = "__share_group_state";
 

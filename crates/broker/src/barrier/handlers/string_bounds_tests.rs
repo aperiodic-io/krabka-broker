@@ -7,24 +7,24 @@
 //! The refusal must be an answer and not a panic in the connection task, and it
 //! must leave no group behind.
 
-use std::sync::Arc;
-
-use assert2::check;
-use krabka_protocol::krabka::barrier::{
-    AlterBarrierGroupsRequest, AlterBarrierGroupsResponse, AlterableBarrierGroup,
-    WritableBarrierPartition, WritableBarrierTopic, WriteBarrierMarkersRequest,
-    WriteBarrierMarkersResponse,
-};
-
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    barrier::handlers::{alter_groups, write_markers},
-    broker::{Broker, BrokerHandle},
-    codes,
-    coordinator::unified::persistence::MAX_STRING_BYTES,
-    test_support::{
-        decode_response, encode_request, peer, principal, request_context, start_broker_with,
+use {
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        barrier::handlers::{alter_groups, write_markers},
+        broker::{Broker, BrokerHandle},
+        codes,
+        coordinator::unified::persistence::MAX_STRING_BYTES,
+        test_support::{
+            decode_response, encode_request, peer, principal, request_context, start_broker_with,
+        },
     },
+    assert2::check,
+    krabka_protocol::krabka::barrier::{
+        AlterBarrierGroupsRequest, AlterBarrierGroupsResponse, AlterableBarrierGroup,
+        WritableBarrierPartition, WritableBarrierTopic, WriteBarrierMarkersRequest,
+        WriteBarrierMarkersResponse,
+    },
+    std::sync::Arc,
 };
 
 /// The only version of both requests.

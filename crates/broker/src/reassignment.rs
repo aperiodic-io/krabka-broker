@@ -10,15 +10,15 @@
 //! The pure per-partition decision that the task applies lives in
 //! [`self::policy`].
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
-
-use crate::heartbeat::controller_state::ControllerLivenessState;
+use {
+    crate::heartbeat::controller_state::ControllerLivenessState,
+    async_trait::async_trait,
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    std::sync::Arc,
+    tokio::sync::watch,
+    tokio_util::sync::CancellationToken,
+    tracing::{debug, info, warn},
+};
 
 mod policy;
 #[cfg(test)]

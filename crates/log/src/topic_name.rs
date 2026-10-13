@@ -72,15 +72,11 @@ pub fn topic_names_collide(a: &str, b: &str) -> bool {
             .all(|(x, y)| unify_collision_byte(x) == unify_collision_byte(y))
 }
 
-fn unify_collision_byte(byte: u8) -> u8 {
-    if byte == b'.' { b'_' } else { byte }
-}
+fn unify_collision_byte(byte: u8) -> u8 { if byte == b'.' { b'_' } else { byte } }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn validate_topic_name_matches_kafka() {

@@ -5,12 +5,10 @@
 //! trait abstraction keeps `krabka-raft` free of any dependency on
 //! `krabka-broker` and `krabka-security`.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_client_core::ClientDuplex;
-use thiserror::Error;
-use tokio::net::TcpStream;
+use {
+    bytes::Bytes, krabka_client_core::ClientDuplex, std::sync::Arc, thiserror::Error,
+    tokio::net::TcpStream,
+};
 
 /// Authenticated controller-listener connection plus request-level grants.
 pub struct RaftConnection {
@@ -73,13 +71,9 @@ const ALL_CLUSTER_OPERATIONS: i32 = 1 << 5 | 1 << 7 | 1 << 8 | 1 << 9 | 1 << 10 
 pub struct AllowAllGrants;
 
 impl ClusterGrants for AllowAllGrants {
-    fn allows(&self, _operation: ClusterOperation) -> bool {
-        true
-    }
+    fn allows(&self, _operation: ClusterOperation) -> bool { true }
 
-    fn cluster_authorized_operations(&self) -> i32 {
-        ALL_CLUSTER_OPERATIONS
-    }
+    fn cluster_authorized_operations(&self) -> i32 { ALL_CLUSTER_OPERATIONS }
 }
 
 #[krabka_macros::transport_errors]

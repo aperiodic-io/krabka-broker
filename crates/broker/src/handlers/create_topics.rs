@@ -34,13 +34,6 @@ mod response;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    authorization::{authorize_create_topics, describe_configs_denied},
-    name::CLUSTER_METADATA_TOPIC,
-    response::{
-        creatable_topic_configs, create_topics_response, finish_response, topic_error_result,
-    },
-};
 pub(crate) use self::{
     creation::TopicCreation,
     placement::{
@@ -49,19 +42,28 @@ pub(crate) use self::{
         validate_manual_partition_assignment,
     },
 };
-use crate::{
-    api_catalog::UnstableApiVersions,
-    authorizer::AuthorizationResult,
-    broker::Broker,
-    codes,
-    config::BrokerConfig,
-    handlers::{
-        RequestContext,
-        describe_configs::{effective_topic_configs, static_settings},
-        request_names::duplicate_names as find_duplicate_names,
+use {
+    self::{
+        authorization::{authorize_create_topics, describe_configs_denied},
+        name::CLUSTER_METADATA_TOPIC,
+        response::{
+            creatable_topic_configs, create_topics_response, finish_response, topic_error_result,
+        },
     },
-    metadata_source::MetadataSource,
-    wal::quorum::placement::select_voters_from_sorted_racks,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        authorizer::AuthorizationResult,
+        broker::Broker,
+        codes,
+        config::BrokerConfig,
+        handlers::{
+            RequestContext,
+            describe_configs::{effective_topic_configs, static_settings},
+            request_names::duplicate_names as find_duplicate_names,
+        },
+        metadata_source::MetadataSource,
+        wal::quorum::placement::select_voters_from_sorted_racks,
+    },
 };
 
 /// Leader epoch that a freshly created partition starts at. The committed

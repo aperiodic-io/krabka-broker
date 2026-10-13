@@ -1,9 +1,8 @@
-#[cfg(creusot)]
-use creusot_std::prelude::*;
-
 use super::{
     FeatureKind, FeatureLevels, FeatureUpdateDecision, FeatureUpdateFacts, FeatureUpdateType,
 };
+#[cfg(creusot)]
+use creusot_std::prelude::*;
 
 open_logic! {
 /// The reference decision: the first failed rule in `updateFeature`'s

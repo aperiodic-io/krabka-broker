@@ -1,11 +1,12 @@
 //! `#[derive(PrimitiveCmp)]`: see the crate documentation.
 
-use moxy::{
-    ast::{ItemStruct, ParseError},
-    token::TokenStream,
+use {
+    crate::meta::inner_type,
+    moxy::{
+        ast::{ItemStruct, ParseError},
+        token::TokenStream,
+    },
 };
-
-use crate::meta::inner_type;
 
 /// Expands `#[derive(PrimitiveCmp)]` on `item`.
 pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {

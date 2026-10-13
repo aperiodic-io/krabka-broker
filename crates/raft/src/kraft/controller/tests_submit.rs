@@ -2,26 +2,27 @@
 //! waiters it parks, and how those waiters resolve, fail on leadership loss,
 //! or take a per-record rejection scoped to their own appended range.
 
-use std::{sync::Arc, time::Duration as StdDuration};
-
-use assert2::{assert, check};
-use krabka_ids::Offset;
-use krabka_metadata::{DeleteTopicRecord, MetadataImage, MetadataRecord, TopicConfigRecord};
-use tokio::sync::oneshot;
-
-use super::{CommitWaiter, Engine};
-use crate::{
-    SubmitChangeResult,
-    error::RaftError,
-    kraft::{
-        KraftController,
-        controller::test_support::{
-            ControllerSetup, EngineSetup, await_leader, build, build_engine_only, commit_pending,
-            one_offset_batch, submit_change_with_timeout, topic_record, topic_record_named,
+use {
+    super::{CommitWaiter, Engine},
+    crate::{
+        SubmitChangeResult,
+        error::RaftError,
+        kraft::{
+            KraftController,
+            controller::test_support::{
+                ControllerSetup, EngineSetup, await_leader, build, build_engine_only,
+                commit_pending, one_offset_batch, submit_change_with_timeout, topic_record,
+                topic_record_named,
+            },
+            event::Event,
+            types::NodeId,
         },
-        event::Event,
-        types::NodeId,
     },
+    assert2::{assert, check},
+    krabka_ids::Offset,
+    krabka_metadata::{DeleteTopicRecord, MetadataImage, MetadataRecord, TopicConfigRecord},
+    std::{sync::Arc, time::Duration as StdDuration},
+    tokio::sync::oneshot,
 };
 
 async fn acknowledge_tip(ctrl: &KraftController, follower: NodeId) {
@@ -175,10 +176,10 @@ fn guarded_config_rejects_stale_maps_and_accepts_a_fresh_merge() {
                 .collect(),
         })
     };
-    let mut updated = super::test_support::submit_on_engine(
-        &mut engine,
-        &[config(&[("cleanup.policy", "compact")])],
-    );
+    let mut updated = super::test_support::submit_on_engine(&mut engine, &[config(&[(
+        "cleanup.policy",
+        "compact",
+    )])]);
     assert!(matches!(updated.try_recv(), Ok(Ok(_))));
     assert_stale_submit()
         .engine(&mut engine)
@@ -393,10 +394,10 @@ async fn break_glass_consume_is_exact_and_single_flight_until_commit() {
     let (ctrl, _dir) = super::test_support::three_voter_leader().await;
     let proposal = break_glass_proposal(0x271, BreakGlassAction::DeleteRecords, "orders-3", 1_000);
 
-    let create = super::test_support::spawn_submit(
-        &ctrl,
-        vec![MetadataRecord::V1BreakGlassProposal(proposal.clone())],
-    );
+    let create =
+        super::test_support::spawn_submit(&ctrl, vec![MetadataRecord::V1BreakGlassProposal(
+            proposal.clone(),
+        )]);
     acknowledge_tip(&ctrl, NodeId(2)).await;
     create.await.unwrap().unwrap();
 
@@ -424,11 +425,11 @@ async fn break_glass_consume_is_exact_and_single_flight_until_commit() {
         consumed_at_ms: i64::MAX,
         ..proposal.clone()
     };
-    let first = super::test_support::pending_submission(
-        &ctrl,
-        vec![MetadataRecord::V1BreakGlassProposal(consumed.clone())],
-    )
-    .await;
+    let first =
+        super::test_support::pending_submission(&ctrl, vec![MetadataRecord::V1BreakGlassProposal(
+            consumed.clone(),
+        )])
+        .await;
 
     let concurrent = tokio::time::timeout(
         StdDuration::from_secs(1),
@@ -467,11 +468,11 @@ async fn a_new_leader_refuses_a_consume_until_its_own_epoch_commits() {
     let (ctrl, _dir) = super::test_support::three_voter_leader().await;
     commit_pending(&ctrl, NodeId(2)).await;
     let proposal = break_glass_proposal(0x591, BreakGlassAction::DeleteTopic, "doomed", i64::MAX);
-    let create = super::test_support::pending_submission(
-        &ctrl,
-        vec![MetadataRecord::V1BreakGlassProposal(proposal.clone())],
-    )
-    .await;
+    let create =
+        super::test_support::pending_submission(&ctrl, vec![MetadataRecord::V1BreakGlassProposal(
+            proposal.clone(),
+        )])
+        .await;
     commit_pending(&ctrl, NodeId(2)).await;
     create.await.unwrap().unwrap();
 
@@ -562,11 +563,11 @@ async fn topic_freeze_replacement_is_newer_only_and_single_flight_until_commit()
     assert2::check!(ctrl.quorum_state().await.unwrap().log_end_offset == log_end);
 
     let replacement = freeze("orders", i64::MAX, true);
-    let replace = super::test_support::pending_submission(
-        &ctrl,
-        vec![MetadataRecord::V1TopicFreeze(replacement.clone())],
-    )
-    .await;
+    let replace =
+        super::test_support::pending_submission(&ctrl, vec![MetadataRecord::V1TopicFreeze(
+            replacement.clone(),
+        )])
+        .await;
 
     let concurrent = tokio::time::timeout(
         StdDuration::from_secs(1),
@@ -589,8 +590,10 @@ async fn topic_freeze_replacement_is_newer_only_and_single_flight_until_commit()
 
 #[tokio::test]
 async fn delegation_token_mutation_is_generation_bound_and_retry_idempotent() {
-    use krabka_metadata::{DelegationTokenRecord, MetadataRecord};
-    use krabka_security::KafkaPrincipal;
+    use {
+        krabka_metadata::{DelegationTokenRecord, MetadataRecord},
+        krabka_security::KafkaPrincipal,
+    };
 
     fn principal(name: &str) -> KafkaPrincipal {
         KafkaPrincipal {
@@ -623,11 +626,11 @@ async fn delegation_token_mutation_is_generation_bound_and_retry_idempotent() {
     let (ctrl, _dir) = super::test_support::three_voter_leader().await;
     commit_pending(&ctrl, NodeId(2)).await;
 
-    let create = super::test_support::pending_submission(
-        &ctrl,
-        vec![MetadataRecord::V1DelegationToken(original.clone())],
-    )
-    .await;
+    let create =
+        super::test_support::pending_submission(&ctrl, vec![MetadataRecord::V1DelegationToken(
+            original.clone(),
+        )])
+        .await;
     commit_pending(&ctrl, NodeId(2)).await;
     create.await.unwrap().unwrap();
 

@@ -3,15 +3,16 @@
 //! the two controller scans build out of those answers. Nothing here does
 //! I/O, so the policy is unit-testable and model-checkable on its own.
 
-use krabka_metadata::{
-    LeaderEpoch, LeaderRecoveryState, MetadataRecord, PartitionRecord, PartitionRecoveryRecord,
+use {
+    crate::{config_keys::RecoveryStrategy, elr::state::PartitionElr},
+    krabka_metadata::{
+        LeaderEpoch, LeaderRecoveryState, MetadataRecord, PartitionRecord, PartitionRecoveryRecord,
+    },
+    krabka_raft::NodeId,
+    krabka_verified::consensus::{
+        FailoverAction, FailoverFacts, FailoverRecovery, LiveIsr, OutOfIsrFacts, failover_action,
+    },
 };
-use krabka_raft::NodeId;
-use krabka_verified::consensus::{
-    FailoverAction, FailoverFacts, FailoverRecovery, LiveIsr, OutOfIsrFacts, failover_action,
-};
-
-use crate::{config_keys::RecoveryStrategy, elr::state::PartitionElr};
 
 /// Output of a failover scan: immediate metadata changes plus partitions
 /// that need asynchronous offset-aware recovery through the URM.
@@ -463,17 +464,13 @@ pub(crate) fn unclean_restart_one(
             down: true,
             joins_elr: false,
         };
-        return decide(
-            pr,
-            &departure,
-            &Ladder {
-                alive,
-                witnesses,
-                elr,
-                strategy,
-                unclean_enabled,
-            },
-        );
+        return decide(pr, &departure, &Ladder {
+            alive,
+            witnesses,
+            elr,
+            strategy,
+            unclean_enabled,
+        });
     }
     if !pr.isr.contains(&returning) {
         return FailoverDecision::NoChange;
@@ -485,10 +482,11 @@ pub(crate) fn unclean_restart_one(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::leader_election::test_support::{ElectionSetup, seed_partition, witnesses};
+    use {
+        super::*,
+        crate::leader_election::test_support::{ElectionSetup, seed_partition, witnesses},
+        assert2::assert,
+    };
 
     /// The full failover decision for one partition, with `witnesses` and the
     /// published eligible-leader-replica set given directly. This keeps the

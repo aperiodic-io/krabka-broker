@@ -5,20 +5,21 @@
 //! gzip step that produces the pprof file format, and the router builders that
 //! bind a `ProfilingConfig` to those handlers as axum state.
 
-use axum::{
-    Router,
-    extract::{Query, State},
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-};
 #[cfg(unix)]
 use krabka_units::convert::TimeExt as _;
 #[cfg(any(unix, test))]
 use krabka_units::{Time, secs};
-use serde::Deserialize;
-
-use super::config::{ProfilingConfig, ProfilingError};
+use {
+    super::config::{ProfilingConfig, ProfilingError},
+    axum::{
+        Router,
+        extract::{Query, State},
+        http::StatusCode,
+        response::IntoResponse,
+        routing::get,
+    },
+    serde::Deserialize,
+};
 
 #[derive(Debug, Deserialize)]
 struct CpuQuery {
@@ -188,9 +189,7 @@ fn pprof_router_unchecked(config: ProfilingConfig) -> Router {
 }
 
 /// The pprof routes with the compatible default policy.
-pub fn pprof_router() -> Router {
-    pprof_router_unchecked(ProfilingConfig::default())
-}
+pub fn pprof_router() -> Router { pprof_router_unchecked(ProfilingConfig::default()) }
 
 #[cfg(any(unix, test))]
 fn requested_duration(seconds: Option<u64>, default: Time, maximum: Time) -> Time {
@@ -203,10 +202,11 @@ fn requested_duration(seconds: Option<u64>, default: Time, maximum: Time) -> Tim
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{millis, minutes};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_units::{millis, minutes},
+    };
 
     #[test]
     fn requested_profile_duration_uses_configured_default_floor_and_cap() {

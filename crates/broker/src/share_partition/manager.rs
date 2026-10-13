@@ -20,20 +20,20 @@
 //! share-group dead-letter queue (KIP-1191), and `toggle` clears the manager
 //! when the finalized `share.version` drops to 0.
 
-use std::sync::{Arc, OnceLock, Weak};
-
-use dashmap::DashMap;
-use krabka_metadata::NodeId;
-use tokio::sync::Mutex;
-
-use crate::{
-    coordinator::unified::share::config::ShareGroupConfig,
-    diskless::read::DisklessReadHandle,
-    metadata_source::MetadataSource,
-    partition_registry::PartitionRegistry,
-    remote_reader::RemoteReader,
-    share_coordinator::persister_client::SharePersister,
-    share_partition::{dlq::DlqSink, session::ShareSessionCache, state::AcquisitionState},
+use {
+    crate::{
+        coordinator::unified::share::config::ShareGroupConfig,
+        diskless::read::DisklessReadHandle,
+        metadata_source::MetadataSource,
+        partition_registry::PartitionRegistry,
+        remote_reader::RemoteReader,
+        share_coordinator::persister_client::SharePersister,
+        share_partition::{dlq::DlqSink, session::ShareSessionCache, state::AcquisitionState},
+    },
+    dashmap::DashMap,
+    krabka_metadata::NodeId,
+    std::sync::{Arc, OnceLock, Weak},
+    tokio::sync::Mutex,
 };
 
 mod cells;

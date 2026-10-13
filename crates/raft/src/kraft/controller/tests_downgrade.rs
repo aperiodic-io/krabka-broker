@@ -2,21 +2,22 @@
 //! it is retried until it succeeds, it pins the exact lower-version image and
 //! boundary, and a restart finishes it before the image is exposed.
 
-use assert2::assert;
-use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-
-use super::*;
-use crate::{
-    MetadataLogConfig,
-    kraft::controller::{
-        checkpoint::{load_latest_checkpoint, write_checkpoint},
-        recovery::replay_committed,
-        test_support::{
-            EngineSetup, build_engine_only, elect_single_voter_engine, open_test_controller,
-            topic_record, voter_set,
+use {
+    super::*,
+    crate::{
+        MetadataLogConfig,
+        kraft::controller::{
+            checkpoint::{load_latest_checkpoint, write_checkpoint},
+            recovery::replay_committed,
+            test_support::{
+                EngineSetup, build_engine_only, elect_single_voter_engine, open_test_controller,
+                topic_record, voter_set,
+            },
         },
+        snapshot::{SnapshotReader, SnapshotWriter},
     },
-    snapshot::{SnapshotReader, SnapshotWriter},
+    assert2::assert,
+    krabka_metadata::{FeatureLevelRecord, MetadataRecord},
 };
 
 fn metadata_version_update(level: i16) -> Vec<MetadataRecord> {

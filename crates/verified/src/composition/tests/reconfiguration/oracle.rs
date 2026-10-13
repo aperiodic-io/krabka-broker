@@ -1,8 +1,4 @@
-use std::collections::BTreeSet;
-
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert, std::collections::BTreeSet};
 
 pub(super) fn grant_sets(
     old: &[u64],

@@ -245,9 +245,10 @@ impl SslPrincipalMapper {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     fn check_mappings<'a>(
         cases: impl IntoIterator<Item = (&'a [&'a str], &'a str, Option<&'a str>)>,

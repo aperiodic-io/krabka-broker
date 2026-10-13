@@ -4,17 +4,18 @@
 //! empty-ISR branches that either defer to the recovery manager or fall
 //! through to an unclean election.
 
-use assert2::{assert, check};
-use krabka_metadata::LeaderEpoch;
-
-use super::*;
-use crate::{
-    config_keys::{UNCLEAN_LEADER_ELECTION_ENABLE, UNCLEAN_RECOVERY_STRATEGY},
-    leader_election::test_support::{
-        ElectionSetup, ExpectedPartitionSetup, expected_clean_election, expected_partition,
-        img_with_partition, liveness_with_alive, one_partition_change,
+use {
+    super::*,
+    crate::{
+        config_keys::{UNCLEAN_LEADER_ELECTION_ENABLE, UNCLEAN_RECOVERY_STRATEGY},
+        leader_election::test_support::{
+            ElectionSetup, ExpectedPartitionSetup, expected_clean_election, expected_partition,
+            img_with_partition, liveness_with_alive, one_partition_change,
+        },
+        metrics::BrokerMetrics,
     },
-    metrics::BrokerMetrics,
+    assert2::{assert, check},
+    krabka_metadata::LeaderEpoch,
 };
 
 #[derive(Clone, Copy)]
@@ -195,11 +196,10 @@ async fn offline_dir_empty_isr_unclean_enabled_elects_out_of_isr_replica() {
     let pr = one_partition_change(&plan.changes);
     // Must elect broker 3 (only alive out-of-ISR) with a singleton
     // ISR (unclean election) and a bumped leader_epoch.
-    let expected = expected_clean_election(
-        krabka_raft::NodeId(3),
-        &[krabka_raft::NodeId(3)],
-        vec![bad, good, good],
-    );
+    let expected =
+        expected_clean_election(krabka_raft::NodeId(3), &[krabka_raft::NodeId(3)], vec![
+            bad, good, good,
+        ]);
     assert!(*pr == expected);
     assert!(
         metrics.unclean_leader_elections_total.get() == 1,

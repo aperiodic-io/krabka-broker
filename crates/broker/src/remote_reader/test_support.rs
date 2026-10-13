@@ -10,24 +10,22 @@
 // `LocalTieredStorage` and `InmemoryRemoteLogMetadataManager`, using the
 // copy path's `copy_eligible` to populate the tier from a real `Log`.
 
-use std::{fmt::Write as _, sync::Arc};
-
-use assert2::assert;
-use krabka_ids::LeaderEpoch;
-use krabka_log::{Log, LogConfig};
-use krabka_remote_storage::{
-    InmemoryRemoteLogMetadataManager, LocalTieredStorage, RemoteLogMetadataManager,
-    RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError, RemoteStorageManager,
-    TopicIdPartition,
+use {
+    super::RemoteReader,
+    assert2::assert,
+    krabka_ids::LeaderEpoch,
+    krabka_log::{Log, LogConfig},
+    krabka_remote_storage::{
+        InmemoryRemoteLogMetadataManager, LocalTieredStorage, RemoteLogMetadataManager,
+        RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError, RemoteStorageManager,
+        TopicIdPartition,
+    },
+    krabka_units::convert::ByteSizeExt as _,
+    std::{fmt::Write as _, sync::Arc},
+    uuid::Uuid,
 };
-use krabka_units::convert::ByteSizeExt as _;
-use uuid::Uuid;
 
-use super::RemoteReader;
-
-pub fn tp() -> TopicIdPartition {
-    TopicIdPartition::new(Uuid::from_u128(1), "orders", 0)
-}
+pub fn tp() -> TopicIdPartition { TopicIdPartition::new(Uuid::from_u128(1), "orders", 0) }
 
 use crate::{
     remote_log_manager::{ProducerSnapshotExport, export_epoch_map, export_segment_data},
@@ -146,14 +144,11 @@ pub fn caching_sparse_remote_segment_reader() -> (
         krabka_remote_storage::DEFAULT_INDEX_CACHE_TOTAL_SIZE_BYTES,
     )
     .unwrap();
-    let cached = RemoteReader::with_limits(
-        counting,
-        Arc::clone(&reader.rlmm),
-        RemoteReaderLimits {
+    let cached =
+        RemoteReader::with_limits(counting, Arc::clone(&reader.rlmm), RemoteReaderLimits {
             index_cache: Arc::new(cache),
             pool: ReaderPool::new(10, 100),
-        },
-    );
+        });
     (
         cached,
         ReaderDirs {
@@ -196,9 +191,7 @@ pub fn append_time_remote_segment_reader() -> (RemoteReader, tempfile::TempDir) 
 
 /// The encoded length of the second batch of the sparse fixture, which is the
 /// smallest byte budget that still holds a batch read from its own start.
-pub fn sparse_fixture_second_batch_len() -> usize {
-    sparse_fixture_batch_bytes()[1].len()
-}
+pub fn sparse_fixture_second_batch_len() -> usize { sparse_fixture_batch_bytes()[1].len() }
 
 /// The two batches of the sparse fixture, as its segment stores them: offsets
 /// 10 to 13, then 14 to 16.
@@ -345,13 +338,10 @@ pub fn populated_reader(
 }
 
 fn populated_log(log_dir: &std::path::Path) -> Log {
-    let mut log = Log::open(
-        log_dir,
-        LogConfig {
-            segment_size: krabka_units::bytes(256),
-            ..LogConfig::default()
-        },
-    )
+    let mut log = Log::open(log_dir, LogConfig {
+        segment_size: krabka_units::bytes(256),
+        ..LogConfig::default()
+    })
     .unwrap();
     for _ in 0..12 {
         let mut b = batch_of(KeyedBatchSetup {
@@ -469,12 +459,14 @@ impl RemoteLogMetadataManager for NotReadyRlmm {
     ) -> Result<(), RemoteStorageError> {
         Ok(())
     }
+
     fn update_remote_log_segment_metadata(
         &self,
         _u: krabka_remote_storage::RemoteLogSegmentMetadataUpdate,
     ) -> Result<(), RemoteStorageError> {
         Ok(())
     }
+
     fn remote_log_segment_metadata(
         &self,
         _tp: &TopicIdPartition,
@@ -483,6 +475,7 @@ impl RemoteLogMetadataManager for NotReadyRlmm {
     ) -> Result<Option<RemoteLogSegmentMetadata>, RemoteStorageError> {
         Err(RemoteStorageError::NotReady { partition: 3 })
     }
+
     fn highest_offset_for_epoch(
         &self,
         _tp: &TopicIdPartition,
@@ -490,12 +483,14 @@ impl RemoteLogMetadataManager for NotReadyRlmm {
     ) -> Result<Option<i64>, RemoteStorageError> {
         Ok(None)
     }
+
     fn list_remote_log_segments(
         &self,
         _tp: &TopicIdPartition,
     ) -> Result<Vec<RemoteLogSegmentMetadata>, RemoteStorageError> {
         Err(RemoteStorageError::NotReady { partition: 3 })
     }
+
     fn list_remote_log_segments_by_epoch(
         &self,
         _tp: &TopicIdPartition,
@@ -503,6 +498,7 @@ impl RemoteLogMetadataManager for NotReadyRlmm {
     ) -> Result<Vec<RemoteLogSegmentMetadata>, RemoteStorageError> {
         Ok(Vec::new())
     }
+
     fn put_remote_partition_delete_metadata(
         &self,
         _m: krabka_remote_storage::RemotePartitionDeleteMetadata,

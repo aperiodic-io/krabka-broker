@@ -3,11 +3,10 @@
 //! Every endpoint must be a named, hosted, non-zero port on a security protocol
 //! the wire defines, with no repeated name and at least one entry.
 
-use std::collections::HashSet;
-
-use krabka_metadata::BrokerEndpoint;
-use krabka_protocol::owned::controller_registration_request;
-use krabka_security::ListenerProtocol;
+use {
+    krabka_metadata::BrokerEndpoint, krabka_protocol::owned::controller_registration_request,
+    krabka_security::ListenerProtocol, std::collections::HashSet,
+};
 
 pub(super) fn decode_controller_listeners(
     listeners: &[controller_registration_request::Listener],
@@ -59,9 +58,7 @@ fn protocol_from_wire(protocol: i16) -> Option<ListenerProtocol> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// The controller listener decoder reads the wire listener and runs the
     /// shared checks.

@@ -6,17 +6,18 @@
 //! was finalized at an unstable `metadata.version`. The tests finalize
 //! `4.4-IV2` (level 33), which is unstable in Kafka 4.3.
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use krabka_metadata::{FeatureLevelRecord, MetadataRecord, NodeId};
-use krabka_raft::{
-    BootstrapMode, Controller, ControllerConfig, ControllerHandle, RaftError,
-    UnstableFeatureVersions,
+use {
+    assert2::{assert, check},
+    krabka_metadata::{FeatureLevelRecord, MetadataRecord, NodeId},
+    krabka_raft::{
+        BootstrapMode, Controller, ControllerConfig, ControllerHandle, RaftError,
+        UnstableFeatureVersions,
+    },
+    krabka_units::prelude::{Time, millis},
+    std::time::{Duration, Instant},
+    tempfile::TempDir,
+    uuid::Uuid,
 };
-use krabka_units::prelude::{Time, millis};
-use tempfile::TempDir;
-use uuid::Uuid;
 
 /// Single-voter elections are instant, and a short timeout keeps each boot well
 /// inside the 30-second leader deadline.
@@ -74,14 +75,11 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     let cluster_id = Uuid::new_v4();
 
     // The first boot has the flag on and finalizes the unstable level.
-    let controller = Controller::start(config(
-        &dir,
-        FeatureControllerSetup {
-            cluster_id,
-            unstable: UnstableFeatureVersions::Enabled,
-            ..Default::default()
-        },
-    ))
+    let controller = Controller::start(config(&dir, FeatureControllerSetup {
+        cluster_id,
+        unstable: UnstableFeatureVersions::Enabled,
+        ..Default::default()
+    }))
     .await
     .expect("first boot");
     wait_for_leader(&controller).await;
@@ -92,14 +90,11 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     controller.shutdown().await;
 
     // With the flag off the node refuses the log, with Kafka's message.
-    let Err(refused) = Controller::start(config(
-        &dir,
-        FeatureControllerSetup {
-            cluster_id,
-            mode: BootstrapMode::Rejoin,
-            ..Default::default()
-        },
-    ))
+    let Err(refused) = Controller::start(config(&dir, FeatureControllerSetup {
+        cluster_id,
+        mode: BootstrapMode::Rejoin,
+        ..Default::default()
+    }))
     .await
     else {
         panic!("a controller without the flag started over an unstable log");
@@ -108,14 +103,11 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
     check!(refused.to_string() == format!("Encountered fatal fault: {REFUSAL}"));
 
     // The refusal changed nothing on disk: the same log starts with the flag on.
-    let controller = Controller::start(config(
-        &dir,
-        FeatureControllerSetup {
-            cluster_id,
-            mode: BootstrapMode::Rejoin,
-            unstable: UnstableFeatureVersions::Enabled,
-        },
-    ))
+    let controller = Controller::start(config(&dir, FeatureControllerSetup {
+        cluster_id,
+        mode: BootstrapMode::Rejoin,
+        unstable: UnstableFeatureVersions::Enabled,
+    }))
     .await
     .expect("restart with the flag on");
     wait_for_leader(&controller).await;
@@ -126,13 +118,10 @@ async fn a_log_finalized_at_an_unstable_level_starts_only_with_the_flag_on() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_controller_stops_when_it_replays_a_level_it_does_not_support() {
     let dir = TempDir::new().unwrap();
-    let controller = Controller::start(config(
-        &dir,
-        FeatureControllerSetup {
-            cluster_id: Uuid::new_v4(),
-            ..Default::default()
-        },
-    ))
+    let controller = Controller::start(config(&dir, FeatureControllerSetup {
+        cluster_id: Uuid::new_v4(),
+        ..Default::default()
+    }))
     .await
     .expect("boot");
     wait_for_leader(&controller).await;
@@ -175,14 +164,11 @@ async fn a_controller_stops_when_it_replays_a_level_it_does_not_support() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_controller_that_stops_for_any_other_reason_reports_no_fault() {
     let dir = TempDir::new().unwrap();
-    let controller = Controller::start(config(
-        &dir,
-        FeatureControllerSetup {
-            cluster_id: Uuid::new_v4(),
-            unstable: UnstableFeatureVersions::Enabled,
-            ..Default::default()
-        },
-    ))
+    let controller = Controller::start(config(&dir, FeatureControllerSetup {
+        cluster_id: Uuid::new_v4(),
+        unstable: UnstableFeatureVersions::Enabled,
+        ..Default::default()
+    }))
     .await
     .expect("boot");
     wait_for_leader(&controller).await;

@@ -22,9 +22,7 @@ pub(crate) fn expired_cut_epochs(published: i64, retained_cuts: i32, held: &[i64
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     struct RetentionCase {
         name: &'static str,

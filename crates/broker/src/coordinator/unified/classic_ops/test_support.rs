@@ -4,15 +4,22 @@
 //! `try_complete` transitions, so a test in any submodule starts from a group
 //! that the production code itself produced.
 
-use std::time::{Duration, Instant};
-
-use bytes::Bytes;
-use krabka_protocol::owned::join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol};
-
-use super::join::{JoinAction, JoinContext, try_complete};
-use crate::coordinator::unified::{
-    classic_state::ClassicGroup as ClassicState, config::DEFAULT_CLASSIC_MAX_SIZE,
+use {
+    super::join::{JoinAction, JoinContext, try_complete},
+    crate::coordinator::unified::{
+        classic_state::ClassicGroup as ClassicState, config::DEFAULT_CLASSIC_MAX_SIZE,
+    },
+    bytes::Bytes,
+    krabka_protocol::owned::join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
+    std::time::{Duration, Instant},
 };
+
+pub(in crate::coordinator::unified::classic_ops) mod prelude {
+    pub(in crate::coordinator::unified::classic_ops) use {
+        super::{handle_join, join_req, stable_two_member_group},
+        assert2::check,
+    };
+}
 
 /// A `JoinGroup` v5 context from client `client-a` on `client_host`.
 pub(super) fn join_ctx(client_host: &str) -> JoinContext<'_> {

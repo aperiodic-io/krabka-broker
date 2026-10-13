@@ -1,14 +1,15 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::restore_selection::{restore_source_selected, selection_input_valid};
-use super::{
-    ProducerDecision, ProducerSnapshotEntryFacts, RestoreBatchFrame, RestoreExclusions,
-    RestoreRecordDeltas, increment_sequence, reloaded_snapshot_preserves_last_batch_retry,
-    restore_selection_respects_batch_extent,
-};
-use crate::restore::{
-    RestoreLayout, RestoreProducer, restore_rewritten_batch_header, restore_rewritten_record,
+use {
+    super::{
+        ProducerDecision, ProducerSnapshotEntryFacts, RestoreBatchFrame, RestoreExclusions,
+        RestoreRecordDeltas, increment_sequence, reloaded_snapshot_preserves_last_batch_retry,
+        restore_selection_respects_batch_extent,
+    },
+    crate::restore::{
+        RestoreLayout, RestoreProducer, restore_rewritten_batch_header, restore_rewritten_record,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Filtering an admitted idempotent data batch preserves original survivor

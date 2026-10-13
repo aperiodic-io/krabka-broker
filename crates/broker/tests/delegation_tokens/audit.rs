@@ -15,22 +15,23 @@
 //! gated on `delegation_token_secret_key`, and they authorize against the
 //! connection's own principal rather than against a request context.
 
-use assert2::{assert, check};
-use base64::Engine as _;
-use krabka_broker::coordinator::AUDIT_TOPIC;
-use krabka_protocol::owned::{
-    create_delegation_token_request::CreateDelegationTokenRequest,
-    expire_delegation_token_request::ExpireDelegationTokenRequest,
-    renew_delegation_token_request::RenewDelegationTokenRequest,
-};
-
-use crate::{
-    cluster::start_broker,
-    rpc::{
-        send_create_delegation_token, send_expire_delegation_token, send_renew_delegation_token,
+use {
+    crate::{
+        cluster::start_broker,
+        rpc::{
+            send_create_delegation_token, send_expire_delegation_token, send_renew_delegation_token,
+        },
+        support,
+        wire::sasl_plain_authenticate,
     },
-    support,
-    wire::sasl_plain_authenticate,
+    assert2::{assert, check},
+    base64::Engine as _,
+    krabka_broker::coordinator::AUDIT_TOPIC,
+    krabka_protocol::owned::{
+        create_delegation_token_request::CreateDelegationTokenRequest,
+        expire_delegation_token_request::ExpireDelegationTokenRequest,
+        renew_delegation_token_request::RenewDelegationTokenRequest,
+    },
 };
 
 /// The OCSF class for an API Activity record.
@@ -84,29 +85,21 @@ async fn delegation_token_mutations_reach_the_audit_topic() {
         .await
         .expect("alice PLAIN auth");
 
-    let create = send_create_delegation_token(
-        &mut alice,
-        100,
-        &CreateDelegationTokenRequest {
-            max_lifetime_ms: -1,
-            ..Default::default()
-        },
-    )
+    let create = send_create_delegation_token(&mut alice, 100, &CreateDelegationTokenRequest {
+        max_lifetime_ms: -1,
+        ..Default::default()
+    })
     .await
     .expect("CreateDelegationToken");
     assert!(create.error_code == 0, "{create:?}");
     let token_id = create.token_id.clone();
     let hmac = create.hmac.clone();
 
-    let renew = send_renew_delegation_token(
-        &mut alice,
-        200,
-        &RenewDelegationTokenRequest {
-            hmac: hmac.clone(),
-            renew_period_ms: 30 * 24 * 60 * 60 * 1_000,
-            ..Default::default()
-        },
-    )
+    let renew = send_renew_delegation_token(&mut alice, 200, &RenewDelegationTokenRequest {
+        hmac: hmac.clone(),
+        renew_period_ms: 30 * 24 * 60 * 60 * 1_000,
+        ..Default::default()
+    })
     .await
     .expect("RenewDelegationToken");
     assert!(renew.error_code == 0, "{renew:?}");
@@ -114,15 +107,11 @@ async fn delegation_token_mutations_reach_the_audit_topic() {
     // A renew against an HMAC no token carries fails, and a failure is not an
     // admin mutation: the count assertion below is what catches an audit call
     // that drifted out from under the success guard.
-    let missing = send_renew_delegation_token(
-        &mut alice,
-        300,
-        &RenewDelegationTokenRequest {
-            hmac: bytes::Bytes::from_static(&[0x5a; 32]),
-            renew_period_ms: 3_600_000,
-            ..Default::default()
-        },
-    )
+    let missing = send_renew_delegation_token(&mut alice, 300, &RenewDelegationTokenRequest {
+        hmac: bytes::Bytes::from_static(&[0x5a; 32]),
+        renew_period_ms: 3_600_000,
+        ..Default::default()
+    })
     .await
     .expect("RenewDelegationToken (unknown hmac)");
     check!(
@@ -130,15 +119,11 @@ async fn delegation_token_mutations_reach_the_audit_topic() {
         "a renew against an unknown HMAC must fail"
     );
 
-    let expire = send_expire_delegation_token(
-        &mut alice,
-        400,
-        &ExpireDelegationTokenRequest {
-            hmac: hmac.clone(),
-            expiry_time_period_ms: -1,
-            ..Default::default()
-        },
-    )
+    let expire = send_expire_delegation_token(&mut alice, 400, &ExpireDelegationTokenRequest {
+        hmac: hmac.clone(),
+        expiry_time_period_ms: -1,
+        ..Default::default()
+    })
     .await
     .expect("ExpireDelegationToken");
     assert!(expire.error_code == 0, "{expire:?}");

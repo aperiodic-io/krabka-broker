@@ -39,9 +39,10 @@ pub trait StampSource: Debug + Send + Sync {
 
 #[cfg(any(test, feature = "test-helpers"))]
 mod test_sources {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    use super::StampSource;
+    use {
+        super::StampSource,
+        std::sync::atomic::{AtomicU64, Ordering},
+    };
 
     /// A deterministic monotonic stamp source for tests. It yields `start`,
     /// `start + step`, `start + 2*step`, and so on, on successive calls. The
@@ -66,9 +67,7 @@ mod test_sources {
     }
 
     impl StampSource for MonotonicStampSource {
-        fn next_stamp(&self) -> u64 {
-            self.next.fetch_add(self.step, Ordering::Relaxed)
-        }
+        fn next_stamp(&self) -> u64 { self.next.fetch_add(self.step, Ordering::Relaxed) }
 
         fn observe(&self, stamp: u64) {
             let next = stamp.saturating_add(self.step);

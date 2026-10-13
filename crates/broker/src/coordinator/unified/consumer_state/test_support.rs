@@ -1,11 +1,11 @@
 //! The member fixture the `consumer_state` submodule tests share.
 
-use std::time::{Duration, Instant};
-
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::{group::GroupState, member::MemberState, regex::ResolvedRegularExpression};
-use crate::coordinator::unified::{actor::MetadataProvider, reconciler::ReconcileInput};
+use {
+    super::{group::GroupState, member::MemberState, regex::ResolvedRegularExpression},
+    crate::coordinator::unified::{actor::MetadataProvider, reconciler::ReconcileInput},
+    krabka_protocol::primitives::uuid::Uuid,
+    std::time::{Duration, Instant},
+};
 
 pub(crate) fn member(id: &str) -> MemberState {
     MemberState {

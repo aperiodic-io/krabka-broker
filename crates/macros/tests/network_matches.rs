@@ -25,7 +25,7 @@ async fn decode(payload: Result<RecordsPayload, &'static str>) -> Result<Vec<u8>
             Ok(RecordsPayload::Raw(values) | RecordsPayload::V2(values))
                 if values.iter().all(|value| *value != 0) => Ok(values),
             Ok(RecordsPayload::FileRegions(values)) => async { Ok(values) }.await,
-            other => portable(other),
+            other => async { portable(other) }.await,
         }
     }
 }

@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use super::quota_credit;
+use {super::quota_credit, creusot_std::prelude::*};
 
 /// Credit elapsed nanoseconds at a micro-token rate, retaining the fractional
 /// micro-token numerator. Repay debt before filling the bucket, and discard

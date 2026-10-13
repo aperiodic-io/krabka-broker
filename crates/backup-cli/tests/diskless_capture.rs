@@ -1,21 +1,22 @@
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicUsize, Ordering},
+use {
+    assert2::assert,
+    async_trait::async_trait,
+    bytes::Bytes,
+    krabka_backup::diskless::capture_projection,
+    krabka_remote_storage::diskless::{
+        CapturedWalRange, DisklessPartitionCapture, DisklessWalCapture, REPLAY_FENCE_KEY,
+        WalFlushRecord, WalIndexEntry,
+    },
+    krabka_remote_storage_topic::{
+        AssignmentHandle, InProcessMetadataEventLog, MetadataEventLog, MetadataEventStream,
+        MetadataLogError, PartitionStart,
+    },
+    std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    uuid::Uuid,
 };
-
-use assert2::assert;
-use async_trait::async_trait;
-use bytes::Bytes;
-use krabka_backup::diskless::capture_projection;
-use krabka_remote_storage::diskless::{
-    CapturedWalRange, DisklessPartitionCapture, DisklessWalCapture, REPLAY_FENCE_KEY,
-    WalFlushRecord, WalIndexEntry,
-};
-use krabka_remote_storage_topic::{
-    AssignmentHandle, InProcessMetadataEventLog, MetadataEventLog, MetadataEventStream,
-    MetadataLogError, PartitionStart,
-};
-use uuid::Uuid;
 
 const TOPIC_ID: Uuid = Uuid::from_u128(9);
 
@@ -54,9 +55,7 @@ impl InternalTopicLog {
 #[krabka_macros::metadata_log_delegate(krabka_remote_storage_topic, range)]
 #[async_trait]
 impl MetadataEventLog for InternalTopicLog {
-    fn partition_count(&self) -> i32 {
-        self.inner.partition_count()
-    }
+    fn partition_count(&self) -> i32 { self.inner.partition_count() }
 
     async fn publish(&self, _partition: i32, _event: Bytes) -> Result<i64, MetadataLogError> {
         Err(self.refuse())
@@ -163,21 +162,17 @@ async fn capture_reads_committed_index_state_to_the_high_watermarks_without_prod
 
     assert!(
         capture
-            == expected_capture(
-                42,
-                vec![2, 2, 0],
-                DisklessPartitionCapture {
-                    topic: "orders".to_owned(),
-                    topic_id: TOPIC_ID,
-                    partition: 0,
-                    delete_floor: 0,
-                    recovery_cutoff: 8,
-                    ranges: vec![CapturedWalRange {
-                        object_key: "diskless-wal/1/a.ckwl".to_owned(),
-                        entry: entry(4, 7, 6),
-                    }],
-                }
-            )
+            == expected_capture(42, vec![2, 2, 0], DisklessPartitionCapture {
+                topic: "orders".to_owned(),
+                topic_id: TOPIC_ID,
+                partition: 0,
+                delete_floor: 0,
+                recovery_cutoff: 8,
+                ranges: vec![CapturedWalRange {
+                    object_key: "diskless-wal/1/a.ckwl".to_owned(),
+                    entry: entry(4, 7, 6),
+                }],
+            })
     );
     assert!(log.publishes.load(Ordering::SeqCst) == 0);
     assert!(log.subscriptions.load(Ordering::SeqCst) == 0);
@@ -191,18 +186,14 @@ async fn capture_of_an_empty_index_completes_at_zero_cutoffs() {
 
     assert!(
         capture
-            == expected_capture(
-                7,
-                vec![0, 0],
-                DisklessPartitionCapture {
-                    topic: "orders".to_owned(),
-                    topic_id: TOPIC_ID,
-                    partition: 0,
-                    delete_floor: 0,
-                    recovery_cutoff: 0,
-                    ranges: Vec::new(),
-                }
-            )
+            == expected_capture(7, vec![0, 0], DisklessPartitionCapture {
+                topic: "orders".to_owned(),
+                topic_id: TOPIC_ID,
+                partition: 0,
+                delete_floor: 0,
+                recovery_cutoff: 0,
+                ranges: Vec::new(),
+            })
     );
     assert!(log.publishes.load(Ordering::SeqCst) == 0);
 }

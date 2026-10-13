@@ -94,11 +94,13 @@
 //! on an abstract `pending` counter. It could not reach either bug, and
 //! production shipped both.
 
-use krabka_throttle::whole_token_request;
-use krabka_verified::throttle::{
-    AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume,
+use {
+    krabka_throttle::whole_token_request,
+    krabka_verified::throttle::{
+        AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume,
+    },
+    stateright::{Checker, Model, Path, Property},
 };
-use stateright::{Checker, Model, Path, Property};
 
 const TARGET_STATE_COUNT: usize = 4_000_000;
 const MAX_DEPTH: usize = 80;
@@ -370,9 +372,7 @@ impl BucketState {
     }
 }
 
-fn available_within_burst(s: &BucketState) -> bool {
-    s.resetting() || s.available <= s.burst
-}
+fn available_within_burst(s: &BucketState) -> bool { s.resetting() || s.available <= s.burst }
 
 fn claimed_refill_conserved(s: &BucketState) -> bool {
     s.resetting()
@@ -606,8 +606,28 @@ impl BucketModel {
 }
 
 impl Model for BucketModel {
-    type State = BucketState;
     type Action = Act;
+    type State = BucketState;
+
+    krabka_macros::model_transition!(last, action, s; {
+        match action {
+            Act::Tick => s.now += 1,
+            Act::StartConsume { consumer, req } => {
+                s.consumers[consumer] = Consumer::FastRate { req };
+            }
+            Act::StartReset { config } => {
+                let config = self.configs[config];
+                s.resets += 1;
+                s.resetter = match self.algorithm {
+                    Algorithm::Locked => Resetter::Acquire { config },
+                    Algorithm::SeqlockCas => Resetter::Enter { config },
+                };
+            }
+            Act::StepConsumer(t) => self.step_consumer(&mut s, t)?,
+            Act::StepResetter => Self::step_resetter(&mut s)?,
+        }
+        Some(s)
+    });
 
     fn init_states(&self) -> Vec<Self::State> {
         let Config { rate, burst } = self.configs[0];
@@ -654,26 +674,6 @@ impl Model for BucketModel {
             actions.push(Act::StepResetter);
         }
     }
-
-    krabka_macros::model_transition!(last, action, s; {
-        match action {
-            Act::Tick => s.now += 1,
-            Act::StartConsume { consumer, req } => {
-                s.consumers[consumer] = Consumer::FastRate { req };
-            }
-            Act::StartReset { config } => {
-                let config = self.configs[config];
-                s.resets += 1;
-                s.resetter = match self.algorithm {
-                    Algorithm::Locked => Resetter::Acquire { config },
-                    Algorithm::SeqlockCas => Resetter::Enter { config },
-                };
-            }
-            Act::StepConsumer(t) => self.step_consumer(&mut s, t)?,
-            Act::StepResetter => Self::step_resetter(&mut s)?,
-        }
-        Some(s)
-    });
 
     fn properties(&self) -> Vec<Property<Self>> {
         let mut properties = vec![
@@ -922,16 +922,13 @@ fn straddled_reset_schedule() {
 
     // Drain 7 of 10 at no refill (9 steps), let 7 seconds pass, run the consume
     // of 1 up to its commit, run the whole reset, then commit.
-    let last = replay(
-        &model(Algorithm::SeqlockCas),
-        &[
-            consume(0, 7, 9),
-            ticks.clone(),
-            consume(0, 1, 9),
-            reset(6),
-            vec![Act::StepConsumer(0)],
-        ],
-    )
+    let last = replay(&model(Algorithm::SeqlockCas), &[
+        consume(0, 7, 9),
+        ticks.clone(),
+        consume(0, 1, 9),
+        reset(6),
+        vec![Act::StepConsumer(0)],
+    ])
     .expect("the straddle is enabled step by step under the seqlock");
     assert2::assert!((last.available, last.burst, available_within_burst(&last)) == (9, 3, false));
 
@@ -942,10 +939,12 @@ fn straddled_reset_schedule() {
         replay(&locked, &straddle).is_none(),
         "the reset waits for the lock"
     );
-    let last = replay(
-        &locked,
-        &[consume(0, 7, 6), ticks, consume(0, 1, 6), reset(4)],
-    )
+    let last = replay(&locked, &[
+        consume(0, 7, 6),
+        ticks,
+        consume(0, 1, 6),
+        reset(4),
+    ])
     .expect("the reset runs once the consume releases the lock");
     assert2::assert!((last.available, last.burst, available_within_burst(&last)) == (3, 3, true));
 }
@@ -963,16 +962,13 @@ fn straddled_reset_schedule() {
 fn dropped_refill_schedule() {
     let tick = vec![Act::Tick];
 
-    let last = replay(
-        &contention_config(Algorithm::SeqlockCas),
-        &[
-            consume(0, 1, 9),
-            tick.clone(),
-            consume(0, 1, 9),
-            consume(1, 1, 9),
-            vec![Act::StepConsumer(0); 9],
-        ],
-    )
+    let last = replay(&contention_config(Algorithm::SeqlockCas), &[
+        consume(0, 1, 9),
+        tick.clone(),
+        consume(0, 1, 9),
+        consume(1, 1, 9),
+        vec![Act::StepConsumer(0); 9],
+    ])
     .expect("the contention is enabled step by step under the seqlock");
     assert2::assert!(
         (
@@ -994,17 +990,14 @@ fn dropped_refill_schedule() {
         replay(&locked, &contention).is_none(),
         "consumer 1 waits for the lock"
     );
-    let last = replay(
-        &locked,
-        &[
-            consume(0, 1, 6),
-            tick,
-            consume(0, 1, 3),
-            consume(1, 1, 1),
-            vec![Act::StepConsumer(0); 3],
-            vec![Act::StepConsumer(1); 5],
-        ],
-    )
+    let last = replay(&locked, &[
+        consume(0, 1, 6),
+        tick,
+        consume(0, 1, 3),
+        consume(1, 1, 1),
+        vec![Act::StepConsumer(0); 3],
+        vec![Act::StepConsumer(1); 5],
+    ])
     .expect("consumer 1 runs once consumer 0 releases the lock");
     assert2::assert!(
         (

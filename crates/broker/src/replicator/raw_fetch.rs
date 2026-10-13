@@ -1,26 +1,28 @@
 //! Fetch response decoding that leaves record batches in their wire form.
 
-use bytes::{Buf, BufMut};
-use krabka_protocol::{
-    Decode, Encode, ProtocolError, ProtocolRequest,
-    owned::{
-        fetch_request::FetchRequest,
-        fetch_response::{
-            AbortedTransaction, EpochEndOffset, FetchResponse, FetchableTopicResponse,
-            LeaderIdAndEpoch, PartitionData, SnapshotId,
+use {
+    bytes::{Buf, BufMut},
+    krabka_protocol::{
+        Decode, Encode, ProtocolError, ProtocolRequest,
+        owned::{
+            fetch_request::FetchRequest,
+            fetch_response::{
+                AbortedTransaction, EpochEndOffset, FetchResponse, FetchableTopicResponse,
+                LeaderIdAndEpoch, PartitionData, SnapshotId,
+            },
         },
-    },
-    primitives::{
-        array::{get_array_len, get_nullable_array_len},
-        fixed::{get_i16, get_i32, get_i64},
-        string_bytes::{
-            get_compact_nullable_bytes_owned, get_compact_string_owned, get_nullable_bytes_owned,
-            get_string_owned,
+        primitives::{
+            array::{get_array_len, get_nullable_array_len},
+            fixed::{get_i16, get_i32, get_i64},
+            string_bytes::{
+                get_compact_nullable_bytes_owned, get_compact_string_owned,
+                get_nullable_bytes_owned, get_string_owned,
+            },
+            uuid::get_uuid,
         },
-        uuid::get_uuid,
+        records::RecordsPayload,
+        tagged_fields::read_tagged_fields,
     },
-    records::RecordsPayload,
-    tagged_fields::read_tagged_fields,
 };
 
 pub(super) struct RawFetchRequest(pub(super) FetchRequest);
@@ -30,18 +32,17 @@ impl Encode for RawFetchRequest {
         self.0.encode(buf, version)
     }
 
-    fn encoded_len(&self, version: i16) -> usize {
-        self.0.encoded_len(version)
-    }
+    fn encoded_len(&self, version: i16) -> usize { self.0.encoded_len(version) }
 }
 
 impl ProtocolRequest for RawFetchRequest {
-    const API_KEY: i16 = <FetchRequest as ProtocolRequest>::API_KEY;
-    const MIN_VERSION: i16 = <FetchRequest as ProtocolRequest>::MIN_VERSION;
-    const MAX_VERSION: i16 = <FetchRequest as ProtocolRequest>::MAX_VERSION;
-    const LATEST_STABLE_VERSION: i16 = <FetchRequest as ProtocolRequest>::LATEST_STABLE_VERSION;
-    const FLEXIBLE_MIN: i16 = <FetchRequest as ProtocolRequest>::FLEXIBLE_MIN;
     type Response = RawFetchResponse;
+
+    const API_KEY: i16 = <FetchRequest as ProtocolRequest>::API_KEY;
+    const FLEXIBLE_MIN: i16 = <FetchRequest as ProtocolRequest>::FLEXIBLE_MIN;
+    const LATEST_STABLE_VERSION: i16 = <FetchRequest as ProtocolRequest>::LATEST_STABLE_VERSION;
+    const MAX_VERSION: i16 = <FetchRequest as ProtocolRequest>::MAX_VERSION;
+    const MIN_VERSION: i16 = <FetchRequest as ProtocolRequest>::MIN_VERSION;
 }
 
 pub(super) struct RawFetchResponse(pub(super) FetchResponse);
@@ -172,22 +173,23 @@ fn decode_partition<B: Buf>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::{Bytes, BytesMut};
-    use krabka_protocol::{
-        Decode as _, Encode as _, ProtocolError, UnknownTaggedField, UnknownTaggedFields,
-        owned::{
-            fetch_request::FetchRequest,
-            fetch_response::{
-                AbortedTransaction, EpochEndOffset, FetchResponse, FetchableTopicResponse,
-                LeaderIdAndEpoch, PartitionData, SnapshotId,
+    use {
+        super::{RawFetchRequest, RawFetchResponse},
+        assert2::assert,
+        bytes::{Bytes, BytesMut},
+        krabka_protocol::{
+            Decode as _, Encode as _, ProtocolError, UnknownTaggedField, UnknownTaggedFields,
+            owned::{
+                fetch_request::FetchRequest,
+                fetch_response::{
+                    AbortedTransaction, EpochEndOffset, FetchResponse, FetchableTopicResponse,
+                    LeaderIdAndEpoch, PartitionData, SnapshotId,
+                },
             },
+            primitives::uuid::Uuid,
+            records::RecordsPayload,
         },
-        primitives::uuid::Uuid,
-        records::RecordsPayload,
     };
-
-    use super::{RawFetchRequest, RawFetchResponse};
 
     #[test]
     fn keeps_records_encoded() {

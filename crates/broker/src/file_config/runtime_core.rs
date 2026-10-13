@@ -5,14 +5,16 @@
 //! backoffs. They share a module because both write the timings the broker
 //! needs before it serves a single request.
 
-use super::{
-    FileConfigError, RuntimeFileConfig,
-    validate::{
-        invalid_runtime_value, kafka_int_bytes, positive_time, voter_request_time, whole_bytes_i32,
-        whole_millis_i32_time,
+use {
+    super::{
+        FileConfigError, RuntimeFileConfig,
+        validate::{
+            invalid_runtime_value, kafka_int_bytes, positive_time, voter_request_time,
+            whole_bytes_i32, whole_millis_i32_time,
+        },
     },
+    crate::config::BrokerConfig,
 };
-use crate::config::BrokerConfig;
 
 impl RuntimeFileConfig {
     pub(super) fn apply_core(&mut self, cfg: &mut BrokerConfig) -> Result<(), FileConfigError> {

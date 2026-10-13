@@ -5,11 +5,12 @@
 //! pattern-type byte and the length prefixes get a test of their own, because
 //! each one answers a way two different records could sign the same bytes.
 
-use assert2::check;
-use krabka_metadata::{PatternType, TopicFreezeRecord};
-
-use super::{ALICE, ALICE_KEY, BOB_KEY, CLUSTER_ID, PROPOSAL, record};
-use crate::{freeze::signing::freeze_signing_bytes, signing_domains::FREEZE_DOMAIN};
+use {
+    super::{ALICE, ALICE_KEY, BOB_KEY, CLUSTER_ID, PROPOSAL, record},
+    crate::{freeze::signing::freeze_signing_bytes, signing_domains::FREEZE_DOMAIN},
+    assert2::check,
+    krabka_metadata::{PatternType, TopicFreezeRecord},
+};
 
 /// The documented layout, written out by hand rather than by the code that
 /// [`freeze_signing_bytes`] runs. A change to either one that the other
@@ -47,27 +48,21 @@ fn the_canonical_bytes_match_the_documented_layout() {
     // The key id and the signature are not in the payload. A signature
     // cannot cover itself, and the key that made it is named beside it.
     check!(
-        freeze_signing_bytes(
-            CLUSTER_ID,
-            &TopicFreezeRecord {
-                key_id: BOB_KEY.to_owned(),
-                signature: Vec::new(),
-                ..record
-            }
-        ) == expected
+        freeze_signing_bytes(CLUSTER_ID, &TopicFreezeRecord {
+            key_id: BOB_KEY.to_owned(),
+            signature: Vec::new(),
+            ..record
+        }) == expected
     );
 }
 
 #[test]
 fn a_literal_freeze_takes_the_kafka_pattern_type_byte() {
     let literal = freeze_signing_bytes(CLUSTER_ID, &record());
-    let prefixed = freeze_signing_bytes(
-        CLUSTER_ID,
-        &TopicFreezeRecord {
-            pattern_type: PatternType::Prefixed,
-            ..record()
-        },
-    );
+    let prefixed = freeze_signing_bytes(CLUSTER_ID, &TopicFreezeRecord {
+        pattern_type: PatternType::Prefixed,
+        ..record()
+    });
     let pattern_byte = FREEZE_DOMAIN.len() + 4 + CLUSTER_ID.len();
 
     check!(literal[pattern_byte] == 3);

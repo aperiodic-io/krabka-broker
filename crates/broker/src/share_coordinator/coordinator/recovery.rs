@@ -8,31 +8,34 @@
 //! no newer term of the partition started in the meantime. This path only
 //! reads the log, so it lives apart from the write path in `persist`.
 
-use std::{collections::HashMap, sync::Arc};
-
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_metadata::MetadataImage;
-use krabka_protocol::records::RecordBatch;
-use tokio::sync::Mutex;
-use tracing::{info, warn};
+use {
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::records::RecordBatch,
+    std::{collections::HashMap, sync::Arc},
+    tokio::sync::Mutex,
+    tracing::{info, warn},
+};
 
 #[cfg(test)]
 mod tests;
 
-use super::{LoadStatus, ShareCoordinator, ShareStateKey3};
-use crate::{
-    blocking::spawn_blocking,
-    error::BrokerError,
-    partition::Partition,
-    share_coordinator::{
-        bootstrap,
-        persistence::{
-            KEY_SHARE_SNAPSHOT, KEY_SHARE_UPDATE, ShareSnapshotValue, ShareStateKey,
-            ShareUpdateValue, parse_state_key,
+use {
+    super::{LoadStatus, ShareCoordinator, ShareStateKey3},
+    crate::{
+        blocking::spawn_blocking,
+        error::BrokerError,
+        partition::Partition,
+        share_coordinator::{
+            bootstrap,
+            persistence::{
+                KEY_SHARE_SNAPSHOT, KEY_SHARE_UPDATE, ShareSnapshotValue, ShareStateKey,
+                ShareUpdateValue, parse_state_key,
+            },
+            state::SharePartitionState,
         },
-        state::SharePartitionState,
     },
 };
 

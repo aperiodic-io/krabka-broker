@@ -29,17 +29,17 @@
 //! one retention pass on one side leaves the two logs starting at different
 //! offsets.
 
-use std::sync::Arc;
-
-use krabka_metadata::MetadataImage;
-use krabka_verified::FreezeMutationKind;
-use tracing::warn;
-
-use crate::{
-    freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
-    metrics::BrokerMetrics,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
+use {
+    crate::{
+        freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
+        metrics::BrokerMetrics,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+    },
+    krabka_metadata::MetadataImage,
+    krabka_verified::FreezeMutationKind,
+    std::sync::Arc,
+    tracing::warn,
 };
 
 #[cfg(test)]

@@ -15,26 +15,26 @@
 //! controller's, and a write built from a stale image rolls the newer state
 //! back.
 
-use std::{future::Future, sync::Arc, time::Duration};
-
-use bytes::{Bytes, BytesMut};
-use krabka_metadata::MetadataImage;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        envelope_request,
-        envelope_response::{self, EnvelopeResponse},
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        envelope::{self, ForwardedPrincipal, ForwardedRequest},
+        error::BrokerError,
+        handlers::{ApiKeyCode, RequestContext},
+        metadata_source::MetadataSource,
     },
-};
-use krabka_raft::RaftError;
-
-use crate::{
-    broker::Broker,
-    codes,
-    envelope::{self, ForwardedPrincipal, ForwardedRequest},
-    error::BrokerError,
-    handlers::{ApiKeyCode, RequestContext},
-    metadata_source::MetadataSource,
+    bytes::{Bytes, BytesMut},
+    krabka_metadata::MetadataImage,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            envelope_request,
+            envelope_response::{self, EnvelopeResponse},
+        },
+    },
+    krabka_raft::RaftError,
+    std::{future::Future, sync::Arc, time::Duration},
 };
 
 /// `Errors.UNKNOWN_SERVER_ERROR.message()`, which the

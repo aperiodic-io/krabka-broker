@@ -5,14 +5,14 @@
 //! and no cache state around it, so the property test below and the stateright
 //! model in `fetch_session_model` can drive it directly.
 
-use std::collections::HashMap;
-
-use krabka_protocol::{
-    owned::fetch_request::{FetchTopic, ForgottenTopic},
-    primitives::uuid::Uuid as WireUuid,
+use {
+    super::state::{CachedPartitionState, FetchSessionKey},
+    krabka_protocol::{
+        owned::fetch_request::{FetchTopic, ForgottenTopic},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::collections::HashMap,
 };
-
-use super::state::{CachedPartitionState, FetchSessionKey};
 
 /// Pure core of the incremental-fetch session update (KIP-227). It drops
 /// forgotten partitions, then merges the requested topics into a session's
@@ -72,10 +72,11 @@ pub(crate) fn apply_incremental(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::fetch_session::test_support::{ForgottenTopicSetup, forgotten_topic};
+    use {
+        super::*,
+        crate::fetch_session::test_support::{ForgottenTopicSetup, forgotten_topic},
+        assert2::assert,
+    };
 
     #[test]
     fn forgotten_topic_name_drops_only_matching_topic_partition() {
@@ -149,21 +150,19 @@ mod tests {
 /// no-orphan-default after every step.
 #[cfg(test)]
 mod fuzz {
-    use std::collections::HashMap;
-
-    use krabka_protocol::{
-        owned::fetch_request::{FetchPartition, FetchTopic},
-        primitives::uuid::Uuid as WireUuid,
+    use {
+        super::{CachedPartitionState, FetchSessionKey, apply_incremental},
+        crate::fetch_session::test_support::{ForgottenTopicSetup, forgotten_topic},
+        krabka_protocol::{
+            owned::fetch_request::{FetchPartition, FetchTopic},
+            primitives::uuid::Uuid as WireUuid,
+        },
+        proptest::prelude::*,
+        std::collections::HashMap,
     };
-    use proptest::prelude::*;
-
-    use super::{CachedPartitionState, FetchSessionKey, apply_incremental};
-    use crate::fetch_session::test_support::{ForgottenTopicSetup, forgotten_topic};
 
     // name index 0 = empty (id-only wire form), 1 = "A", 2 = "B".
-    fn name_of(i: u8) -> String {
-        ["", "A", "B"][i as usize].to_string()
-    }
+    fn name_of(i: u8) -> String { ["", "A", "B"][i as usize].to_string() }
     // id index 0 = ZERO (name-only wire form), 1 = U, 2 = V.
     fn id_of(i: u8) -> WireUuid {
         [WireUuid::ZERO, WireUuid([1; 16]), WireUuid([2; 16])][i as usize]

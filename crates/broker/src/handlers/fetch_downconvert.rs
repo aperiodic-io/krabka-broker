@@ -5,14 +5,14 @@
 //! re-compress zstd-compressed batches as snappy, because v0 and v1 do not
 //! support zstd.
 
-use std::borrow::Cow;
-
-use bytes::BytesMut;
-use krabka_compression::CompressionType;
-use krabka_protocol::records::{RecordBatch, RecordsPayload};
-use krabka_records_legacy::{Magic, v2_to_legacy};
-
-use crate::codes;
+use {
+    crate::codes,
+    bytes::BytesMut,
+    krabka_compression::CompressionType,
+    krabka_protocol::records::{RecordBatch, RecordsPayload},
+    krabka_records_legacy::{Magic, v2_to_legacy},
+    std::borrow::Cow,
+};
 
 /// Builds the records-field payload for one batch.
 ///
@@ -97,11 +97,12 @@ pub(crate) fn down_convert_payload_for_fetch(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::Bytes;
-    use krabka_protocol::records::{Attributes, Record, RecordBatch};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        bytes::Bytes,
+        krabka_protocol::records::{Attributes, Record, RecordBatch},
+    };
 
     fn make_batch(codec: CompressionType, records: Vec<Record>) -> RecordBatch {
         RecordBatch {
@@ -132,7 +133,11 @@ mod tests {
     /// Version 4 and above returns the V2 batch unchanged.
     /// Retain the encoded payload and decoder cursor in the original test scope.
     macro_rules! legacy_records {
-        (($result:ident, $payload:ident, $bytes:ident, $cursor:ident, $records:ident), $batch:expr, $version:expr) => {
+        (
+            ($result:ident, $payload:ident, $bytes:ident, $cursor:ident, $records:ident),
+            $batch:expr,
+            $version:expr
+        ) => {
             let $result = down_convert_for_fetch($batch, $version).unwrap();
             let $payload = $result.expect("should have Some payload");
             let RecordsPayload::Legacy($bytes) = $payload else {

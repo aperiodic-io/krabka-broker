@@ -1,20 +1,21 @@
 //! `DescribeClientQuotas` (`api_key` 48, KIP-13/124).
 
-use krabka_metadata::{EntityKey, ResourceType};
-use krabka_protocol::owned::{
-    describe_client_quotas_request::{ComponentData, DescribeClientQuotasRequest},
-    describe_client_quotas_response::{
-        DescribeClientQuotasResponse, EntityData, EntryData, ValueData,
-    },
-};
-
-use super::acl_wire::CLUSTER_RESOURCE_NAME;
 #[cfg(test)]
 use crate::authorizer::SimpleAclAuthorizer;
-use crate::{
-    broker::Broker,
-    codes::{CLUSTER_AUTHORIZATION_FAILED, INVALID_REQUEST, NONE, UNSUPPORTED_VERSION},
-    handlers::{RequestContext, acl_denied},
+use {
+    super::acl_wire::CLUSTER_RESOURCE_NAME,
+    crate::{
+        broker::Broker,
+        codes::{CLUSTER_AUTHORIZATION_FAILED, INVALID_REQUEST, NONE, UNSUPPORTED_VERSION},
+        handlers::{RequestContext, acl_denied},
+    },
+    krabka_metadata::{EntityKey, ResourceType},
+    krabka_protocol::owned::{
+        describe_client_quotas_request::{ComponentData, DescribeClientQuotasRequest},
+        describe_client_quotas_response::{
+            DescribeClientQuotasResponse, EntityData, EntryData, ValueData,
+        },
+    },
 };
 
 /// Wire `match_type`: entity name must equal `match_` exactly (KIP-546 `EXACT`).
@@ -215,17 +216,17 @@ pub(crate) fn entity_matches_filter(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use krabka_metadata::MetadataRecord;
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        broker::BrokerHandle,
-        quota::test_support::{QuotaRecordSetup, QuotaValue},
-        test_support::DenyAll,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            broker::BrokerHandle,
+            quota::test_support::{QuotaRecordSetup, QuotaValue},
+            test_support::DenyAll,
+        },
+        assert2::{assert, check},
+        krabka_metadata::MetadataRecord,
+        std::sync::Arc,
     };
 
     const VERSION: i16 = 1;
@@ -318,13 +319,10 @@ mod tests {
     }
 
     async fn seed_alice_quota(handle: &BrokerHandle) {
-        seed_quota(
-            handle,
-            QuotaRecordSetup {
-                value: QuotaValue(1024.0),
-                ..Default::default()
-            },
-        )
+        seed_quota(handle, QuotaRecordSetup {
+            value: QuotaValue(1024.0),
+            ..Default::default()
+        })
         .await;
     }
 
@@ -490,23 +488,17 @@ mod tests {
     #[tokio::test]
     async fn handle_returns_matching_quota_entry_fields() {
         let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
-        seed_quota(
-            &broker_handle,
-            QuotaRecordSetup {
-                entity: vec![("client-id", Some("app-1")), ("user", Some("alice"))],
-                value: QuotaValue(2048.0),
-                ..Default::default()
-            },
-        )
+        seed_quota(&broker_handle, QuotaRecordSetup {
+            entity: vec![("client-id", Some("app-1")), ("user", Some("alice"))],
+            value: QuotaValue(2048.0),
+            ..Default::default()
+        })
         .await;
-        seed_quota(
-            &broker_handle,
-            QuotaRecordSetup {
-                entity: vec![("user", Some("bob"))],
-                key: "consumer_byte_rate",
-                value: QuotaValue(512.0),
-            },
-        )
+        seed_quota(&broker_handle, QuotaRecordSetup {
+            entity: vec![("user", Some("bob"))],
+            key: "consumer_byte_rate",
+            value: QuotaValue(512.0),
+        })
         .await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "admin");
@@ -556,14 +548,11 @@ mod tests {
     async fn invalid_filters_answer_kafkas_top_level_error() {
         let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_alice_quota(&broker_handle).await;
-        seed_quota(
-            &broker_handle,
-            QuotaRecordSetup {
-                entity: vec![("user", None)],
-                value: QuotaValue(2048.0),
-                ..Default::default()
-            },
-        )
+        seed_quota(&broker_handle, QuotaRecordSetup {
+            entity: vec![("user", None)],
+            value: QuotaValue(2048.0),
+            ..Default::default()
+        })
         .await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "admin");

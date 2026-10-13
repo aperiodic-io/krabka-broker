@@ -1,11 +1,12 @@
 //! The `kafka-topics` tool: `--create` followed by `--describe`, and an
 //! `--alter --partitions` growth through `CreatePartitions`.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    broker0_advertised, docker_run_kafka_tool, nc_check_connectivity, start_console_broker,
-    start_host_broker,
+use {
+    crate::jvm_acceptance::{
+        broker0_advertised, docker_run_kafka_tool, nc_check_connectivity, start_console_broker,
+        start_host_broker,
+    },
+    assert2::assert,
 };
 
 // `flavor = "multi_thread"` is essential here. The test bodies make

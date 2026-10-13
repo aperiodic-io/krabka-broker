@@ -5,42 +5,24 @@
 //! The transitions themselves live in the sibling modules. This file only
 //! dispatches to them and states what must hold.
 
-use stateright::Model;
-
-use super::{
-    MAX_OFFSET,
-    commit::do_commit,
-    config::CgcModel,
-    projection::{assert_epoch_monotonic, project, rebuild_group},
-    state::{CgcAction, CgcState, EpochKind, committed_map, committed_of, member},
-};
-use crate::coordinator::unified::actor::reconciliation_model_support::{
-    advertised_disjoint, enqueue_member_actions, exclusive_ownership, handoff_witness,
-    member_next_state, model_properties, overlaps_others,
+use {
+    super::{
+        MAX_OFFSET,
+        commit::do_commit,
+        config::CgcModel,
+        projection::{assert_epoch_monotonic, project, rebuild_group},
+        state::{CgcAction, CgcState, EpochKind, committed_map, committed_of, member},
+    },
+    crate::coordinator::unified::actor::reconciliation_model_support::{
+        advertised_disjoint, enqueue_member_actions, exclusive_ownership, handoff_witness,
+        member_next_state, model_properties, overlaps_others,
+    },
+    stateright::Model,
 };
 
 impl Model for CgcModel {
-    type State = CgcState;
     type Action = CgcAction;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![CgcState::empty(vec![])]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        enqueue_member_actions!(self, state, actions, CgcAction, member; |m| {
-            // Offset commit: offered with EACH epoch kind (current / stale /
-            // forward) so the real epoch fence — not a precondition — is what's
-            // exercised; the committed counter is bounded by MAX_OFFSET.
-            for part in 0..self.partitions {
-                if committed_of(state, part) < MAX_OFFSET {
-                    for kind in [EpochKind::Current, EpochKind::Stale, EpochKind::Forward] {
-                        actions.push(CgcAction::Commit(m.id.clone(), part, kind));
-                    }
-                }
-            }
-        });
-    }
+    type State = CgcState;
 
     member_next_state! {
         fn next_state(self, last, action; CgcAction);
@@ -97,6 +79,23 @@ impl Model for CgcModel {
         sometimes "handoff_witness" => |s| {
             handoff_witness!(s)
         },
+    }
+
+    fn init_states(&self) -> Vec<Self::State> { vec![CgcState::empty(vec![])] }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        enqueue_member_actions!(self, state, actions, CgcAction, member; |m| {
+            // Offset commit: offered with EACH epoch kind (current / stale /
+            // forward) so the real epoch fence — not a precondition — is what's
+            // exercised; the committed counter is bounded by MAX_OFFSET.
+            for part in 0..self.partitions {
+                if committed_of(state, part) < MAX_OFFSET {
+                    for kind in [EpochKind::Current, EpochKind::Stale, EpochKind::Forward] {
+                        actions.push(CgcAction::Commit(m.id.clone(), part, kind));
+                    }
+                }
+            }
+        });
     }
 
     fn within_boundary(&self, state: &Self::State) -> bool {

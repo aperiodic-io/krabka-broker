@@ -9,20 +9,20 @@
 //! copies them from the log. Whatever the tracker held before the promotion,
 //! the new leader decides from the producer state at its log end.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_log::Offset;
-use krabka_protocol::records::{Record, RecordBatch};
-use tokio::sync::Notify;
-
-use crate::{
-    partition::{Partition, test_support::test_partition},
-    producer_state::{
-        Checked, Decision, NO_EARLIER_BATCHES, ProducerEntry, ProducerState, RetainedBatch,
-        SequenceContext,
+use {
+    crate::{
+        partition::{Partition, test_support::test_partition},
+        producer_state::{
+            Checked, Decision, NO_EARLIER_BATCHES, ProducerEntry, ProducerState, RetainedBatch,
+            SequenceContext,
+        },
     },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_log::Offset,
+    krabka_protocol::records::{Record, RecordBatch},
+    std::sync::Arc,
+    tokio::sync::Notify,
 };
 
 const TOPIC: &str = "t";
@@ -148,19 +148,16 @@ async fn a_promotion_decides_from_the_producer_state_of_the_log() {
         earlier[0] = Some(retained(0, 0));
         expected.push((
             name,
-            vec![(
-                PRODUCER_ID,
-                ProducerEntry {
-                    epoch: 0,
-                    last_sequence: 5,
-                    last_offset: 5,
-                    base_offset: 3,
-                    last_timestamp: TIMESTAMP,
-                    entry_timestamp: TIMESTAMP,
-                    current_txn_first_offset: None,
-                    earlier,
-                },
-            )],
+            vec![(PRODUCER_ID, ProducerEntry {
+                epoch: 0,
+                last_sequence: 5,
+                last_offset: 5,
+                base_offset: 3,
+                last_timestamp: TIMESTAMP,
+                entry_timestamp: TIMESTAMP,
+                current_txn_first_offset: None,
+                earlier,
+            })],
             [
                 Checked {
                     decision: Decision::Duplicate { base_offset: 3 },

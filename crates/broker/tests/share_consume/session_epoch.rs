@@ -3,18 +3,19 @@
 //! and an incremental request with no topic rows keeps fetching the cached
 //! partitions until the client forgets one.
 
-use assert2::assert;
-use krabka_protocol::owned::{
-    share_fetch_request::ForgottenTopic, share_fetch_response::ShareFetchResponse,
-};
-
-use crate::{
-    INVALID_SHARE_SESSION_EPOCH, NONE, ONE_MB, SHARE_SESSION_NOT_FOUND,
-    harness::{ConsumptionFixture, join, produce_n, single_record_consumption_fixture, wire},
-    share_rpc::{acquired_count, fetch_until_acquired, share_fetch_req},
-    support::share::{
-        EmptySessionSetup, FetchByteLimit, ShareAck, ShareFetchSetup, ShareRecordsSetup,
-        ShareSessionEpoch, ShareSessionSetup, acknowledge_success, empty_session_request,
+use {
+    crate::{
+        INVALID_SHARE_SESSION_EPOCH, NONE, ONE_MB, SHARE_SESSION_NOT_FOUND,
+        harness::{ConsumptionFixture, join, produce_n, single_record_consumption_fixture, wire},
+        share_rpc::{acquired_count, fetch_until_acquired, share_fetch_req},
+        support::share::{
+            EmptySessionSetup, FetchByteLimit, ShareAck, ShareFetchSetup, ShareRecordsSetup,
+            ShareSessionEpoch, ShareSessionSetup, acknowledge_success, empty_session_request,
+        },
+    },
+    assert2::assert,
+    krabka_protocol::owned::{
+        share_fetch_request::ForgottenTopic, share_fetch_response::ShareFetchResponse,
     },
 };
 
@@ -99,13 +100,10 @@ async fn incremental_session_uses_cached_and_forgotten_partitions() {
     )
     .await;
 
-    produce_n(
-        &client,
-        ShareRecordsSetup {
-            topic_id: tid,
-            ..Default::default()
-        },
-    )
+    produce_n(&client, ShareRecordsSetup {
+        topic_id: tid,
+        ..Default::default()
+    })
     .await;
     let cached: ShareFetchResponse = client
         .send(empty_session_request(EmptySessionSetup {
@@ -148,13 +146,10 @@ async fn incremental_session_uses_cached_and_forgotten_partitions() {
     assert!(forgotten.error_code == NONE);
     assert!(forgotten.responses.is_empty());
 
-    produce_n(
-        &client,
-        ShareRecordsSetup {
-            topic_id: tid,
-            ..Default::default()
-        },
-    )
+    produce_n(&client, ShareRecordsSetup {
+        topic_id: tid,
+        ..Default::default()
+    })
     .await;
     let after_forget: ShareFetchResponse = client
         .send(empty_session_request(EmptySessionSetup {

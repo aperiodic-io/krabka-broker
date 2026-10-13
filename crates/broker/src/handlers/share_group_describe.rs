@@ -6,21 +6,22 @@
 //! `build_table`, so the handler receives the per-connection principal and the
 //! peer `SocketAddr` for the per-group `Describe` ACL gate.
 
-use krabka_protocol::owned::{
-    share_group_describe_request::ShareGroupDescribeRequest,
-    share_group_describe_response::{DescribedGroup, ShareGroupDescribeResponse},
-};
-
 #[cfg(test)]
 use crate::authorizer::SimpleAclAuthorizer;
-use crate::{
-    codes,
-    coordinator::unified::{GroupType, share::actor::ShareGroupActorMessage},
-    handlers::{
-        authorized_operations::{DescribedGroupRow as _, fill_group_authorized_operations},
-        consumer_group_describe::{DescribedTopics, hide_undescribable_topics},
+use {
+    crate::{
+        codes,
+        coordinator::unified::{GroupType, share::actor::ShareGroupActorMessage},
+        handlers::{
+            authorized_operations::{DescribedGroupRow as _, fill_group_authorized_operations},
+            consumer_group_describe::{DescribedTopics, hide_undescribable_topics},
+        },
+        task_util::{AskError, ask},
     },
-    task_util::{AskError, ask},
+    krabka_protocol::owned::{
+        share_group_describe_request::ShareGroupDescribeRequest,
+        share_group_describe_response::{DescribedGroup, ShareGroupDescribeResponse},
+    },
 };
 
 impl DescribedTopics for DescribedGroup {
@@ -138,22 +139,22 @@ fn response(groups: Vec<DescribedGroup>) -> ShareGroupDescribeResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{AclOperation, ResourceType};
-    use krabka_protocol::owned::share_group_describe_response;
-
-    use super::*;
-    use crate::{
-        broker::Broker,
-        handlers::group_heartbeat_test_support::{
-            GroupTopicSetup, acl as group_acl, topic_with_partitions,
+    use {
+        super::*,
+        crate::{
+            broker::Broker,
+            handlers::group_heartbeat_test_support::{
+                GroupTopicSetup, acl as group_acl, topic_with_partitions,
+            },
+            test_support::{
+                DenyAll, PartitionCount, ShareApiSupport, ShareBrokerSetup, peer, principal,
+                start_share_broker, test_ctx,
+            },
         },
-        test_support::{
-            DenyAll, PartitionCount, ShareApiSupport, ShareBrokerSetup, peer, principal,
-            start_share_broker, test_ctx,
-        },
+        assert2::assert,
+        krabka_metadata::{AclOperation, ResourceType},
+        krabka_protocol::owned::share_group_describe_response,
+        std::sync::Arc,
     };
 
     fn request(group_ids: &[&str]) -> ShareGroupDescribeRequest {
@@ -196,12 +197,9 @@ mod tests {
     #[tokio::test]
     async fn handle_disabled_feature_wins_even_when_share_actor_exists() {
         let version = share_group_describe_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_share_broker(
-            Arc::new(DenyAll),
-            ShareBrokerSetup {
-                support: ShareApiSupport::Disabled,
-            },
-        )
+        let (broker_handle, _dir) = start_share_broker(Arc::new(DenyAll), ShareBrokerSetup {
+            support: ShareApiSupport::Disabled,
+        })
         .await;
         let broker = broker_handle.broker_arc_for_test();
         broker.group_coordinator.mark_share("g1");
@@ -268,24 +266,18 @@ mod tests {
                 group_epoch: 2,
                 target_epoch: 2,
                 assignment_timestamp_ms: 0,
-                members: [(
-                    "m1".to_owned(),
-                    ShareGroupMemberMetadataValue {
-                        rack_id: None,
-                        client_id: "client".into(),
-                        client_host: "/127.0.0.1".into(),
-                        subscribed_topic_names: vec!["t".into()],
-                    },
-                )]
+                members: [("m1".to_owned(), ShareGroupMemberMetadataValue {
+                    rack_id: None,
+                    client_id: "client".into(),
+                    client_host: "/127.0.0.1".into(),
+                    subscribed_topic_names: vec!["t".into()],
+                })]
                 .into(),
-                current_per_member: [(
-                    "m1".to_owned(),
-                    ShareGroupCurrentMemberAssignmentValue {
-                        member_epoch: 2,
-                        previous_member_epoch: 1,
-                        assigned_partitions: assigned,
-                    },
-                )]
+                current_per_member: [("m1".to_owned(), ShareGroupCurrentMemberAssignmentValue {
+                    member_epoch: 2,
+                    previous_member_epoch: 1,
+                    assigned_partitions: assigned,
+                })]
                 .into(),
                 ..ShareGroupSeed::default()
             }))

@@ -1,8 +1,18 @@
 //! The raw wire adapter used by Krabka's extension API handlers.
 
 macro_rules! wire_handler {
-    ($name:ident, $span:literal, $api:literal, $level:literal, $request:ty,
-     |$broker:ident, $version:ident, $req:ident, $ctx:ident| $body:block) => {
+    (
+        $name:ident,
+        $span:literal,
+        $api:literal,
+        $level:literal,
+        $request:ty, |
+        $broker:ident,
+        $version:ident,
+        $req:ident,
+        $ctx:ident |
+        $body:block
+    ) => {
         #[tracing::instrument(name = $span, level = $level, skip_all, fields(api = $api), err)]
         pub(crate) async fn $name(
             $broker: &crate::broker::Broker,

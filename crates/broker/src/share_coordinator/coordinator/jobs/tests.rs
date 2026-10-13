@@ -1,22 +1,22 @@
 //! Unit tests for the background work: the tombstones of a deleted topic,
 //! the cold-partition snapshot, the prune, and the loop that runs them.
 
-use std::time::Duration;
-
-use assert2::{assert, check};
-use krabka_log::Offset;
-use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-use tempfile::tempdir;
-
-use super::*;
-use crate::share_coordinator::{
-    bootstrap,
-    config::ShareCoordinatorConfig,
-    coordinator::test_support::{
-        Logged, NOW_MS, configured_coordinator, image_with_topics, lead_all, logged_records,
-        set_clock,
+use {
+    super::*,
+    crate::share_coordinator::{
+        bootstrap,
+        config::ShareCoordinatorConfig,
+        coordinator::test_support::{
+            Logged, NOW_MS, configured_coordinator, image_with_topics, lead_all, logged_records,
+            set_clock,
+        },
+        persistence::ShareSnapshotValue,
     },
-    persistence::ShareSnapshotValue,
+    assert2::{assert, check},
+    krabka_log::Offset,
+    krabka_metadata::{FeatureLevelRecord, MetadataRecord},
+    std::time::Duration,
+    tempfile::tempdir,
 };
 
 const T1: uuid::Uuid = uuid::Uuid::from_bytes([61; 16]);

@@ -1,10 +1,11 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{
-    ProducerDecision, epoch_handoff_distinguishes_identity_and_data_retry, recovered_window_row,
+use {
+    super::{
+        ProducerDecision, epoch_handoff_distinguishes_identity_and_data_retry, recovered_window_row,
+    },
+    crate::transaction::InitProducerIdIdentityDecision,
+    assert2::assert,
+    proptest::prelude::*,
 };
-use crate::transaction::InitProducerIdIdentityDecision;
 
 #[test]
 fn allocating_a_rotated_identity_does_not_update_the_old_partition_entry() {

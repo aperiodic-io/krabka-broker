@@ -2,45 +2,50 @@
 //! encoding against a running broker: the authorization gate, the per-topic
 //! error rows, a successful create, and the KIP-599 mutation quota.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_metadata::{AclEntry, AclOperation, MetadataRecord, PatternType};
-use krabka_protocol::{
-    UnknownTaggedFields,
-    owned::{
-        create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
-        create_topics_response::{CreatableTopicConfigs, CreateTopicsResponse},
-    },
-};
-
-use super::*;
-use crate::{
-    api_catalog::UnstableApiVersions,
-    authorizer::{AllowAllAuthorizer, AuthorizationResult},
-    broker::BrokerHandle,
-    config::{BrokerConfig, RemoteStorageBackend},
-    config_keys::{DISKLESS, serves_topic_key},
-    handlers::{
-        RequestContext,
-        describe_configs::effective_topic_configs,
+use {
+    super::*,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        authorizer::{AllowAllAuthorizer, AuthorizationResult},
+        broker::BrokerHandle,
+        config::{BrokerConfig, RemoteStorageBackend},
+        config_keys::{DISKLESS, serves_topic_key},
+        handlers::{
+            RequestContext,
+            describe_configs::effective_topic_configs,
+            test_support::{
+                AclSetup, TopicPartitionCount, TopicReplicationFactor, replica_availability,
+                replica_nodes_from_partitions,
+                seed_controller_quota as seed_controller_quota_helper,
+            },
+        },
         test_support::{
-            AclSetup, TopicPartitionCount, TopicReplicationFactor, replica_availability,
-            replica_nodes_from_partitions, seed_controller_quota as seed_controller_quota_helper,
+            AllowAclSetup, DenyAll, DescribedCreationSetup, KafkaErrorCode, allow_acl,
+            begin_controlled_shutdown, broker_registration, described_creation_configs,
+            dispatch_wire, fence_remote_broker, make_witness, peer, principal, seed_remote_broker,
+            start_broker_no_audit_with,
+        },
+        throttle::LEADER_THROTTLED_REPLICAS_KEY,
+    },
+    assert2::{assert, check},
+    krabka_metadata::{AclEntry, AclOperation, MetadataRecord, PatternType},
+    krabka_protocol::{
+        UnknownTaggedFields,
+        owned::{
+            create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
+            create_topics_response::{CreatableTopicConfigs, CreateTopicsResponse},
         },
     },
-    test_support::{
-        AllowAclSetup, DenyAll, DescribedCreationSetup, KafkaErrorCode, allow_acl,
-        begin_controlled_shutdown, broker_registration, described_creation_configs, dispatch_wire,
-        fence_remote_broker, make_witness, peer, principal, seed_remote_broker,
-        start_broker_no_audit_with,
-    },
-    throttle::LEADER_THROTTLED_REPLICAS_KEY,
+    std::sync::Arc,
 };
 
 /// Live broker and request identity for the wire-driven creation cases.
 macro_rules! creation_fixture {
-    (($handle:ident, $directory:ident, $broker:ident), ($principal:ident, $peer:ident), $authorizer:ident, $user:expr) => {
+    (
+        ($handle:ident, $directory:ident, $broker:ident),($principal:ident, $peer:ident),
+        $authorizer:ident,
+        $user:expr
+    ) => {
         broker_fixture!(($handle, $directory, $broker), $authorizer);
         request_identity!(($principal, $peer), principal($user));
     };
@@ -481,14 +486,11 @@ async fn handle_success_persists_topic_config_and_success_fields() {
 #[tokio::test]
 async fn handle_creates_a_topic_whose_cleanup_policy_names_both_halves() {
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
-    let req = request(vec![topic_with_configs(
-        "windowed-changelog",
-        &[
-            ("cleanup.policy", "compact,delete"),
-            ("min.compaction.lag.ms", "0"),
-            ("message.timestamp.type", "CreateTime"),
-        ],
-    )]);
+    let req = request(vec![topic_with_configs("windowed-changelog", &[
+        ("cleanup.policy", "compact,delete"),
+        ("min.compaction.lag.ms", "0"),
+        ("message.timestamp.type", "CreateTime"),
+    ])]);
 
     let resp = drive_single_topic(&broker, &req, &test_context(&p, &peer)).await;
     assert!(resp.topics[0].error_code == codes::NONE);
@@ -510,11 +512,9 @@ async fn handle_rejects_invalid_topic_configs_before_creating_the_topic() {
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
 
     let cases: [RejectedConfig<'_>; 10] = [
-        (
-            "unknown-key",
-            &[("not.a.topic.config", "1000")],
-            &["not.a.topic.config"],
-        ),
+        ("unknown-key", &[("not.a.topic.config", "1000")], &[
+            "not.a.topic.config",
+        ]),
         (
             "compacted-and-tiered",
             &[
@@ -531,16 +531,12 @@ async fn handle_rejects_invalid_topic_configs_before_creating_the_topic() {
             ],
             &["Tiered Storage functionality is disabled in the broker"],
         ),
-        (
-            "bad-delivery-mode",
-            &[("delivery.mode", "later")],
-            &["delivery.mode"],
-        ),
-        (
-            "bad-delivery-delay",
-            &[("delivery.max.delay.ms", "-2")],
-            &["-2"],
-        ),
+        ("bad-delivery-mode", &[("delivery.mode", "later")], &[
+            "delivery.mode",
+        ]),
+        ("bad-delivery-delay", &[("delivery.max.delay.ms", "-2")], &[
+            "-2",
+        ]),
         (
             "compacted-schedule",
             &[
@@ -549,11 +545,9 @@ async fn handle_rejects_invalid_topic_configs_before_creating_the_topic() {
             ],
             &["cleanup.policy", "delivery.mode"],
         ),
-        (
-            "bad-diskless",
-            &[("krabka.diskless", "yes")],
-            &["krabka.diskless"],
-        ),
+        ("bad-diskless", &[("krabka.diskless", "yes")], &[
+            "krabka.diskless",
+        ]),
         (
             "diskless-and-tiered",
             &[
@@ -573,11 +567,10 @@ async fn handle_rejects_invalid_topic_configs_before_creating_the_topic() {
         // grow without bound behind a flag that advertises the opposite. This
         // is the one case here that the pure key/value validator cannot catch,
         // because it depends on the broker's own configuration.
-        (
-            "diskless-without-an-object-tier",
-            &[(DISKLESS, "true")],
-            &[DISKLESS, "remote_storage_backend"],
-        ),
+        ("diskless-without-an-object-tier", &[(DISKLESS, "true")], &[
+            DISKLESS,
+            "remote_storage_backend",
+        ]),
     ];
 
     for (name, configs, needles) in cases {
@@ -608,28 +601,22 @@ async fn handle_rejects_invalid_topic_configs_before_creating_the_topic() {
 #[tokio::test]
 async fn handle_creates_a_scheduled_topic_and_persists_its_delivery_configs() {
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
-    let req = request(vec![topic_with_configs(
-        "retries",
-        &[
+    let req = request(vec![topic_with_configs("retries", &[
+        ("delivery.mode", "scheduled"),
+        ("delivery.max.delay.ms", "-1"),
+        ("delivery.schedule.monotonic", "true"),
+    ])]);
+
+    let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
+
+    check_created_topic_response(&resp, CreatedTopicExpectation {
+        configs: &[
             ("delivery.mode", "scheduled"),
             ("delivery.max.delay.ms", "-1"),
             ("delivery.schedule.monotonic", "true"),
         ],
-    )]);
-
-    let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
-
-    check_created_topic_response(
-        &resp,
-        CreatedTopicExpectation {
-            configs: &[
-                ("delivery.mode", "scheduled"),
-                ("delivery.max.delay.ms", "-1"),
-                ("delivery.schedule.monotonic", "true"),
-            ],
-            ..Default::default()
-        },
-    );
+        ..Default::default()
+    });
 
     let image = broker_handle.controller_image_for_test();
     let configs = image.topic_config("retries").expect("topic configs");
@@ -659,21 +646,18 @@ async fn handle_creates_a_diskless_topic_and_opens_its_partitions_on_the_wal_pat
     .await;
     let broker = broker_handle.broker_arc_for_test();
     request_identity!((p, peer), principal("admin"));
-    let req = request(vec![topic_with_configs(
-        "events",
-        &[("krabka.diskless", "true")],
-    )]);
+    let req = request(vec![topic_with_configs("events", &[(
+        "krabka.diskless",
+        "true",
+    )])]);
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-    check_created_topic_response(
-        &resp,
-        CreatedTopicExpectation {
-            name: "events",
-            configs: &[("krabka.diskless", "true")],
-            ..Default::default()
-        },
-    );
+    check_created_topic_response(&resp, CreatedTopicExpectation {
+        name: "events",
+        configs: &[("krabka.diskless", "true")],
+        ..Default::default()
+    });
 
     // The override reaches the metadata log unchanged, ...
     let image = broker_handle.controller_image_for_test();
@@ -698,10 +682,10 @@ async fn handle_rejects_diskless_topic_without_a_rack_safe_wal_quorum() {
         (broker_handle, _dir, broker),
         local_object_store(object_store)
     );
-    let req = request(vec![topic_with_configs(
-        "unplaceable-diskless",
-        &[("krabka.diskless", "true")],
-    )]);
+    let req = request(vec![topic_with_configs("unplaceable-diskless", &[(
+        "krabka.diskless",
+        "true",
+    )])]);
 
     invalid_config_answer!((resp, message), broker, req);
     for needle in [
@@ -768,15 +752,12 @@ fn diskless_wal_validation_uses_the_local_registration_fallback() {
     config.diskless_wal_local_replica_count = 1;
 
     assert!(
-        diskless_wal_placement_error(
-            &krabka_metadata::MetadataImage::default(),
-            &config,
-            0,
-            &[InitialLeadership {
+        diskless_wal_placement_error(&krabka_metadata::MetadataImage::default(), &config, 0, &[
+            InitialLeadership {
                 leader: config.node_id,
                 isr: vec![config.node_id],
-            }],
-        )
+            }
+        ],)
         .is_none()
     );
 }
@@ -784,10 +765,10 @@ fn diskless_wal_validation_uses_the_local_registration_fallback() {
 #[tokio::test]
 async fn a_created_topic_with_the_key_off_stays_on_the_local_log_path() {
     creation_fixture!((broker_handle, _dir, broker), (p, peer), allow_all, "admin");
-    let req = request(vec![topic_with_configs(
-        "plain",
-        &[("krabka.diskless", "false")],
-    )]);
+    let req = request(vec![topic_with_configs("plain", &[(
+        "krabka.diskless",
+        "false",
+    )])]);
 
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
@@ -929,14 +910,11 @@ async fn strict_create_topics_rejects_after_quota_exhaustion() {
     let charged_no_earlier_than = std::time::Instant::now();
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
-    check_created_topic_response(
-        &resp,
-        CreatedTopicExpectation {
-            name: "throttled",
-            partitions: TopicPartitionCount(5),
-            ..Default::default()
-        },
-    );
+    check_created_topic_response(&resp, CreatedTopicExpectation {
+        name: "throttled",
+        partitions: TopicPartitionCount(5),
+        ..Default::default()
+    });
 
     let rejected = drive(
         &broker,
@@ -1037,14 +1015,11 @@ async fn created_topic_configs_match_describe_configs_for_the_same_topic() {
     let resp = drive(&broker, &req, &test_context(&p, &peer)).await;
 
     let image = broker_handle.controller_image_for_test();
-    let described = described_creation_configs(
-        &image,
-        DescribedCreationSetup {
-            node: broker.config.node_id,
-            topic: "mirrored",
-            overrides: image.topic_config("mirrored").expect("stored overrides"),
-        },
-    );
+    let described = described_creation_configs(&image, DescribedCreationSetup {
+        node: broker.config.node_id,
+        topic: "mirrored",
+        overrides: image.topic_config("mirrored").expect("stored overrides"),
+    });
     assert!(resp.topics[0].configs.clone().expect("configs") == described);
     broker_handle.shutdown().await;
 }
@@ -1271,22 +1246,14 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
     use crate::handlers::test_support::ManualAssignmentRow as Row;
     let n = krabka_raft::NodeId;
     let rows: [Row; 7] = [
-        (
-            &[],
-            &[],
-            &[&[2, 3, 4]],
-            codes::NONE,
-            None,
-            vec![(n(2), vec![n(2), n(3), n(4)])],
-        ),
-        (
-            &[2],
-            &[],
-            &[&[2, 3, 4]],
-            codes::NONE,
-            None,
-            vec![(n(3), vec![n(3), n(4)])],
-        ),
+        (&[], &[], &[&[2, 3, 4]], codes::NONE, None, vec![(
+            n(2),
+            vec![n(2), n(3), n(4)],
+        )]),
+        (&[2], &[], &[&[2, 3, 4]], codes::NONE, None, vec![(
+            n(3),
+            vec![n(3), n(4)],
+        )]),
         (
             &[2, 3],
             &[],
@@ -1317,14 +1284,10 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
             ),
             vec![],
         ),
-        (
-            &[2],
-            &[3],
-            &[&[2, 3, 4]],
-            codes::NONE,
-            None,
-            vec![(n(4), vec![n(3), n(4)])],
-        ),
+        (&[2], &[3], &[&[2, 3, 4]], codes::NONE, None, vec![(
+            n(4),
+            vec![n(3), n(4)],
+        )]),
         (
             &[2],
             &[3],
@@ -1600,34 +1563,22 @@ async fn handle_authorizes_create_per_topic_when_cluster_create_is_denied() {
     });
 
     let cases = [
-        (
-            "cluster Create authorizes every survivor",
-            Case {
-                acls: vec![cluster_create.clone()],
-                created: &["a", "app-x"],
-            },
-        ),
-        (
-            "a literal ACL authorizes only its exact name",
-            Case {
-                acls: vec![literal_a.clone()],
-                created: &["a"],
-            },
-        ),
-        (
-            "an app- prefixed ACL authorizes only its prefix",
-            Case {
-                acls: vec![prefixed_app.clone()],
-                created: &["app-x"],
-            },
-        ),
-        (
-            "no ACL authorizes nothing",
-            Case {
-                acls: vec![],
-                created: &[],
-            },
-        ),
+        ("cluster Create authorizes every survivor", Case {
+            acls: vec![cluster_create.clone()],
+            created: &["a", "app-x"],
+        }),
+        ("a literal ACL authorizes only its exact name", Case {
+            acls: vec![literal_a.clone()],
+            created: &["a"],
+        }),
+        ("an app- prefixed ACL authorizes only its prefix", Case {
+            acls: vec![prefixed_app.clone()],
+            created: &["app-x"],
+        }),
+        ("no ACL authorizes nothing", Case {
+            acls: vec![],
+            created: &[],
+        }),
     ];
 
     for (label, case) in cases {
@@ -1923,14 +1874,11 @@ async fn rows_follow_kafkas_check_order_and_messages() {
         },
         CheckOrderCase {
             label: "two null configs in a dry run",
-            topics: vec![topic_with_nullable_configs(
-                "n",
-                &[
-                    ("retention.ms", None),
-                    ("segment.ms", Some("60000")),
-                    ("cleanup.policy", None),
-                ],
-            )],
+            topics: vec![topic_with_nullable_configs("n", &[
+                ("retention.ms", None),
+                ("segment.ms", Some("60000")),
+                ("cleanup.policy", None),
+            ])],
             validate_only: true,
             rows: vec![(
                 "n",

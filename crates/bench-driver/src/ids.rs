@@ -8,12 +8,13 @@
 //! byte-identical to the bare primitive it wraps. The report aggregator and
 //! any external tool that reads the artifacts see no change.
 
-use derive_more::{Display, From, Into};
-use krabka_macros::PrimitiveCmp;
-use krabka_units::prelude::*;
-use serde::{Deserialize, Serialize};
-
-use crate::numeric::saturating_u64_to_i64;
+use {
+    crate::numeric::saturating_u64_to_i64,
+    derive_more::{Display, From, Into},
+    krabka_macros::PrimitiveCmp,
+    krabka_units::prelude::*,
+    serde::{Deserialize, Serialize},
+};
 
 /// A number of Kafka messages (produced, consumed, or dropped).
 #[derive(
@@ -69,9 +70,7 @@ pub struct TimeOffsetMs(pub u64);
 impl TimeOffsetMs {
     /// This offset as the time extent from the window start.
     #[must_use]
-    pub fn as_time(self) -> Time {
-        Time::from_millis(saturating_u64_to_i64(self.0))
-    }
+    pub fn as_time(self) -> Time { Time::from_millis(saturating_u64_to_i64(self.0)) }
 
     /// The extent from `earlier` to this offset. This is no time at all when
     /// the two are the wrong way round.
@@ -106,9 +105,7 @@ pub struct WallclockMs(pub i64);
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn offsets_convert_to_extents_and_differences() {

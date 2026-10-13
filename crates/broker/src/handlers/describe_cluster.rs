@@ -17,21 +17,22 @@
 //! on `Cluster("kafka-cluster")`, the bitfield is `0` rather than absent --
 //! `Describe` gates only this field, not the rest of the response.
 
-use krabka_metadata::ResourceType;
-use krabka_protocol::owned::{
-    describe_cluster_request::DescribeClusterRequest,
-    describe_cluster_response::{DescribeClusterBroker, DescribeClusterResponse},
-};
-
 #[cfg(test)]
 use crate::authorizer::SimpleAclAuthorizer;
 #[cfg(test)]
 use crate::handlers::RequestContext;
-use crate::{
-    codes,
-    handlers::{
-        acl_wire::CLUSTER_RESOURCE_NAME, authorized_operations::authorized_operations_bits,
-        offline_replicas::listener_endpoint,
+use {
+    crate::{
+        codes,
+        handlers::{
+            acl_wire::CLUSTER_RESOURCE_NAME, authorized_operations::authorized_operations_bits,
+            offline_replicas::listener_endpoint,
+        },
+    },
+    krabka_metadata::ResourceType,
+    krabka_protocol::owned::{
+        describe_cluster_request::DescribeClusterRequest,
+        describe_cluster_response::{DescribeClusterBroker, DescribeClusterResponse},
     },
 };
 
@@ -54,9 +55,7 @@ const ENDPOINT_TYPE_CONTROLLER: i8 = 2;
 // it (endpoint type, authorization, fenced filtering, KIP-430 opt-in) are all
 // wire-visible and are asserted by the tests below.
 #[cfg_attr(test, mutants::skip)]
-fn wire_broker_id(node_id: u64) -> i32 {
-    i32::try_from(node_id).unwrap_or(-1)
-}
+fn wire_broker_id(node_id: u64) -> i32 { i32::try_from(node_id).unwrap_or(-1) }
 
 context_handler! {
     DescribeClusterRequest => DescribeClusterResponse,
@@ -183,17 +182,17 @@ context_handler! {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{AclOperation, BrokerEndpoint, BrokerRegistrationRecord, MetadataRecord};
-    use krabka_security::ListenerProtocol;
-
-    use super::*;
-    use crate::{
-        authorizer::{AllowAllAuthorizer, Authorizer},
-        broker::{Broker, BrokerHandle},
-        test_support::{ControllerPeerAllowed, DenyAll, broker_registration, peer, principal},
+    use {
+        super::*,
+        crate::{
+            authorizer::{AllowAllAuthorizer, Authorizer},
+            broker::{Broker, BrokerHandle},
+            test_support::{ControllerPeerAllowed, DenyAll, broker_registration, peer, principal},
+        },
+        assert2::assert,
+        krabka_metadata::{AclOperation, BrokerEndpoint, BrokerRegistrationRecord, MetadataRecord},
+        krabka_security::ListenerProtocol,
+        std::sync::Arc,
     };
 
     const VERSION: i16 = 2;

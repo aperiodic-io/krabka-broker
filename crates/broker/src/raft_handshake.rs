@@ -15,24 +15,24 @@
 //!     `correlation_id` and a 1-byte tagged-fields section.
 //!   - The `ApiVersions (18)` response header is *always* v0 by Kafka spec.
 
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicI64, AtomicU64},
+use {
+    crate::platform::Sockets,
+    krabka_client_core::ClientDuplex,
+    krabka_raft::{
+        ControllerApiVersions, ControllerHandle, RaftConnection, RaftHandshakeError,
+        RaftListenerHandshake,
     },
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::{
+        collections::HashMap,
+        sync::{
+            Arc,
+            atomic::{AtomicI64, AtomicU64},
+        },
+    },
+    tokio::{net::TcpStream, sync::OnceCell},
+    tokio_rustls::TlsAcceptor,
 };
-
-use krabka_client_core::ClientDuplex;
-use krabka_raft::{
-    ControllerApiVersions, ControllerHandle, RaftConnection, RaftHandshakeError,
-    RaftListenerHandshake,
-};
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tokio::{net::TcpStream, sync::OnceCell};
-use tokio_rustls::TlsAcceptor;
-
-use crate::platform::Sockets;
 
 mod authorization;
 mod frame;
@@ -40,11 +40,13 @@ mod sasl;
 #[cfg(test)]
 mod test_support;
 
-use self::sasl::run_inbound_sasl;
-use crate::{
-    SslPrincipalMapper,
-    authorizer::Authorizer,
-    network::auth::{GssapiConfig, subject_dn_rfc2253},
+use {
+    self::sasl::run_inbound_sasl,
+    crate::{
+        SslPrincipalMapper,
+        authorizer::Authorizer,
+        network::auth::{GssapiConfig, subject_dn_rfc2253},
+    },
 };
 
 /// Late-bound handle to the broker's [`ControllerHandle`].
@@ -235,10 +237,7 @@ mod tests {
     //! short-circuit predicate, so that this layer catches a regression that
     //! flips `requires_*`.
 
-    use assert2::assert;
-
-    use super::*;
-    use crate::SslPrincipalMapper;
+    use {super::*, crate::SslPrincipalMapper, assert2::assert};
 
     #[test]
     fn plaintext_passthrough_short_circuits() {

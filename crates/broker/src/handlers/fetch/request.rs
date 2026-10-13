@@ -3,15 +3,15 @@
 //! with the session classification and the authorization that run before
 //! any partition is read.
 
-use std::sync::Arc;
-
-use krabka_metadata::AclOperation;
-use krabka_protocol::{owned::fetch_request::FetchRequest, primitives::uuid::Uuid as WireUuid};
-
-use crate::{
-    broker::Broker,
-    fetch_session::{CachedPartitionState, FetchSessionKey, SessionDecision},
-    handlers::{RequestContext, cluster_action_denied, denied_topics, requested_topic_name},
+use {
+    crate::{
+        broker::Broker,
+        fetch_session::{CachedPartitionState, FetchSessionKey, SessionDecision},
+        handlers::{RequestContext, cluster_action_denied, denied_topics, requested_topic_name},
+    },
+    krabka_metadata::AclOperation,
+    krabka_protocol::{owned::fetch_request::FetchRequest, primitives::uuid::Uuid as WireUuid},
+    std::sync::Arc,
 };
 
 /// Projection of `FetchRequest::topics` or of the cached session partitions.
@@ -62,9 +62,7 @@ pub(super) enum FetchAuthorization {
 impl FetchAuthorization {
     /// Reports whether every partition row is refused before its topic
     /// resolves.
-    pub(super) const fn refuses_every_row(&self) -> bool {
-        matches!(self, Self::FollowerDenied)
-    }
+    pub(super) const fn refuses_every_row(&self) -> bool { matches!(self, Self::FollowerDenied) }
 
     /// Reports whether the rows of the resolved topic `topic_name` are refused.
     pub(super) fn refuses_topic(&self, topic_name: &str) -> bool {
@@ -223,9 +221,7 @@ fn group_cached_into_effective_topics(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     fn key(id: u8, name: &str, partition: i32) -> FetchSessionKey {
         FetchSessionKey {

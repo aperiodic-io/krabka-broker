@@ -28,9 +28,7 @@ pub enum StreamsGroupStatePhase {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn group_state_phase_as_str_strings() {

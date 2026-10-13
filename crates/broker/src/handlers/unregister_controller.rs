@@ -29,24 +29,25 @@
 //! `UnregisterControllerRequest.getErrorResponse` copies `e.getMessage()`. A
 //! success carries the generated empty-string `ErrorMessage`.
 
-use bytes::Bytes;
-use krabka_metadata::{MetadataRecord, NodeId, UnregisterControllerRecord};
-use krabka_protocol::owned::{
-    unregister_controller_request::{self, UnregisterControllerRequest},
-    unregister_controller_response::UnregisterControllerResponse,
-};
-use krabka_raft::RaftError;
-
-use crate::{
-    broker::Broker,
-    codes,
-    controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
-    error::BrokerError,
-    features::CONTROLLER_UNREGISTRATION_MIN_LEVEL,
-    handlers::{
-        cluster_alter_denied, encode_response,
-        forward_to_controller::{to_active_controller, wrong_controller_message},
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
+        error::BrokerError,
+        features::CONTROLLER_UNREGISTRATION_MIN_LEVEL,
+        handlers::{
+            cluster_alter_denied, encode_response,
+            forward_to_controller::{to_active_controller, wrong_controller_message},
+        },
     },
+    bytes::Bytes,
+    krabka_metadata::{MetadataRecord, NodeId, UnregisterControllerRecord},
+    krabka_protocol::owned::{
+        unregister_controller_request::{self, UnregisterControllerRequest},
+        unregister_controller_response::UnregisterControllerResponse,
+    },
+    krabka_raft::RaftError,
 };
 
 #[cfg(test)]

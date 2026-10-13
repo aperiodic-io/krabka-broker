@@ -22,14 +22,17 @@
 //! (versions 9–14). This is a different topic with its own discriminator
 //! space.
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use krabka_log::Offset;
-use krabka_protocol::ProtocolError;
-use uuid::Uuid;
-
-use crate::{
-    coordinator::unified::persistence::{flex, get_i16, get_i32, get_i64, get_string, put_string},
-    error::BrokerError,
+use {
+    crate::{
+        coordinator::unified::persistence::{
+            flex, get_i16, get_i32, get_i64, get_string, put_string,
+        },
+        error::BrokerError,
+    },
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    krabka_log::Offset,
+    krabka_protocol::ProtocolError,
+    uuid::Uuid,
 };
 
 pub const KEY_SHARE_SNAPSHOT: i16 = 0;
@@ -224,13 +227,10 @@ fn put_value_tags(buf: &mut BytesMut, delivery_complete_count: i32) {
     if delivery_complete_count == UNKNOWN_DELIVERY_COMPLETE_COUNT {
         flex::put_empty_tagged_fields(buf);
     } else {
-        flex::put_tagged_fields(
-            buf,
-            vec![(
-                TAG_DELIVERY_COMPLETE_COUNT,
-                Bytes::copy_from_slice(&delivery_complete_count.to_be_bytes()),
-            )],
-        );
+        flex::put_tagged_fields(buf, vec![(
+            TAG_DELIVERY_COMPLETE_COUNT,
+            Bytes::copy_from_slice(&delivery_complete_count.to_be_bytes()),
+        )]);
     }
 }
 
@@ -285,14 +285,15 @@ fn get_batches(buf: &mut &[u8]) -> Result<Vec<StateBatch>, BrokerError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::{
-        coordinator::unified::test_support::wire_bytes,
-        share_coordinator::coordinator::test_support::{
-            DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::test_support::wire_bytes,
+            share_coordinator::coordinator::test_support::{
+                DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+            },
         },
+        assert2::{assert, check},
     };
 
     fn peek_type(buf: &[u8]) -> i16 {
@@ -301,9 +302,7 @@ mod tests {
     }
 
     /// Bytes from a hex string that may hold spaces.
-    fn hex(s: &str) -> Vec<u8> {
-        wire_bytes(&s.split_whitespace().collect::<Vec<_>>())
-    }
+    fn hex(s: &str) -> Vec<u8> { wire_bytes(&s.split_whitespace().collect::<Vec<_>>()) }
 
     #[test]
     fn state_key_round_trip() {

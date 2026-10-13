@@ -17,17 +17,18 @@
 //! patterns match the raw key and header bytes. This module decodes no
 //! payload and knows no schema.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_ids::{Offset, ProducerId};
-use krabka_protocol::records::{
-    Attributes, RecordBatchBorrowed, RecordBatchHeader, RecordBorrowed, RecordsError, TimestampType,
-};
-use regex::Regex;
-
-use crate::{
-    args::{HeaderPattern, PartitionRef},
-    error::RestoreError,
+use {
+    crate::{
+        args::{HeaderPattern, PartitionRef},
+        error::RestoreError,
+    },
+    krabka_ids::{Offset, ProducerId},
+    krabka_protocol::records::{
+        Attributes, RecordBatchBorrowed, RecordBatchHeader, RecordBorrowed, RecordsError,
+        TimestampType,
+    },
+    regex::Regex,
+    std::collections::{HashMap, HashSet},
 };
 
 mod compile;
@@ -291,13 +292,10 @@ pub(crate) fn record_coordinates(
     record: &RecordBorrowed<'_>,
 ) -> Result<(Offset, i64), RestoreError> {
     let frame = batch_frame(header);
-    krabka_verified::restore_record_coordinates(
-        frame,
-        krabka_verified::RestoreRecordDeltas {
-            offset_delta: record.offset_delta,
-            timestamp_delta: record.timestamp_delta,
-        },
-    )
+    krabka_verified::restore_record_coordinates(frame, krabka_verified::RestoreRecordDeltas {
+        offset_delta: record.offset_delta,
+        timestamp_delta: record.timestamp_delta,
+    })
     .map(|(offset, timestamp)| (Offset(offset), timestamp))
     .ok_or_else(|| {
         RecordsError::RecordParse(format!(

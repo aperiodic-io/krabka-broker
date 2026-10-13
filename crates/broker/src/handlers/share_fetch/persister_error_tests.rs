@@ -9,32 +9,33 @@
 //! error that `SharePartition.fetchPersisterError` maps. A fenced state epoch
 //! maps to `NOT_LEADER_OR_FOLLOWER` and drops the partition from the cache.
 
-use assert2::assert;
-use krabka_log::Offset;
-use krabka_metadata::{MetadataRecord, NodeId, TopicRecord};
-use krabka_protocol::{
-    owned::{
-        share_fetch_request::{
-            AcknowledgementBatch as FetchAcknowledgeBatch, FetchPartition, FetchTopic,
-            ShareFetchRequest,
+use {
+    crate::{
+        broker::BrokerHandle,
+        codes,
+        error::BrokerError,
+        handlers::test_support::{
+            AcknowledgementCode, AcknowledgementPartitionSetup, AcknowledgementSetup,
+            ClientTopicSetup, ProduceRecordsSetup, RecordCount, ShareSessionEpoch, ShareWireSetup,
+            create_topic as create_topic_from_test_support, produce_records, send_acknowledgements,
+            share_fetch_partition_rows, single_replica_partition,
         },
-        share_fetch_response::PartitionData,
+        share_coordinator::bootstrap::TOPIC,
+        test_support::initialize_share_state,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    broker::BrokerHandle,
-    codes,
-    error::BrokerError,
-    handlers::test_support::{
-        AcknowledgementCode, AcknowledgementPartitionSetup, AcknowledgementSetup, ClientTopicSetup,
-        ProduceRecordsSetup, RecordCount, ShareSessionEpoch, ShareWireSetup,
-        create_topic as create_topic_from_test_support, produce_records, send_acknowledgements,
-        share_fetch_partition_rows, single_replica_partition,
+    assert2::assert,
+    krabka_log::Offset,
+    krabka_metadata::{MetadataRecord, NodeId, TopicRecord},
+    krabka_protocol::{
+        owned::{
+            share_fetch_request::{
+                AcknowledgementBatch as FetchAcknowledgeBatch, FetchPartition, FetchTopic,
+                ShareFetchRequest,
+            },
+            share_fetch_response::PartitionData,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    share_coordinator::bootstrap::TOPIC,
-    test_support::initialize_share_state,
 };
 
 /// The acknowledge type `Accept`.
@@ -51,27 +52,21 @@ enum Api {
 use crate::handlers::test_support::start_allow_all_no_audit as start;
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    create_topic_from_test_support(
-        broker,
-        ClientTopicSetup {
-            client_id: "share-persister-error-test",
-            name,
-            ..Default::default()
-        },
-    )
+    create_topic_from_test_support(broker, ClientTopicSetup {
+        client_id: "share-persister-error-test",
+        name,
+        ..Default::default()
+    })
     .await
 }
 
 /// Appends one batch of two records to partition 0 of `topic`.
 async fn produce_two_records(broker: &BrokerHandle, topic: &str) {
-    produce_records(
-        broker,
-        ProduceRecordsSetup {
-            topic,
-            count: RecordCount(2),
-            ..Default::default()
-        },
-    )
+    produce_records(broker, ProduceRecordsSetup {
+        topic,
+        count: RecordCount(2),
+        ..Default::default()
+    })
     .await;
 }
 
@@ -124,16 +119,13 @@ async fn share_acknowledge(
     topic_id: WireUuid,
     (first_offset, last_offset): (i64, i64),
 ) -> i16 {
-    let response = send_acknowledgements(
-        broker,
-        AcknowledgementSetup {
-            partition: AcknowledgementPartitionSetup::single_batch(
-                krabka_log::Offset(first_offset)..=krabka_log::Offset(last_offset),
-                AcknowledgementCode(ACCEPT),
-            ),
-            ..AcknowledgementSetup::for_topic_session(group, ShareSessionEpoch(epoch), topic_id)
-        },
-    )
+    let response = send_acknowledgements(broker, AcknowledgementSetup {
+        partition: AcknowledgementPartitionSetup::single_batch(
+            krabka_log::Offset(first_offset)..=krabka_log::Offset(last_offset),
+            AcknowledgementCode(ACCEPT),
+        ),
+        ..AcknowledgementSetup::for_topic_session(group, ShareSessionEpoch(epoch), topic_id)
+    })
     .await;
 
     response.responses[0].partitions[0].error_code
@@ -141,9 +133,7 @@ async fn share_acknowledge(
 
 use crate::handlers::test_support::acquired_share_records as acquired;
 
-fn topic_uuid(topic_id: WireUuid) -> uuid::Uuid {
-    uuid::Uuid::from_bytes(topic_id.0)
-}
+fn topic_uuid(topic_id: WireUuid) -> uuid::Uuid { uuid::Uuid::from_bytes(topic_id.0) }
 
 async fn initialize_state(broker: &BrokerHandle, group: &str, topic_id: WireUuid) {
     initialize_share_state(broker, group, topic_uuid(topic_id), 0).await;
@@ -224,36 +214,27 @@ async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition(
             .is_some();
         let next = share_fetch(&broker, &name, 3, topic_id, None).await;
 
-        actual.push((
-            api,
-            FencedWrite {
-                acknowledge_error,
-                fetch_error,
-                cached,
-                next_acquired: acquired(&next),
-            },
-        ));
+        actual.push((api, FencedWrite {
+            acknowledge_error,
+            fetch_error,
+            cached,
+            next_acquired: acquired(&next),
+        }));
     }
 
     let expected = vec![
-        (
-            Api::ShareAcknowledge,
-            FencedWrite {
-                acknowledge_error: codes::NOT_LEADER_OR_FOLLOWER,
-                fetch_error: codes::NONE,
-                cached: false,
-                next_acquired: vec![(0, 1)],
-            },
-        ),
-        (
-            Api::ShareFetch,
-            FencedWrite {
-                acknowledge_error: codes::NOT_LEADER_OR_FOLLOWER,
-                fetch_error: codes::NOT_LEADER_OR_FOLLOWER,
-                cached: false,
-                next_acquired: vec![(0, 1)],
-            },
-        ),
+        (Api::ShareAcknowledge, FencedWrite {
+            acknowledge_error: codes::NOT_LEADER_OR_FOLLOWER,
+            fetch_error: codes::NONE,
+            cached: false,
+            next_acquired: vec![(0, 1)],
+        }),
+        (Api::ShareFetch, FencedWrite {
+            acknowledge_error: codes::NOT_LEADER_OR_FOLLOWER,
+            fetch_error: codes::NOT_LEADER_OR_FOLLOWER,
+            cached: false,
+            next_acquired: vec![(0, 1)],
+        }),
     ];
     assert!(actual == expected);
     broker.shutdown().await;

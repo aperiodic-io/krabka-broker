@@ -6,22 +6,23 @@
 //! because a v1 framing would decode without error yet carry a create-time the
 //! v0 client cannot represent.
 
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_broker::metrics::TopicLabel;
-use krabka_protocol::{
-    Decode,
-    kafka_3_6_2::owned::fetch_response::FetchResponse as LegacyFetchResponse,
-    records::{Record, RecordBatch, RecordsPayload},
-};
-use krabka_records_legacy::decode_message_set;
-
-use crate::{
-    harness::{
-        create_topic, create_topic_with_partitions, fetch_legacy_raw, fetch_legacy_raw_partitions,
-        legacy_bytes, produce_batch, produce_batch_to,
+use {
+    crate::{
+        harness::{
+            create_topic, create_topic_with_partitions, fetch_legacy_raw,
+            fetch_legacy_raw_partitions, legacy_bytes, produce_batch, produce_batch_to,
+        },
+        support,
     },
-    support,
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_broker::metrics::TopicLabel,
+    krabka_protocol::{
+        Decode,
+        kafka_3_6_2::owned::fetch_response::FetchResponse as LegacyFetchResponse,
+        records::{Record, RecordBatch, RecordsPayload},
+    },
+    krabka_records_legacy::decode_message_set,
 };
 
 #[tokio::test]

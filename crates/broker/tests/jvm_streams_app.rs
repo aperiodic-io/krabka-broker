@@ -47,21 +47,21 @@
 mod jvm_acceptance;
 mod support;
 
-use std::{
-    io::Write,
-    path::Path,
-    process::{Command, Stdio},
-};
-
-use assert2::assert;
-use jvm_acceptance::{
-    KAFKA_IMAGE_TXN, STREAMS_APP_JAVA, broker0_advertised, docker_run_kafka_tool_with_image,
-    rlmm_broker0_advertised, start_host_broker,
-};
-
-use crate::{
-    jvm_acceptance::{create_console_topic_at, describe_console_topic_configs},
-    support::client::connect_owned,
+use {
+    crate::{
+        jvm_acceptance::{create_console_topic_at, describe_console_topic_configs},
+        support::client::connect_owned,
+    },
+    assert2::assert,
+    jvm_acceptance::{
+        KAFKA_IMAGE_TXN, STREAMS_APP_JAVA, broker0_advertised, docker_run_kafka_tool_with_image,
+        rlmm_broker0_advertised, start_host_broker,
+    },
+    std::{
+        io::Write,
+        path::Path,
+        process::{Command, Stdio},
+    },
 };
 
 /// The Apache Kafka image whose jars carry KIP-1071. It is JRE-only, which is
@@ -214,16 +214,16 @@ fn shared_class_dir() -> tempfile::TempDir {
 /// Streams creates its own internal topics, but not the source and sink
 /// topics of the topology: `builder.stream(...)` and `.to(...)` both require
 /// the topic to exist already.
-fn create_topic(bootstrap: &str, topic: &str) {
-    create_console_topic_at(bootstrap, topic);
-}
+fn create_topic(bootstrap: &str, topic: &str) { create_console_topic_at(bootstrap, topic); }
 
 /// Every topic the broker holds, one per line.
 fn list_topics(bootstrap: &str) -> Vec<String> {
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &["kafka-topics", "--list", "--bootstrap-server", bootstrap],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-topics",
+        "--list",
+        "--bootstrap-server",
+        bootstrap,
+    ]);
     support::jvm_output_lines(&out)
 }
 
@@ -255,23 +255,20 @@ fn describe_topic_configs(bootstrap: &str, topic: &str) -> String {
 /// Read the sink topic under `read_committed`, which is the isolation level
 /// `exactly_once_v2` output is only visible at.
 fn read_committed_sink(bootstrap: &str, topic: &str) -> Vec<String> {
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-console-consumer",
-            "--bootstrap-server",
-            bootstrap,
-            "--topic",
-            topic,
-            "--isolation-level",
-            "read_committed",
-            "--from-beginning",
-            "--max-messages",
-            "5",
-            "--timeout-ms",
-            "60000",
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-console-consumer",
+        "--bootstrap-server",
+        bootstrap,
+        "--topic",
+        topic,
+        "--isolation-level",
+        "read_committed",
+        "--from-beginning",
+        "--max-messages",
+        "5",
+        "--timeout-ms",
+        "60000",
+    ]);
     support::jvm_output_lines(&out)
 }
 
@@ -363,12 +360,12 @@ async fn compiled_streams_app_runs_on_the_classic_protocol() {
 
     let classes = shared_class_dir();
     compile_streams_app(classes.path());
-    let out = run_streams_app(
-        KAFKA_IMAGE_TXN,
-        classes.path(),
-        CP_CONFLUENT,
-        &[bootstrap, INPUT, OUTPUT, APPLICATION_ID],
-    );
+    let out = run_streams_app(KAFKA_IMAGE_TXN, classes.path(), CP_CONFLUENT, &[
+        bootstrap,
+        INPUT,
+        OUTPUT,
+        APPLICATION_ID,
+    ]);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(
         stdout.contains("STREAMSPROBE OK"),
@@ -407,12 +404,13 @@ async fn compiled_streams_app_runs_on_the_streams_protocol() {
 
     let classes = shared_class_dir();
     compile_streams_app(classes.path());
-    let out = run_streams_app(
-        KAFKA_IMAGE_STREAMS_PROTOCOL,
-        classes.path(),
-        CP_APACHE,
-        &[bootstrap, INPUT, OUTPUT, APPLICATION_ID, "streams"],
-    );
+    let out = run_streams_app(KAFKA_IMAGE_STREAMS_PROTOCOL, classes.path(), CP_APACHE, &[
+        bootstrap,
+        INPUT,
+        OUTPUT,
+        APPLICATION_ID,
+        "streams",
+    ]);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
 

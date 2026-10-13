@@ -1,10 +1,11 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::time_index::sparse_timestamp_window_valid;
-use super::{
-    SparseTimestampWindow, constructed_time_index_preserves_first,
-    indexed_timestamp_scan_finds_first,
+use {
+    super::{
+        SparseTimestampWindow, constructed_time_index_preserves_first,
+        indexed_timestamp_scan_finds_first,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Consume the actual constructed index to scan at/after the logical floor.

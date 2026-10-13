@@ -3,21 +3,21 @@
 //! minority of replicas, the hot-tail run it mirrors, and the trim that follows
 //! a committed prefix.
 
-use std::sync::{Arc, Mutex};
-
-use assert2::assert;
-use krabka_compression::CompressionType;
-use krabka_ids::{Offset, PartitionIndex};
-use krabka_kraft_core::NodeId;
-use krabka_log::{Log, LogConfig};
-use uuid::Uuid;
-
-use super::{
-    HotTailTarget, QuorumWalStore,
-    engine::{self, WalShardEngine},
-    test_support::{append_source, batch, local_replicas, open_log, source_log},
+use {
+    super::{
+        HotTailTarget, QuorumWalStore,
+        engine::{self, WalShardEngine},
+        test_support::{append_source, batch, local_replicas, open_log, source_log},
+    },
+    crate::{diskless::hot_tail::HotTailCache, error::BrokerError, wal::WalStore},
+    assert2::assert,
+    krabka_compression::CompressionType,
+    krabka_ids::{Offset, PartitionIndex},
+    krabka_kraft_core::NodeId,
+    krabka_log::{Log, LogConfig},
+    std::sync::{Arc, Mutex},
+    uuid::Uuid,
 };
-use crate::{diskless::hot_tail::HotTailCache, error::BrokerError, wal::WalStore};
 
 #[test]
 fn strict_majority_requires_more_than_half_of_every_voter_set() {

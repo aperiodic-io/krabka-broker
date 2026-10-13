@@ -3,14 +3,16 @@
 //! Every flag here overlays a field of `RuntimeFileConfig`, and the group is
 //! large enough to keep apart from the rest of the command line.
 
-use krabka_broker::{
-    config_value::{PositiveCount, PositiveI16, PositiveI32, PositiveI64},
-    coordinator::unified::streams::config::StreamsAssignorKind,
+use {
+    krabka_broker::{
+        config_value::{PositiveCount, PositiveI16, PositiveI32, PositiveI64},
+        coordinator::unified::streams::config::StreamsAssignorKind,
+    },
+    krabka_client_core::{
+        ClientFrameMax, ConnectionDispatchQueueCapacity, DEFAULT_CONNECTION_DISPATCH_QUEUE_CAPACITY,
+    },
+    krabka_units::{ByteSize, Ratio, Time},
 };
-use krabka_client_core::{
-    ClientFrameMax, ConnectionDispatchQueueCapacity, DEFAULT_CONNECTION_DISPATCH_QUEUE_CAPACITY,
-};
-use krabka_units::{ByteSize, Ratio, Time};
 
 fn parse_streams_assignor(value: &str) -> Result<StreamsAssignorKind, String> {
     StreamsAssignorKind::from_config_name(value)
@@ -207,12 +209,13 @@ fn parse_client_frame_max(value: &str) -> Result<ByteSize, String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use clap::{Args as _, Parser as _};
-    use krabka_units::convert::ByteSizeExt;
-
-    use super::RuntimeArgs;
-    use crate::{cli::Args, test_support::env_guard};
+    use {
+        super::RuntimeArgs,
+        crate::{cli::Args, test_support::env_guard},
+        assert2::check,
+        clap::{Args as _, Parser as _},
+        krabka_units::convert::ByteSizeExt,
+    };
 
     /// The values each flag is offered in [`runtime_flags_keep_their_shape`].
     /// Between them they tell every value parser the group uses apart: zero

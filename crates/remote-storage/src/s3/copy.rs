@@ -5,16 +5,17 @@
 //! of six near-identical call sites, which is what makes collecting a digest
 //! per object cheap enough to do on every archive write.
 
-use krabka_object_store::{ObjectOps, PutMode, PutOutcome, PutRequest};
-use krabka_units::prelude::ByteSizeExt as _;
-use object_store::path::Path as ObjectPath;
-
-use super::S3RemoteStorage;
-use crate::{
-    error::RemoteStorageError,
-    metadata::{CustomMetadata, RemoteLogSegmentMetadata},
-    storage_manager::{ArtifactBody, LogSegmentData},
-    worm::{MANIFEST_SUFFIX, ObjectEntry, Sha256Digest, WormError},
+use {
+    super::S3RemoteStorage,
+    crate::{
+        error::RemoteStorageError,
+        metadata::{CustomMetadata, RemoteLogSegmentMetadata},
+        storage_manager::{ArtifactBody, LogSegmentData},
+        worm::{MANIFEST_SUFFIX, ObjectEntry, Sha256Digest, WormError},
+    },
+    krabka_object_store::{ObjectOps, PutMode, PutOutcome, PutRequest},
+    krabka_units::prelude::ByteSizeExt as _,
+    object_store::path::Path as ObjectPath,
 };
 
 #[cfg(test)]

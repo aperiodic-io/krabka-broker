@@ -24,30 +24,32 @@
 //!   assignment or target assignment names one is replaced by a
 //!   `TOPIC_AUTHORIZATION_FAILED` row with no members.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_metadata::{AclOperation, MetadataImage};
-use krabka_protocol::{
-    owned::{
-        common::consumer_group_describe_response::{
-            assignment::Assignment, topic_partitions::TopicPartitions,
+use {
+    crate::{
+        authorizer::Authorizer,
+        codes,
+        coordinator::unified::actor::{DescribeMember, DescribeView, GroupActorMessage},
+        handlers::{
+            RequestContext,
+            authorized_operations::{DescribedGroupRow, fill_group_authorized_operations},
+            denied_topics, group_version_disabled,
         },
-        consumer_group_describe_request::ConsumerGroupDescribeRequest,
-        consumer_group_describe_response::{ConsumerGroupDescribeResponse, DescribedGroup, Member},
+        task_util::{AskError, ask},
     },
-    primitives::uuid::Uuid,
-};
-
-use crate::{
-    authorizer::Authorizer,
-    codes,
-    coordinator::unified::actor::{DescribeMember, DescribeView, GroupActorMessage},
-    handlers::{
-        RequestContext,
-        authorized_operations::{DescribedGroupRow, fill_group_authorized_operations},
-        denied_topics, group_version_disabled,
+    krabka_metadata::{AclOperation, MetadataImage},
+    krabka_protocol::{
+        owned::{
+            common::consumer_group_describe_response::{
+                assignment::Assignment, topic_partitions::TopicPartitions,
+            },
+            consumer_group_describe_request::ConsumerGroupDescribeRequest,
+            consumer_group_describe_response::{
+                ConsumerGroupDescribeResponse, DescribedGroup, Member,
+            },
+        },
+        primitives::uuid::Uuid,
     },
-    task_util::{AskError, ask},
+    std::collections::{HashMap, HashSet},
 };
 
 /// `member_type` of a member that speaks the classic protocol inside a
@@ -301,23 +303,24 @@ fn response(groups: Vec<DescribedGroup>) -> ConsumerGroupDescribeResponse {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::MetadataRecord;
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        broker::Broker,
-        handlers::{
-            RequestContext,
-            authorized_operations::authorized_operations_bits,
-            group_heartbeat_test_support::{
-                GroupFeatureLevel, acl_authorizer, image_with_group_version, set_group_version,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            broker::Broker,
+            handlers::{
+                RequestContext,
+                authorized_operations::authorized_operations_bits,
+                group_heartbeat_test_support::{
+                    GroupFeatureLevel, acl_authorizer, image_with_group_version, set_group_version,
+                },
+            },
+            test_support::{
+                AllowAclSetup, allow_acl, start_group_broker_no_audit, start_group_broker_with,
             },
         },
-        test_support::{
-            AllowAclSetup, allow_acl, start_group_broker_no_audit, start_group_broker_with,
-        },
+        assert2::assert,
+        krabka_metadata::MetadataRecord,
     };
 
     const VERSION: i16 = krabka_protocol::owned::consumer_group_describe_request::MAX_VERSION;
@@ -607,13 +610,10 @@ mod tests {
             group("describable", vec![member(vec![orders()], vec![orders()])]),
             group("assigned", vec![member(vec![payments()], vec![])]),
             group("targeted", vec![member(vec![orders()], vec![payments()])]),
-            group(
-                "second-member",
-                vec![
-                    member(vec![orders()], vec![]),
-                    member(vec![payments()], vec![]),
-                ],
-            ),
+            group("second-member", vec![
+                member(vec![orders()], vec![]),
+                member(vec![payments()], vec![]),
+            ]),
             group("empty", vec![]),
         ];
         let expected = vec![

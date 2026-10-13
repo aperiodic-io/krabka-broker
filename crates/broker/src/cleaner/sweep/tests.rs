@@ -3,23 +3,23 @@
 //! a KFC-9 topic write freeze and the later thaw move a partition out of and
 //! back into eligibility.
 
-use std::sync::atomic::Ordering;
-
-use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_metadata::{MetadataRecord, NodeId, PatternType};
-use tempfile::TempDir;
-
-use super::*;
-use crate::{
-    cleaner::test_support::{
-        CompactionSetup, block_compaction_swap, compactable_partition, record_count,
-        register_compactable,
+use {
+    super::*,
+    crate::{
+        cleaner::test_support::{
+            CompactionSetup, block_compaction_swap, compactable_partition, record_count,
+            register_compactable,
+        },
+        log_dir_status::LogDirRegistry,
+        metrics::{CleanerFailureLabel, CleanerFailureReason},
+        partition::Partition,
+        test_support::{FrozenTopicsImageSetup, append_partition_batch, topic_thaw_record},
     },
-    log_dir_status::LogDirRegistry,
-    metrics::{CleanerFailureLabel, CleanerFailureReason},
-    partition::Partition,
-    test_support::{FrozenTopicsImageSetup, append_partition_batch, topic_thaw_record},
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_metadata::{MetadataRecord, NodeId, PatternType},
+    std::sync::atomic::Ordering,
+    tempfile::TempDir,
 };
 
 struct HostedCompactPartition {
@@ -33,13 +33,10 @@ async fn hosted_compact_partition() -> HostedCompactPartition {
     let dir = tempfile::tempdir().expect("log root");
     let status = LogDirRegistry::probe(&[dir.path().to_path_buf()]);
     let registry = PartitionRegistry::new();
-    let partition = compactable_partition(
-        &dir,
-        CompactionSetup {
-            log_dir_status: status.clone(),
-            ..Default::default()
-        },
-    )
+    let partition = compactable_partition(&dir, CompactionSetup {
+        log_dir_status: status.clone(),
+        ..Default::default()
+    })
     .await;
     registry.insert("orders".into(), PartitionIndex(0), Arc::clone(&partition));
     HostedCompactPartition {
@@ -105,18 +102,15 @@ async fn tick_all_compacts_every_hosted_compact_topic_whoever_leads_it() {
     ];
     let mut cases = Vec::new();
     for (topic, leader, policy, expect_compacted) in specs {
-        let partition = compactable_partition(
-            &dir,
-            CompactionSetup {
-                topic,
-                leader: NodeId(leader),
-                cfg: krabka_log::LogConfig {
-                    cleanup_policy: policy,
-                    ..CompactionSetup::default().cfg
-                },
-                ..Default::default()
+        let partition = compactable_partition(&dir, CompactionSetup {
+            topic,
+            leader: NodeId(leader),
+            cfg: krabka_log::LogConfig {
+                cleanup_policy: policy,
+                ..CompactionSetup::default().cfg
             },
-        )
+            ..Default::default()
+        })
         .await;
         let before = record_count(&partition);
         registry.insert(topic.into(), PartitionIndex(0), Arc::clone(&partition));
@@ -165,14 +159,11 @@ async fn tick_all_skips_a_partition_below_its_dirty_ratio_until_the_max_lag() {
         min_cleanable_dirty_ratio: krabka_units::fraction(1.0),
         ..Default::default()
     };
-    let partition = compactable_partition(
-        &dir,
-        CompactionSetup {
-            topic: "too-clean",
-            cfg: base.clone(),
-            ..Default::default()
-        },
-    )
+    let partition = compactable_partition(&dir, CompactionSetup {
+        topic: "too-clean",
+        cfg: base.clone(),
+        ..Default::default()
+    })
     .await;
     let before = record_count(&partition);
     registry.insert(
@@ -249,11 +240,11 @@ async fn compactable_topics(
 async fn tick_all_skips_a_frozen_partition_and_compacts_an_unfrozen_control() {
     let dir = tempfile::tempdir().expect("log root");
     let registry = PartitionRegistry::new();
-    let cases = compactable_topics(
-        &dir,
-        &registry,
-        &["frozen-literal", "tenant-a.orders", "unfrozen"],
-    )
+    let cases = compactable_topics(&dir, &registry, &[
+        "frozen-literal",
+        "tenant-a.orders",
+        "unfrozen",
+    ])
     .await;
     // One image, one sweep. The control partition is compactable in
     // exactly the same way as the two frozen ones, so a sweep that
@@ -436,9 +427,11 @@ async fn tick_all_accounts_a_failed_compaction_and_takes_the_log_dir_offline() {
 /// changes; once the limit is raised the pass succeeds.
 #[tokio::test]
 async fn tick_all_leaves_a_partition_uncleanable_for_a_record_above_the_decompressed_limit() {
-    use bytes::Bytes;
-    use krabka_compression::CompressionType;
-    use krabka_protocol::records::{Attributes, Record, RecordBatch};
+    use {
+        bytes::Bytes,
+        krabka_compression::CompressionType,
+        krabka_protocol::records::{Attributes, Record, RecordBatch},
+    };
 
     let HostedCompactPartition {
         dir,

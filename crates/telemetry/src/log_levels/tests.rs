@@ -1,15 +1,15 @@
 //! Behavior of the live log filter: what it lists, what it retargets, and
 //! what a retarget does to the events a subscriber actually sees.
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+use {
+    super::{LogLevel, LogLevelController, ROOT_LOGGER},
+    assert2::{assert, check},
+    std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    tracing_subscriber::{Layer, layer::SubscriberExt as _},
 };
-
-use assert2::{assert, check};
-use tracing_subscriber::{Layer, layer::SubscriberExt as _};
-
-use super::{LogLevel, LogLevelController, ROOT_LOGGER};
 
 krabka_macros::capture_layer_fixture!(CaptureLayer, Captured, recover_poison);
 

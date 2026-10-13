@@ -28,9 +28,10 @@
 //! a stuck cluster reports in seconds instead of hitting CI's 600s kill, which
 //! is reported as TIMEOUT with no cause.
 
-use std::{future::Future, time::Duration};
-
-use support::cluster_lock;
+use {
+    std::{future::Future, time::Duration},
+    support::cluster_lock,
+};
 
 mod support;
 

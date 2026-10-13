@@ -7,13 +7,14 @@
 //! outranks the freeze, so a caller with no right to read a topic learns
 //! nothing about its freeze state.
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic;
-use krabka_verified::{FreezeMutationDecision, FreezeMutationKind, freeze_mutation_decision};
-
-use crate::{
-    codes,
-    freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
+use {
+    crate::{
+        codes,
+        freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
+    },
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+    krabka_verified::{FreezeMutationDecision, FreezeMutationKind, freeze_mutation_decision},
 };
 
 /// Builds the set of topic names that a KFC-9 write freeze covers.
@@ -69,36 +70,38 @@ pub(super) fn topic_refusal(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, sync::Arc};
-
-    use assert2::{assert, check};
-    use krabka_ids::PartitionIndex;
-    use krabka_metadata::{
-        AclOperation, MetadataRecord, PatternType, ResourceType, TopicFreezeRecord,
-    };
-    use krabka_protocol::owned::{
-        add_partitions_to_txn_request::{AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction},
-        add_partitions_to_txn_response::AddPartitionsToTxnResponse,
-        common::add_partitions_to_txn_response::add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
-    };
-
-    use super::*;
-    use crate::{
-        authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
-        broker::{Broker, BrokerHandle},
-        test_support::{
-            FreezeSetup, FrozenTopicsImageSetup, configure_single_partition_transactions,
-            start_broker_no_audit_with, test_ctx, topic_freeze_record,
-        },
-        txn::{
-            bootstrap::TOPIC,
-            handlers::add_partitions_to_txn::{
-                handle,
-                test_support::{seed_topic, topic, topic_result},
+    use {
+        super::*,
+        crate::{
+            authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
+            broker::{Broker, BrokerHandle},
+            test_support::{
+                FreezeSetup, FrozenTopicsImageSetup, configure_single_partition_transactions,
+                start_broker_no_audit_with, test_ctx, topic_freeze_record,
             },
-            state::TxnEntry,
-            version::resolve_txn_version,
+            txn::{
+                bootstrap::TOPIC,
+                handlers::add_partitions_to_txn::{
+                    handle,
+                    test_support::{seed_topic, topic, topic_result},
+                },
+                state::TxnEntry,
+                version::resolve_txn_version,
+            },
         },
+        assert2::{assert, check},
+        krabka_ids::PartitionIndex,
+        krabka_metadata::{
+            AclOperation, MetadataRecord, PatternType, ResourceType, TopicFreezeRecord,
+        },
+        krabka_protocol::owned::{
+            add_partitions_to_txn_request::{
+                AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction,
+            },
+            add_partitions_to_txn_response::AddPartitionsToTxnResponse,
+            common::add_partitions_to_txn_response::add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
+        },
+        std::{collections::HashSet, sync::Arc},
     };
 
     crate::test_support::context_helper!(client_id = "producer-client");
@@ -368,10 +371,10 @@ mod tests {
             let resp = anonymous_freeze_request(&broker, version).await;
 
             let expected = vec![
-                topic_result(
-                    FROZEN_TOPIC,
-                    &[(0, codes::POLICY_VIOLATION), (1, codes::POLICY_VIOLATION)],
-                ),
+                topic_result(FROZEN_TOPIC, &[
+                    (0, codes::POLICY_VIOLATION),
+                    (1, codes::POLICY_VIOLATION),
+                ]),
                 topic_result(UNFROZEN_TOPIC, &[(0, codes::NONE)]),
             ];
             check!(topic_rows(&resp, version) == expected, "{label}");
@@ -413,13 +416,10 @@ mod tests {
             // not 44: its freeze state never reaches a caller with no right
             // to read it.
             let expected = vec![
-                topic_result(
-                    FROZEN_TOPIC,
-                    &[
-                        (0, codes::TOPIC_AUTHORIZATION_FAILED),
-                        (1, codes::TOPIC_AUTHORIZATION_FAILED),
-                    ],
-                ),
+                topic_result(FROZEN_TOPIC, &[
+                    (0, codes::TOPIC_AUTHORIZATION_FAILED),
+                    (1, codes::TOPIC_AUTHORIZATION_FAILED),
+                ]),
                 topic_result(UNFROZEN_TOPIC, &[(0, codes::TOPIC_AUTHORIZATION_FAILED)]),
             ];
             check!(topic_rows(&resp, version) == expected, "{label}");

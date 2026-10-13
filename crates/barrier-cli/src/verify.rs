@@ -14,16 +14,17 @@
 //! metadata read that finds each leader therefore also carries the topic id
 //! back, so the fetch is correct at any version.
 
-use krabka_protocol::{
-    krabka::barrier as api,
-    owned::{
-        fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-        metadata_request::{MetadataRequest, MetadataRequestTopic},
+use {
+    crate::report::described_error,
+    krabka_protocol::{
+        krabka::barrier as api,
+        owned::{
+            fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+            metadata_request::{MetadataRequest, MetadataRequestTopic},
+        },
+        records::RecordBatch,
     },
-    records::RecordBatch,
 };
-
-use crate::report::described_error;
 
 /// One offset that does not hold the marker the cut claims.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,11 +288,12 @@ fn check_batch(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::Bytes;
-    use krabka_protocol::records::{Attributes, Record};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        bytes::Bytes,
+        krabka_protocol::records::{Attributes, Record},
+    };
 
     /// A barrier marker for `group` at `epoch`, built the way the broker builds
     /// one so the key layout cannot drift from the parser.

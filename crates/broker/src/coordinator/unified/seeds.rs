@@ -168,8 +168,16 @@ replay_member_maps!(
 
 /// Snapshot member metadata, current assignments, then the protocol's target map.
 macro_rules! snapshot_member_maps {
-    ($state:ident; $members:ident, $current:ident, $targets:ident;
-        $metadata:path, $assignment:path; |$id:ident, $member:ident| $target:block
+    (
+        $state:ident;
+        $members:ident,
+        $current:ident,
+        $targets:ident;
+        $metadata:path,
+        $assignment:path; |
+        $id:ident,
+        $member:ident |
+        $target:block
     ) => {
         let mut $members = ::std::collections::HashMap::new();
         let mut $targets = ::std::collections::HashMap::new();

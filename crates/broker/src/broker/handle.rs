@@ -3,20 +3,20 @@
 //! draining they share. The handle's test-only inspection helpers live in the
 //! sibling modules declared below, so this file stays the production surface.
 
-use std::net::SocketAddr;
-
-use krabka_ids::PartitionIndex;
-use tokio::task::JoinHandle;
-
 #[cfg(test)]
 use crate::broker::Broker;
-use crate::{
-    broker::BrokerHandle,
-    clean_shutdown::write,
-    error::BrokerError,
-    future_log::{abort_moves, shutdown_moves},
-    partition_registry::PartitionRegistry,
-    time_util::now_ms,
+use {
+    crate::{
+        broker::BrokerHandle,
+        clean_shutdown::write,
+        error::BrokerError,
+        future_log::{abort_moves, shutdown_moves},
+        partition_registry::PartitionRegistry,
+        time_util::now_ms,
+    },
+    krabka_ids::PartitionIndex,
+    std::net::SocketAddr,
+    tokio::task::JoinHandle,
 };
 
 #[cfg(any(test, feature = "test-helpers"))]
@@ -106,9 +106,7 @@ impl BrokerHandle {
     /// tests that drive a subsystem taking `&Arc<Broker>` directly rather than
     /// over a socket. `BrokerControllerAdminRouter::bind` is one.
     #[cfg(test)]
-    pub(crate) fn broker_for_test(&self) -> &std::sync::Arc<Broker> {
-        &self.broker
-    }
+    pub(crate) fn broker_for_test(&self) -> &std::sync::Arc<Broker> { &self.broker }
 
     /// The bound address of the listener that serves this node's Kafka
     /// requests. This is useful when `BrokerConfig.listen_addr` used port 0
@@ -131,27 +129,21 @@ impl BrokerHandle {
     /// when none has that name. `None` on a node without the broker role,
     /// which opens no data-plane listener.
     #[must_use]
-    pub fn data_plane_addr(&self) -> Option<SocketAddr> {
-        self.listen_addr
-    }
+    pub fn data_plane_addr(&self) -> Option<SocketAddr> { self.listen_addr }
 
     /// The actual bound address of the Prometheus `/metrics`
     /// HTTP server, if one is configured. Tests pass `127.0.0.1:0` in
     /// `BrokerConfig::metrics_listen_addr` and read the OS-assigned
     /// port back through this accessor.
     #[must_use]
-    pub fn metrics_addr(&self) -> Option<SocketAddr> {
-        self.broker.metrics_bound_addr
-    }
+    pub fn metrics_addr(&self) -> Option<SocketAddr> { self.broker.metrics_bound_addr }
 
     /// The actual `SocketAddr` this broker's controller listener bound to
     /// (resolves the OS-assigned port when `controller_listen_addr` used port
     /// 0). KIP-853 dynamic-voters tests read this to point joiners at the
     /// bootstrap broker's real controller endpoint.
     #[must_use]
-    pub fn controller_addr(&self) -> SocketAddr {
-        self.broker.controller.controller_bound_addr()
-    }
+    pub fn controller_addr(&self) -> SocketAddr { self.broker.controller.controller_bound_addr() }
 
     /// Current Raft leader id as observed by this broker's controller.
     /// Returns `None` before the first leader is elected. Trivial
@@ -165,9 +157,7 @@ impl BrokerHandle {
     /// `MetadataImage`. Used by replication integration tests to wait
     /// for all peers to come up before issuing `CreateTopics`.
     #[must_use]
-    pub fn broker_count(&self) -> usize {
-        self.broker.controller.current_image().brokers().count()
-    }
+    pub fn broker_count(&self) -> usize { self.broker.controller.current_image().brokers().count() }
 
     /// This broker's own registration endpoints, as stored in the
     /// quorum-replicated [`krabka_metadata::MetadataImage`]. Integration
@@ -272,9 +262,7 @@ impl BrokerHandle {
     /// `IncrementalAlterConfigs` broker-resource requests that target this
     /// broker without a hard-coded node id.
     #[must_use]
-    pub fn node_id(&self) -> u64 {
-        self.broker.config.node_id.0
-    }
+    pub fn node_id(&self) -> u64 { self.broker.config.node_id.0 }
 
     /// Rebuild the TLS server config from the cert/key paths
     /// in `BrokerConfig::tls_config` *right now*, without the

@@ -6,12 +6,12 @@
 //! drive the same shapes, so the fixtures live in one module rather than once
 //! per test file.
 
-use std::sync::Arc;
-
-use krabka_metadata::{MetadataImage, NodeId};
-
-use crate::{
-    heartbeat::controller_state::ControllerLivenessState, test_support::FakeMetadataSource,
+use {
+    crate::{
+        heartbeat::controller_state::ControllerLivenessState, test_support::FakeMetadataSource,
+    },
+    krabka_metadata::{MetadataImage, NodeId},
+    std::sync::Arc,
 };
 
 /// A metadata source over `image`, with this node as the controller leader so

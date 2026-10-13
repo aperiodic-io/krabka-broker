@@ -2,15 +2,16 @@
 //! decision helpers, and one completion attempt against a coordinator whose
 //! `__transaction_state-0` partition and data partition are real logs.
 
-use assert2::{assert, check};
-
-use super::*;
-use crate::{
-    test_support::PartitionCount,
-    txn::{
-        coordinator::test_support::{StateImageSetup, test_prelude::*},
-        state::TopicPartition,
+use {
+    super::*,
+    crate::{
+        test_support::PartitionCount,
+        txn::{
+            coordinator::test_support::{StateImageSetup, test_prelude::*},
+            state::TopicPartition,
+        },
     },
+    assert2::{assert, check},
 };
 
 const TID: &str = "tid-completion";

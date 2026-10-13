@@ -5,9 +5,10 @@
 //! the `kafka-topics` calls that create the mixed-cluster topic, wait for a
 //! named leader, and parse the ISR out of a `--describe` report.
 
-use std::time::{Duration, Instant};
-
-use crate::docker::{KAFKA_IMAGE, docker_run_kafka_tool_with_image};
+use {
+    crate::docker::{KAFKA_IMAGE, docker_run_kafka_tool_with_image},
+    std::time::{Duration, Instant},
+};
 
 /// How long to wait for an external metadata request to report a leader.
 ///
@@ -61,22 +62,19 @@ pub fn described_isr(description: &str) -> Vec<u64> {
 pub async fn create_mixed_topic(bootstrap: &str, topic: &str) {
     let deadline = Instant::now() + Duration::from_mins(1);
     loop {
-        let output = docker_run_kafka_tool_with_image(
-            KAFKA_IMAGE,
-            &[
-                "kafka-topics",
-                "--create",
-                "--if-not-exists",
-                "--topic",
-                topic,
-                "--partitions",
-                "1",
-                "--replication-factor",
-                "3",
-                "--bootstrap-server",
-                bootstrap,
-            ],
-        );
+        let output = docker_run_kafka_tool_with_image(KAFKA_IMAGE, &[
+            "kafka-topics",
+            "--create",
+            "--if-not-exists",
+            "--topic",
+            topic,
+            "--partitions",
+            "1",
+            "--replication-factor",
+            "3",
+            "--bootstrap-server",
+            bootstrap,
+        ]);
         if output.status.success() {
             return;
         }
@@ -120,15 +118,12 @@ pub async fn create_and_wait_for_isr(
 }
 
 fn describe_topic(bootstrap: &str, topic: &str) -> std::process::Output {
-    docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE,
-        &[
-            "kafka-topics",
-            "--describe",
-            "--topic",
-            topic,
-            "--bootstrap-server",
-            bootstrap,
-        ],
-    )
+    docker_run_kafka_tool_with_image(KAFKA_IMAGE, &[
+        "kafka-topics",
+        "--describe",
+        "--topic",
+        topic,
+        "--bootstrap-server",
+        bootstrap,
+    ])
 }

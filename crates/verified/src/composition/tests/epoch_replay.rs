@@ -1,16 +1,16 @@
-use std::{
-    collections::BTreeMap,
-    ops::Bound::{Excluded, Unbounded},
+use {
+    super::{
+        EpochEntry, FetchWatermarks, LeaderEpoch, Offset, resolved_epoch_bounds_retained_replay,
+        validated_epochs_bound_truncated_fetch,
+    },
+    crate::broker::FetchVisibility,
+    assert2::assert,
+    proptest::prelude::*,
+    std::{
+        collections::BTreeMap,
+        ops::Bound::{Excluded, Unbounded},
+    },
 };
-
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{
-    EpochEntry, FetchWatermarks, LeaderEpoch, Offset, resolved_epoch_bounds_retained_replay,
-    validated_epochs_bound_truncated_fetch,
-};
-use crate::broker::FetchVisibility;
 
 type EpochOracle = Result<Option<(i32, FetchWatermarks, FetchVisibility)>, ()>;
 

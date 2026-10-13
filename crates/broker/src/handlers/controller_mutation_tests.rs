@@ -1,31 +1,32 @@
 //! Controller mutations through a broker whose observer stopped before newer commits.
 
-use assert2::assert;
-use krabka_metadata::{BrokerConfigRecord, DeleteTopicRecord, MetadataRecord, TopicConfigRecord};
-use krabka_protocol::{
-    owned::{
-        delete_topics_request::{self, DeleteTopicState, DeleteTopicsRequest},
-        delete_topics_response::DeleteTopicsResponse,
-        incremental_alter_configs_request::{
-            self, AlterConfigsResource, AlterableConfig, IncrementalAlterConfigsRequest,
+use {
+    super::test_support::{ReplicatedPartitionSetup, replicated_partition},
+    crate::{
+        broker::BrokerHandle,
+        codes,
+        config::NodeRole,
+        test_support::{
+            dispatch_wire, peer, principal, request_context, single_partition_topic,
+            start_broker_no_audit, start_broker_no_audit_with, string_pairs,
         },
-        incremental_alter_configs_response::IncrementalAlterConfigsResponse,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use krabka_raft::{BootstrapMode, NodeId};
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use super::test_support::{ReplicatedPartitionSetup, replicated_partition};
-use crate::{
-    broker::BrokerHandle,
-    codes,
-    config::NodeRole,
-    test_support::{
-        dispatch_wire, peer, principal, request_context, single_partition_topic,
-        start_broker_no_audit, start_broker_no_audit_with, string_pairs,
+    assert2::assert,
+    krabka_metadata::{BrokerConfigRecord, DeleteTopicRecord, MetadataRecord, TopicConfigRecord},
+    krabka_protocol::{
+        owned::{
+            delete_topics_request::{self, DeleteTopicState, DeleteTopicsRequest},
+            delete_topics_response::DeleteTopicsResponse,
+            incremental_alter_configs_request::{
+                self, AlterConfigsResource, AlterableConfig, IncrementalAlterConfigsRequest,
+            },
+            incremental_alter_configs_response::IncrementalAlterConfigsResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
+    krabka_raft::{BootstrapMode, NodeId},
+    tempfile::TempDir,
+    uuid::Uuid,
 };
 
 macro_rules! assert_single_response_error {

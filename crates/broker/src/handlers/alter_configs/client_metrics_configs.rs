@@ -8,10 +8,11 @@
 //! never reads the subscription's stored overrides: the request carries the
 //! complete set of non-default values. Every value is validated per KIP-714.
 
-use krabka_metadata::{ClientMetricsConfigRecord, MetadataRecord};
-use krabka_protocol::owned::alter_configs_request::AlterConfigsResource;
-
-use crate::client_metrics;
+use {
+    crate::client_metrics,
+    krabka_metadata::{ClientMetricsConfigRecord, MetadataRecord},
+    krabka_protocol::owned::alter_configs_request::AlterConfigsResource,
+};
 
 /// Build the authoritative `V1ClientMetricsConfig` record for a
 /// `CLIENT_METRICS` resource. The request carries the *complete* set of
@@ -39,20 +40,18 @@ pub(super) fn client_metrics_config_record(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{codes, handlers::alter_configs::test_support::client_metrics_resource};
+    use {
+        super::*,
+        crate::{codes, handlers::alter_configs::test_support::client_metrics_resource},
+        assert2::assert,
+    };
 
     #[test]
     fn client_metrics_replacement_builds_authoritative_override_map() {
-        let record = client_metrics_config_record(&client_metrics_resource(
-            "sub-a",
-            &[
-                ("interval.ms", "60000"),
-                ("metrics", "org.apache.kafka.consumer."),
-            ],
-        ))
+        let record = client_metrics_config_record(&client_metrics_resource("sub-a", &[
+            ("interval.ms", "60000"),
+            ("metrics", "org.apache.kafka.consumer."),
+        ]))
         .expect("valid client-metrics replacement");
 
         let expected = MetadataRecord::V1ClientMetricsConfig(ClientMetricsConfigRecord {

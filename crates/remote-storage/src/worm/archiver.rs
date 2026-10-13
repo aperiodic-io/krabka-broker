@@ -4,22 +4,23 @@
 //! the IO and reports what the store gave back for each object; the archiver
 //! turns those observations into the manifest bytes and the chain receipt.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_audit::signing::FileEd25519Signer;
-
-use crate::{
-    metadata::RemoteLogSegmentMetadata,
-    worm::{
-        chain::WormChainRecord,
-        config::WormConfig,
-        error::WormError,
-        manifest::{
-            ChainStamp, HexBytes, MANIFEST_FORMAT_VERSION, ManifestBody, ManifestSignature,
-            ObjectEntry, SegmentIdentity, SegmentManifest, manifest_head, manifest_signing_bytes,
+use {
+    crate::{
+        metadata::RemoteLogSegmentMetadata,
+        worm::{
+            chain::WormChainRecord,
+            config::WormConfig,
+            error::WormError,
+            manifest::{
+                ChainStamp, HexBytes, MANIFEST_FORMAT_VERSION, ManifestBody, ManifestSignature,
+                ObjectEntry, SegmentIdentity, SegmentManifest, manifest_head,
+                manifest_signing_bytes,
+            },
         },
     },
+    bytes::Bytes,
+    krabka_audit::signing::FileEd25519Signer,
+    std::sync::Arc,
 };
 
 /// Builds and signs the per-segment integrity manifest that backs WORM mode.
@@ -54,9 +55,7 @@ impl WormArchiver {
     /// An archiver that signs with `signer`, or leaves manifests unsigned when
     /// `signer` is `None`.
     #[must_use]
-    pub fn new(signer: Option<Arc<FileEd25519Signer>>) -> Self {
-        Self { signer }
-    }
+    pub fn new(signer: Option<Arc<FileEd25519Signer>>) -> Self { Self { signer } }
 
     /// Loads the signing key that `cfg` names, if it names one.
     ///
@@ -151,28 +150,27 @@ impl WormArchiver {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_ids::LeaderEpoch;
-    use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-    use tempfile::TempDir;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        metadata::{
-            CustomMetadata, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentState,
-            TopicIdPartition,
+    use {
+        super::*,
+        crate::{
+            metadata::{
+                CustomMetadata, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentState,
+                TopicIdPartition,
+            },
+            worm::manifest::{
+                ChainHead, EpochId, ManifestSeq, Sha256Digest, verify_manifest_signature,
+            },
         },
-        worm::manifest::{
-            ChainHead, EpochId, ManifestSeq, Sha256Digest, verify_manifest_signature,
-        },
+        assert2::{assert, check},
+        krabka_ids::LeaderEpoch,
+        ring::{rand::SystemRandom, signature::Ed25519KeyPair},
+        tempfile::TempDir,
+        uuid::Uuid,
     };
 
     const KEY_ID: &str = "worm-archiver-key";
 
-    fn epoch() -> EpochId {
-        EpochId(Uuid::from_u128(0xabcd))
-    }
+    fn epoch() -> EpochId { EpochId(Uuid::from_u128(0xabcd)) }
 
     fn metadata(segment_id: u128, stamp: Option<ChainStamp>) -> RemoteLogSegmentMetadata {
         let md = RemoteLogSegmentMetadata::new(
@@ -373,30 +371,21 @@ mod tests {
         check!(signer.key_id() == KEY_ID);
 
         for (label, cfg) in [
-            (
-                "path without id",
-                WormConfig {
-                    signing_key_path: Some(path.clone()),
-                    signing_key_id: None,
-                    write_only: false,
-                },
-            ),
-            (
-                "id without path",
-                WormConfig {
-                    signing_key_path: None,
-                    signing_key_id: Some(KEY_ID.to_string()),
-                    write_only: false,
-                },
-            ),
-            (
-                "path to something that is not a key",
-                WormConfig {
-                    signing_key_path: Some(dir.path().join("absent.pk8")),
-                    signing_key_id: Some(KEY_ID.to_string()),
-                    write_only: false,
-                },
-            ),
+            ("path without id", WormConfig {
+                signing_key_path: Some(path.clone()),
+                signing_key_id: None,
+                write_only: false,
+            }),
+            ("id without path", WormConfig {
+                signing_key_path: None,
+                signing_key_id: Some(KEY_ID.to_string()),
+                write_only: false,
+            }),
+            ("path to something that is not a key", WormConfig {
+                signing_key_path: Some(dir.path().join("absent.pk8")),
+                signing_key_id: Some(KEY_ID.to_string()),
+                write_only: false,
+            }),
         ] {
             check!(
                 matches!(

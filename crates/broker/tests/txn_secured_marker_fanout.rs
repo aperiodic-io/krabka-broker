@@ -29,47 +29,51 @@
 //! Windows-gated like the other multi-node transactional tests, because
 //! openraft and tokio scheduling race on the hosted Windows runner.
 
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use krabka_broker::{
-    BootstrapMode, Broker, BrokerConfig, BrokerError, BrokerHandle,
-    config::{InterBrokerCredentials, ListenerSpec},
-};
-use krabka_client_core::{
-    Client,
-    security::{ClientSecurity, SaslCredentials},
-};
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    owned::{
-        add_partitions_to_txn_request::{AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction},
-        common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
-        find_coordinator_request::FindCoordinatorRequest,
-        init_producer_id_response::InitProducerIdResponse,
-        produce_request::ProduceRequest,
-        produce_response::PartitionProduceResponse,
+use {
+    crate::support::{
+        acl::{AllowAclSetup, use_simple_acl_authorizer},
+        controller_voters,
+        discovery::named_topic_metadata,
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{batch_from_records, value_record},
+        shutdown_cluster,
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        },
+        transactions::{
+            EndTransactionSetup, InitProducerSetup, ProducerIdentity, end_transaction_request,
+            init_producer_request,
+        },
     },
-    records::{Attributes, RecordBatch},
-};
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tempfile::TempDir;
-
-use crate::support::{
-    acl::{AllowAclSetup, use_simple_acl_authorizer},
-    controller_voters,
-    discovery::named_topic_metadata,
-    produce::{SinglePartitionProduceSetup, batch_request},
-    records::{batch_from_records, value_record},
-    shutdown_cluster,
-    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
-    transactions::{
-        EndTransactionSetup, InitProducerSetup, ProducerIdentity, end_transaction_request,
-        init_producer_request,
+    assert2::assert,
+    krabka_broker::{
+        BootstrapMode, Broker, BrokerConfig, BrokerError, BrokerHandle,
+        config::{InterBrokerCredentials, ListenerSpec},
     },
+    krabka_client_core::{
+        Client,
+        security::{ClientSecurity, SaslCredentials},
+    },
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        owned::{
+            add_partitions_to_txn_request::{
+                AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction,
+            },
+            common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+            find_coordinator_request::FindCoordinatorRequest,
+            init_producer_id_response::InitProducerIdResponse,
+            produce_request::ProduceRequest,
+            produce_response::PartitionProduceResponse,
+        },
+        records::{Attributes, RecordBatch},
+    },
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::{
+        net::SocketAddr,
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
 };
 
 mod support;
@@ -136,9 +140,7 @@ async fn sasl_client_as(addr: &str, credentials: (&str, &str)) -> Client {
 }
 
 /// Open a client to `addr` that authenticates as the broker user.
-async fn sasl_client(addr: &str) -> Client {
-    sasl_client_as(addr, (USER, PASS)).await
-}
+async fn sasl_client(addr: &str) -> Client { sasl_client_as(addr, (USER, PASS)).await }
 
 /// Boot a two-broker KIP-853 auto-join cluster on a `SASL_PLAINTEXT` listener.
 ///
@@ -424,13 +426,10 @@ async fn end_txn_marker_fanout_to_remote_leader_over_sasl() {
     // the path the fix repairs — the pre-fix one-shot client could not
     // authenticate and EndTxn would surface a retriable UNKNOWN_SERVER_ERROR.
     let end = coord
-        .send(end_transaction_request(
-            TID,
-            EndTransactionSetup {
-                producer: ProducerIdentity::from_wire((pid, epoch)),
-                ..Default::default()
-            },
-        ))
+        .send(end_transaction_request(TID, EndTransactionSetup {
+            producer: ProducerIdentity::from_wire((pid, epoch)),
+            ..Default::default()
+        }))
         .await
         .expect("end txn");
     assert!(
@@ -652,14 +651,11 @@ async fn a_remote_coordinator_verifies_a_produce_for_a_broker_with_only_cluster_
         };
         let request = ProduceRequest {
             transactional_id: Some(case.name.into()),
-            ..batch_request(
-                batch,
-                SinglePartitionProduceSetup {
-                    topic: (case.name).into(),
-                    partition: krabka_ids::PartitionIndex(partition),
-                    ..SinglePartitionProduceSetup::replicated()
-                },
-            )
+            ..batch_request(batch, SinglePartitionProduceSetup {
+                topic: (case.name).into(),
+                partition: krabka_ids::PartitionIndex(partition),
+                ..SinglePartitionProduceSetup::replicated()
+            })
         };
         let produced = if case.produce_version < 12 {
             to_leader.send(At::<_, 11>(request)).await
@@ -669,13 +665,10 @@ async fn a_remote_coordinator_verifies_a_produce_for_a_broker_with_only_cluster_
         .expect("produce");
 
         let ended = to_coordinator
-            .send(end_transaction_request(
-                case.name,
-                EndTransactionSetup {
-                    producer: ProducerIdentity::from_wire((init.producer_id, init.producer_epoch)),
-                    ..Default::default()
-                },
-            ))
+            .send(end_transaction_request(case.name, EndTransactionSetup {
+                producer: ProducerIdentity::from_wire((init.producer_id, init.producer_epoch)),
+                ..Default::default()
+            }))
             .await
             .expect("end txn");
 

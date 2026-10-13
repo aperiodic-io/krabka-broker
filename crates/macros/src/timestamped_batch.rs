@@ -1,8 +1,9 @@
 //! Timestamped record fixtures shared by local and remote read tests.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::fixtures::function;
+use {
+    crate::fixtures::function,
+    moxy::{ast::ParseError, token::TokenStream},
+};
 
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
     function(

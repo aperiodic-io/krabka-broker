@@ -4,12 +4,12 @@
 //! temporary file and a backup copy, so a crash in the middle of the rename
 //! still leaves one readable checkpoint behind.
 
-use std::{io::Write as _, path::Path};
-
-use krabka_ids::Offset;
-use krabka_log::Log;
-
-use crate::BrokerError;
+use {
+    crate::BrokerError,
+    krabka_ids::Offset,
+    krabka_log::Log,
+    std::{io::Write as _, path::Path},
+};
 
 pub(super) const DURABLE_OFFSET_FILE: &str = "wal-durable-offset.checkpoint";
 const DURABLE_OFFSET_BACKUP_FILE: &str = "wal-durable-offset.checkpoint.bak";
@@ -197,12 +197,13 @@ fn restore_durable_offset_backup(path: &Path, backup: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_log::LogConfig;
-    use krabka_protocol::records::{Record, RecordBatch};
-
-    use super::*;
-    use crate::{test_support::RecordCount, wal::quorum::test_support::batch};
+    use {
+        super::*,
+        crate::{test_support::RecordCount, wal::quorum::test_support::batch},
+        assert2::assert,
+        krabka_log::LogConfig,
+        krabka_protocol::records::{Record, RecordBatch},
+    };
 
     /// The exact bytes a 1.x broker writes for the range `3..7`. A change
     /// here is a change to the 1.x on-disk contract.
@@ -319,13 +320,10 @@ mod tests {
         };
         log.append(&mut durable).unwrap();
         log.sync().unwrap();
-        write_durable_offset(
-            &checkpoint,
-            DurableRange {
-                start: Offset(0),
-                end: Offset(1),
-            },
-        )
+        write_durable_offset(&checkpoint, DurableRange {
+            start: Offset(0),
+            end: Offset(1),
+        })
         .unwrap();
         let mut uncertain = RecordBatch {
             base_offset: 1,

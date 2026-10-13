@@ -34,12 +34,12 @@
 
 mod support;
 
-use std::process::Command;
-
-use assert2::check;
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
-
-use crate::support::{JvmBrokerSetup, controller_voters, init_jvm_tracing, jvm_broker_config};
+use {
+    crate::support::{JvmBrokerSetup, controller_voters, init_jvm_tracing, jvm_broker_config},
+    assert2::check,
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+    std::process::Command,
+};
 
 /// Kafka 4.3.1 is the compatibility oracle for KIP-919.
 const KAFKA_IMAGE: &str = "mirror.gcr.io/apache/kafka:4.3.1";
@@ -63,17 +63,11 @@ fn ports() -> &'static (String, String, String) {
     })
 }
 
-fn advertised_addr() -> &'static str {
-    &ports().0
-}
+fn advertised_addr() -> &'static str { &ports().0 }
 
-fn listen_addr() -> &'static str {
-    &ports().1
-}
+fn listen_addr() -> &'static str { &ports().1 }
 
-fn controller_listen() -> &'static str {
-    &ports().2
-}
+fn controller_listen() -> &'static str { &ports().2 }
 
 /// The controller listener as the CLI containers address it. The voter set
 /// carries the same name, because `DescribeCluster` projects the voter
@@ -95,19 +89,13 @@ async fn start_host_broker_with(
             krabka_broker::NodeId(1),
             controller_bootstrap().to_string(),
         )],
-        ..jvm_broker_config(
-            dir.path().to_path_buf(),
-            JvmBrokerSetup {
-                listen: listen_addr().parse().expect("allocated addr"),
-                controller: controller_listen().parse().expect("allocated addr"),
-                advertised: (advertised_addr()).to_owned(),
-                voters: controller_voters(&[(
-                    1,
-                    controller_listen().parse().expect("allocated addr"),
-                )]),
-                ..Default::default()
-            },
-        )
+        ..jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
+            listen: listen_addr().parse().expect("allocated addr"),
+            controller: controller_listen().parse().expect("allocated addr"),
+            advertised: (advertised_addr()).to_owned(),
+            voters: controller_voters(&[(1, controller_listen().parse().expect("allocated addr"))]),
+            ..Default::default()
+        })
     };
     adjust(&mut config);
     let handle = Broker::start(config).await.expect("start broker");
@@ -163,28 +151,22 @@ async fn kafka_configs_bootstrap_controller_round_trips_a_dynamic_broker_config(
 
     let (broker, _dir) = start_host_broker_with(|_| {}).await;
 
-    kafka_tool(
-        "kafka-configs",
-        &[
-            "--entity-type",
-            "brokers",
-            "--entity-name",
-            "1",
-            "--alter",
-            "--add-config",
-            THROTTLE,
-        ],
-    );
-    let described = kafka_tool(
-        "kafka-configs",
-        &[
-            "--entity-type",
-            "brokers",
-            "--entity-name",
-            "1",
-            "--describe",
-        ],
-    );
+    kafka_tool("kafka-configs", &[
+        "--entity-type",
+        "brokers",
+        "--entity-name",
+        "1",
+        "--alter",
+        "--add-config",
+        THROTTLE,
+    ]);
+    let described = kafka_tool("kafka-configs", &[
+        "--entity-type",
+        "brokers",
+        "--entity-name",
+        "1",
+        "--describe",
+    ]);
 
     check!(
         described.contains(THROTTLE),
@@ -213,37 +195,31 @@ async fn kafka_acls_bootstrap_controller_add_list_remove() {
     })
     .await;
 
-    kafka_tool(
-        "kafka-acls",
-        &[
-            "--add",
-            "--allow-principal",
-            "User:alice",
-            "--operation",
-            "Read",
-            "--topic",
-            TOPIC,
-        ],
-    );
+    kafka_tool("kafka-acls", &[
+        "--add",
+        "--allow-principal",
+        "User:alice",
+        "--operation",
+        "Read",
+        "--topic",
+        TOPIC,
+    ]);
     let listed = kafka_tool("kafka-acls", &["--list", "--topic", TOPIC]);
     check!(
         listed.contains("User:alice") && listed.contains("READ"),
         "list missing the ACL just written: {listed}"
     );
 
-    kafka_tool(
-        "kafka-acls",
-        &[
-            "--remove",
-            "--force",
-            "--allow-principal",
-            "User:alice",
-            "--operation",
-            "Read",
-            "--topic",
-            TOPIC,
-        ],
-    );
+    kafka_tool("kafka-acls", &[
+        "--remove",
+        "--force",
+        "--allow-principal",
+        "User:alice",
+        "--operation",
+        "Read",
+        "--topic",
+        TOPIC,
+    ]);
     let remaining = kafka_tool("kafka-acls", &["--list", "--topic", TOPIC]);
 
     check!(
@@ -324,15 +300,12 @@ async fn kafka_features_bootstrap_controller_describes_and_downgrades() {
         "expected transaction.version finalized at 2 before the downgrade, got {before:?}: {described}"
     );
 
-    kafka_tool(
-        "kafka-features",
-        &[
-            "downgrade",
-            "--feature",
-            "transaction.version=1",
-            "--unsafe",
-        ],
-    );
+    kafka_tool("kafka-features", &[
+        "downgrade",
+        "--feature",
+        "transaction.version=1",
+        "--unsafe",
+    ]);
 
     let after_out = kafka_tool("kafka-features", &["describe"]);
     let after = support::jvm_finalized_level(&after_out, "transaction.version");

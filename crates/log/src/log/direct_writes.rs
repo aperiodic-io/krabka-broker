@@ -7,32 +7,32 @@
 //! the real `O_DIRECT` where the kernel offers it, and through the page cache
 //! where it does not, and expects the same log either way.
 
-use std::{
-    fs::{File, OpenOptions},
-    io::Write as _,
-    os::unix::fs::FileExt as _,
-    path::Path,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+use {
+    super::{
+        Log,
+        test_support::{
+            NO_LIMIT, append_samples, assert_log_end_offset, configured_test_log, sample_batch,
+            verbatim_from,
+        },
     },
-};
-
-use krabka_ids::Offset;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _, bytes, mebibytes};
-
-use super::{
-    Log,
-    test_support::{
-        NO_LIMIT, append_samples, assert_log_end_offset, configured_test_log, sample_batch,
-        verbatim_from,
+    crate::{
+        DeliveryPolicy, LeaderEpoch, VerbatimBatch,
+        config::{LogConfig, SegmentAllocation},
+        io::{DirectFile, IoTarget, LogIo},
+        name,
     },
-};
-use crate::{
-    DeliveryPolicy, LeaderEpoch, VerbatimBatch,
-    config::{LogConfig, SegmentAllocation},
-    io::{DirectFile, IoTarget, LogIo},
-    name,
+    krabka_ids::Offset,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _, bytes, mebibytes},
+    std::{
+        fs::{File, OpenOptions},
+        io::Write as _,
+        os::unix::fs::FileExt as _,
+        path::Path,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+    },
 };
 
 const BLOCK: usize = 512;

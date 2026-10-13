@@ -20,14 +20,14 @@
 //! and rewrites what it opens, so pointing it at a directory a live broker
 //! owns would corrupt the thing under test.
 
-use std::path::{Path, PathBuf};
-
-use bytes::Bytes;
-use krabka_broker::NodeId;
-use krabka_log::{Log, LogConfig, Offset};
-use uuid::Uuid;
-
-use crate::TOPIC;
+use {
+    crate::TOPIC,
+    bytes::Bytes,
+    krabka_broker::NodeId,
+    krabka_log::{Log, LogConfig, Offset},
+    std::path::{Path, PathBuf},
+    uuid::Uuid,
+};
 
 /// Name of the follower's durable-offset checkpoint, from
 /// `wal::quorum::follower::checkpoint`.

@@ -7,21 +7,21 @@
 //! `INTERNAL` listeners and the image that ships `javac`, which is why it is
 //! its own file.
 
-use std::{io::Write, process::Stdio};
-
-use assert2::assert;
-use krabka_broker::{Broker, BrokerConfig};
-use krabka_log::LogConfig;
-
-use crate::{
-    jvm_acceptance::{
-        KAFKA_IMAGE_TXN, TRANSACTIONAL_PRODUCER_JAVA, create_plain_console_topic_at,
-        docker_run_kafka_tool,
+use {
+    crate::{
+        jvm_acceptance::{
+            KAFKA_IMAGE_TXN, TRANSACTIONAL_PRODUCER_JAVA, create_plain_console_topic_at,
+            docker_run_kafka_tool,
+        },
+        support::{
+            ContainerInput, JvmBrokerSetup, JvmDockerSetup, controller_voters, init_jvm_tracing,
+            jvm_broker_config, jvm_docker_command,
+        },
     },
-    support::{
-        ContainerInput, JvmBrokerSetup, JvmDockerSetup, controller_voters, init_jvm_tracing,
-        jvm_broker_config, jvm_docker_command,
-    },
+    assert2::assert,
+    krabka_broker::{Broker, BrokerConfig},
+    krabka_log::LogConfig,
+    std::{io::Write, process::Stdio},
 };
 
 /// A zombie-fencing probe (KIP-360): two JVM producers share one
@@ -191,18 +191,15 @@ async fn transactional_console_producer_eos() {
                 },
             ],
             inter_broker_listener_name: "INTERNAL".to_string(),
-            ..jvm_broker_config(
-                dir.path().to_path_buf(),
-                JvmBrokerSetup {
-                    node: krabka_broker::NodeId(u64::try_from(i + 1).unwrap()),
-                    listen: listen_addr,
-                    controller: format!("0.0.0.0:{}", controller_ports[i])
-                        .parse()
-                        .expect("static addr"),
-                    advertised: advertised_listener.clone(),
-                    voters: controller_voters(&voters),
-                },
-            )
+            ..jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
+                node: krabka_broker::NodeId(u64::try_from(i + 1).unwrap()),
+                listen: listen_addr,
+                controller: format!("0.0.0.0:{}", controller_ports[i])
+                    .parse()
+                    .expect("static addr"),
+                advertised: advertised_listener.clone(),
+                voters: controller_voters(&voters),
+            })
         };
         tempdirs.push(dir);
         spawns.push(tokio::spawn(async move {

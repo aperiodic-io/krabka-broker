@@ -213,10 +213,11 @@ impl AuditEvent {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::test_support::{admin, authentication, denied, privileged_freeze};
+    use {
+        super::*,
+        crate::test_support::{admin, authentication, denied, privileged_freeze},
+        assert2::check,
+    };
 
     #[test]
     fn class_tag_round_trips_and_header_maps() {

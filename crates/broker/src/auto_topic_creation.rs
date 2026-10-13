@@ -36,40 +36,43 @@
 //! holds the name back from a new creation until the entry expires, and the
 //! next heartbeats report the error.
 
-use std::{
-    cmp::Reverse,
-    collections::{BTreeMap, BinaryHeap, HashMap},
-    sync::{
-        Arc, Mutex, OnceLock, PoisonError, Weak,
-        atomic::{AtomicUsize, Ordering},
+use {
+    crate::{
+        barrier::{STATE_TOPIC, bootstrap::topic_configs as barrier_topic_configs},
+        broker::Broker,
+        codes,
+        config::BrokerConfig,
+        config_keys::{
+            ERRORS_DEADLETTERQUEUE_GROUP_ENABLE, MESSAGE_TIMESTAMP_TYPE,
+            MESSAGE_TIMESTAMP_TYPE_CREATE,
+        },
+        coordinator::bootstrap::{OFFSETS_TOPIC, offsets_topic_configs},
+        internal_topics::is_internal_topic,
+        share_coordinator::bootstrap::{
+            TOPIC as SHARE_TOPIC, topic_configs as share_topic_configs,
+        },
+        time_util::now_ms,
+        topic_creator::{ForwardedIdentity, TopicCreator, TopicCreatorError},
+        txn::bootstrap::{TOPIC as TRANSACTION_TOPIC, topic_configs as transaction_topic_configs},
     },
-};
-
-use dashmap::DashMap;
-use krabka_log::topic_name::validate_topic_name;
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
-        create_topics_response::CreateTopicsResponse,
-        metadata_response::MetadataResponseTopic,
+    dashmap::DashMap,
+    krabka_log::topic_name::validate_topic_name,
+    krabka_protocol::{
+        owned::{
+            create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
+            create_topics_response::CreateTopicsResponse,
+            metadata_response::MetadataResponseTopic,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    barrier::{STATE_TOPIC, bootstrap::topic_configs as barrier_topic_configs},
-    broker::Broker,
-    codes,
-    config::BrokerConfig,
-    config_keys::{
-        ERRORS_DEADLETTERQUEUE_GROUP_ENABLE, MESSAGE_TIMESTAMP_TYPE, MESSAGE_TIMESTAMP_TYPE_CREATE,
+    std::{
+        cmp::Reverse,
+        collections::{BTreeMap, BinaryHeap, HashMap},
+        sync::{
+            Arc, Mutex, OnceLock, PoisonError, Weak,
+            atomic::{AtomicUsize, Ordering},
+        },
     },
-    coordinator::bootstrap::{OFFSETS_TOPIC, offsets_topic_configs},
-    internal_topics::is_internal_topic,
-    share_coordinator::bootstrap::{TOPIC as SHARE_TOPIC, topic_configs as share_topic_configs},
-    time_util::now_ms,
-    topic_creator::{ForwardedIdentity, TopicCreator, TopicCreatorError},
-    txn::bootstrap::{TOPIC as TRANSACTION_TOPIC, topic_configs as transaction_topic_configs},
 };
 
 /// The `timeout_ms` of each `CreateTopics` request. Kafka's
@@ -210,9 +213,7 @@ impl AutoTopicCreation {
 
     /// Marks `name` in flight. Returns `false` when another creation of the
     /// name is in flight already.
-    fn begin(&self, name: &str) -> bool {
-        self.in_flight.insert(name.to_owned(), ()).is_none()
-    }
+    fn begin(&self, name: &str) -> bool { self.in_flight.insert(name.to_owned(), ()).is_none() }
 
     /// Kafka's `clearInflightRequests`: clears the in-flight mark of each of
     /// `names`.
@@ -225,30 +226,22 @@ impl AutoTopicCreation {
     /// Test-only: marks `name` in flight, as a creation that has not answered
     /// yet holds it.
     #[cfg(test)]
-    pub(crate) fn hold_for_test(&self, name: &str) -> bool {
-        self.begin(name)
-    }
+    pub(crate) fn hold_for_test(&self, name: &str) -> bool { self.begin(name) }
 
     /// Test-only: clears the in-flight mark of `name`.
     #[cfg(test)]
-    pub(crate) fn release_for_test(&self, name: &str) {
-        self.end(&[name.to_owned()]);
-    }
+    pub(crate) fn release_for_test(&self, name: &str) { self.end(&[name.to_owned()]); }
 
     /// Test-only: whether a creation of `name` is in flight.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn is_in_flight(&self, name: &str) -> bool {
-        self.in_flight.contains_key(name)
-    }
+    pub(crate) fn is_in_flight(&self, name: &str) -> bool { self.in_flight.contains_key(name) }
 
     /// Test-only: the number of `CreateTopics` requests this component has
     /// sent.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn started(&self) -> usize {
-        self.started.load(Ordering::Relaxed)
-    }
+    pub(crate) fn started(&self) -> usize { self.started.load(Ordering::Relaxed) }
 
     /// Asks for the topic `name` with no request context, as
     /// `KafkaApis.getCoordinator` calls `createTopics(Set(name), quota,
@@ -638,9 +631,7 @@ struct ErrorEntry {
 }
 
 impl Default for ExpiringErrorCache {
-    fn default() -> Self {
-        Self::new(ERROR_CACHE_CAPACITY)
-    }
+    fn default() -> Self { Self::new(ERROR_CACHE_CAPACITY) }
 }
 
 impl ExpiringErrorCache {
@@ -663,14 +654,11 @@ impl ExpiringErrorCache {
         let expires_at_ms = now_ms.saturating_add(ttl_ms);
         let sequence = inner.next_sequence;
         inner.next_sequence += 1;
-        inner.by_topic.insert(
-            topic.to_owned(),
-            ErrorEntry {
-                message,
-                expires_at_ms,
-                sequence,
-            },
-        );
+        inner.by_topic.insert(topic.to_owned(), ErrorEntry {
+            message,
+            expires_at_ms,
+            sequence,
+        });
         inner
             .expiry_queue
             .push(Reverse((expires_at_ms, sequence, topic.to_owned())));
@@ -720,9 +708,7 @@ impl ExpiringErrorCache {
 
     /// The number of entries, the expired ones included.
     #[cfg(test)]
-    fn len(&self) -> usize {
-        self.lock().by_topic.len()
-    }
+    fn len(&self) -> usize { self.lock().by_topic.len() }
 }
 
 #[cfg(test)]

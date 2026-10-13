@@ -5,11 +5,7 @@
 //! per-partition mutex guards. They sit in their own file because every other
 //! part of the tracker reads or writes them.
 
-use std::collections::HashMap;
-
-use krabka_log::ProducerId;
-
-use crate::partition::LogOffset;
+use {crate::partition::LogOffset, krabka_log::ProducerId, std::collections::HashMap};
 
 /// Kafka's `ProducerStateEntry.NUM_BATCHES_TO_RETAIN`: the number of a
 /// producer's most recent batches whose retry answers as a duplicate.

@@ -6,12 +6,13 @@
 //!
 //! [`build_registry`]: super::build_registry
 
-use krabka_protocol::api_key::ApiKey;
-
-use super::{AuthHandler, ContextHandler, ProduceHandler, TelemetryHandler};
-use crate::{
-    api_catalog::dispatched_apis,
-    handlers::{ApiKeyCode, ApiVersion},
+use {
+    super::{AuthHandler, ContextHandler, ProduceHandler, TelemetryHandler},
+    crate::{
+        api_catalog::dispatched_apis,
+        handlers::{ApiKeyCode, ApiVersion},
+    },
+    krabka_protocol::api_key::ApiKey,
 };
 
 /// How the KIP-124 request quota reaches an api.
@@ -155,13 +156,9 @@ impl DispatchEntry {
         }
     }
 
-    pub(crate) fn kind(self) -> DispatchKind {
-        self.kind
-    }
+    pub(crate) fn kind(self) -> DispatchKind { self.kind }
 
-    pub(crate) fn quota_policy(self) -> RequestQuotaPolicy {
-        self.quota_policy
-    }
+    pub(crate) fn quota_policy(self) -> RequestQuotaPolicy { self.quota_policy }
 
     pub(crate) fn body_flexible(self, version: ApiVersion) -> bool {
         self.flexible_min != i16::MAX && version >= self.flexible_min
@@ -177,15 +174,11 @@ impl DispatchEntry {
     }
 
     #[cfg(test)]
-    pub(crate) fn is_context(self) -> bool {
-        matches!(self.kind, DispatchKind::Context(_))
-    }
+    pub(crate) fn is_context(self) -> bool { matches!(self.kind, DispatchKind::Context(_)) }
 }
 
 impl DispatchRegistry {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
+    pub(crate) fn new() -> Self { Self::default() }
 
     pub(crate) fn register(&mut self, entry: DispatchEntry) -> bool {
         self.table.insert(entry.api_key, entry).is_none()

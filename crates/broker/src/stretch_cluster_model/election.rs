@@ -6,22 +6,22 @@
 //! model state, so they share one file with the convergence test that the
 //! availability property depends on.
 
-use std::collections::HashSet;
-
-use krabka_metadata::PartitionRecord;
-use krabka_raft::NodeId;
-
-use super::{
-    block_on,
-    config::{StretchModel, TOPIC},
-    state::{StretchState, check_epoch},
-};
-use crate::{
-    config_keys::RecoveryStrategy,
-    elr::state::PartitionElr,
-    leader_election::{
-        ElectionType, FailoverDecision, Ladder, failover_one, select_new_leader_for_partition,
+use {
+    super::{
+        block_on,
+        config::{StretchModel, TOPIC},
+        state::{StretchState, check_epoch},
     },
+    crate::{
+        config_keys::RecoveryStrategy,
+        elr::state::PartitionElr,
+        leader_election::{
+            ElectionType, FailoverDecision, Ladder, failover_one, select_new_leader_for_partition,
+        },
+    },
+    krabka_metadata::PartitionRecord,
+    krabka_raft::NodeId,
+    std::collections::HashSet,
 };
 
 /// Adapt the production ladder-based decision to the model's callback shape.

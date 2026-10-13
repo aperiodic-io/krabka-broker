@@ -1,16 +1,16 @@
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_metadata::{
-    ControllerRegistrationRecord, FeatureLevelRecord, MetadataImage, MetadataRecord, NodeId,
-    voters::{KRaftVersionRange, Voter, VoterSet},
-};
-use krabka_protocol::owned::unregister_controller_response::MAX_VERSION;
-
-use super::*;
-use crate::{
-    handlers::{RequestContext, update_features::answer},
-    test_support::{ControllerPeerAllowed, GrantsInPrincipalName, start_broker_with},
+use {
+    super::*,
+    crate::{
+        handlers::{RequestContext, update_features::answer},
+        test_support::{ControllerPeerAllowed, GrantsInPrincipalName, start_broker_with},
+    },
+    assert2::assert,
+    krabka_metadata::{
+        ControllerRegistrationRecord, FeatureLevelRecord, MetadataImage, MetadataRecord, NodeId,
+        voters::{KRaftVersionRange, Voter, VoterSet},
+    },
+    krabka_protocol::owned::unregister_controller_response::MAX_VERSION,
+    std::sync::Arc,
 };
 
 crate::test_support::codec_helpers!(

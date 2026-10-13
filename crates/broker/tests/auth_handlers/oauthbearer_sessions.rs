@@ -16,35 +16,36 @@
 //! to jump past, and a session that has expired stays open until a request
 //! that is not part of a re-authentication arrives on it.
 
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_broker::Broker;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        api_versions_request, api_versions_response, metadata_request, metadata_response,
-        sasl_authenticate_response, sasl_handshake_request, sasl_handshake_response,
-    },
-};
-use krabka_security::SaslMechanism;
-use tokio::{io::AsyncReadExt, net::TcpStream};
-
-use crate::{
-    harness::{alice_password, round_trip, sasl_authenticate_round_trip, start_broker_stream},
-    kafka_wire::{ExchangeSetup as WireExchangeSetup, exchange},
-    oauthbearer::{
-        drive_inband_reauth, drive_sasl_oauthbearer_session_open, now_unix_secs,
-        oauthbearer_fixture, oauthbearer_zero_skew_validator, unsecured_jws,
-    },
-    support::{
-        sasl::{plain_authentication_body, sasl_temp_config},
-        sasl_plaintext_config,
-        wire::{
-            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-            SocketExchangeSetup,
+use {
+    crate::{
+        harness::{alice_password, round_trip, sasl_authenticate_round_trip, start_broker_stream},
+        kafka_wire::{ExchangeSetup as WireExchangeSetup, exchange},
+        oauthbearer::{
+            drive_inband_reauth, drive_sasl_oauthbearer_session_open, now_unix_secs,
+            oauthbearer_fixture, oauthbearer_zero_skew_validator, unsecured_jws,
+        },
+        support::{
+            sasl::{plain_authentication_body, sasl_temp_config},
+            sasl_plaintext_config,
+            wire::{
+                CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+                SocketExchangeSetup,
+            },
         },
     },
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_broker::Broker,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            api_versions_request, api_versions_response, metadata_request, metadata_response,
+            sasl_authenticate_response, sasl_handshake_request, sasl_handshake_response,
+        },
+    },
+    krabka_security::SaslMechanism,
+    tokio::{io::AsyncReadExt, net::TcpStream},
 };
 
 /// Sends one Metadata request on a session whose window has elapsed.

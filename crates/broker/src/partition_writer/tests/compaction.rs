@@ -7,22 +7,23 @@
 //! each batch that it appends, and a follower for each batch that it
 //! replicates, so the two replicas keep the same batches.
 
-use assert2::check;
-use bytes::{Bytes, BytesMut};
-use krabka_log::{CleanupPolicy, LogConfig, Offset, ProducerId, VerbatimBatch};
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-use krabka_units::{bytes, convert::TimeExt as _, gibibytes, millis};
-use tempfile::tempdir;
-use tokio::sync::oneshot;
-
-use super::*;
-use crate::{
-    config::BrokerConfig,
-    partition::{ProduceData, ProduceJob},
-    replica_state::ReplicaState,
-    test_support::UnixMillis,
-    time_util::now_ms,
-    txn::marker::{MarkerType, build_marker_batch},
+use {
+    super::*,
+    crate::{
+        config::BrokerConfig,
+        partition::{ProduceData, ProduceJob},
+        replica_state::ReplicaState,
+        test_support::UnixMillis,
+        time_util::now_ms,
+        txn::marker::{MarkerType, build_marker_batch},
+    },
+    assert2::check,
+    bytes::{Bytes, BytesMut},
+    krabka_log::{CleanupPolicy, LogConfig, Offset, ProducerId, VerbatimBatch},
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    krabka_units::{bytes, convert::TimeExt as _, gibibytes, millis},
+    tempfile::tempdir,
+    tokio::sync::oneshot,
 };
 
 /// The idempotent producer: `(id, epoch)`.
@@ -344,16 +345,11 @@ async fn compacted(role: Role, history: &History, now_ms: i64) -> Vec<Kept> {
     let producer_state = Arc::new(ProducerState::new());
     let replica_state = Arc::new(tokio::sync::Mutex::new(ReplicaState::new()));
     let (tx, rx) = mpsc::channel(1);
-    let writer = spawn_writer(
-        dir.path(),
-        log.clone(),
-        rx,
-        WriterOptions {
-            replica_state: replica_state.clone(),
-            producer_state: producer_state.clone(),
-            ..Default::default()
-        },
-    );
+    let writer = spawn_writer(dir.path(), log.clone(), rx, WriterOptions {
+        replica_state: replica_state.clone(),
+        producer_state: producer_state.clone(),
+        ..Default::default()
+    });
 
     for (offset, batch) in (0..).zip(&history.batches) {
         append(role, &tx, &producer_state, batch.clone(), offset).await;

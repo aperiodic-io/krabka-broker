@@ -5,16 +5,17 @@
 //! by its own name, a topic frozen by the namespace above it, and the unfrozen
 //! control topic that keeps the other two rows honest.
 
-use assert2::check;
-use krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED};
-
-use crate::{
-    control_plane::{freeze, plain_topic_fixture},
-    jvm_tool::jvm_produce,
-    vocabulary::{
-        CONTROL_TOPIC, LITERAL_REASON, LITERAL_TOPIC, POLICY_VIOLATION_EXCEPTION, PREFIX_REASON,
-        PREFIX_SCOPE, PREFIX_TOPIC, freeze_refusal,
+use {
+    crate::{
+        control_plane::{freeze, plain_topic_fixture},
+        jvm_tool::jvm_produce,
+        vocabulary::{
+            CONTROL_TOPIC, LITERAL_REASON, LITERAL_TOPIC, POLICY_VIOLATION_EXCEPTION,
+            PREFIX_REASON, PREFIX_SCOPE, PREFIX_TOPIC, freeze_refusal,
+        },
     },
+    assert2::check,
+    krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED},
 };
 
 /// A produce to a frozen topic reaches `kafka-console-producer` as a

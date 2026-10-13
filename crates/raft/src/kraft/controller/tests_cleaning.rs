@@ -3,14 +3,17 @@
 //! until `metadata.max.retention.bytes` or `metadata.max.retention.ms` lets
 //! the oldest one go, and the KIP-835 no-op records a leader appends.
 
-use assert2::check;
-use krabka_units::prelude::{bytes, days, gibibytes, millis};
-
-use super::*;
-use crate::kraft::controller::{
-    checkpoint::{checkpoint_ids, write_checkpoint},
-    records::{is_kip835_noop, noop_record_value},
-    test_support::{EngineSetup, build_engine_only, elect_single_voter_engine, topic_record_named},
+use {
+    super::*,
+    crate::kraft::controller::{
+        checkpoint::{checkpoint_ids, write_checkpoint},
+        records::{is_kip835_noop, noop_record_value},
+        test_support::{
+            EngineSetup, build_engine_only, elect_single_voter_engine, topic_record_named,
+        },
+    },
+    assert2::check,
+    krabka_units::prelude::{bytes, days, gibibytes, millis},
 };
 
 /// A metadata log whose every batch gets its own segment, so a cleaning that

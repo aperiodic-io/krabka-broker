@@ -6,10 +6,7 @@
 //! refusal they can act on rather than whichever record the image happened to
 //! yield first.
 
-use krabka_metadata::BreakGlassAction;
-use uuid::Uuid;
-
-use crate::break_glass::action_name;
+use {crate::break_glass::action_name, krabka_metadata::BreakGlassAction, uuid::Uuid};
 
 /// A refused privileged transition, and the evidence for the refusal.
 ///
@@ -35,9 +32,7 @@ impl BreakGlassDenial {
     ///
     /// An audit event carries this id, so an operator can join the refusal to
     /// the proposal that nearly authorized it.
-    pub(crate) fn proposal_id(&self) -> Option<Uuid> {
-        self.reason.proposal_id()
-    }
+    pub(crate) fn proposal_id(&self) -> Option<Uuid> { self.reason.proposal_id() }
 }
 
 /// Why the gate refused a transition.
@@ -120,9 +115,7 @@ impl DenialReason {
     /// The proposal this reason names, or the nil id for
     /// [`DenialReason::NoProposal`]. It breaks a tie between two reasons of one
     /// rank, so the answer does not depend on the image iteration order.
-    fn tie_break(self) -> Uuid {
-        self.proposal_id().unwrap_or_else(Uuid::nil)
-    }
+    fn tie_break(self) -> Uuid { self.proposal_id().unwrap_or_else(Uuid::nil) }
 }
 
 /// The refusal to report when more than one covering proposal is unusable.

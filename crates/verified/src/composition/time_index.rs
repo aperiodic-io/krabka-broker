@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::timestamp::time_archive_valid;
-use super::{
-    restore_index_frontier, time_index_lookup, validated_remote_and_local_time_starts_agree,
+use {
+    super::{
+        restore_index_frontier, time_index_lookup, validated_remote_and_local_time_starts_agree,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

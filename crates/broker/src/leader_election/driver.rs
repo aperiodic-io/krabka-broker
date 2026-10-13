@@ -3,22 +3,22 @@
 //! sessions, re-drives stuck failovers through [`sweep_dead_leaders`], and
 //! runs [`on_broker_dead`] on every fresh death edge.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_metadata::MetadataImage;
-use krabka_raft::NodeId;
-use tracing::warn;
-
-use super::scan::compute_failover_changes;
-use crate::{
-    error::BrokerError,
-    heartbeat::{
-        controller_state::{ControllerLivenessState, replicated_registrations},
-        fencing::publish_fencing_changes,
+use {
+    super::scan::compute_failover_changes,
+    crate::{
+        error::BrokerError,
+        heartbeat::{
+            controller_state::{ControllerLivenessState, replicated_registrations},
+            fencing::publish_fencing_changes,
+        },
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        unclean_recovery::{RecoveryJob, UncleanRecoveryHandle},
     },
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    unclean_recovery::{RecoveryJob, UncleanRecoveryHandle},
+    krabka_metadata::MetadataImage,
+    krabka_raft::NodeId,
+    std::{sync::Arc, time::Duration},
+    tracing::warn,
 };
 
 #[cfg(test)]
@@ -166,17 +166,12 @@ pub(crate) async fn on_broker_dead(
     metrics: &BrokerMetrics,
     recovery: &UncleanRecoveryHandle,
 ) -> Result<(), BrokerError> {
-    fail_over_dead_broker(
-        FailoverTrigger::Edge,
-        node_id,
-        dead,
-        FailoverServices {
-            controller,
-            liveness,
-            metrics,
-            recovery,
-        },
-    )
+    fail_over_dead_broker(FailoverTrigger::Edge, node_id, dead, FailoverServices {
+        controller,
+        liveness,
+        metrics,
+        recovery,
+    })
     .await
 }
 

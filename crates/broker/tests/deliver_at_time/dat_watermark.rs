@@ -6,14 +6,16 @@
 //! its log and nothing past the first pending record — so they are written
 //! against the same immediate-topic control.
 
-use assert2::check;
-
-use crate::{
-    dat_fixtures::{
-        ALREADY_DUE_MS, IMMEDIATE, Mode, PENDING_HORIZON_MS, SCHEDULED, Visible, batch_at, now_ms,
+use {
+    crate::{
+        dat_fixtures::{
+            ALREADY_DUE_MS, IMMEDIATE, Mode, PENDING_HORIZON_MS, SCHEDULED, Visible, batch_at,
+            now_ms,
+        },
+        dat_wire::{produce, ready_topic, visible},
+        support,
     },
-    dat_wire::{produce, ready_topic, visible},
-    support,
+    assert2::check,
 };
 
 #[tokio::test]

@@ -14,28 +14,28 @@
 //! leader again refused the next batch with `OUT_OF_ORDER_SEQUENCE_NUMBER`,
 //! because its producer state still held the sequence of its previous term.
 
-use std::time::Duration;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_broker::{BrokerConfig, BrokerHandle, codes};
-use krabka_protocol::{
-    owned::produce_response::{LeaderIdAndEpoch, PartitionProduceResponse},
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-use tempfile::TempDir;
-
-use crate::{
-    cluster_lock,
-    support::{
-        self,
-        client::connect_with_context,
-        produce::{SinglePartitionProduceSetup, send_batch},
-        records::{batch_from_records, value_record},
-        registered_cluster, shutdown_cluster,
-        topics::create_topic_request,
+use {
+    crate::{
+        cluster_lock,
+        support::{
+            self,
+            client::connect_with_context,
+            produce::{SinglePartitionProduceSetup, send_batch},
+            records::{batch_from_records, value_record},
+            registered_cluster, shutdown_cluster,
+            topics::create_topic_request,
+        },
     },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_broker::{BrokerConfig, BrokerHandle, codes},
+    krabka_protocol::{
+        owned::produce_response::{LeaderIdAndEpoch, PartitionProduceResponse},
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
+    },
+    std::time::Duration,
+    tempfile::TempDir,
 };
 
 /// The idempotent producer of every batch in this module.
@@ -124,15 +124,11 @@ async fn produce(
 ) -> PartitionProduceResponse {
     let client =
         connect_with_context(broker.listen_addr().to_string(), None, "producer client").await;
-    let response = send_batch(
-        &client,
-        batch,
-        SinglePartitionProduceSetup {
-            topic: topic.to_owned(),
-            topic_id,
-            ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
-        },
-    )
+    let response = send_batch(&client, batch, SinglePartitionProduceSetup {
+        topic: topic.to_owned(),
+        topic_id,
+        ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
+    })
     .await;
     response.responses[0].partition_responses[0].clone()
 }
@@ -251,12 +247,12 @@ async fn a_leader_elected_by_a_controlled_shutdown_answers_a_replicated_retry_as
 
     assert!(
         (retry, older_retry, next, logs)
-            == (
-                duplicate_of(3),
-                duplicate_of(0),
-                appended(6),
-                vec![Some(vec![0, 3, 6]); 2]
-            )
+            == (duplicate_of(3), duplicate_of(0), appended(6), vec![
+                Some(
+                    vec![0, 3, 6]
+                );
+                2
+            ])
     );
 
     shutdown_cluster(cluster).await;

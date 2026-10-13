@@ -8,25 +8,25 @@
 //! and `kafka-reassign-partitions` moving a replica into a cordoned directory
 //! fails with `InvalidReplicaAssignmentException` (39).
 
-use std::{
-    net::SocketAddr,
-    path::Path,
-    time::{Duration, Instant},
-};
-
-use assert2::{assert, check};
-use krabka_protocol::{
-    UnknownTaggedFields,
-    owned::alter_replica_log_dirs_response::{
-        AlterReplicaLogDirPartitionResult, AlterReplicaLogDirTopicResult,
-        AlterReplicaLogDirsResponse,
+use {
+    crate::{
+        harness::start_two_dir_broker,
+        two_dir_topic::{Setup, start},
+        wire::{CLIENT_ID, alter_replica_log_dirs, describe_log_dirs_at, set_broker_config},
     },
-};
-
-use crate::{
-    harness::start_two_dir_broker,
-    two_dir_topic::{Setup, start},
-    wire::{CLIENT_ID, alter_replica_log_dirs, describe_log_dirs_at, set_broker_config},
+    assert2::{assert, check},
+    krabka_protocol::{
+        UnknownTaggedFields,
+        owned::alter_replica_log_dirs_response::{
+            AlterReplicaLogDirPartitionResult, AlterReplicaLogDirTopicResult,
+            AlterReplicaLogDirsResponse,
+        },
+    },
+    std::{
+        net::SocketAddr,
+        path::Path,
+        time::{Duration, Instant},
+    },
 };
 
 /// `(log_dir, is_cordoned)` for every directory `DescribeLogDirs` reports at
@@ -65,9 +65,7 @@ async fn wait_for_flags(addr: SocketAddr, want: &[(std::path::PathBuf, bool)]) {
     }
 }
 
-fn canonical(dir: &Path) -> std::path::PathBuf {
-    std::fs::canonicalize(dir).unwrap()
-}
+fn canonical(dir: &Path) -> std::path::PathBuf { std::fs::canonicalize(dir).unwrap() }
 
 fn move_result(topic: &str, error_code: i16) -> AlterReplicaLogDirsResponse {
     AlterReplicaLogDirsResponse {

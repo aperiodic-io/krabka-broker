@@ -5,14 +5,15 @@
 //! unfrozen control proves the sweep would otherwise have done the work the
 //! freeze holds back.
 
-use assert2::check;
-use fixtures::{local_backends, sweep_counts};
-use krabka_metadata::PatternType;
-
-use super::*;
-use crate::{
-    remote_log_manager::test_support as fixtures,
-    test_support::{FreezeSetup, topic_freeze_record},
+use {
+    super::*,
+    crate::{
+        remote_log_manager::test_support as fixtures,
+        test_support::{FreezeSetup, topic_freeze_record},
+    },
+    assert2::check,
+    fixtures::{local_backends, sweep_counts},
+    krabka_metadata::PatternType,
 };
 
 /// The `orders` topic, plus the one live freeze entry `freeze` names.

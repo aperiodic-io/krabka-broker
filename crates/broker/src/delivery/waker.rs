@@ -10,9 +10,10 @@
 //! watermark under the log mutex, so it never serves a batch early and never
 //! holds one back once its deadline has passed.
 
-use std::sync::atomic::{AtomicI64, Ordering};
-
-use tokio::sync::Notify;
+use {
+    std::sync::atomic::{AtomicI64, Ordering},
+    tokio::sync::Notify,
+};
 
 /// Lets a produce re-arm the delivery scheduler before its current sleep ends.
 pub(crate) struct DeliveryWaker {
@@ -40,9 +41,7 @@ impl DeliveryWaker {
     }
 
     /// The instant the scheduler wakes on its own now.
-    pub(crate) fn wakes_at_ms(&self) -> i64 {
-        self.wakes_at_ms.load(Ordering::Acquire)
-    }
+    pub(crate) fn wakes_at_ms(&self) -> i64 { self.wakes_at_ms.load(Ordering::Acquire) }
 
     /// Wake the scheduler when `deadline_ms` comes due before it would wake by
     /// itself. Reports whether it woke the task.
@@ -55,24 +54,16 @@ impl DeliveryWaker {
     }
 
     /// Wait until a produce asks for an earlier deadline.
-    pub(crate) async fn woken(&self) {
-        self.notify.notified().await;
-    }
+    pub(crate) async fn woken(&self) { self.notify.notified().await; }
 }
 
 impl Default for DeliveryWaker {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check, std::sync::Arc};
 
     #[test]
     fn an_unarmed_waker_takes_every_deadline() {

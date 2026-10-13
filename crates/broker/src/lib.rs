@@ -279,12 +279,14 @@ mod txn;
 pub(crate) mod unclean_recovery;
 mod wal;
 
-pub use broker::{Broker, BrokerHandle};
-pub use config::{BootstrapMode, BrokerConfig, KafkaRlmmConfig, RemoteStorageBackend, RlmmKind};
-pub use config_keys::{TopicConfigDoc, topic_config_docs};
-pub use error::BrokerError;
 #[cfg(any(test, feature = "test-helpers"))]
 pub use txn::coordinator::fanout_gate::MarkerFanoutMode;
+pub use {
+    broker::{Broker, BrokerHandle},
+    config::{BootstrapMode, BrokerConfig, KafkaRlmmConfig, RemoteStorageBackend, RlmmKind},
+    config_keys::{TopicConfigDoc, topic_config_docs},
+    error::BrokerError,
+};
 /// Benchmark seam over the zero-copy fetch drain, driven by
 /// `benches/fetch_drain.rs`. It is the drain the connection writer calls, with
 /// the two records resolvers that decide whether a records region reaches the
@@ -302,8 +304,6 @@ pub mod fetch_drain {
 /// Benchmark seam over the produce hot path, driven by `benches/produce.rs`.
 #[cfg(any(test, feature = "test-helpers"))]
 pub use handlers::produce::hot_path as produce_hot_path;
-pub use health::{HealthState, NotReady};
-pub use krabka_raft::NodeId;
 /// The SASL/GSSAPI accept-path configuration, [`config::BrokerConfig::gssapi`].
 pub use network::auth::GssapiConfig;
 /// The RFC 2253 Subject DN of an mTLS peer certificate, the string
@@ -323,3 +323,7 @@ pub use network::dispatch::response_framing;
 /// `benches/perf_deferrals.rs`.
 #[cfg(any(test, feature = "test-helpers"))]
 pub use replicator::hot_path as replicate_hot_path;
+pub use {
+    health::{HealthState, NotReady},
+    krabka_raft::NodeId,
+};

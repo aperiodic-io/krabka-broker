@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn selection_covers_isolation_tiers_and_overflow_edges() {

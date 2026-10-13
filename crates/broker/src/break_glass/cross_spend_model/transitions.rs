@@ -8,17 +8,18 @@
 //! answer into the next state. No rule the broker owns is restated here, so a
 //! rule this model checks is the rule the broker runs.
 
-use krabka_metadata::{BreakGlassProposalRecord, MetadataImage, MetadataRecord};
-use uuid::Uuid;
-
-use super::universe::{EXPIRES_AT, PROPOSALS, ProposalSpec, Request, Universe};
-use crate::{
-    break_glass::{
-        config::BreakGlassPolicy,
-        gate,
-        state_model::{distinct, model_approval_principals, model_approvals, model_settle},
+use {
+    super::universe::{EXPIRES_AT, PROPOSALS, ProposalSpec, Request, Universe},
+    crate::{
+        break_glass::{
+            config::BreakGlassPolicy,
+            gate,
+            state_model::{distinct, model_approval_principals, model_approvals, model_settle},
+        },
+        config::BreakGlassConfig,
     },
-    config::BreakGlassConfig,
+    krabka_metadata::{BreakGlassProposalRecord, MetadataImage, MetadataRecord},
+    uuid::Uuid,
 };
 
 pub(super) struct CrossSpendModel {
@@ -31,9 +32,7 @@ pub(super) struct CrossSpendModel {
 }
 
 impl CrossSpendModel {
-    fn policy(&self) -> BreakGlassPolicy<'_> {
-        BreakGlassPolicy::new(&self.config)
-    }
+    fn policy(&self) -> BreakGlassPolicy<'_> { BreakGlassPolicy::new(&self.config) }
 
     /// The stored record that one proposal's model state stands for.
     fn record(&self, index: usize, state: &Universe) -> BreakGlassProposalRecord {

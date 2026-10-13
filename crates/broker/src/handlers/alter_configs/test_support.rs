@@ -5,18 +5,20 @@
 //! resource shapes and the same seeded images, so the fixtures live in one
 //! module rather than being duplicated per test file.
 
-use std::sync::Arc;
-
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::owned::{
-    alter_configs_request::{AlterConfigsRequest, AlterConfigsResource, AlterableConfig},
-    alter_configs_response::AlterConfigsResponse,
-};
-
-use super::{RESOURCE_TYPE_BROKER, RESOURCE_TYPE_TOPIC, handle};
-use crate::{
-    authorizer::Authorizer,
-    test_support::{broker_registration, start_broker_with_authorizer as start_broker, test_ctx},
+use {
+    super::{RESOURCE_TYPE_BROKER, RESOURCE_TYPE_TOPIC, handle},
+    crate::{
+        authorizer::Authorizer,
+        test_support::{
+            broker_registration, start_broker_with_authorizer as start_broker, test_ctx,
+        },
+    },
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::owned::{
+        alter_configs_request::{AlterConfigsRequest, AlterConfigsResource, AlterableConfig},
+        alter_configs_response::AlterConfigsResponse,
+    },
+    std::sync::Arc,
 };
 
 crate::test_support::context_helper!(client_id = "admin-client");

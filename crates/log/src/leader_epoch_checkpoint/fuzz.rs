@@ -3,9 +3,10 @@
 //! step function -- the production lookup and truncation underneath -- over
 //! random schedules of elections, writes and follower fetches.
 
-use proptest::prelude::*;
-
-use super::leader_epoch_model::{Action, Cluster, Violations};
+use {
+    super::leader_epoch_model::{Action, Cluster, Violations},
+    proptest::prelude::*,
+};
 
 const REPLICAS: usize = 4;
 const MAX_LOG: usize = 40;

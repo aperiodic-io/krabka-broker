@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::timestamp::{record_offsets_ordered, sparse_maxima_bound_prefix};
-use super::{first_unstable_offset, indexed_timestamp_scan_finds_first};
-use crate::list_offsets::{
-    ListOffsetsBoundDecision, ListOffsetsBoundFacts, ListOffsetsSelectionDecision,
-    ListOffsetsSelectionFacts, list_offsets_bound_decision, list_offsets_kind,
-    list_offsets_selection_decision,
+use {
+    super::{first_unstable_offset, indexed_timestamp_scan_finds_first},
+    crate::list_offsets::{
+        ListOffsetsBoundDecision, ListOffsetsBoundFacts, ListOffsetsSelectionDecision,
+        ListOffsetsSelectionFacts, list_offsets_bound_decision, list_offsets_kind,
+        list_offsets_selection_decision,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Sparse timestamp lookup, transaction-derived isolation, and response

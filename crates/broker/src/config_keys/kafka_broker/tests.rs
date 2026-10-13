@@ -1,7 +1,4 @@
-use assert2::check;
-
-use super::*;
-use crate::config_keys::registry::ConfigType;
+use {super::*, crate::config_keys::registry::ConfigType, assert2::check};
 
 fn dynamic_names(dynamic: Dynamic) -> Vec<&'static str> {
     KAFKA_BROKER_CONFIGS

@@ -24,12 +24,13 @@
 //! client, and JBOD placement all see a flip immediately. The heartbeat
 //! client reports offline dir UUIDs to the controller.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
+use {
+    dashmap::DashMap,
+    std::{
+        path::{Path, PathBuf},
+        sync::Arc,
+    },
 };
-
-use dashmap::DashMap;
 
 /// Sentinel filename written into each log dir at startup to verify the
 /// dir is writable. The broker creates the file, fsyncs it, then removes
@@ -287,10 +288,11 @@ fn probe_one(dir: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use tempfile::tempdir;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        tempfile::tempdir,
+    };
 
     #[test]
     fn probe_writable_tempdir_is_online() {

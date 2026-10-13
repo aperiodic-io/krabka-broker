@@ -6,11 +6,13 @@
 //! belong to one module: the follower's fetch watchdog, and the leader's
 //! check-quorum window that makes it resign when the voters stop fetching.
 
-use super::QuorumStateMachine;
-use crate::{
-    action::{Action, TimerKind},
-    role::{ReplicaProgress, Role},
-    types::{Epoch, LogOffsetMetadata, LogView, NodeId, SimInstant},
+use {
+    super::QuorumStateMachine,
+    crate::{
+        action::{Action, TimerKind},
+        role::{ReplicaProgress, Role},
+        types::{Epoch, LogOffsetMetadata, LogView, NodeId, SimInstant},
+    },
 };
 
 #[cfg(test)]
@@ -338,13 +340,10 @@ impl QuorumStateMachine {
             .into_iter()
             .collect();
         let fetch_deadline = now.saturating_add_ms(self.election_timeout_ms);
-        actions.extend([
-            Action::SendFetch { leader_id },
-            Action::ResetTimer {
-                kind: TimerKind::Fetch,
-                deadline: fetch_deadline,
-            },
-        ]);
+        actions.extend([Action::SendFetch { leader_id }, Action::ResetTimer {
+            kind: TimerKind::Fetch,
+            deadline: fetch_deadline,
+        }]);
         actions
     }
 

@@ -1,12 +1,13 @@
 //! Waits for exact partition state in the local registry or committed image.
 
-use std::{
-    collections::HashSet,
-    time::{Duration, Instant},
+use {
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    std::{
+        collections::HashSet,
+        time::{Duration, Instant},
+    },
 };
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
 
 /// Wait until every listed broker has materialized the partition in its image.
 pub async fn wait_for_partition_on_all<'a>(

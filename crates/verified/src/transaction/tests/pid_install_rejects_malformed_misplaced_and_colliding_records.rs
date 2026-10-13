@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn pid_install_rejects_malformed_misplaced_and_colliding_records() {

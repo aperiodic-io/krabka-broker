@@ -1,28 +1,28 @@
 //! A cryptographically valid token must still pass the controller cache guard.
 
-use std::sync::atomic::Ordering;
-
-use assert2::assert;
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
-use krabka_protocol::{Encode, owned::sasl_authenticate_response::SaslAuthenticateResponse};
-use krabka_raft::RaftListenerHandshake as _;
-use krabka_security::{Jwks, JwksHandle, OAuthBearerValidator, SignedJwsValidator};
-use ring::{
-    rand::SystemRandom,
-    signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair},
-};
-use tokio::{
-    io::AsyncWriteExt,
-    net::{TcpListener, TcpStream},
-};
-
-use super::*;
-use crate::{
-    raft_handshake::test_support::{
-        HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
-        RequestFrameSetup, read_response_frame, request_frame, sasl_test_config,
+use {
+    super::*,
+    crate::{
+        raft_handshake::test_support::{
+            HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
+            RequestFrameSetup, read_response_frame, request_frame, sasl_test_config,
+        },
+        time_util::now_ms,
     },
-    time_util::now_ms,
+    assert2::assert,
+    base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64},
+    krabka_protocol::{Encode, owned::sasl_authenticate_response::SaslAuthenticateResponse},
+    krabka_raft::RaftListenerHandshake as _,
+    krabka_security::{Jwks, JwksHandle, OAuthBearerValidator, SignedJwsValidator},
+    ring::{
+        rand::SystemRandom,
+        signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair},
+    },
+    std::sync::atomic::Ordering,
+    tokio::{
+        io::AsyncWriteExt,
+        net::{TcpListener, TcpStream},
+    },
 };
 
 struct NoApiVersions;

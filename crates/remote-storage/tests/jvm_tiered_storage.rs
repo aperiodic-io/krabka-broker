@@ -6,25 +6,26 @@
 //! cargo test -p krabka-remote-storage --test jvm_tiered_storage -- --ignored --nocapture
 //! ```
 
-use std::{
-    fmt::Write as _,
-    path::Path,
-    process::{Command, Output},
+use {
+    assert2::{assert, check},
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    bytes::Bytes,
+    krabka_ids::LeaderEpoch,
+    krabka_log::{Log, LogConfig, Offset},
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    krabka_remote_storage::{
+        LocalTieredStorage, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+        RemoteLogSegmentState, RemoteStorageManager, TopicIdPartition,
+    },
+    krabka_units::prelude::bytes,
+    sha2::{Digest as _, Sha256},
+    std::{
+        fmt::Write as _,
+        path::Path,
+        process::{Command, Output},
+    },
+    uuid::Uuid,
 };
-
-use assert2::{assert, check};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bytes::Bytes;
-use krabka_ids::LeaderEpoch;
-use krabka_log::{Log, LogConfig, Offset};
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-use krabka_remote_storage::{
-    LocalTieredStorage, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
-    RemoteLogSegmentState, RemoteStorageManager, TopicIdPartition,
-};
-use krabka_units::prelude::bytes;
-use sha2::{Digest as _, Sha256};
-use uuid::Uuid;
 
 krabka_macros::export_segment_data_fixture!(export_segment_data);
 
@@ -262,13 +263,10 @@ fn ordinary_batch() -> RecordBatch {
 #[ignore = "requires Docker, a JDK, and Maven Central"]
 fn kafka_reads_krabka_local_tiered_segment_and_producer_snapshot() {
     let local = tempfile::tempdir().expect("local log tempdir");
-    let mut log = Log::open(
-        local.path(),
-        LogConfig {
-            segment_size: bytes(1),
-            ..LogConfig::default()
-        },
-    )
+    let mut log = Log::open(local.path(), LogConfig {
+        segment_size: bytes(1),
+        ..LogConfig::default()
+    })
     .expect("open local log");
     log.append(&mut producer_batch())
         .expect("append producer batch");

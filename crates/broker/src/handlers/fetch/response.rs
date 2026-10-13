@@ -1,13 +1,14 @@
 //! Assembly of the wire response: the resolved reads are grouped back into
 //! per-topic entries, down-converted for a v0-v3 fetcher, and metered.
 
-use krabka_protocol::{
-    owned::fetch_response::{FetchableTopicResponse, LeaderIdAndEpoch},
-    records::RecordsPayload,
+use {
+    super::plan::PendingRead,
+    crate::{broker::Broker, handlers::fetch_downconvert::down_convert_payload_for_fetch},
+    krabka_protocol::{
+        owned::fetch_response::{FetchableTopicResponse, LeaderIdAndEpoch},
+        records::RecordsPayload,
+    },
 };
-
-use super::plan::PendingRead;
-use crate::{broker::Broker, handlers::fetch_downconvert::down_convert_payload_for_fetch};
 
 /// Group the resolved `PendingRead`s back into per-topic response entries.
 ///
@@ -191,18 +192,19 @@ pub(super) fn record_fetch_metrics(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::{
-        owned::fetch_response::{FetchableTopicResponse, LeaderIdAndEpoch, PartitionData},
-        primitives::uuid::Uuid as WireUuid,
-    };
-
-    use super::{group_into_topic_responses, withhold_current_leader_before_kip_951};
-    use crate::{
-        codes::{FENCED_LEADER_EPOCH, TOPIC_AUTHORIZATION_FAILED, UNKNOWN_TOPIC_ID},
-        handlers::fetch::{
-            PendingRead,
-            plan::{refused_partition, refused_read},
+    use {
+        super::{group_into_topic_responses, withhold_current_leader_before_kip_951},
+        crate::{
+            codes::{FENCED_LEADER_EPOCH, TOPIC_AUTHORIZATION_FAILED, UNKNOWN_TOPIC_ID},
+            handlers::fetch::{
+                PendingRead,
+                plan::{refused_partition, refused_read},
+            },
+        },
+        assert2::check,
+        krabka_protocol::{
+            owned::fetch_response::{FetchableTopicResponse, LeaderIdAndEpoch, PartitionData},
+            primitives::uuid::Uuid as WireUuid,
         },
     };
 
@@ -286,14 +288,10 @@ mod tests {
         ] {
             let mut responses = vec![topic("t", 1, vec![fenced.clone()])];
             withhold_current_leader_before_kip_951(version, &mut responses);
-            let expected = vec![topic(
-                "t",
-                1,
-                vec![PartitionData {
-                    current_leader: expected_leader,
-                    ..fenced.clone()
-                }],
-            )];
+            let expected = vec![topic("t", 1, vec![PartitionData {
+                current_leader: expected_leader,
+                ..fenced.clone()
+            }])];
             check!(responses == expected, "v{version}");
         }
     }

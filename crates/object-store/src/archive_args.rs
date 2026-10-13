@@ -10,12 +10,12 @@
 //! `#[command(flatten)]`, because the archive is a destination to one and a
 //! source to the other.
 
-use std::path::PathBuf;
-
-use clap::{ArgGroup, Args};
-use object_store::path::Path;
-
-use crate::{GcsConfig, ObjectStoreConfig, S3Config};
+use {
+    crate::{GcsConfig, ObjectStoreConfig, S3Config},
+    clap::{ArgGroup, Args},
+    object_store::path::Path,
+    std::path::PathBuf,
+};
 
 /// Region used when `--archive-s3-region` is absent. AWS requires a region,
 /// and `MinIO` and R2 accept this one as a placeholder.
@@ -198,9 +198,7 @@ impl ArchiveArgs {
 
     /// `--archive-prefix`, through [`normalize_prefix`].
     #[must_use]
-    pub fn normalized_prefix(&self) -> Option<String> {
-        normalize_prefix(self.prefix.as_deref())
-    }
+    pub fn normalized_prefix(&self) -> Option<String> { normalize_prefix(self.prefix.as_deref()) }
 }
 
 /// Trim the whitespace and separators an operator copies out of a console URL,
@@ -224,10 +222,7 @@ pub fn prefixed_key(prefix: Option<&str>, relative: &str) -> Path {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use clap::Parser;
-
-    use super::*;
+    use {super::*, assert2::check, clap::Parser};
 
     #[derive(Parser, Debug)]
     struct Cli {

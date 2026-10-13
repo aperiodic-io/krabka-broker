@@ -1,11 +1,12 @@
 //! Borrowed Kafka request-header parsing for the broker dispatch loop.
 
-use bytes::Buf;
-use krabka_protocol::primitives::string_bytes_borrowed::get_nullable_string_borrowed;
-
-use crate::{
-    error::BrokerError,
-    handlers::{ApiKeyCode, ApiVersion, CorrelationId},
+use {
+    crate::{
+        error::BrokerError,
+        handlers::{ApiKeyCode, ApiVersion, CorrelationId},
+    },
+    bytes::Buf,
+    krabka_protocol::primitives::string_bytes_borrowed::get_nullable_string_borrowed,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -64,11 +65,12 @@ fn protocol_invalid(message: &'static str) -> BrokerError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::{BufMut, BytesMut};
-
-    use super::*;
-    use crate::network::test_support::{FrameCorrelationId, RequestFrameSetup, request_frame};
+    use {
+        super::*,
+        crate::network::test_support::{FrameCorrelationId, RequestFrameSetup, request_frame},
+        assert2::{assert, check},
+        bytes::{BufMut, BytesMut},
+    };
 
     fn legacy_metadata_frame() -> BytesMut {
         request_frame(RequestFrameSetup {

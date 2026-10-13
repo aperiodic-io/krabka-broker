@@ -1,13 +1,14 @@
 //! Process-wide limits include snapshots being prepared, queued, and flushed.
 
-use std::{
-    collections::VecDeque,
-    io,
-    sync::{Arc, Condvar, Mutex},
-    thread::JoinHandle,
+use {
+    super::Shared,
+    std::{
+        collections::VecDeque,
+        io,
+        sync::{Arc, Condvar, Mutex},
+        thread::JoinHandle,
+    },
 };
-
-use super::Shared;
 
 static EXECUTOR: Mutex<Option<Arc<Executor>>> = Mutex::new(None);
 
@@ -160,14 +161,14 @@ impl Drop for Executor {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::mpsc,
-        time::{Duration, Instant},
+    use {
+        super::*,
+        assert2::assert,
+        std::{
+            sync::mpsc,
+            time::{Duration, Instant},
+        },
     };
-
-    use assert2::assert;
-
-    use super::*;
 
     #[test]
     fn an_oversized_waiter_is_not_overtaken_by_smaller_reservations() {

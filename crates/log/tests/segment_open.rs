@@ -1,13 +1,14 @@
 //! Opening a sealed segment through the public API.
 
-use std::{fs, io::Write};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_log::{LogError, Offset, Segment, name};
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_units::prelude::kibibytes;
-use tempfile::tempdir;
+use {
+    assert2::assert,
+    bytes::Bytes,
+    krabka_log::{LogError, Offset, Segment, name},
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_units::prelude::kibibytes,
+    std::{fs, io::Write},
+    tempfile::tempdir,
+};
 
 fn batch(offset: i64, timestamp: i64) -> RecordBatch {
     RecordBatch {

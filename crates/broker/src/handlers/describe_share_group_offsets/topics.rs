@@ -8,9 +8,10 @@
 //! id turned back into a name through the metadata image, and a topic the
 //! image no longer holds left out.
 
-use krabka_protocol::owned::describe_share_group_offsets_request::DescribeShareGroupOffsetsRequestTopic;
-
-use crate::coordinator::unified::share::persistence::ShareGroupStatePartitionMetadataValue;
+use {
+    crate::coordinator::unified::share::persistence::ShareGroupStatePartitionMetadataValue,
+    krabka_protocol::owned::describe_share_group_offsets_request::DescribeShareGroupOffsetsRequestTopic,
+};
 
 /// The initialized topics of `metadata` that `image` holds, by name, each
 /// with its partitions in ascending order.
@@ -48,13 +49,14 @@ pub(super) fn initialized_topics(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{MetadataRecord, TopicRecord};
-
-    use super::*;
-    use crate::{
-        coordinator::unified::share::persistence::TopicPartitionsInfo,
-        handlers::describe_share_group_offsets::test_support::image_with_topic,
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::share::persistence::TopicPartitionsInfo,
+            handlers::describe_share_group_offsets::test_support::image_with_topic,
+        },
+        assert2::assert,
+        krabka_metadata::{MetadataRecord, TopicRecord},
     };
 
     fn initialized_topic(

@@ -15,13 +15,14 @@
 //! ELR is partition metadata, as it is in Kafka, so config replacement cannot
 //! erase it.
 
-use krabka_metadata::{MetadataRecord, TopicConfigRecord};
-use krabka_protocol::owned::alter_configs_request::AlterConfigsResource;
-
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes, config_keys,
-    topic_policy::{TopicPolicy, check},
+use {
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes, config_keys,
+        topic_policy::{TopicPolicy, check},
+    },
+    krabka_metadata::{MetadataRecord, TopicConfigRecord},
+    krabka_protocol::owned::alter_configs_request::AlterConfigsResource,
 };
 
 /// Build the authoritative `V1TopicConfig` record for a topic resource. The
@@ -98,17 +99,18 @@ pub(super) fn topic_config_record(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::{
-        config_keys::{CLEANUP_POLICY, DELIVERY_MODE, REMOTE_STORAGE_ENABLE, RETENTION_MS},
-        handlers::{
-            alter_configs::test_support::{
-                image_with_topic, image_with_topic_config, topic_resource,
+    use {
+        super::*,
+        crate::{
+            config_keys::{CLEANUP_POLICY, DELIVERY_MODE, REMOTE_STORAGE_ENABLE, RETENTION_MS},
+            handlers::{
+                alter_configs::test_support::{
+                    image_with_topic, image_with_topic_config, topic_resource,
+                },
+                test_support::check_config_result,
             },
-            test_support::check_config_result,
         },
+        assert2::{assert, check},
     };
 
     /// The record builder under the empty policy, which is the state of a
@@ -134,10 +136,10 @@ mod tests {
         let image = image_with_topic("orders");
 
         let (code, message) = topic_config_record(
-            &topic_resource(
-                "orders",
-                &[(CLEANUP_POLICY, "compact"), (DELIVERY_MODE, "scheduled")],
-            ),
+            &topic_resource("orders", &[
+                (CLEANUP_POLICY, "compact"),
+                (DELIVERY_MODE, "scheduled"),
+            ]),
             &image,
         )
         .expect_err("compaction on a scheduled topic must be rejected");
@@ -163,10 +165,10 @@ mod tests {
 
         for policy in ["compact", "compact,delete", "delete,compact"] {
             let (code, message) = topic_config_record(
-                &topic_resource(
-                    "orders",
-                    &[(CLEANUP_POLICY, policy), (REMOTE_STORAGE_ENABLE, "true")],
-                ),
+                &topic_resource("orders", &[
+                    (CLEANUP_POLICY, policy),
+                    (REMOTE_STORAGE_ENABLE, "true"),
+                ]),
                 &image,
             )
             .expect_err("tiered storage on a compacted topic must be rejected");
@@ -197,10 +199,10 @@ mod tests {
         let image = image_with_topic("orders");
 
         let record = topic_config_record(
-            &topic_resource(
-                "orders",
-                &[(CLEANUP_POLICY, "delete"), (REMOTE_STORAGE_ENABLE, "true")],
-            ),
+            &topic_resource("orders", &[
+                (CLEANUP_POLICY, "delete"),
+                (REMOTE_STORAGE_ENABLE, "true"),
+            ]),
             &image,
         )
         .expect("a tiered delete-policy topic is valid");
@@ -214,10 +216,10 @@ mod tests {
         let image = image_with_topic("orders");
 
         let record = topic_config_record(
-            &topic_resource(
-                "orders",
-                &[(CLEANUP_POLICY, "delete"), (DELIVERY_MODE, "scheduled")],
-            ),
+            &topic_resource("orders", &[
+                (CLEANUP_POLICY, "delete"),
+                (DELIVERY_MODE, "scheduled"),
+            ]),
             &image,
         )
         .expect("a scheduled delete-policy topic is valid");
@@ -350,10 +352,10 @@ mod tests {
         let policy = forbid_unclean_election();
 
         let (code, message) = super::topic_config_record(
-            &topic_resource(
-                "orders",
-                &[(config_keys::UNCLEAN_LEADER_ELECTION_ENABLE, "true")],
-            ),
+            &topic_resource("orders", &[(
+                config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
+                "true",
+            )]),
             &image,
             &policy,
             true,
@@ -374,10 +376,10 @@ mod tests {
         let policy = forbid_unclean_election();
 
         let record = super::topic_config_record(
-            &topic_resource(
-                "orders",
-                &[(config_keys::UNCLEAN_LEADER_ELECTION_ENABLE, "false")],
-            ),
+            &topic_resource("orders", &[(
+                config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
+                "false",
+            )]),
             &image,
             &policy,
             true,

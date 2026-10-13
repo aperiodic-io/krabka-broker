@@ -4,14 +4,14 @@
 //! group map. The fold is the one place that decides what a tombstone removes,
 //! so it stays apart from the entry it writes into.
 
-use std::collections::BTreeMap;
-
-use krabka_verified::{
-    BarrierRecoveryFoldAction, BarrierRecoveryRecordKind, barrier_recovery_fold_action,
+use {
+    super::{GroupEntry, PendingInjection},
+    crate::barrier::persistence::{CutValue, GroupValue, InjectionStartValue},
+    krabka_verified::{
+        BarrierRecoveryFoldAction, BarrierRecoveryRecordKind, barrier_recovery_fold_action,
+    },
+    std::collections::BTreeMap,
 };
-
-use super::{GroupEntry, PendingInjection};
-use crate::barrier::persistence::{CutValue, GroupValue, InjectionStartValue};
 
 fn pending_epoch(state: &BTreeMap<String, GroupEntry>, group: &str) -> Option<i64> {
     state
@@ -137,28 +137,25 @@ pub(crate) fn apply_record(state: &mut BTreeMap<String, GroupEntry>, record: Sta
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::assert;
-
-    use super::{StateRecord, apply_record};
-    use crate::barrier::{
-        persistence::CutStatus,
-        state::{
-            PendingInjection,
-            test_support::{cut_value, group_value, start_value},
+    use {
+        super::{StateRecord, apply_record},
+        crate::barrier::{
+            persistence::CutStatus,
+            state::{
+                PendingInjection,
+                test_support::{cut_value, group_value, start_value},
+            },
         },
+        assert2::assert,
+        std::collections::BTreeMap,
     };
 
     fn state_with_group(epoch: i64) -> BTreeMap<String, super::GroupEntry> {
         let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::Group {
-                group: "orders-cut".to_owned(),
-                value: Some(group_value(epoch)),
-            },
-        );
+        apply_record(&mut state, StateRecord::Group {
+            group: "orders-cut".to_owned(),
+            value: Some(group_value(epoch)),
+        });
         state
     }
 
@@ -174,45 +171,33 @@ mod tests {
     #[test]
     fn a_group_tombstone_removes_the_whole_entry() {
         let mut state = state_with_group(7);
-        apply_record(
-            &mut state,
-            StateRecord::Cut {
-                group: "orders-cut".to_owned(),
-                epoch: 7,
-                value: Some(cut_value(CutStatus::Complete)),
-            },
-        );
-        apply_record(
-            &mut state,
-            StateRecord::Group {
-                group: "orders-cut".to_owned(),
-                value: None,
-            },
-        );
+        apply_record(&mut state, StateRecord::Cut {
+            group: "orders-cut".to_owned(),
+            epoch: 7,
+            value: Some(cut_value(CutStatus::Complete)),
+        });
+        apply_record(&mut state, StateRecord::Group {
+            group: "orders-cut".to_owned(),
+            value: None,
+        });
         assert!(state.is_empty());
     }
 
     #[test]
     fn a_cut_record_retires_the_injection_start_of_its_epoch() {
         let mut state = state_with_group(0);
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "orders-cut".to_owned(),
-                epoch: 1,
-                value: Some(start_value(3)),
-            },
-        );
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "orders-cut".to_owned(),
+            epoch: 1,
+            value: Some(start_value(3)),
+        });
         assert!(state["orders-cut"].pending.is_some());
 
-        apply_record(
-            &mut state,
-            StateRecord::Cut {
-                group: "orders-cut".to_owned(),
-                epoch: 1,
-                value: Some(cut_value(CutStatus::Complete)),
-            },
-        );
+        apply_record(&mut state, StateRecord::Cut {
+            group: "orders-cut".to_owned(),
+            epoch: 1,
+            value: Some(cut_value(CutStatus::Complete)),
+        });
         let entry = &state["orders-cut"];
         assert!(entry.pending.is_none());
         assert!(entry.cuts.keys().copied().collect::<Vec<_>>() == vec![1]);
@@ -247,21 +232,15 @@ mod tests {
     #[test]
     fn a_retired_cut_cannot_be_reopened_below_the_group_epoch() {
         let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::Group {
-                group: "orders-cut".to_owned(),
-                value: Some(group_value(9)),
-            },
-        );
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "orders-cut".to_owned(),
-                epoch: 7,
-                value: Some(start_value(3)),
-            },
-        );
+        apply_record(&mut state, StateRecord::Group {
+            group: "orders-cut".to_owned(),
+            value: Some(group_value(9)),
+        });
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "orders-cut".to_owned(),
+            epoch: 7,
+            value: Some(start_value(3)),
+        });
 
         assert!(state["orders-cut"].pending.is_none());
         assert!(state["orders-cut"].last_epoch() == 9);
@@ -270,38 +249,26 @@ mod tests {
     #[test]
     fn keyed_records_do_not_cross_groups_and_tombstones_do_not_create_entries() {
         let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "orders-cut".to_owned(),
-                epoch: 2,
-                value: Some(start_value(3)),
-            },
-        );
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "payments-cut".to_owned(),
-                epoch: 4,
-                value: Some(start_value(3)),
-            },
-        );
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "orders-cut".to_owned(),
-                epoch: 2,
-                value: None,
-            },
-        );
-        apply_record(
-            &mut state,
-            StateRecord::Cut {
-                group: "absent".to_owned(),
-                epoch: 1,
-                value: None,
-            },
-        );
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "orders-cut".to_owned(),
+            epoch: 2,
+            value: Some(start_value(3)),
+        });
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "payments-cut".to_owned(),
+            epoch: 4,
+            value: Some(start_value(3)),
+        });
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "orders-cut".to_owned(),
+            epoch: 2,
+            value: None,
+        });
+        apply_record(&mut state, StateRecord::Cut {
+            group: "absent".to_owned(),
+            epoch: 1,
+            value: None,
+        });
 
         assert!(state["orders-cut"].pending.is_none());
         assert!(
@@ -317,21 +284,15 @@ mod tests {
     #[test]
     fn an_injection_start_with_no_cut_stays_pending() {
         let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::Group {
-                group: "orders-cut".to_owned(),
-                value: Some(group_value(1)),
-            },
-        );
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "orders-cut".to_owned(),
-                epoch: 2,
-                value: Some(start_value(4)),
-            },
-        );
+        apply_record(&mut state, StateRecord::Group {
+            group: "orders-cut".to_owned(),
+            value: Some(group_value(1)),
+        });
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "orders-cut".to_owned(),
+            epoch: 2,
+            value: Some(start_value(4)),
+        });
         let entry = &state["orders-cut"];
         assert!(
             entry.pending
@@ -347,55 +308,40 @@ mod tests {
     fn a_tombstone_drops_only_the_epoch_it_names() {
         let mut state = state_with_group(0);
         for epoch in [1, 2, 3] {
-            apply_record(
-                &mut state,
-                StateRecord::Cut {
-                    group: "orders-cut".to_owned(),
-                    epoch,
-                    value: Some(cut_value(CutStatus::Complete)),
-                },
-            );
-        }
-        apply_record(
-            &mut state,
-            StateRecord::Cut {
+            apply_record(&mut state, StateRecord::Cut {
                 group: "orders-cut".to_owned(),
-                epoch: 1,
-                value: None,
-            },
-        );
+                epoch,
+                value: Some(cut_value(CutStatus::Complete)),
+            });
+        }
+        apply_record(&mut state, StateRecord::Cut {
+            group: "orders-cut".to_owned(),
+            epoch: 1,
+            value: None,
+        });
         assert!(state["orders-cut"].cuts.keys().copied().collect::<Vec<_>>() == vec![2, 3]);
     }
 
     #[test]
     fn an_injection_start_tombstone_of_another_epoch_keeps_the_pending_one() {
         let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "orders-cut".to_owned(),
-                epoch: 9,
-                value: Some(start_value(2)),
-            },
-        );
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "orders-cut".to_owned(),
-                epoch: 4,
-                value: None,
-            },
-        );
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "orders-cut".to_owned(),
+            epoch: 9,
+            value: Some(start_value(2)),
+        });
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "orders-cut".to_owned(),
+            epoch: 4,
+            value: None,
+        });
         assert!(state["orders-cut"].pending.as_ref().map(|p| p.epoch) == Some(9));
 
-        apply_record(
-            &mut state,
-            StateRecord::InjectionStart {
-                group: "orders-cut".to_owned(),
-                epoch: 9,
-                value: None,
-            },
-        );
+        apply_record(&mut state, StateRecord::InjectionStart {
+            group: "orders-cut".to_owned(),
+            epoch: 9,
+            value: None,
+        });
         assert!(state["orders-cut"].pending.is_none());
     }
 
@@ -404,23 +350,17 @@ mod tests {
     #[test]
     fn a_cut_that_precedes_the_group_record_survives_the_fold() {
         let mut state = BTreeMap::new();
-        apply_record(
-            &mut state,
-            StateRecord::Cut {
-                group: "orders-cut".to_owned(),
-                epoch: 6,
-                value: Some(cut_value(CutStatus::Partial)),
-            },
-        );
+        apply_record(&mut state, StateRecord::Cut {
+            group: "orders-cut".to_owned(),
+            epoch: 6,
+            value: Some(cut_value(CutStatus::Partial)),
+        });
         assert!(!state["orders-cut"].is_defined());
 
-        apply_record(
-            &mut state,
-            StateRecord::Group {
-                group: "orders-cut".to_owned(),
-                value: Some(group_value(6)),
-            },
-        );
+        apply_record(&mut state, StateRecord::Group {
+            group: "orders-cut".to_owned(),
+            value: Some(group_value(6)),
+        });
         let entry = &state["orders-cut"];
         assert!(entry.is_defined());
         assert!(entry.cuts.contains_key(&6));

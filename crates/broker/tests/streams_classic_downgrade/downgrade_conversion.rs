@@ -2,21 +2,22 @@
 //! classic `JoinGroup` and keeps its committed offset, both in the live broker
 //! and across a restart that replays the group from the log.
 
-use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig, coordinator::unified::GroupType};
-
-use crate::{
-    CONVERGE_TRIES, ERR_NONE,
-    downgrade_classic_join::classic_join_sync,
-    downgrade_harness::{
-        boot, commit_offset_as_member, connect, create_topic, finalize_streams_version,
-        rejoin_config, topic_id_for,
+use {
+    crate::{
+        CONVERGE_TRIES, ERR_NONE,
+        downgrade_classic_join::classic_join_sync,
+        downgrade_harness::{
+            boot, commit_offset_as_member, connect, create_topic, finalize_streams_version,
+            rejoin_config, topic_id_for,
+        },
+        downgrade_streams_join::{streams_join_and_converge, streams_leave, topology},
+        support::{
+            client::start_client,
+            offsets::{offset_fetch_group, offset_fetch_request, offset_fetch_topic},
+        },
     },
-    downgrade_streams_join::{streams_join_and_converge, streams_leave, topology},
-    support::{
-        client::start_client,
-        offsets::{offset_fetch_group, offset_fetch_request, offset_fetch_topic},
-    },
+    assert2::{assert, check},
+    krabka_broker::{Broker, BrokerConfig, coordinator::unified::GroupType},
 };
 
 /// A drained streams group with a committed offset converts to classic on a

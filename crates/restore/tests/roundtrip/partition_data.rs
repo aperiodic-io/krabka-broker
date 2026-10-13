@@ -5,14 +5,15 @@
 //! with a fresh `krabka_log::Log` over the restored directory rather than
 //! through any restore-side value.
 
-use assert2::check;
-use krabka_ids::Offset;
-use krabka_log::{Log, LogConfig, name};
-use krabka_restore::restore;
-
-use crate::{
-    args::{RestoreOptions, restore_args},
-    fixture::build_fixture,
+use {
+    crate::{
+        args::{RestoreOptions, restore_args},
+        fixture::build_fixture,
+    },
+    assert2::check,
+    krabka_ids::Offset,
+    krabka_log::{Log, LogConfig, name},
+    krabka_restore::restore,
 };
 
 /// 2. Read back the restored data: every partition's log holds exactly the

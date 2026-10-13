@@ -4,30 +4,30 @@
 //! `__consumer_offsets`. It is its own file because every handler in this
 //! module writes through it.
 
-use std::collections::HashMap;
-
-use krabka_protocol::{primitives::uuid::Uuid, records::RecordBatch};
-
-use super::seed::snapshot_seed;
-use crate::{
-    coordinator::unified::{
-        OffsetRecordBatchBuilder,
-        member_records::{
-            MemberRecordFamilies, MemberRecordLists, MemberTombstone, MemberValues,
-            append_removed_members, append_target_records,
-        },
-        share::{
-            persistence::{
-                DeletingTopic, ShareGroupCurrentMemberAssignmentValue, ShareGroupKey,
-                ShareGroupMemberMetadataValue, ShareGroupMetadataValue,
-                ShareGroupStatePartitionMetadataValue, ShareGroupTargetAssignmentMemberValue,
-                ShareGroupTargetAssignmentMetadataValue, TopicPartitionsInfo, UNKNOWN_TOPIC_NAME,
-                encode_share_key,
+use {
+    super::seed::snapshot_seed,
+    crate::{
+        coordinator::unified::{
+            OffsetRecordBatchBuilder,
+            member_records::{
+                MemberRecordFamilies, MemberRecordLists, MemberTombstone, MemberValues,
+                append_removed_members, append_target_records,
             },
-            state::{ShareGroupState, ShareMemberState},
+            share::{
+                persistence::{
+                    DeletingTopic, ShareGroupCurrentMemberAssignmentValue, ShareGroupKey,
+                    ShareGroupMemberMetadataValue, ShareGroupMetadataValue,
+                    ShareGroupStatePartitionMetadataValue, ShareGroupTargetAssignmentMemberValue,
+                    ShareGroupTargetAssignmentMetadataValue, TopicPartitionsInfo,
+                    UNKNOWN_TOPIC_NAME, encode_share_key,
+                },
+                state::{ShareGroupState, ShareMemberState},
+            },
         },
+        error::BrokerError,
     },
-    error::BrokerError,
+    krabka_protocol::{primitives::uuid::Uuid, records::RecordBatch},
+    std::collections::HashMap,
 };
 
 #[derive(Debug, Default, PartialEq)]
@@ -45,9 +45,9 @@ pub(crate) struct PendingShareRecords {
 }
 
 impl MemberRecordFamilies for PendingShareRecords {
+    type Current = ShareGroupCurrentMemberAssignmentValue;
     type Metadata = ShareGroupMemberMetadataValue;
     type Target = ShareGroupTargetAssignmentMemberValue;
-    type Current = ShareGroupCurrentMemberAssignmentValue;
 
     fn member_record_families(&mut self) -> MemberRecordLists<'_, Self> {
         (
@@ -357,9 +357,7 @@ pub(super) use crate::txn::util::now_millis as chrono_now_ms;
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn state_partition_metadata_names_every_topic_it_lists() {

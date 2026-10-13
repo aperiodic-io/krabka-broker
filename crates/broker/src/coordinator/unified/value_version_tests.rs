@@ -4,16 +4,17 @@
 //! for any other value version, which fails the load. Each decoder here
 //! accepts its version-0 value and refuses the same bytes at version 1.
 
-use assert2::check;
-use bytes::Bytes;
-
-use super::{
-    persistence_next_gen as ng,
-    share::persistence as sp,
-    streams::persistence as st,
-    test_support::{next_current, next_member, share_member, streams_member},
+use {
+    super::{
+        persistence_next_gen as ng,
+        share::persistence as sp,
+        streams::persistence as st,
+        test_support::{next_current, next_member, share_member, streams_member},
+    },
+    crate::error::BrokerError,
+    assert2::check,
+    bytes::Bytes,
 };
-use crate::error::BrokerError;
 
 type Decoder = fn(&[u8]) -> Result<(), BrokerError>;
 

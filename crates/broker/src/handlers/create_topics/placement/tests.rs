@@ -2,23 +2,25 @@
 //! spread, the fenced and shutting-down brokers, and the validation of an
 //! explicit assignment list.
 
-use assert2::assert;
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::owned::create_topics_request::{CreatableReplicaAssignment, CreatableTopic};
-use krabka_raft::NodeId;
-
-use super::{
-    InitialLeadership, PlacementRng, automatic_leaderships, automatic_placement_exclusions, codes,
-    inactive_brokers, manual_leaderships, manual_replicas, placement_failure_message,
-    resolve_assignments, site_broker_views,
-};
-use crate::{
-    config_keys::{
-        BROKER_WITNESS, STRETCH_PREFERRED_LEADER_SITE, WITNESS_TRUE, resolve_preferred_leader_site,
+use {
+    super::{
+        InitialLeadership, PlacementRng, automatic_leaderships, automatic_placement_exclusions,
+        codes, inactive_brokers, manual_leaderships, manual_replicas, placement_failure_message,
+        resolve_assignments, site_broker_views,
     },
-    handlers::test_support::sorted_replica_sites,
-    heartbeat::fencing::fenced_node_ids,
-    test_support::broker_registration,
+    crate::{
+        config_keys::{
+            BROKER_WITNESS, STRETCH_PREFERRED_LEADER_SITE, WITNESS_TRUE,
+            resolve_preferred_leader_site,
+        },
+        handlers::test_support::sorted_replica_sites,
+        heartbeat::fencing::fenced_node_ids,
+        test_support::broker_registration,
+    },
+    assert2::assert,
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::owned::create_topics_request::{CreatableReplicaAssignment, CreatableTopic},
+    krabka_raft::NodeId,
 };
 
 /// The seeds that a test runs the placement with.
@@ -358,10 +360,10 @@ fn a_fenced_broker_is_out_of_controlled_shutdown() {
                 registration_fenced,
                 registry_unavailable,
                 views: vec![(NodeId(1), false), (NodeId(2), false), (NodeId(3), true)],
-                created: Ok((
-                    vec![NodeId(1), NodeId(2), NodeId(3)],
-                    vec![NodeId(1), NodeId(2)],
-                )),
+                created: Ok((vec![NodeId(1), NodeId(2), NodeId(3)], vec![
+                    NodeId(1),
+                    NodeId(2),
+                ])),
             }
         }
     }
@@ -712,16 +714,15 @@ fn fully_cordoned_brokers_are_not_automatic_placement_candidates() {
         image.apply(&MetadataRecord::V1BrokerRegistration(registration));
     }
     let cases = [
-        (
-            "no broker in controlled shutdown",
-            None,
-            vec![NodeId(2), NodeId(3), NodeId(4)],
-        ),
-        (
-            "broker 4 in controlled shutdown",
-            Some(4),
-            vec![NodeId(2), NodeId(3)],
-        ),
+        ("no broker in controlled shutdown", None, vec![
+            NodeId(2),
+            NodeId(3),
+            NodeId(4),
+        ]),
+        ("broker 4 in controlled shutdown", Some(4), vec![
+            NodeId(2),
+            NodeId(3),
+        ]),
     ];
     for (label, shutting_down, want) in cases {
         let mut image = image.clone();

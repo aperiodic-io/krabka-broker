@@ -11,14 +11,15 @@
 //! restarts and catches up is therefore the test: it rejoins the ISR only when
 //! the `AlterPartition` of the leader reaches the controller.
 
-use assert2::assert;
-use krabka_broker::{BootstrapMode, BrokerConfig, BrokerHandle, config::NodeRole};
-use tempfile::TempDir;
-
-use crate::support::{
-    NodeIndex, RoleNodeSetup,
-    client::create_topic_for_broker,
-    topics::{CreateTopicSetup, TopicReplicationFactor},
+use {
+    crate::support::{
+        NodeIndex, RoleNodeSetup,
+        client::create_topic_for_broker,
+        topics::{CreateTopicSetup, TopicReplicationFactor},
+    },
+    assert2::assert,
+    krabka_broker::{BootstrapMode, BrokerConfig, BrokerHandle, config::NodeRole},
+    tempfile::TempDir,
 };
 
 mod support;
@@ -54,13 +55,10 @@ async fn start_role_separated() -> RoleSeparated {
     let mut dirs = Vec::with_capacity(NODES);
 
     let ctrl_dir = TempDir::new().unwrap();
-    let ctrl_cfg = topology.config(
-        ctrl_dir.path(),
-        RoleNodeSetup {
-            role: NodeRole::Controller,
-            ..Default::default()
-        },
-    );
+    let ctrl_cfg = topology.config(ctrl_dir.path(), RoleNodeSetup {
+        role: NodeRole::Controller,
+        ..Default::default()
+    });
     let controller = support::start_held_node(
         ctrl_cfg,
         &mut ctrl_listeners,
@@ -75,14 +73,11 @@ async fn start_role_separated() -> RoleSeparated {
     let mut broker_configs = Vec::with_capacity(NODES - 1);
     for index in 1..NODES {
         let dir = TempDir::new().unwrap();
-        let cfg = topology.config(
-            dir.path(),
-            RoleNodeSetup {
-                index: NodeIndex(index),
-                mode: BootstrapMode::Join,
-                ..Default::default()
-            },
-        );
+        let cfg = topology.config(dir.path(), RoleNodeSetup {
+            index: NodeIndex(index),
+            mode: BootstrapMode::Join,
+            ..Default::default()
+        });
         broker_configs.push(cfg.clone());
         brokers.push(
             support::start_held_node(
@@ -119,14 +114,11 @@ async fn a_restarted_follower_rejoins_the_isr_when_the_controller_is_controller_
     support::init_tracing();
     let topic = "rolesep-isr";
     let mut cluster = start_role_separated().await;
-    create_topic_for_broker(
-        &cluster.brokers[0],
-        CreateTopicSetup {
-            topic,
-            replication_factor: TopicReplicationFactor(2),
-            ..Default::default()
-        },
-    )
+    create_topic_for_broker(&cluster.brokers[0], CreateTopicSetup {
+        topic,
+        replication_factor: TopicReplicationFactor(2),
+        ..Default::default()
+    })
     .await;
     cluster.controller.wait_until_isr_len(topic, 0, 2).await;
     assert!(sorted_isr(&cluster, topic) == vec![2, 3]);

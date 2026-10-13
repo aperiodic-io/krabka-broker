@@ -1,9 +1,7 @@
 //! The sampler advances each counter by the increment the reader accrued
 //! since the last sample, and leaves the gauges at the newest reading.
 
-use assert2::check;
-
-use super::*;
+use {super::*, assert2::check};
 
 #[test]
 fn counters_advance_by_the_increment_since_the_last_sample() {

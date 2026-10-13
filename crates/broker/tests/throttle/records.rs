@@ -6,17 +6,17 @@
 //! `kafka_wire::round_trip`, because the assertion under test is the *size* of
 //! the raw response and that has to be captured before decoding.
 
-use std::net::SocketAddr;
-
-use assert2::assert;
-use bytes::Buf;
-
-use super::test_support::*;
-use crate::support::{
-    fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
-    produce::{SinglePartitionProduceSetup, single_partition_produce},
-    records::{batch_from_records, value_record},
-    wire::{WireFrameSetup, read_frame, request_body_capacity, request_frame, write_frame},
+use {
+    super::test_support::*,
+    crate::support::{
+        fetch::{FetchLimits, RequestWaitMillis, named_topic_fetch},
+        produce::{SinglePartitionProduceSetup, single_partition_produce},
+        records::{batch_from_records, value_record},
+        wire::{WireFrameSetup, read_frame, request_body_capacity, request_frame, write_frame},
+    },
+    assert2::assert,
+    bytes::Buf,
+    std::net::SocketAddr,
 };
 
 /// Produce `count` records of `record_bytes` bytes each to `(topic, 0)` over

@@ -6,13 +6,14 @@
 //! no values, so `BrokerConfig::gssapi` is always `None` and a listener that
 //! enables GSSAPI fails validation with `BrokerError::GssapiConfigMissing`.
 
-use krabka_protocol::owned::{
-    sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
+use {
+    super::state::ConnectionAuth,
+    krabka_protocol::owned::{
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+    },
+    krabka_units::Time,
 };
-use krabka_units::Time;
-
-use super::state::ConnectionAuth;
 
 /// The GSSAPI accept-path configuration, which this platform cannot hold.
 #[derive(Debug, Clone)]

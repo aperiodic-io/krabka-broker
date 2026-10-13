@@ -7,12 +7,13 @@
 //! the signature exit code for a signature that failed rather than one it could
 //! not check.
 
-use krabka_protocol::krabka::{break_glass as bg, freeze as api};
-
-use super::{
-    EXIT_BAD_SIGNATURE, EXIT_MISMATCH, EXIT_NO_APPROVAL, EXIT_REFUSED,
-    cli::{action_name, pattern_name},
-    verify::{CheckedEntry, VerifyOutcome},
+use {
+    super::{
+        EXIT_BAD_SIGNATURE, EXIT_MISMATCH, EXIT_NO_APPROVAL, EXIT_REFUSED,
+        cli::{action_name, pattern_name},
+        verify::{CheckedEntry, VerifyOutcome},
+    },
+    krabka_protocol::krabka::{break_glass as bg, freeze as api},
 };
 
 /// The exit code that one broker error code becomes.

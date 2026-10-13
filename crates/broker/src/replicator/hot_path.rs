@@ -14,18 +14,18 @@
 //! [`ReplicaSeam::replicate`] is the production `replicate_batch`: the same
 //! channel send to the same writer actor, which runs the same `append_at`.
 
-use std::{
-    path::Path,
-    sync::{Arc, Mutex},
-};
-
-use arc_swap::ArcSwap;
-use krabka_log::{Log, LogConfig, LogError, Offset};
-use krabka_protocol::records::RecordBatch;
-
-use crate::{
-    config::BrokerConfig, error::BrokerError, log_dir_status::LogDirRegistry, partition::Partition,
-    partition_writer::run_with_sequencer, producer_state::ProducerState,
+use {
+    crate::{
+        config::BrokerConfig, error::BrokerError, log_dir_status::LogDirRegistry,
+        partition::Partition, partition_writer::run_with_sequencer, producer_state::ProducerState,
+    },
+    arc_swap::ArcSwap,
+    krabka_log::{Log, LogConfig, LogError, Offset},
+    krabka_protocol::records::RecordBatch,
+    std::{
+        path::Path,
+        sync::{Arc, Mutex},
+    },
 };
 
 /// A follower partition over `dir`, with its writer actor running.
@@ -79,9 +79,7 @@ impl ReplicaSeam {
     /// `append_at` rejects a batch whose `base_offset` is not the log end, so
     /// a caller stamps this into the batch the way the leader already has.
     #[must_use]
-    pub fn next_offset(&self) -> Offset {
-        self.partition.log_end_offset()
-    }
+    pub fn next_offset(&self) -> Offset { self.partition.log_end_offset() }
 
     /// Append one leader-assigned batch through the writer actor.
     ///

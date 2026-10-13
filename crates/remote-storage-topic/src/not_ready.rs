@@ -16,10 +16,12 @@
 //! [`krabka_remote_storage::InmemoryRemoteLogMetadataManager`], which silently
 //! accepts writes that are then lost when the real manager replaces it.
 
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{
-    RemoteLogMetadataManager, RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
-    RemotePartitionDeleteMetadata, RemoteStorageError, TopicIdPartition,
+use {
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{
+        RemoteLogMetadataManager, RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
+        RemotePartitionDeleteMetadata, RemoteStorageError, TopicIdPartition,
+    },
 };
 
 /// A [`RemoteLogMetadataManager`] that returns
@@ -33,9 +35,7 @@ pub struct NotReadyRlmm;
 impl NotReadyRlmm {
     /// Construct a new `NotReadyRlmm`.
     #[must_use]
-    pub fn new() -> Self {
-        Self
-    }
+    pub fn new() -> Self { Self }
 }
 
 impl RemoteLogMetadataManager for NotReadyRlmm {
@@ -109,23 +109,20 @@ impl RemoteLogMetadataManager for NotReadyRlmm {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_remote_storage::{
-        RemoteLogSegmentId, RemoteLogSegmentState, RemotePartitionDeleteState,
+    use {
+        super::*,
+        assert2::assert,
+        krabka_remote_storage::{
+            RemoteLogSegmentId, RemoteLogSegmentState, RemotePartitionDeleteState,
+        },
+        uuid::Uuid,
     };
-    use uuid::Uuid;
-
-    use super::*;
 
     krabka_macros::remote_started_segment!(synthetic_started_segment, krabka_remote_storage);
 
-    fn tp() -> TopicIdPartition {
-        TopicIdPartition::new(Uuid::from_u128(1), "orders", 3)
-    }
+    fn tp() -> TopicIdPartition { TopicIdPartition::new(Uuid::from_u128(1), "orders", 3) }
 
-    fn seg_id(id: u128) -> RemoteLogSegmentId {
-        RemoteLogSegmentId::new(tp(), Uuid::from_u128(id))
-    }
+    fn seg_id(id: u128) -> RemoteLogSegmentId { RemoteLogSegmentId::new(tp(), Uuid::from_u128(id)) }
 
     #[test]
     fn reads_return_not_ready_with_partition() {

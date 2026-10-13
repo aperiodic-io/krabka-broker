@@ -28,15 +28,15 @@
 //! whose per-replica logs it also carries, and states the losslessness as a
 //! property over both. Neither half is worth much without the other.
 
-use std::collections::BTreeMap;
-
-use krabka_raft::NodeId;
-use stateright::{Model, Property};
-
-use super::recovery_state::{
-    RecoveryAction, RecoveryModel, RecoveryState, ReplicaLog, infos_of, wire_id,
+use {
+    super::recovery_state::{
+        RecoveryAction, RecoveryModel, RecoveryState, ReplicaLog, infos_of, wire_id,
+    },
+    crate::unclean_recovery::{ReplicaLogInfo, has_newer_leader, select_leader},
+    krabka_raft::NodeId,
+    stateright::{Model, Property},
+    std::collections::BTreeMap,
 };
-use crate::unclean_recovery::{ReplicaLogInfo, has_newer_leader, select_leader};
 
 /// What an election is, reduced to the two things the rest of the controller
 /// reads off it: who leads, and whether the election lost committed data.
@@ -100,8 +100,33 @@ fn actual(model: &RecoveryModel, responses: &[ReplicaLogInfo]) -> Outcome {
 }
 
 impl Model for RecoveryModel {
-    type State = RecoveryState;
     type Action = RecoveryAction;
+    type State = RecoveryState;
+
+    krabka_macros::model_transition!(last, action, state; {
+            match action {
+                RecoveryAction::AddResponse {
+                    node,
+                    last_written_epoch,
+                    leo,
+                    current_epoch,
+                } => {
+                    if state.responses.contains_key(&node) {
+                        return None;
+                    }
+                    state.responses.insert(
+                        node,
+                        ReplicaLog {
+                            last_written_leader_epoch: last_written_epoch,
+                            log_end_offset: leo,
+                            current_leader_epoch: current_epoch,
+                        },
+                    );
+                }
+            }
+            Some(state)
+
+    });
 
     fn init_states(&self) -> Vec<Self::State> {
         vec![RecoveryState {
@@ -132,31 +157,6 @@ impl Model for RecoveryModel {
             }
         }
     }
-
-    krabka_macros::model_transition!(last, action, state; {
-            match action {
-                RecoveryAction::AddResponse {
-                    node,
-                    last_written_epoch,
-                    leo,
-                    current_epoch,
-                } => {
-                    if state.responses.contains_key(&node) {
-                        return None;
-                    }
-                    state.responses.insert(
-                        node,
-                        ReplicaLog {
-                            last_written_leader_epoch: last_written_epoch,
-                            log_end_offset: leo,
-                            current_leader_epoch: current_epoch,
-                        },
-                    );
-                }
-            }
-            Some(state)
-
-    });
 
     fn properties(&self) -> Vec<Property<Self>> {
         let mut props = vec![

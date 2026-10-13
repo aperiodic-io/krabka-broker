@@ -2,23 +2,24 @@
 //! prefix into a [`MetadataImage`], replay of the KIP-853 control records into
 //! the seed [`QuorumState`], and the control state as of a chosen boundary.
 
-use krabka_ids::Offset;
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_protocol::records::{RecordBatch, metadata::control::ControlRecord};
-use krabka_verified::recovery::{
-    ReplayCursorDecision, ReplayRecordDecision, replay_cursor_decision, replay_record_decision,
-    should_capture_first_downgrade,
-};
-
-use super::{
-    PendingDowngradeSnapshot,
-    control_state::voter_set_from_wire,
-    records::{decode_committed_value, decode_control_record, next_batch_offset},
-};
-use crate::{
-    config::MetadataRaftFetchMax,
-    error::{MetadataReplayError, RaftError},
-    kraft::{log::KraftLog, types::QuorumState},
+use {
+    super::{
+        PendingDowngradeSnapshot,
+        control_state::voter_set_from_wire,
+        records::{decode_committed_value, decode_control_record, next_batch_offset},
+    },
+    crate::{
+        config::MetadataRaftFetchMax,
+        error::{MetadataReplayError, RaftError},
+        kraft::{log::KraftLog, types::QuorumState},
+    },
+    krabka_ids::Offset,
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    krabka_protocol::records::{RecordBatch, metadata::control::ControlRecord},
+    krabka_verified::recovery::{
+        ReplayCursorDecision, ReplayRecordDecision, replay_cursor_decision, replay_record_decision,
+        should_capture_first_downgrade,
+    },
 };
 
 fn visit_decoded_batches(

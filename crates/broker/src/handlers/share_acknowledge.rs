@@ -18,28 +18,28 @@
 //! `SocketAddr` in its `RequestContext`, for the group `Read` and per-topic
 //! `Read` ACL gates.
 
-use std::time::Instant;
-
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    share_acknowledge_request::ShareAcknowledgeRequest,
-    share_acknowledge_response::{
-        LeaderIdAndEpoch, NodeEndpoint, PartitionData, ShareAcknowledgeResponse,
-        ShareAcknowledgeTopicResponse,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{
+            ErrorResponse as _, RequestContext, acl_denied, leader_endpoints,
+            share_fetch::{
+                AckApplication, Renewal, acknowledgement_batches_are_valid, apply_acknowledgements,
+                current_leader, names_the_leader, share_request_identity,
+            },
+        },
+        share_partition::group_settings::GroupShareSettings,
     },
-};
-
-use crate::{
-    broker::Broker,
-    codes,
-    handlers::{
-        ErrorResponse as _, RequestContext, acl_denied, leader_endpoints,
-        share_fetch::{
-            AckApplication, Renewal, acknowledgement_batches_are_valid, apply_acknowledgements,
-            current_leader, names_the_leader, share_request_identity,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        share_acknowledge_request::ShareAcknowledgeRequest,
+        share_acknowledge_response::{
+            LeaderIdAndEpoch, NodeEndpoint, PartitionData, ShareAcknowledgeResponse,
+            ShareAcknowledgeTopicResponse,
         },
     },
-    share_partition::group_settings::GroupShareSettings,
+    std::time::Instant,
 };
 
 context_handler! {
@@ -283,26 +283,27 @@ async fn process_topics(context: &AcknowledgeContext<'_>) -> Vec<ShareAcknowledg
 #[cfg(test)]
 mod tests {
 
-    use assert2::assert;
-    use krabka_protocol::{
-        owned::{
-            share_acknowledge_request::{AcknowledgePartition, AcknowledgeTopic},
-            share_acknowledge_response,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            broker::BrokerHandle,
+            handlers::test_support::{
+                ClientTopicSetup, create_topic as create_topic_from_test_support,
+            },
+            share_partition::session::FetchPartitions,
+            test_support::{
+                ShareApiSupport, ShareBrokerSetup, dispatch_wire, peer, principal,
+                start_share_broker, test_ctx,
+            },
         },
-        primitives::uuid::Uuid as ProtoUuid,
-    };
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        broker::BrokerHandle,
-        handlers::test_support::{
-            ClientTopicSetup, create_topic as create_topic_from_test_support,
-        },
-        share_partition::session::FetchPartitions,
-        test_support::{
-            ShareApiSupport, ShareBrokerSetup, dispatch_wire, peer, principal, start_share_broker,
-            test_ctx,
+        assert2::assert,
+        krabka_protocol::{
+            owned::{
+                share_acknowledge_request::{AcknowledgePartition, AcknowledgeTopic},
+                share_acknowledge_response,
+            },
+            primitives::uuid::Uuid as ProtoUuid,
         },
     };
 
@@ -331,13 +332,11 @@ mod tests {
     #[tokio::test]
     async fn handle_disabled_feature_returns_top_level_unsupported_version() {
         let version = share_acknowledge_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_share_broker(
-            std::sync::Arc::new(AllowAllAuthorizer),
-            ShareBrokerSetup {
+        let (broker_handle, _dir) =
+            start_share_broker(std::sync::Arc::new(AllowAllAuthorizer), ShareBrokerSetup {
                 support: ShareApiSupport::Disabled,
-            },
-        )
-        .await;
+            })
+            .await;
         let broker = broker_handle.broker_arc_for_test();
         test_ctx!(ctx, "alice");
 
@@ -359,14 +358,11 @@ mod tests {
     use crate::handlers::test_support::{DenyTopicRead, TopicIdRef as TopicRef};
 
     async fn create_topic(broker: &BrokerHandle, name: &str) -> ProtoUuid {
-        create_topic_from_test_support(
-            broker,
-            ClientTopicSetup {
-                client_id: "share-acknowledge-resolution-test",
-                name,
-                ..Default::default()
-            },
-        )
+        create_topic_from_test_support(broker, ClientTopicSetup {
+            client_id: "share-acknowledge-resolution-test",
+            name,
+            ..Default::default()
+        })
         .await
     }
 
@@ -447,21 +443,17 @@ mod tests {
                     error_code,
                     ..Default::default()
                 };
-                expected.push((
-                    version,
-                    topic,
-                    ShareAcknowledgeResponse {
-                        // The wire carries the lock timeout from v2 on. An
-                        // older version decodes the field's default, 0.
-                        acquisition_lock_timeout_ms: if version >= 2 { 30_000 } else { 0 },
-                        responses: vec![ShareAcknowledgeTopicResponse {
-                            topic_id,
-                            partitions: vec![row],
-                            ..Default::default()
-                        }],
+                expected.push((version, topic, ShareAcknowledgeResponse {
+                    // The wire carries the lock timeout from v2 on. An
+                    // older version decodes the field's default, 0.
+                    acquisition_lock_timeout_ms: if version >= 2 { 30_000 } else { 0 },
+                    responses: vec![ShareAcknowledgeTopicResponse {
+                        topic_id,
+                        partitions: vec![row],
                         ..Default::default()
-                    },
-                ));
+                    }],
+                    ..Default::default()
+                }));
             }
         }
         (actual, expected)

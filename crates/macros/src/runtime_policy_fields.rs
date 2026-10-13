@@ -1,11 +1,12 @@
 //! Common policy fields of the TOML and command-line runtime configurations.
 
-use moxy::{
-    ast::{Field, List, ParseError, Parser, Token},
-    token::{LitStr, Span, ToTokenStream, TokenStream, TokenTree},
+use {
+    crate::meta::{mode, named_body},
+    moxy::{
+        ast::{Field, List, ParseError, Parser, Token},
+        token::{LitStr, Span, ToTokenStream, TokenStream, TokenTree},
+    },
 };
-
-use crate::meta::{mode, named_body};
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     let mode = mode(meta, ["toml", "cli", "node_cli"])?;

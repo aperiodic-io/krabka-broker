@@ -11,27 +11,28 @@
 //! define. The broker synonyms of Kafka trunk's topic keys join the roster
 //! under `unstable.api.versions.enable`.
 
-use std::{collections::BTreeMap, path::PathBuf};
-
-use krabka_metadata::NodeId;
-
-use super::{
-    MIN_INSYNC_REPLICAS,
-    kafka_broker::{self, Dynamic, listener_override_base},
-    parse::{check_range, parse_long},
-    recovery::UNCLEAN_RECOVERY_STRATEGY,
-    registry::{self, ConfigScope},
-    serves_topic_key,
-    validation::canonical_value,
-};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    cordoned_log_dirs::{CORDONED_LOG_DIRS, resolve, validate_value_type},
-    features::ELR_VERSION,
-    throttle::{
-        ALTER_LOG_DIRS_THROTTLED_RATE_KEY, FOLLOWER_THROTTLED_RATE_KEY, LEADER_THROTTLED_RATE_KEY,
+use {
+    super::{
+        MIN_INSYNC_REPLICAS,
+        kafka_broker::{self, Dynamic, listener_override_base},
+        parse::{check_range, parse_long},
+        recovery::UNCLEAN_RECOVERY_STRATEGY,
+        registry::{self, ConfigScope},
+        serves_topic_key,
+        validation::canonical_value,
     },
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        cordoned_log_dirs::{CORDONED_LOG_DIRS, resolve, validate_value_type},
+        features::ELR_VERSION,
+        throttle::{
+            ALTER_LOG_DIRS_THROTTLED_RATE_KEY, FOLLOWER_THROTTLED_RATE_KEY,
+            LEADER_THROTTLED_RATE_KEY,
+        },
+    },
+    krabka_metadata::NodeId,
+    std::{collections::BTreeMap, path::PathBuf},
 };
 
 /// The live facts used by either broker-configuration mutation API.
@@ -513,10 +514,11 @@ pub(crate) const CLUSTER_DEFAULT_ONLY: &[&str] = &[UNCLEAN_RECOVERY_STRATEGY];
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::{test_support::config_map as map, throttle::LEADER_THROTTLED_RATE_KEY};
+    use {
+        super::*,
+        crate::{test_support::config_map as map, throttle::LEADER_THROTTLED_RATE_KEY},
+        assert2::check,
+    };
 
     /// Controller-side validation skips broker-local membership checks but
     /// must reject a wildcard mixed with explicit directories after a merge.

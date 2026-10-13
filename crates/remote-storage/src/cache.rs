@@ -12,21 +12,21 @@
 //! [`DeleteSegmentFinished`](RemoteLogSegmentState::DeleteSegmentFinished)
 //! drops it entirely.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-
-use krabka_ids::LeaderEpoch;
-use krabka_verified::{
-    remote_read_relative_offset,
-    storage::{RemoteCacheAction, remote_cache_action},
-};
-use uuid::Uuid;
-
-use crate::{
-    error::RemoteStorageError,
-    metadata::{
-        RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState,
-        RemotePartitionDeleteState,
+use {
+    crate::{
+        error::RemoteStorageError,
+        metadata::{
+            RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState,
+            RemotePartitionDeleteState,
+        },
     },
+    krabka_ids::LeaderEpoch,
+    krabka_verified::{
+        remote_read_relative_offset,
+        storage::{RemoteCacheAction, remote_cache_action},
+    },
+    std::collections::{BTreeMap, HashMap, HashSet},
+    uuid::Uuid,
 };
 
 #[derive(Debug, Default)]
@@ -242,9 +242,7 @@ impl RemoteLogMetadataCache {
         self.delete_state = delete_state;
     }
 
-    pub(crate) fn delete_state(&self) -> Option<RemotePartitionDeleteState> {
-        self.delete_state
-    }
+    pub(crate) fn delete_state(&self) -> Option<RemotePartitionDeleteState> { self.delete_state }
 
     pub(crate) fn set_delete_state(&mut self, state: RemotePartitionDeleteState) {
         self.delete_state = Some(state);
@@ -263,16 +261,15 @@ pub(crate) fn sort_by_start_offset(segments: &mut [RemoteLogSegmentMetadata]) {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::metadata::{
-        CustomMetadata, RemoteLogSegmentDetails, RemoteLogSegmentId, TopicIdPartition,
+    use {
+        super::*,
+        crate::metadata::{
+            CustomMetadata, RemoteLogSegmentDetails, RemoteLogSegmentId, TopicIdPartition,
+        },
+        assert2::{assert, check},
     };
 
-    fn tp() -> TopicIdPartition {
-        TopicIdPartition::new(Uuid::from_u128(1), "t", 0)
-    }
+    fn tp() -> TopicIdPartition { TopicIdPartition::new(Uuid::from_u128(1), "t", 0) }
 
     use krabka_ids::Offset;
 

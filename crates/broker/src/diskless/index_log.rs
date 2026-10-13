@@ -1,24 +1,24 @@
 //! Projection of committed diskless WAL index events.
 
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+use {
+    super::wal_index::{
+        WalDeleteFloorKey, WalDeleteFloorRecord, WalFlushRecord, WalIndexCache, WalIndexKey,
     },
-    time::Duration,
+    crate::{error::BrokerError, metrics::BrokerMetrics},
+    bytes::Bytes,
+    futures_util::StreamExt,
+    krabka_remote_storage::diskless::{REPLAY_FENCE_KEY, wal_index_key_version},
+    krabka_remote_storage_topic::{MetadataEventLog, PartitionStart},
+    std::{
+        collections::HashMap,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Duration,
+    },
+    tokio::sync::{Mutex, watch},
 };
-
-use bytes::Bytes;
-use futures_util::StreamExt;
-use krabka_remote_storage::diskless::{REPLAY_FENCE_KEY, wal_index_key_version};
-use krabka_remote_storage_topic::{MetadataEventLog, PartitionStart};
-use tokio::sync::{Mutex, watch};
-
-use super::wal_index::{
-    WalDeleteFloorKey, WalDeleteFloorRecord, WalFlushRecord, WalIndexCache, WalIndexKey,
-};
-use crate::{error::BrokerError, metrics::BrokerMetrics};
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -253,13 +253,9 @@ impl DisklessIndexLog {
     }
 
     #[must_use]
-    pub(crate) fn cache(&self) -> Arc<Mutex<WalIndexCache>> {
-        self.cache.clone()
-    }
+    pub(crate) fn cache(&self) -> Arc<Mutex<WalIndexCache>> { self.cache.clone() }
 
-    pub(crate) fn is_valid(&self) -> bool {
-        self.valid.load(Ordering::Acquire)
-    }
+    pub(crate) fn is_valid(&self) -> bool { self.valid.load(Ordering::Acquire) }
 
     /// Wait until the live projection becomes invalid or its pump stops.
     pub(crate) async fn wait_until_unusable(&self) {
@@ -443,28 +439,28 @@ fn index_partition(key: &[u8], partitions: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    use assert2::assert;
-    use async_trait::async_trait;
-    use krabka_remote_storage_topic::{
-        AssignmentHandle, InProcessMetadataEventLog, MetadataEventLog, MetadataEventStream,
-        MetadataLogError, PartitionStart,
-    };
-    use tokio::time::timeout;
-    use uuid::Uuid;
-
-    use super::{
-        test_support::{PacedReplayLog, RacingAppendLog, ReplayPace},
-        *,
-    };
-    use crate::{
-        diskless::{
-            index_log::test_support::RacingAppendSetup,
-            wal_index::{WalFlushRecord, WalIndexEntry},
+    use {
+        super::{
+            test_support::{PacedReplayLog, RacingAppendLog, ReplayPace},
+            *,
         },
-        metrics::BrokerMetrics,
-        test_support::UnixMillis,
+        crate::{
+            diskless::{
+                index_log::test_support::RacingAppendSetup,
+                wal_index::{WalFlushRecord, WalIndexEntry},
+            },
+            metrics::BrokerMetrics,
+            test_support::UnixMillis,
+        },
+        assert2::assert,
+        async_trait::async_trait,
+        krabka_remote_storage_topic::{
+            AssignmentHandle, InProcessMetadataEventLog, MetadataEventLog, MetadataEventStream,
+            MetadataLogError, PartitionStart,
+        },
+        std::sync::atomic::{AtomicBool, Ordering},
+        tokio::time::timeout,
+        uuid::Uuid,
     };
 
     #[derive(Clone, Copy)]
@@ -494,9 +490,7 @@ mod tests {
 
     #[async_trait]
     impl MetadataEventLog for TogglePublishLog {
-        fn partition_count(&self) -> i32 {
-            self.inner.partition_count()
-        }
+        fn partition_count(&self) -> i32 { self.inner.partition_count() }
 
         async fn publish(&self, partition: i32, event: Bytes) -> Result<i64, MetadataLogError> {
             self.inner.publish(partition, event).await
@@ -555,11 +549,10 @@ mod tests {
     ) -> (Arc<InProcessMetadataEventLog>, Uuid, DisklessIndexLog) {
         let event_log = InProcessMetadataEventLog::new(partitions);
         let topic_id = Uuid::from_u128(7);
-        let seed = seeded_index(
-            event_log.clone(),
-            topic_id,
-            &[("object-a", 0, 3), ("object-b", 4, 7)],
-        )
+        let seed = seeded_index(event_log.clone(), topic_id, &[
+            ("object-a", 0, 3),
+            ("object-b", 4, 7),
+        ])
         .await;
         (event_log, topic_id, seed)
     }

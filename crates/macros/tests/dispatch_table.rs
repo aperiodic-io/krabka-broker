@@ -3,16 +3,17 @@
 //! api key and `FLEXIBLE_MIN`, and each adapter hands its handler what that
 //! section promises.
 
-use std::{
-    collections::BTreeMap,
-    future::Future,
-    pin::Pin,
-    sync::{Arc, Mutex},
-    task::{Context, Poll, Waker},
+use {
+    assert2::assert,
+    std::{
+        collections::BTreeMap,
+        future::Future,
+        pin::Pin,
+        sync::{Arc, Mutex},
+        task::{Context, Poll, Waker},
+    },
+    tracing_subscriber::layer::SubscriberExt as _,
 };
-
-use assert2::assert;
-use tracing_subscriber::layer::SubscriberExt as _;
 
 type ApiVersion = i16;
 type CorrelationId = i32;
@@ -50,9 +51,7 @@ impl std::fmt::Display for BrokerError {
 }
 
 impl From<krabka_protocol::DecodeError> for BrokerError {
-    fn from(_: krabka_protocol::DecodeError) -> Self {
-        Self::Decode
-    }
+    fn from(_: krabka_protocol::DecodeError) -> Self { Self::Decode }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -216,9 +215,7 @@ fn reply(parts: &[&dyn std::fmt::Display]) -> Result<Bytes, BrokerError> {
     }
 }
 
-fn text(body: &[u8]) -> String {
-    String::from_utf8_lossy(body).into_owned()
-}
+fn text(body: &[u8]) -> String { String::from_utf8_lossy(body).into_owned() }
 
 macro_rules! context_bytes_handler {
     ($name:literal) => {
@@ -243,8 +240,10 @@ macro_rules! context_bytes_handler {
 }
 
 mod handlers {
-    use super::reply;
-    use crate::{ApiVersion, BrokerError, Bytes, krabka_protocol::Decode};
+    use {
+        super::reply,
+        crate::{ApiVersion, BrokerError, Bytes, krabka_protocol::Decode},
+    };
 
     /// The `typed` adapters' encoder: the response, then the version it was
     /// encoded at. It refuses a response that says `nope`.

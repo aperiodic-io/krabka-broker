@@ -10,25 +10,25 @@
 //! contributes one `PartitionRecord` change or an error response, so the whole
 //! per-row decision belongs in one module.
 
-use std::collections::HashSet;
-
-#[cfg(test)]
-use krabka_metadata::LeaderEpoch;
-use krabka_metadata::{
-    LeaderRecoveryState, MetadataRecord, NodeId, PartitionRecord, PartitionRecoveryRecord,
-};
-use krabka_protocol::{
-    UnknownTaggedFields,
-    owned::{
-        alter_partition_request::PartitionData as ReqPartitionData,
-        alter_partition_response::PartitionData as RespPartitionData,
-    },
-};
-use krabka_verified::isr::{AlterPartitionFacts, IsrAdmission, ProposedIsr, isr_admission};
-
 #[cfg(test)]
 use crate::test_support::WireBrokerId;
-use crate::{codes, metadata_epoch::next_i32};
+#[cfg(test)]
+use krabka_metadata::LeaderEpoch;
+use {
+    crate::{codes, metadata_epoch::next_i32},
+    krabka_metadata::{
+        LeaderRecoveryState, MetadataRecord, NodeId, PartitionRecord, PartitionRecoveryRecord,
+    },
+    krabka_protocol::{
+        UnknownTaggedFields,
+        owned::{
+            alter_partition_request::PartitionData as ReqPartitionData,
+            alter_partition_response::PartitionData as RespPartitionData,
+        },
+    },
+    krabka_verified::isr::{AlterPartitionFacts, IsrAdmission, ProposedIsr, isr_admission},
+    std::collections::HashSet,
+};
 
 /// Validates and applies the ISR proposal of one partition of the known topic
 /// `topic_name`, sent by broker `requester`. It returns the per-partition
@@ -250,16 +250,17 @@ fn error_part(partition_index: i32, error_code: i16) -> RespPartitionData {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        handlers::alter_partition::test_support::{
-            ONE_REGISTERED_BROKER, PartitionFixture, THREE_REGISTERED_BROKERS,
-            TWO_REGISTERED_BROKERS, ThreeBrokerEpochsSetup, bs, image_with, image_with_partition,
-            three_broker_states,
+    use {
+        super::*,
+        crate::{
+            handlers::alter_partition::test_support::{
+                ONE_REGISTERED_BROKER, PartitionFixture, THREE_REGISTERED_BROKERS,
+                TWO_REGISTERED_BROKERS, ThreeBrokerEpochsSetup, bs, image_with,
+                image_with_partition, three_broker_states,
+            },
+            test_support::{BrokerEpoch, PartitionEpoch, WireBrokerId},
         },
-        test_support::{BrokerEpoch, PartitionEpoch, WireBrokerId},
+        assert2::assert,
     };
 
     /// Kafka's `ReplicationControlManager.validateAlterPartitionData`, in its
@@ -463,16 +464,12 @@ mod tests {
     fn success_response_preserves_non_default_partition_fields() {
         let image = non_default_partition_image();
         let mut changes = Vec::new();
-        let resp = handle_partition(
-            &image,
-            &mut changes,
-            PartitionRequestSetup {
-                partition: krabka_ids::PartitionIndex(7),
-                leader_epoch: LeaderEpoch(9),
-                new_isr: &[WireBrokerId(2), WireBrokerId(4)],
-                ..Default::default()
-            },
-        );
+        let resp = handle_partition(&image, &mut changes, PartitionRequestSetup {
+            partition: krabka_ids::PartitionIndex(7),
+            leader_epoch: LeaderEpoch(9),
+            new_isr: &[WireBrokerId(2), WireBrokerId(4)],
+            ..Default::default()
+        });
 
         let expected = tagged_wire!(RespPartitionData {
             partition_index: 7,
@@ -649,14 +646,10 @@ mod tests {
         );
         let mut changes = Vec::new();
 
-        let response = handle_partition(
-            &image,
-            &mut changes,
-            PartitionRequestSetup {
-                new_isr: &[WireBrokerId(1), WireBrokerId(2)],
-                ..Default::default()
-            },
-        );
+        let response = handle_partition(&image, &mut changes, PartitionRequestSetup {
+            new_isr: &[WireBrokerId(1), WireBrokerId(2)],
+            ..Default::default()
+        });
 
         assert!(response.error_code == codes::INVALID_REQUEST);
         assert!(changes.is_empty());
@@ -687,15 +680,11 @@ mod tests {
     fn explicit_v2_isr_wins_when_epoch_states_are_also_present() {
         let image = image_with(THREE_REGISTERED_BROKERS);
         let mut changes = Vec::new();
-        let resp = handle_partition(
-            &image,
-            &mut changes,
-            PartitionRequestSetup {
-                new_isr: &[WireBrokerId(1), WireBrokerId(2)],
-                new_isr_with_epochs: &[bs(WireBrokerId(3), BrokerEpoch(30))],
-                ..Default::default()
-            },
-        );
+        let resp = handle_partition(&image, &mut changes, PartitionRequestSetup {
+            new_isr: &[WireBrokerId(1), WireBrokerId(2)],
+            new_isr_with_epochs: &[bs(WireBrokerId(3), BrokerEpoch(30))],
+            ..Default::default()
+        });
         let expected = tagged_wire!(RespPartitionData {
             partition_index: 0,
             error_code: codes::NONE,
@@ -764,18 +753,14 @@ mod tests {
             (&[1, 2, 3][..], codes::INELIGIBLE_REPLICA),
         ] {
             let mut changes = Vec::new();
-            let resp = handle_partition(
-                &image,
-                &mut changes,
-                PartitionRequestSetup {
-                    new_isr: &(new_isr)
-                        .iter()
-                        .copied()
-                        .map(WireBrokerId)
-                        .collect::<Vec<_>>(),
-                    ..Default::default()
-                },
-            );
+            let resp = handle_partition(&image, &mut changes, PartitionRequestSetup {
+                new_isr: &(new_isr)
+                    .iter()
+                    .copied()
+                    .map(WireBrokerId)
+                    .collect::<Vec<_>>(),
+                ..Default::default()
+            });
             assert2::check!(resp.error_code == expected, "new_isr {new_isr:?}");
         }
     }
@@ -794,14 +779,10 @@ mod tests {
             ],
         );
         let mut changes = Vec::new();
-        let resp = handle_partition(
-            &image,
-            &mut changes,
-            PartitionRequestSetup {
-                new_isr: &[WireBrokerId(-1)],
-                ..Default::default()
-            },
-        );
+        let resp = handle_partition(&image, &mut changes, PartitionRequestSetup {
+            new_isr: &[WireBrokerId(-1)],
+            ..Default::default()
+        });
 
         assert!(resp.error_code == codes::INVALID_REQUEST);
         assert!(changes.is_empty());
@@ -853,16 +834,13 @@ mod tests {
             &mut changes,
         );
         assert!(recovered.error_code == codes::NONE);
-        assert!(matches!(
-            changes.as_slice(),
-            [
-                MetadataRecord::V1Partition(_),
-                MetadataRecord::V1PartitionRecovery(PartitionRecoveryRecord {
-                    state: LeaderRecoveryState::Recovered,
-                    ..
-                })
-            ]
-        ));
+        assert!(matches!(changes.as_slice(), [
+            MetadataRecord::V1Partition(_),
+            MetadataRecord::V1PartitionRecovery(PartitionRecoveryRecord {
+                state: LeaderRecoveryState::Recovered,
+                ..
+            })
+        ]));
     }
 
     /// krabka-io/krabka-broker#825: Kafka's `ineligibleReplicasForIsr`. The
@@ -943,33 +921,27 @@ mod tests {
             let mut changes = Vec::new();
 
             for (form, request) in [
-                (
-                    "v2 new_isr",
-                    ReqPartitionData {
-                        partition_index: 0,
-                        leader_epoch: 5,
-                        new_isr: vec![1, 2],
-                        ..Default::default()
-                    },
-                ),
-                (
-                    "v3 new_isr_with_epochs",
-                    ReqPartitionData {
-                        partition_index: 0,
-                        leader_epoch: 5,
-                        new_isr_with_epochs: vec![
-                            bs(
-                                crate::test_support::WireBrokerId(1),
-                                crate::test_support::BrokerEpoch(10),
-                            ),
-                            bs(
-                                crate::test_support::WireBrokerId(2),
-                                crate::test_support::BrokerEpoch(-1),
-                            ),
-                        ],
-                        ..Default::default()
-                    },
-                ),
+                ("v2 new_isr", ReqPartitionData {
+                    partition_index: 0,
+                    leader_epoch: 5,
+                    new_isr: vec![1, 2],
+                    ..Default::default()
+                }),
+                ("v3 new_isr_with_epochs", ReqPartitionData {
+                    partition_index: 0,
+                    leader_epoch: 5,
+                    new_isr_with_epochs: vec![
+                        bs(
+                            crate::test_support::WireBrokerId(1),
+                            crate::test_support::BrokerEpoch(10),
+                        ),
+                        bs(
+                            crate::test_support::WireBrokerId(2),
+                            crate::test_support::BrokerEpoch(-1),
+                        ),
+                    ],
+                    ..Default::default()
+                }),
             ] {
                 let response =
                     handle_partition_with_recovery(&image, &active, 1, "t", &request, &mut changes);

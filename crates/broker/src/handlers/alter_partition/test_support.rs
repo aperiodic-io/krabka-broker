@@ -6,19 +6,20 @@
 //! registrations, so those fixtures live in one module rather than being
 //! duplicated per test file.
 
-use krabka_metadata::{
-    BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
-};
-use krabka_protocol::{
-    owned::alter_partition_request::{
-        AlterPartitionRequest, BrokerState, TopicData as ReqTopicData,
+use {
+    crate::{
+        broker::Broker,
+        test_support::{BrokerEpoch, PartitionEpoch, WireBrokerId, broker_registration},
     },
-    primitives::uuid::Uuid as ProtoUuid,
-};
-
-use crate::{
-    broker::Broker,
-    test_support::{BrokerEpoch, PartitionEpoch, WireBrokerId, broker_registration},
+    krabka_metadata::{
+        BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
+    },
+    krabka_protocol::{
+        owned::alter_partition_request::{
+            AlterPartitionRequest, BrokerState, TopicData as ReqTopicData,
+        },
+        primitives::uuid::Uuid as ProtoUuid,
+    },
 };
 
 const TOPIC_ID_BYTES: [u8; 16] = [7; 16];
@@ -110,13 +111,9 @@ pub(super) fn image_with(epochs: &[(krabka_metadata::NodeId, BrokerEpoch)]) -> M
     image_with_partition(&PartitionFixture::default(), epochs)
 }
 
-fn topic_id() -> uuid::Uuid {
-    uuid::Uuid::from_bytes(TOPIC_ID_BYTES)
-}
+fn topic_id() -> uuid::Uuid { uuid::Uuid::from_bytes(TOPIC_ID_BYTES) }
 
-pub(super) fn wire_topic_id() -> ProtoUuid {
-    ProtoUuid(TOPIC_ID_BYTES)
-}
+pub(super) fn wire_topic_id() -> ProtoUuid { ProtoUuid(TOPIC_ID_BYTES) }
 
 pub(super) fn bs(broker_id: WireBrokerId, broker_epoch: BrokerEpoch) -> BrokerState {
     BrokerState {

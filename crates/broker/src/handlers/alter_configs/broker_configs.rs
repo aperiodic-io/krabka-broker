@@ -10,21 +10,21 @@
 //! shared with `IncrementalAlterConfigs` in
 //! [`crate::config_keys::broker_dynamic`].
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::{BrokerConfigRecord, MetadataRecord};
-use krabka_protocol::owned::alter_configs_request::AlterConfigsResource;
-
-use crate::{
-    codes,
-    config_keys::{
-        self,
-        broker_dynamic::{
-            BrokerConfigContext, CLUSTER_DEFAULT_ONLY, cordoned_log_dirs_disabled_error,
-            cordoned_log_dirs_error, elr_min_isr_error, validate_dynamic_broker_configs,
+use {
+    crate::{
+        codes,
+        config_keys::{
+            self,
+            broker_dynamic::{
+                BrokerConfigContext, CLUSTER_DEFAULT_ONLY, cordoned_log_dirs_disabled_error,
+                cordoned_log_dirs_error, elr_min_isr_error, validate_dynamic_broker_configs,
+            },
         },
+        cordoned_log_dirs::CORDONED_LOG_DIRS,
     },
-    cordoned_log_dirs::CORDONED_LOG_DIRS,
+    krabka_metadata::{BrokerConfigRecord, MetadataRecord},
+    krabka_protocol::owned::alter_configs_request::AlterConfigsResource,
+    std::collections::BTreeMap,
 };
 
 /// Check broker identity and directory membership on the client-addressed node.
@@ -129,18 +129,19 @@ pub(super) fn broker_config_records(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::NodeId;
-
-    use super::*;
-    use crate::{
-        config_keys::{BROKER_WITNESS, UNCLEAN_RECOVERY_STRATEGY, WITNESS_TRUE},
-        handlers::{
-            alter_configs::test_support::{broker_resource, image_with_broker},
-            test_support::{BrokerConfigMutationSetup, broker_config_context},
+    use {
+        super::*,
+        crate::{
+            config_keys::{BROKER_WITNESS, UNCLEAN_RECOVERY_STRATEGY, WITNESS_TRUE},
+            handlers::{
+                alter_configs::test_support::{broker_resource, image_with_broker},
+                test_support::{BrokerConfigMutationSetup, broker_config_context},
+            },
+            test_support::{broker_registration, finalize_elr_version},
+            throttle::{FOLLOWER_THROTTLED_RATE_KEY, LEADER_THROTTLED_RATE_KEY},
         },
-        test_support::{broker_registration, finalize_elr_version},
-        throttle::{FOLLOWER_THROTTLED_RATE_KEY, LEADER_THROTTLED_RATE_KEY},
+        assert2::{assert, check},
+        krabka_metadata::NodeId,
     };
 
     const SERVING: NodeId = NodeId(1);

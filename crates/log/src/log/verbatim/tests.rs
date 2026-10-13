@@ -2,17 +2,18 @@
 //! against the owned path, the offset each variant assigns, and the
 //! transaction state it tracks.
 
-use assert2::{assert, check};
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{kibibytes, mebibytes};
-
-use super::*;
-use crate::{
-    leader_epoch_checkpoint::EpochEntry,
-    log::test_support::{
-        check_append_time_lookup, install_stamps, log_append_time_log, sample_batch,
-        stamped_test_log, test_batch_at, test_log, verbatim_from,
+use {
+    super::*,
+    crate::{
+        leader_epoch_checkpoint::EpochEntry,
+        log::test_support::{
+            check_append_time_lookup, install_stamps, log_append_time_log, sample_batch,
+            stamped_test_log, test_batch_at, test_log, verbatim_from,
+        },
     },
+    assert2::{assert, check},
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{kibibytes, mebibytes},
 };
 
 fn check_transaction_offsets(log: &Log, stable: Offset) {
@@ -146,13 +147,10 @@ fn append_verbatim_at_refuses_a_base_below_the_log_end_offset_and_takes_one_abov
     let err = log.append_verbatim_at(&vb, Offset(0)).unwrap_err();
 
     assert!(
-        matches!(
-            err,
-            LogError::OffsetMismatch {
-                expected: Offset(1),
-                actual: Offset(0)
-            }
-        ),
+        matches!(err, LogError::OffsetMismatch {
+            expected: Offset(1),
+            actual: Offset(0)
+        }),
         "a base below the log end offset must report OffsetMismatch"
     );
     assert!(log.log_end_offset() == Offset(1));

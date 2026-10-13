@@ -5,23 +5,23 @@
 //! over the real wire. This module builds that cluster and owns its lifetime,
 //! so each scenario file carries only the divergence it induces.
 
-use std::{
-    net::SocketAddr,
-    process::Command,
-    time::{Duration, Instant},
-};
-
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use crate::{
-    docker::{
-        KAFKA_IMAGE_KRAFT, docker_bridge_gateway, docker_rm, kafka_cluster_id_string,
-        produce_committed_prefix,
+use {
+    crate::{
+        docker::{
+            KAFKA_IMAGE_KRAFT, docker_bridge_gateway, docker_rm, kafka_cluster_id_string,
+            produce_committed_prefix,
+        },
+        support::{self, JvmBrokerSetup, JvmStaticVoterSetup, controller_voters},
+        topic_admin::create_and_wait_for_isr,
     },
-    support::{self, JvmBrokerSetup, JvmStaticVoterSetup, controller_voters},
-    topic_admin::create_and_wait_for_isr,
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+    std::{
+        net::SocketAddr,
+        process::Command,
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
+    uuid::Uuid,
 };
 
 /// A running mixed cluster: two Krabka brokers (ids 1, 2) that hold the
@@ -144,36 +144,30 @@ pub async fn start_mixed_cluster(container: &str, jvm_is_controller: bool) -> Mi
 
     let dir1 = TempDir::new().unwrap();
     let dir2 = TempDir::new().unwrap();
-    let cfg1 = krabka_mixed_config(
-        dir1.path(),
-        JvmStaticVoterSetup {
-            broker: JvmBrokerSetup {
-                listen: format!("0.0.0.0:{}", krabka_client_ports[0])
-                    .parse()
-                    .unwrap(),
-                advertised: format!("{}:{}", advertised_host, krabka_client_ports[0]),
-                controller: format!("0.0.0.0:{p1}").parse().unwrap(),
-                voters: controller_voters(&krabka_voters),
-                ..Default::default()
-            },
-            cluster_id,
+    let cfg1 = krabka_mixed_config(dir1.path(), JvmStaticVoterSetup {
+        broker: JvmBrokerSetup {
+            listen: format!("0.0.0.0:{}", krabka_client_ports[0])
+                .parse()
+                .unwrap(),
+            advertised: format!("{}:{}", advertised_host, krabka_client_ports[0]),
+            controller: format!("0.0.0.0:{p1}").parse().unwrap(),
+            voters: controller_voters(&krabka_voters),
+            ..Default::default()
         },
-    );
-    let cfg2 = krabka_mixed_config(
-        dir2.path(),
-        JvmStaticVoterSetup {
-            broker: JvmBrokerSetup {
-                node: krabka_broker::NodeId(u64::try_from((1) + 1).expect("one-based node id")),
-                listen: format!("0.0.0.0:{}", krabka_client_ports[1])
-                    .parse()
-                    .unwrap(),
-                advertised: format!("{}:{}", advertised_host, krabka_client_ports[1]),
-                controller: format!("0.0.0.0:{p2}").parse().unwrap(),
-                voters: controller_voters(&krabka_voters),
-            },
-            cluster_id,
+        cluster_id,
+    });
+    let cfg2 = krabka_mixed_config(dir2.path(), JvmStaticVoterSetup {
+        broker: JvmBrokerSetup {
+            node: krabka_broker::NodeId(u64::try_from((1) + 1).expect("one-based node id")),
+            listen: format!("0.0.0.0:{}", krabka_client_ports[1])
+                .parse()
+                .unwrap(),
+            advertised: format!("{}:{}", advertised_host, krabka_client_ports[1]),
+            controller: format!("0.0.0.0:{p2}").parse().unwrap(),
+            voters: controller_voters(&krabka_voters),
         },
-    );
+        cluster_id,
+    });
     format_at_kafka_4_0(dir1.path(), &cid_str, &cfg1).await;
     format_at_kafka_4_0(dir2.path(), &cid_str, &cfg2).await;
     let (c1, c2): (BrokerHandle, BrokerHandle) = {

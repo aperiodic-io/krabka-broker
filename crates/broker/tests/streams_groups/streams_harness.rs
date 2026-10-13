@@ -8,16 +8,17 @@
 //! heartbeat response, live here so each scenario module holds only its own
 //! assertions.
 
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    streams_group_describe_request::StreamsGroupDescribeRequest,
-    streams_group_heartbeat_request::Topology,
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-};
-
-use crate::support::streams::{ElectionReadiness, boot as boot_streams, streams_join_and_converge};
 pub use crate::support::streams::{
     active_partition_count, finalize_streams_version, first_join, follow_up, topology,
+};
+use {
+    crate::support::streams::{ElectionReadiness, boot as boot_streams, streams_join_and_converge},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        streams_group_describe_request::StreamsGroupDescribeRequest,
+        streams_group_heartbeat_request::Topology,
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
 };
 
 pub async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {

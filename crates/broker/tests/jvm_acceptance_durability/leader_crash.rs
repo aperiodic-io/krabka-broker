@@ -5,18 +5,18 @@
 //! It runs with accelerated election timers and probes `Metadata` for the
 //! current leader, neither of which the steady-state `acks=all` case needs.
 
-use std::process::Stdio;
-
-use assert2::assert;
-
-use crate::{
-    jvm_acceptance::{KAFKA_IMAGE, consume_committed_at},
-    prepare_replication_topic,
-    support::{
-        ContainerInput, JvmDockerSetup, client::connect_with_context,
-        discovery::metadata_first_leader, init_jvm_tracing, jvm_docker_command, jvm_output_lines,
-        start_jvm_cluster,
+use {
+    crate::{
+        jvm_acceptance::{KAFKA_IMAGE, consume_committed_at},
+        prepare_replication_topic,
+        support::{
+            ContainerInput, JvmDockerSetup, client::connect_with_context,
+            discovery::metadata_first_leader, init_jvm_tracing, jvm_docker_command,
+            jvm_output_lines, start_jvm_cluster,
+        },
     },
+    assert2::assert,
+    std::process::Stdio,
 };
 
 // `acks=all` survives a leader crash mid-produce burst: 3-broker Krabka

@@ -2,23 +2,24 @@
 //! per-connection principal and returns the response as an ordered write plan
 //! rather than one contiguous buffer, so that records regions stay zero-copy.
 
-use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::SinkExt;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_util::codec::Framed;
-use tracing::Instrument as _;
-
-use super::{AfterResponse, response::encode_response, session::principal_or_anonymous};
-use crate::{
-    error::BrokerError,
-    handlers::{
-        RequestContext,
-        fetch::{encode_fetch_response, handle},
+use {
+    super::{AfterResponse, response::encode_response, session::principal_or_anonymous},
+    crate::{
+        error::BrokerError,
+        handlers::{
+            RequestContext,
+            fetch::{encode_fetch_response, handle},
+        },
+        network::{
+            codec::{KafkaCodec, response_frame_length},
+            fetch_writer::{SendfileSink, WriteOp, resolve_records_inline, write_fetch_plan},
+        },
     },
-    network::{
-        codec::{KafkaCodec, response_frame_length},
-        fetch_writer::{SendfileSink, WriteOp, resolve_records_inline, write_fetch_plan},
-    },
+    bytes::{BufMut, Bytes, BytesMut},
+    futures_util::SinkExt,
+    tokio::io::{AsyncRead, AsyncWrite},
+    tokio_util::codec::Framed,
+    tracing::Instrument as _,
 };
 
 /// A finished fetch: the ordered write plan for its response, and the KIP-219

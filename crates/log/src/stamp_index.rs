@@ -16,19 +16,19 @@
 //! retained and truncated with its segment. It never leaves the broker on any
 //! client-facing API. This mirrors the `.txnindex` sidecar pattern.
 
-use std::{fs::OpenOptions, path::PathBuf, sync::Arc};
-
-use krabka_ids::Offset;
-use tracing::instrument;
-use zerocopy::{
-    BigEndian, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
-    byteorder::{I64, U64},
-};
-
-use crate::{
-    error::LogError,
-    index::{open_index, rewrite_retained_entries, rewrite_sidecar_file},
-    io::{IoTarget, LogIo, write_all},
+use {
+    crate::{
+        error::LogError,
+        index::{open_index, rewrite_retained_entries, rewrite_sidecar_file},
+        io::{IoTarget, LogIo, write_all},
+    },
+    krabka_ids::Offset,
+    std::{fs::OpenOptions, path::PathBuf, sync::Arc},
+    tracing::instrument,
+    zerocopy::{
+        BigEndian, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
+        byteorder::{I64, U64},
+    },
 };
 
 const ENTRY_BYTES: usize = 24;
@@ -334,14 +334,10 @@ impl StampIndex {
     }
 
     /// Route this sidecar's writes and syncs through `io`.
-    pub(crate) fn set_io(&mut self, io: Arc<dyn LogIo>) {
-        self.io = io;
-    }
+    pub(crate) fn set_io(&mut self, io: Arc<dyn LogIo>) { self.io = io; }
 
     #[must_use]
-    pub fn entries(&self) -> &[StampEntry] {
-        &self.entries
-    }
+    pub fn entries(&self) -> &[StampEntry] { &self.entries }
 
     fn coordinates(entries: &[StampEntry]) -> (Vec<i64>, Vec<i64>) {
         entries
@@ -368,10 +364,11 @@ impl StampIndex {
 #[cfg(test)]
 mod tests {
 
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::{index::index_fixture, test_support::stamp_entry};
+    use {
+        super::*,
+        crate::{index::index_fixture, test_support::stamp_entry},
+        tempfile::TempDir,
+    };
 
     fn index_with(entries: &[StampEntry]) -> (TempDir, PathBuf, StampIndex) {
         let (dir, path, mut index) =
@@ -561,10 +558,10 @@ mod tests {
         for (name, entries) in [
             ("inverted", vec![stamp_entry(7, 6, 1)]),
             ("overlap", vec![stamp_entry(0, 4, 1), stamp_entry(4, 8, 2)]),
-            (
-                "conflicting-retry",
-                vec![stamp_entry(0, 4, 1), stamp_entry(0, 4, 2)],
-            ),
+            ("conflicting-retry", vec![
+                stamp_entry(0, 4, 1),
+                stamp_entry(0, 4, 2),
+            ]),
         ] {
             let path = dir.path().join(format!("{name}.stampindex"));
             write_entries(&path, &entries);

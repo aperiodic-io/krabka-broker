@@ -6,15 +6,16 @@
 //! distinct from a refusal throughout, because a request that did not complete
 //! says nothing at all about whether the broker acted on it.
 
-use clap::Parser;
-use krabka_protocol::krabka::barrier as api;
-use krabka_units::{Time, convert::TimeExt as _};
-
-use crate::{
-    EXIT_REFUSED, EXIT_UNREACHABLE,
-    cli::{Cli, Command},
-    report::{report_alter, report_describe, report_list, report_trigger, report_verify},
-    verify,
+use {
+    crate::{
+        EXIT_REFUSED, EXIT_UNREACHABLE,
+        cli::{Cli, Command},
+        report::{report_alter, report_describe, report_list, report_trigger, report_verify},
+        verify,
+    },
+    clap::Parser,
+    krabka_protocol::krabka::barrier as api,
+    krabka_units::{Time, convert::TimeExt as _},
 };
 
 krabka_macros::parsed_cli_entrypoint!({

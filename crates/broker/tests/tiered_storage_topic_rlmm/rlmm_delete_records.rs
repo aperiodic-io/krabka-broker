@@ -13,28 +13,28 @@
 //!   breached, rather than leaving them listed, fetchable and billed until
 //!   time or size retention happens to reach them.
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use krabka_client_admin::{AdminClient, DeleteRecordsOp};
-use krabka_client_core::Client;
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-use crate::{
-    rlmm_cluster::{
-        await_activation, await_tiered_config, build_client, start_broker_with_topic_rlmm,
-    },
-    rlmm_round_trip::remote_log_files,
-    run_broker_test,
-    support::{
-        fetch::{
-            FetchLimits, FetchPartitionSetup, RequestWaitMillis, SinglePartitionFetchSetup,
-            fetch_partition, single_partition_fetch,
+use {
+    crate::{
+        rlmm_cluster::{
+            await_activation, await_tiered_config, build_client, start_broker_with_topic_rlmm,
         },
-        topic_id_for,
-        topics::topic_configs,
+        rlmm_round_trip::remote_log_files,
+        run_broker_test,
+        support::{
+            fetch::{
+                FetchLimits, FetchPartitionSetup, RequestWaitMillis, SinglePartitionFetchSetup,
+                fetch_partition, single_partition_fetch,
+            },
+            topic_id_for,
+            topics::topic_configs,
+        },
+        topic_fixture::create_configured_topic,
     },
-    topic_fixture::create_configured_topic,
+    assert2::{assert, check},
+    krabka_client_admin::{AdminClient, DeleteRecordsOp},
+    krabka_client_core::Client,
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    std::time::{Duration, Instant},
 };
 
 const TOPIC: &str = "tiered-delete-records-itest";

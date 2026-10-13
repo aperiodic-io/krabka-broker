@@ -5,9 +5,7 @@
 //! field, so its two conversions live together here: the codes stop at 3, and
 //! a codec that v0/v1 cannot name has to fail rather than truncate.
 
-use krabka_compression::CompressionType;
-
-use crate::error::LegacyRecordsError;
+use {crate::error::LegacyRecordsError, krabka_compression::CompressionType};
 
 /// Bit layout of the legacy `attributes` byte.
 pub mod attrs {

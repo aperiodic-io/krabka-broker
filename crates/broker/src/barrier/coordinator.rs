@@ -26,16 +26,17 @@
 //! 7. Tombstone the epoch that leaves the retention window. The coordinator
 //!    never trims the log, because the group definitions share the prefix.
 
-use std::{collections::HashSet, sync::Arc};
-
-use bytes::Bytes;
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio::sync::{Mutex, RwLock};
+use {
+    bytes::Bytes,
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_units::{Time, convert::TimeExt as _},
+    std::{collections::HashSet, sync::Arc},
+    tokio::sync::{Mutex, RwLock},
+};
 
 mod groups;
 mod injection;
@@ -215,9 +216,7 @@ impl BarrierCoordinator {
 
     /// How often the scheduler should call [`Self::run_due_injections`].
     #[must_use]
-    pub(crate) fn scheduler_tick(&self) -> Time {
-        self.config.scheduler_tick
-    }
+    pub(crate) fn scheduler_tick(&self) -> Time { self.config.scheduler_tick }
 
     /// The `__barrier_state` partition that carries `group`.
     #[must_use]
@@ -336,20 +335,19 @@ impl BarrierCoordinator {
         }
     }
 
-    fn report_group_count(&self) {
-        self.metrics.groups_coordinated(self.groups.len());
-    }
+    fn report_group_count(&self) { self.metrics.groups_coordinated(self.groups.len()); }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::barrier::{
-        coordinator::test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
-        persistence::{RecordKind, decode_key},
+    use {
+        super::*,
+        crate::barrier::{
+            coordinator::test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
+            persistence::{RecordKind, decode_key},
+        },
+        assert2::{assert, check},
+        krabka_units::millis,
     };
 
     /// The configured timeout is a ceiling, not a default a caller can raise.

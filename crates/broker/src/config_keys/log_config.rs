@@ -1,29 +1,29 @@
 //! The applier that merges a topic's validated overrides onto a `LogConfig`
 //! for `Log::set_config`.
 
-use std::collections::BTreeMap;
-
-use krabka_log::LogConfig;
-use krabka_units::{
-    ByteSize, Time,
-    convert::{
-        ByteSizeExt as _, TimeExt as _,
-        wire::{opt_size_from_bytes_i64, opt_time_from_millis_i64},
+use {
+    super::{
+        CLEANUP_POLICY, COMPRESSION_GZIP_LEVEL, COMPRESSION_LZ4_LEVEL, COMPRESSION_TYPE,
+        COMPRESSION_ZSTD_LEVEL, DELETE_RETENTION_MS, FILE_DELETE_DELAY_MS, FLUSH_MESSAGES,
+        FLUSH_MS, INDEX_INTERVAL_BYTES, INTERNAL_SEGMENT_BYTES, LOCAL_RETENTION_BYTES,
+        LOCAL_RETENTION_MS, MAX_COMPACTION_LAG_MS, MAX_MESSAGE_BYTES, MESSAGE_TIMESTAMP_TYPE,
+        MESSAGE_TIMESTAMP_TYPE_LOG_APPEND, MIN_CLEANABLE_DIRTY_RATIO, MIN_COMPACTION_LAG_MS,
+        PREALLOCATE, REMOTE_LOG_COPY_DISABLE, REMOTE_LOG_DELETE_ON_DISABLE, REMOTE_STORAGE_ENABLE,
+        RETENTION_BYTES, RETENTION_MS, SEGMENT_BYTES, SEGMENT_INDEX_BYTES, SEGMENT_JITTER_MS,
+        SEGMENT_MS,
+        delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, DELIVERY_SCHEDULE_MONOTONIC},
+        parse::{self, bool_value, int_value, long_value},
+        validation::{parse_cleanup_policy, parse_compression_type},
     },
-};
-
-use super::{
-    CLEANUP_POLICY, COMPRESSION_GZIP_LEVEL, COMPRESSION_LZ4_LEVEL, COMPRESSION_TYPE,
-    COMPRESSION_ZSTD_LEVEL, DELETE_RETENTION_MS, FILE_DELETE_DELAY_MS, FLUSH_MESSAGES, FLUSH_MS,
-    INDEX_INTERVAL_BYTES, INTERNAL_SEGMENT_BYTES, LOCAL_RETENTION_BYTES, LOCAL_RETENTION_MS,
-    MAX_COMPACTION_LAG_MS, MAX_MESSAGE_BYTES, MESSAGE_TIMESTAMP_TYPE,
-    MESSAGE_TIMESTAMP_TYPE_LOG_APPEND, MIN_CLEANABLE_DIRTY_RATIO, MIN_COMPACTION_LAG_MS,
-    PREALLOCATE, REMOTE_LOG_COPY_DISABLE, REMOTE_LOG_DELETE_ON_DISABLE, REMOTE_STORAGE_ENABLE,
-    RETENTION_BYTES, RETENTION_MS, SEGMENT_BYTES, SEGMENT_INDEX_BYTES, SEGMENT_JITTER_MS,
-    SEGMENT_MS,
-    delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED, DELIVERY_SCHEDULE_MONOTONIC},
-    parse::{self, bool_value, int_value, long_value},
-    validation::{parse_cleanup_policy, parse_compression_type},
+    krabka_log::LogConfig,
+    krabka_units::{
+        ByteSize, Time,
+        convert::{
+            ByteSizeExt as _, TimeExt as _,
+            wire::{opt_size_from_bytes_i64, opt_time_from_millis_i64},
+        },
+    },
+    std::collections::BTreeMap,
 };
 
 /// Merge `overrides` over `base` and return a fresh `LogConfig` to push
@@ -222,10 +222,11 @@ pub(crate) fn apply_to_log_config(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{bytes, mebibytes, millis, minutes};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_units::{bytes, mebibytes, millis, minutes},
+    };
 
     #[test]
     fn apply_compression_type_zstd_propagates() {

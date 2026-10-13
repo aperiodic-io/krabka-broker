@@ -30,11 +30,6 @@ mod format;
 mod ids;
 mod meta_properties;
 
-/// The seed record type [`run_with_records`] accepts, re-exported so a caller
-/// building a bootstrap stream does not have to name [`krabka_metadata`]
-/// itself.
-pub use krabka_metadata::MetadataRecord;
-
 pub use self::{
     format::{
         FAIL_AFTER_ENV, FormatArgs, LATEST_PRODUCTION_METADATA_VERSION, ScramSpec, parse_node_id,
@@ -46,6 +41,10 @@ pub use self::{
         MetaPropertiesError, verify_ensemble,
     },
 };
+/// The seed record type [`run_with_records`] accepts, re-exported so a caller
+/// building a bootstrap stream does not have to name [`krabka_metadata`]
+/// itself.
+pub use krabka_metadata::MetadataRecord;
 
 /// The formatter's command line.
 ///
@@ -83,9 +82,7 @@ pub struct Cli {
 /// Malformed arguments print a diagnostic and return 2. Help and version
 /// requests print to stdout and return 0, without terminating the caller.
 #[krabka_macros::argv_entrypoint]
-pub async fn run_from_args() -> i32 {
-    run_from_args_with_records(argv, Vec::new()).await
-}
+pub async fn run_from_args() -> i32 { run_from_args_with_records(argv, Vec::new()).await }
 
 /// Run the formatter from an argv-style iterator, seeding `extra` alongside the
 /// records the flags produce, and return its exit code.

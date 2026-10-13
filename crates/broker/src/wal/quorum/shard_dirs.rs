@@ -7,12 +7,7 @@
 //! follower-only roots that the current metadata image no longer assigns to
 //! this broker.
 
-use std::fs;
-
-use krabka_ids::PartitionIndex;
-use uuid::Uuid;
-
-use super::registry;
+use {super::registry, krabka_ids::PartitionIndex, std::fs, uuid::Uuid};
 
 fn sanitize_topic(topic: &str) -> String {
     topic
@@ -143,11 +138,10 @@ pub(crate) fn prune_orphaned_shard_dirs(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_kraft_core::NodeId;
-
-    use super::*;
-    use crate::wal::quorum::membership::QUORUM_STATE_FILE;
+    use {
+        super::*, crate::wal::quorum::membership::QUORUM_STATE_FILE, assert2::assert,
+        krabka_kraft_core::NodeId,
+    };
 
     #[test]
     fn shard_directory_distinguishes_same_name_topic_recreations() {

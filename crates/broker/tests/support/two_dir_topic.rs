@@ -1,16 +1,16 @@
 //! Ready topic fixtures for the three two-directory integration binaries.
-use std::net::SocketAddr;
-
-use krabka_broker::BrokerHandle;
-use tempfile::TempDir;
-
 pub(crate) use crate::support::storage::PartitionReadiness;
-use crate::{
-    kafka_wire::{AutomaticTopicSetup, create_configured_topic_plaintext},
-    support::{
-        storage::start_two_dir_broker,
-        topics::{ConfiguredTopicSetup, TopicPartitionCount},
+use {
+    crate::{
+        kafka_wire::{AutomaticTopicSetup, create_configured_topic_plaintext},
+        support::{
+            storage::start_two_dir_broker,
+            topics::{ConfiguredTopicSetup, TopicPartitionCount},
+        },
     },
+    krabka_broker::BrokerHandle,
+    std::net::SocketAddr,
+    tempfile::TempDir,
 };
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -25,17 +25,14 @@ pub(crate) struct Setup<'a> {
 }
 
 pub(crate) async fn create_and_wait(handle: &BrokerHandle, address: SocketAddr, setup: Setup<'_>) {
-    create_configured_topic_plaintext(
-        address,
-        AutomaticTopicSetup {
-            client_id: setup.client_id,
-            topic: ConfiguredTopicSetup {
-                name: setup.topic.into(),
-                partitions: setup.partitions,
-                ..Default::default()
-            },
+    create_configured_topic_plaintext(address, AutomaticTopicSetup {
+        client_id: setup.client_id,
+        topic: ConfiguredTopicSetup {
+            name: setup.topic.into(),
+            partitions: setup.partitions,
+            ..Default::default()
         },
-    )
+    })
     .await;
     for partition in 0..setup.partitions.0 {
         match setup.readiness {

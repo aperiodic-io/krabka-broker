@@ -1,24 +1,24 @@
 //! Wire requests, canonical projections and ownership oracles shared by the
 //! reconciliation and consumer-group composition models.
 
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    time::{Duration, Instant},
-};
-
-use krabka_protocol::{
-    owned::consumer_group_heartbeat_request::{ConsumerGroupHeartbeatRequest, TopicPartitions},
-    primitives::uuid::Uuid,
-};
-
-use super::{HeartbeatStep, RegexResolution, step_heartbeat};
-use crate::coordinator::unified::{
-    ClientIdentity,
-    actor::MetadataProvider,
-    config::NextGenConfig,
-    consumer_state::{GroupState, MemberState},
-    persistence_next_gen::MemberAssignmentState,
-    reconciler::ReconcileInput,
+use {
+    super::{HeartbeatStep, RegexResolution, step_heartbeat},
+    crate::coordinator::unified::{
+        ClientIdentity,
+        actor::MetadataProvider,
+        config::NextGenConfig,
+        consumer_state::{GroupState, MemberState},
+        persistence_next_gen::MemberAssignmentState,
+        reconciler::ReconcileInput,
+    },
+    krabka_protocol::{
+        owned::consumer_group_heartbeat_request::{ConsumerGroupHeartbeatRequest, TopicPartitions},
+        primitives::uuid::Uuid,
+    },
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+        time::{Duration, Instant},
+    },
 };
 
 pub const TOPIC: Uuid = Uuid([7; 16]);
@@ -276,8 +276,14 @@ pub(crate) use model_actions;
 /// Enumerate joins, then each member's epoch-gated events and faithful-client
 /// moves. Model-specific actions follow those moves for each member.
 macro_rules! enqueue_member_actions {
-    ($self:ident, $state:ident, $actions:ident, $kind:ident, $lookup:ident;
-        |$member:ident| $extra:block
+    (
+        $self:ident,
+        $state:ident,
+        $actions:ident,
+        $kind:ident,
+        $lookup:ident; |
+        $member:ident |
+        $extra:block
     ) => {{
         let under_cap = $state.group_epoch < $self.max_epoch;
         if under_cap {
@@ -352,9 +358,7 @@ pub(crate) use member_next_state;
 pub struct ModelMetadata(ReconcileInput);
 
 impl MetadataProvider for ModelMetadata {
-    fn snapshot(&self) -> ReconcileInput {
-        self.0.clone()
-    }
+    fn snapshot(&self) -> ReconcileInput { self.0.clone() }
 }
 
 pub fn metadata(partitions: i32) -> ModelMetadata {
@@ -365,9 +369,7 @@ pub fn metadata(partitions: i32) -> ModelMetadata {
     })
 }
 
-pub fn config() -> NextGenConfig {
-    NextGenConfig::default()
-}
+pub fn config() -> NextGenConfig { NextGenConfig::default() }
 
 pub fn drive_heartbeat(
     group: &mut GroupState,

@@ -10,16 +10,17 @@
 //! and a top-level `NONE`; `LeaveGroupResponse` folds that row into the
 //! top-level code at v0-v2.
 
-use krabka_protocol::owned::{
-    leave_group_request::LeaveGroupRequest,
-    leave_group_response::{LeaveGroupResponse, MemberResponse},
-};
-
-use crate::{
-    codes,
-    coordinator::unified::actor::{GroupActorMessage, LeaveResult},
-    handlers::{ErrorCodeResponse as _, group_read_denied},
-    task_util::{AskError, ask},
+use {
+    crate::{
+        codes,
+        coordinator::unified::actor::{GroupActorMessage, LeaveResult},
+        handlers::{ErrorCodeResponse as _, group_read_denied},
+        task_util::{AskError, ask},
+    },
+    krabka_protocol::owned::{
+        leave_group_request::LeaveGroupRequest,
+        leave_group_response::{LeaveGroupResponse, MemberResponse},
+    },
 };
 
 #[cfg(test)]

@@ -10,22 +10,23 @@
 //! for the whole request, and denied groups are gathered separately so their
 //! rows sort first in the response.
 
-use krabka_protocol::owned::streams_group_describe_response::DescribedGroup;
-
-use super::{render::render_group, topic_authz};
-use crate::{
-    broker::Broker,
-    codes,
-    coordinator::{
-        GroupCoordinator,
-        unified::{GroupType, streams::actor::StreamsGroupActorMessage},
+use {
+    super::{render::render_group, topic_authz},
+    crate::{
+        broker::Broker,
+        codes,
+        coordinator::{
+            GroupCoordinator,
+            unified::{GroupType, streams::actor::StreamsGroupActorMessage},
+        },
+        handlers::{
+            RequestContext, any_topic_describe_denied,
+            authorized_operations::{DescribedGroupRow as _, fill_group_authorized_operations},
+            group_coordinator_error,
+        },
+        task_util::{AskError, ask},
     },
-    handlers::{
-        RequestContext, any_topic_describe_denied,
-        authorized_operations::{DescribedGroupRow as _, fill_group_authorized_operations},
-        group_coordinator_error,
-    },
-    task_util::{AskError, ask},
+    krabka_protocol::owned::streams_group_describe_response::DescribedGroup,
 };
 
 /// Kafka's `TopologyDescriptionStatus` `NOT_STORED` (1): no description is

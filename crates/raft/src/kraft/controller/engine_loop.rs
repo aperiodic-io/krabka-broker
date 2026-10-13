@@ -3,31 +3,31 @@
 //! core [`Action`] it produces, and the timer reconciliation that follows a
 //! role change.
 
-use std::sync::Arc;
-
-use krabka_ids::Offset;
-use krabka_units::prelude::TimeExt as _;
-use tokio::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
-
-use super::{
-    Engine, METADATA_LOG_CLEAN_INTERVAL,
-    offsets::leader_alone_is_majority,
-    timing::{
-        election_timeout_ms, election_timer_starts_election, following_leader_for_role,
-        heartbeat_period, instant_from_clock_base, should_fail_waiters_on_leadership_change,
+use {
+    super::{
+        Engine, METADATA_LOG_CLEAN_INTERVAL,
+        offsets::leader_alone_is_majority,
+        timing::{
+            election_timeout_ms, election_timer_starts_election, following_leader_for_role,
+            heartbeat_period, instant_from_clock_base, should_fail_waiters_on_leadership_change,
+        },
     },
-};
-use crate::{
-    error::RaftError,
-    kraft::{
-        action::{Action, TimerKind},
-        event::Event,
-        role::Role,
-        transport::{Command, TimerTick, api_key, wire},
-        types::{NodeId, SimInstant},
+    crate::{
+        error::RaftError,
+        kraft::{
+            action::{Action, TimerKind},
+            event::Event,
+            role::Role,
+            transport::{Command, TimerTick, api_key, wire},
+            types::{NodeId, SimInstant},
+        },
+    },
+    krabka_ids::Offset,
+    krabka_units::prelude::TimeExt as _,
+    std::sync::Arc,
+    tokio::{
+        sync::mpsc,
+        time::{Duration, Instant},
     },
 };
 
@@ -290,9 +290,7 @@ impl Engine {
 
     /// The leader id we are actively following (Follower / attached Observer),
     /// if any.
-    pub fn following_leader(&self) -> Option<NodeId> {
-        following_leader_for_role(self.core.role())
-    }
+    pub fn following_leader(&self) -> Option<NodeId> { following_leader_for_role(self.core.role()) }
 
     /// Pick the peer for the next observer leader discovery Fetch: the voters
     /// other than this node, or the bootstrap servers when it knows no voter,

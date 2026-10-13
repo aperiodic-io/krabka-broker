@@ -4,12 +4,13 @@
 //! the optional OTLP log bridge into one registry, and it owns the shutdown
 //! path for the providers that those layers export through.
 
-use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider};
-use tracing_subscriber::{
-    EnvFilter, Layer, Registry, layer::SubscriberExt as _, util::SubscriberInitExt as _,
+use {
+    crate::{config::OtlpConfig, error::TelemetryError, log_levels::LogLevelController},
+    opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider},
+    tracing_subscriber::{
+        EnvFilter, Layer, Registry, layer::SubscriberExt as _, util::SubscriberInitExt as _,
+    },
 };
-
-use crate::{config::OtlpConfig, error::TelemetryError, log_levels::LogLevelController};
 
 /// The stdout layer, boxed as `krabka_logfmt::layer` returns it.
 type StdoutLayer = Box<dyn Layer<Registry> + Send + Sync>;
@@ -36,16 +37,12 @@ impl TelemetryGuard {
     /// level without a restart. Clone it out before the guard is parked for
     /// the process lifetime.
     #[must_use]
-    pub fn log_levels(&self) -> LogLevelController {
-        self.log_levels.clone()
-    }
+    pub fn log_levels(&self) -> LogLevelController { self.log_levels.clone() }
 
     /// Flush and shut down the OTLP exporters for traces and logs.
     ///
     /// This function does nothing when OTLP is disabled.
-    pub fn shutdown(mut self) {
-        self.shutdown_providers();
-    }
+    pub fn shutdown(mut self) { self.shutdown_providers(); }
 
     fn shutdown_providers(&mut self) {
         if let Some(task) = self.heartbeat_task.take() {
@@ -65,9 +62,7 @@ impl TelemetryGuard {
 }
 
 impl Drop for TelemetryGuard {
-    fn drop(&mut self) {
-        self.shutdown_providers();
-    }
+    fn drop(&mut self) { self.shutdown_providers(); }
 }
 
 /// Install the global `tracing` subscriber.
@@ -128,20 +123,21 @@ pub fn init(
 /// The OTLP span and log layers, installed beside the stdout layer.
 #[cfg(not(target_family = "wasm"))]
 mod otlp {
-    use krabka_units::prelude::TimeExt;
-    use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-    use opentelemetry_sdk::{
-        logs::SdkLoggerProvider, propagation::TraceContextPropagator, trace::SdkTracerProvider,
-    };
-    use tracing_subscriber::{
-        EnvFilter, Layer as _, layer::SubscriberExt as _, util::SubscriberInitExt as _,
-    };
-
-    use super::{StdoutLayer, TelemetryGuard};
-    use crate::{
-        config::OtlpConfig, error::TelemetryError, heartbeat::spawn_heartbeat_task,
-        log_levels::LogLevelController,
+    use {
+        super::{StdoutLayer, TelemetryGuard},
+        crate::{
+            config::OtlpConfig, error::TelemetryError, heartbeat::spawn_heartbeat_task,
+            log_levels::LogLevelController,
+        },
+        krabka_units::prelude::TimeExt,
+        opentelemetry::trace::TracerProvider as _,
+        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge,
+        opentelemetry_sdk::{
+            logs::SdkLoggerProvider, propagation::TraceContextPropagator, trace::SdkTracerProvider,
+        },
+        tracing_subscriber::{
+            EnvFilter, Layer as _, layer::SubscriberExt as _, util::SubscriberInitExt as _,
+        },
     };
 
     /// Per-layer filter for the OTLP layer.
@@ -226,8 +222,7 @@ mod otlp {
 
     #[cfg(test)]
     mod tests {
-        use super::otel_filter;
-        use crate::test_support::env_from;
+        use {super::otel_filter, crate::test_support::env_from};
 
         #[test]
         fn otel_filter_uses_override_or_default() {
@@ -250,8 +245,10 @@ mod otlp {
 // not have.
 #[cfg(target_family = "wasm")]
 mod otlp {
-    use super::{StdoutLayer, TelemetryGuard};
-    use crate::{config::OtlpConfig, error::TelemetryError, log_levels::LogLevelController};
+    use {
+        super::{StdoutLayer, TelemetryGuard},
+        crate::{config::OtlpConfig, error::TelemetryError, log_levels::LogLevelController},
+    };
 
     pub(super) fn install(
         _cfg: &OtlpConfig,
@@ -268,14 +265,14 @@ mod otlp {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering::SeqCst},
+    use {
+        super::*,
+        opentelemetry_sdk::error::OTelSdkResult,
+        std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering::SeqCst},
+        },
     };
-
-    use opentelemetry_sdk::error::OTelSdkResult;
-
-    use super::*;
 
     #[derive(Clone, Debug)]
     struct ShutdownCountingSpanExporter {

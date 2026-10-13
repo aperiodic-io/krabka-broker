@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 /// Kafka's `TransactionCoordinator.handleVerifyPartitionsInTransaction`, in
 /// its order of checks.
@@ -66,11 +64,13 @@ fn a_verify_only_answer_follows_kafka() {
 /// apply.
 #[test]
 fn the_verification_knob_reads_the_broker_then_the_cluster_then_the_static_value() {
-    use krabka_metadata::{
-        BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord, NodeId,
+    use {
+        crate::config::BrokerConfig,
+        krabka_metadata::{
+            BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord,
+            NodeId,
+        },
     };
-
-    use crate::config::BrokerConfig;
 
     const NODE: NodeId = NodeId(1);
     let image = |records: &[(NodeId, &str)]| {

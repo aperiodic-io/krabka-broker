@@ -6,10 +6,11 @@
 //! scans decode the batches in that range and pick the first one, or the first
 //! record, that satisfies the request.
 
-use krabka_protocol::records::{Attributes, RecordBatch, TimestampType};
-
-use super::{LogOffset, TimestampMs, corrupt_log};
-use crate::error::RemoteStorageError;
+use {
+    super::{LogOffset, TimestampMs, corrupt_log},
+    crate::error::RemoteStorageError,
+    krabka_protocol::records::{Attributes, RecordBatch, TimestampType},
+};
 
 /// Decodes remote log batches and returns the earliest record at or after both
 /// `floor_offset` and `target_timestamp`. Under `LogAppendTime`, every record
@@ -97,11 +98,12 @@ pub fn first_batch_at_or_after(data: &[u8], floor: LogOffset) -> Option<RecordBa
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::{Bytes, BytesMut};
-    use krabka_protocol::records::Record;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        bytes::{Bytes, BytesMut},
+        krabka_protocol::records::Record,
+    };
 
     fn test_batch_at(base_offset: i64, record_count: i32, value_byte: u8) -> RecordBatch {
         let mut batch = RecordBatch {

@@ -6,12 +6,13 @@
 //! case is the disaster-recovery order in which an operator freezes a
 //! namespace before a restore writes into it.
 
-use krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED};
-
-use crate::{
-    control_plane::freeze_scope,
-    support,
-    wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
+use {
+    crate::{
+        control_plane::freeze_scope,
+        support,
+        wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
+    },
+    krabka_protocol::krabka::freeze::{PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED},
 };
 
 /// A literal freeze stops writes to the topic it names, and to nothing else.

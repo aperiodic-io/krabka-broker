@@ -4,20 +4,21 @@
 //! broker fences it with `NON_EMPTY_GROUP` while the group still has a live
 //! member.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_protocol::owned::alter_share_group_offsets_request::{
-    AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestPartition,
-    AlterShareGroupOffsetsRequestTopic,
-};
-
-use crate::{
-    describe::describe_until,
-    harness::{
-        NON_EMPTY_GROUP, NONE, fetch_until_acquired, join, seeded_empty_group, wait_for_share_init,
+use {
+    crate::{
+        describe::describe_until,
+        harness::{
+            NON_EMPTY_GROUP, NONE, fetch_until_acquired, join, seeded_empty_group,
+            wait_for_share_init,
+        },
+        support::share::{ShareRecordCount, ShareRecordSeedSetup, ShareSessionSetup},
     },
-    support::share::{ShareRecordCount, ShareRecordSeedSetup, ShareSessionSetup},
+    assert2::assert,
+    krabka_protocol::owned::alter_share_group_offsets_request::{
+        AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestPartition,
+        AlterShareGroupOffsetsRequestTopic,
+    },
+    std::time::Duration,
 };
 
 /// Alter resets the SPSO of an empty group.

@@ -6,15 +6,17 @@
 //! socket buffers, ACL string ceilings, and the telemetry and record
 //! decompression bounds that guard the broker against a hostile client.
 
-use super::{
-    FileConfigError, RuntimeFileConfig,
-    validate::{
-        kafka_int_bytes, kafka_long_bytes, nonnegative_time, positive_i32, positive_i64,
-        positive_ratio, positive_time, positive_u32, positive_usize, whole_bytes_u32,
-        whole_bytes_u64, whole_bytes_usize,
+use {
+    super::{
+        FileConfigError, RuntimeFileConfig,
+        validate::{
+            kafka_int_bytes, kafka_long_bytes, nonnegative_time, positive_i32, positive_i64,
+            positive_ratio, positive_time, positive_u32, positive_usize, whole_bytes_u32,
+            whole_bytes_u64, whole_bytes_usize,
+        },
     },
+    crate::config::BrokerConfig,
 };
-use crate::config::BrokerConfig;
 
 impl RuntimeFileConfig {
     pub(super) fn apply_recovery_and_queues(
@@ -105,18 +107,19 @@ impl RuntimeFileConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{
-        bytes,
-        convert::{ByteSizeExt as _, TimeExt as _},
-        mebibytes, millis,
-    };
-
-    use crate::{
-        config::BrokerConfig,
-        file_config::{
-            FileConfig,
-            test_support::{configured, optional_configured_feature},
+    use {
+        crate::{
+            config::BrokerConfig,
+            file_config::{
+                FileConfig,
+                test_support::{configured, optional_configured_feature},
+            },
+        },
+        assert2::assert,
+        krabka_units::{
+            bytes,
+            convert::{ByteSizeExt as _, TimeExt as _},
+            mebibytes, millis,
         },
     };
 

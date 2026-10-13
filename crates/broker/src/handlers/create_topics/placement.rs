@@ -3,13 +3,16 @@
 //! this module for the replica list of every partition of a new topic, and
 //! it reports the error code that comes back on an assignment it rejects.
 
-use krabka_protocol::owned::create_topics_request::CreatableTopic;
-
-use crate::{
-    codes,
-    config_keys::resolve_broker_witness,
-    cordoned_log_dirs::fully_cordoned_brokers,
-    site_placement::{PlacementRng, SiteBrokerView, placement_failure_reason, stretch_replicas},
+use {
+    crate::{
+        codes,
+        config_keys::resolve_broker_witness,
+        cordoned_log_dirs::fully_cordoned_brokers,
+        site_placement::{
+            PlacementRng, SiteBrokerView, placement_failure_reason, stretch_replicas,
+        },
+    },
+    krabka_protocol::owned::create_topics_request::CreatableTopic,
 };
 
 #[cfg(test)]

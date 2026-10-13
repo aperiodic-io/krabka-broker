@@ -3,24 +3,24 @@
 //! marker counts only once the high watermark covers it under the leader and
 //! leader epoch that took it.
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_log::{Offset, ProducerId};
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-use krabka_raft::NodeId;
-
-use super::{PendingMarker, append_marker_as_leader};
-use crate::{
-    codes,
-    error::BrokerError,
-    partition::{Partition, test_support::test_partition_with_writer},
-    replica_state::LeaderPolicy,
-    txn::{handlers::write_txn_markers::MarkerAppend, marker::MarkerType},
+use {
+    super::{PendingMarker, append_marker_as_leader},
+    crate::{
+        codes,
+        error::BrokerError,
+        partition::{Partition, test_support::test_partition_with_writer},
+        replica_state::LeaderPolicy,
+        txn::{handlers::write_txn_markers::MarkerAppend, marker::MarkerType},
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_log::{Offset, ProducerId},
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    krabka_raft::NodeId,
+    std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    },
 };
 
 /// This broker.

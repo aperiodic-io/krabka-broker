@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::completed_producer::completed_row;
-use super::{ProducerSnapshotEntryFacts, completed_batches_preserve_first_retry};
 #[cfg(creusot)]
 use crate::producer_snapshot::retained_producer_row;
-use crate::{
-    produce::produce_durability_frontier, producer::decrement_sequence, raft::frontier_reaches,
+use {
+    super::{ProducerSnapshotEntryFacts, completed_batches_preserve_first_retry},
+    crate::{
+        produce::produce_durability_frontier, producer::decrement_sequence, raft::frontier_reaches,
+    },
+    creusot_std::prelude::*,
 };
 
 // (evicted, nominated frontier, nominated ready, retained (source, frontier, ready)).

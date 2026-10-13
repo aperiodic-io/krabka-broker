@@ -4,9 +4,10 @@
 //! spool's overflow check by accident, and the builder that stamps the chain
 //! headers onto a record the way the writer does.
 
-use krabka_units::prelude::{ByteSize, mebibytes};
-
-use crate::{GENESIS_HEAD, Spool, event::AuditEventClass, sink::AuditRecord};
+use {
+    crate::{GENESIS_HEAD, Spool, event::AuditEventClass, sink::AuditRecord},
+    krabka_units::prelude::{ByteSize, mebibytes},
+};
 
 /// A cap that is large enough that no test reaches it by accident.
 pub const ROOMY_CAP: ByteSize = mebibytes(1);

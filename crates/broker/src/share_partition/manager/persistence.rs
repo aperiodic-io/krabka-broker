@@ -7,13 +7,13 @@
 //! `SharePartition.rollbackOrProcessStateUpdates` does. A fenced partition
 //! drops its cell, so the next request reads the state again.
 
-use std::sync::Arc;
-
-use tokio::sync::Mutex;
-use tracing::warn;
-
-use super::SharePartitionLeaderManager;
-use crate::{codes, error::BrokerError, share_partition::state::AcquisitionState};
+use {
+    super::SharePartitionLeaderManager,
+    crate::{codes, error::BrokerError, share_partition::state::AcquisitionState},
+    std::sync::Arc,
+    tokio::sync::Mutex,
+    tracing::warn,
+};
 
 /// Maps a failed `ReadShareGroupState` or `WriteShareGroupState` call to the
 /// error code that the share-partition leader gives the client.
@@ -153,15 +153,15 @@ impl SharePartitionLeaderManager {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
-    use assert2::assert;
-    use krabka_log::Offset;
-
-    use super::*;
-    use crate::share_partition::{
-        manager::test_support::{LOCK, manager},
-        state::{AckType, test_support::acquired_state},
+    use {
+        super::*,
+        crate::share_partition::{
+            manager::test_support::{LOCK, manager},
+            state::{AckType, test_support::acquired_state},
+        },
+        assert2::assert,
+        krabka_log::Offset,
+        std::time::Instant,
     };
 
     /// Kafka's `SharePartition.fetchPersisterError`, and whether

@@ -1,9 +1,4 @@
-use std::iter;
-
-use assert2::check;
-use proptest::prelude::*;
-
-use super::*;
+use {super::*, assert2::check, proptest::prelude::*, std::iter};
 
 /// Places `rf` replicas one per site in turn and reports what each site
 /// holds. This is an independent implementation, and not the ceiling
@@ -31,9 +26,7 @@ fn largest_site_oracle(rf: i64, sites: i64) -> i64 {
 
 /// The count that remains after the loss of the site that holds the most
 /// replicas.
-fn round_robin_oracle(rf: i64, sites: i64) -> i64 {
-    rf - largest_site_oracle(rf, sites)
-}
+fn round_robin_oracle(rf: i64, sites: i64) -> i64 { rf - largest_site_oracle(rf, sites) }
 
 /// Sums the slice and checks every site with an iterator chain.
 fn quorum_oracle(voters_per_site: &[i64]) -> bool {

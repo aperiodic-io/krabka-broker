@@ -3,11 +3,12 @@
 //! A thaw names the proposal it spent beside the scope it thawed, so a rule
 //! that reads those events joins the approval to the transition on that id.
 
-use assert2::check;
-use krabka_audit::AuditResource;
-use uuid::Uuid;
-
-use super::{super::response::admin_resources, PROPOSAL};
+use {
+    super::{super::response::admin_resources, PROPOSAL},
+    assert2::check,
+    krabka_audit::AuditResource,
+    uuid::Uuid,
+};
 
 #[test]
 fn a_thaw_names_the_break_glass_proposal_and_the_scope_in_its_audit_resources() {

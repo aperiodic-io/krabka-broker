@@ -13,11 +13,12 @@
 //! ## Quick start
 //!
 //! ```no_run
-//! use std::time::Duration;
-//!
-//! use krabka_metadata::{MetadataRecord, TopicRecord};
-//! use krabka_raft::{Controller, ControllerConfig, NodeId};
-//! use uuid::Uuid;
+//! use {
+//!     krabka_metadata::{MetadataRecord, TopicRecord},
+//!     krabka_raft::{Controller, ControllerConfig, NodeId},
+//!     std::time::Duration,
+//!     uuid::Uuid,
+//! };
 //!
 //! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
@@ -50,7 +51,6 @@
 //! and controller configuration. [`ControllerHandle::add_learner`] stages a
 //! node identity; [`ControllerHandle::change_membership`] reconciles a
 //! one-voter delta into `add_voter` or `remove_voter`.
-//!
 //! Mixed JVM and Krabka controller quorums are outside this crate's
 //! compatibility target.
 
@@ -79,41 +79,43 @@ mod test_support;
 mod types;
 mod wire;
 
-pub use config::{
-    BootstrapMode, ControllerAdminRequest, ControllerAdminResponse, ControllerAdminRouteFuture,
-    ControllerAdminRouter, ControllerApiVersion, ControllerConfig, ControllerFetchMissLimit,
-    DEFAULT_METADATA_LOG_SEGMENT_ROLL_INTERVAL, DEFAULT_METADATA_LOG_SEGMENT_SIZE,
-    DEFAULT_METADATA_MAX_IDLE_INTERVAL, DEFAULT_METADATA_MAX_RETENTION,
-    DEFAULT_METADATA_MAX_RETENTION_SIZE, KAFKA_4_3_1_APIS, LATEST_PRODUCTION_METADATA_VERSION,
-    ListenerLimits, METADATA_PARTITION_DIR, MIN_METADATA_LOG_SEGMENT_SIZE, MetadataLogConfig,
-    MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax, RaftShardRouter, ReleasedApi,
-    ShardRouteFuture, UnstableApiVersions, UnstableFeatureVersions, kafka_4_3_1_api,
-    kafka_4_3_1_max, metadata_partition_dir, supported_feature_range, supported_feature_ranges,
-};
-pub use connection_limiter::{ConnectionGuard, ConnectionLimit, ConnectionLimiter};
-pub use controller::{
-    Controller, ControllerHandle, QuorumState, QuorumStateSnapshot, SnapshotRange, SnapshotSlice,
-    metadata_log_nonempty,
-};
-pub use error::{MetadataReplayError, PersistedFormatError, RaftError};
-pub use handshake::{
-    AllowAllGrants, ClusterGrants, ClusterOperation, ControllerApiVersions, RaftConnection,
-    RaftHandshakeError, RaftListenerHandshake,
-};
-pub use kraft::{
-    MetadataFetchSlice,
-    controller::{control_batch_image_records, decode_committed_value, is_kip835_noop},
-};
-pub use network::{OutboundDialer, PlaintextDialer};
-pub use reconfig::{AddVoter, ReconfigOutcome, RemoveVoter, UpdateVoter};
-pub use server::{
-    api_versions_max_version, describe_quorum::describe_quorum, finalized_feature_keys,
-    is_valid_api_versions_request, is_valid_client_info, supported_feature_key,
-    supported_feature_keys, unsupported_version_response,
-};
-pub use types::{
-    AppData, AppDataResponse, DelegationTokenMutation, Node, NodeId, OffsetReservation,
-    SubmitChangeResult,
+pub use {
+    config::{
+        BootstrapMode, ControllerAdminRequest, ControllerAdminResponse, ControllerAdminRouteFuture,
+        ControllerAdminRouter, ControllerApiVersion, ControllerConfig, ControllerFetchMissLimit,
+        DEFAULT_METADATA_LOG_SEGMENT_ROLL_INTERVAL, DEFAULT_METADATA_LOG_SEGMENT_SIZE,
+        DEFAULT_METADATA_MAX_IDLE_INTERVAL, DEFAULT_METADATA_MAX_RETENTION,
+        DEFAULT_METADATA_MAX_RETENTION_SIZE, KAFKA_4_3_1_APIS, LATEST_PRODUCTION_METADATA_VERSION,
+        ListenerLimits, METADATA_PARTITION_DIR, MIN_METADATA_LOG_SEGMENT_SIZE, MetadataLogConfig,
+        MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax, RaftShardRouter, ReleasedApi,
+        ShardRouteFuture, UnstableApiVersions, UnstableFeatureVersions, kafka_4_3_1_api,
+        kafka_4_3_1_max, metadata_partition_dir, supported_feature_range, supported_feature_ranges,
+    },
+    connection_limiter::{ConnectionGuard, ConnectionLimit, ConnectionLimiter},
+    controller::{
+        Controller, ControllerHandle, QuorumState, QuorumStateSnapshot, SnapshotRange,
+        SnapshotSlice, metadata_log_nonempty,
+    },
+    error::{MetadataReplayError, PersistedFormatError, RaftError},
+    handshake::{
+        AllowAllGrants, ClusterGrants, ClusterOperation, ControllerApiVersions, RaftConnection,
+        RaftHandshakeError, RaftListenerHandshake,
+    },
+    kraft::{
+        MetadataFetchSlice,
+        controller::{control_batch_image_records, decode_committed_value, is_kip835_noop},
+    },
+    network::{OutboundDialer, PlaintextDialer},
+    reconfig::{AddVoter, ReconfigOutcome, RemoveVoter, UpdateVoter},
+    server::{
+        api_versions_max_version, describe_quorum::describe_quorum, finalized_feature_keys,
+        is_valid_api_versions_request, is_valid_client_info, supported_feature_key,
+        supported_feature_keys, unsupported_version_response,
+    },
+    types::{
+        AppData, AppDataResponse, DelegationTokenMutation, Node, NodeId, OffsetReservation,
+        SubmitChangeResult,
+    },
 };
 
 /// Serialize a Kafka metadata snapshot, including KIP-853 control state.

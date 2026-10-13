@@ -5,13 +5,13 @@
 //! without an awaited shutdown. Each path cancels the move's token and stops
 //! its replicator task; a redirect also removes the staged future directory.
 
-use std::sync::Arc;
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use tokio::task::JoinHandle;
-
-use super::{FutureLogState, MoveError};
+use {
+    super::{FutureLogState, MoveError},
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    std::sync::Arc,
+    tokio::task::JoinHandle,
+};
 
 pub(super) async fn cancel_move(
     future_logs: &Arc<DashMap<(String, PartitionIndex), Arc<FutureLogState>>>,
@@ -85,21 +85,21 @@ pub(crate) fn abort_moves(future_logs: &DashMap<(String, PartitionIndex), Arc<Fu
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::{
-            Mutex,
-            atomic::{AtomicU64, Ordering},
+    use {
+        super::*,
+        crate::test_support::wait_tasks_started,
+        assert2::assert,
+        krabka_log::{Log, LogConfig},
+        std::{
+            sync::{
+                Mutex,
+                atomic::{AtomicU64, Ordering},
+            },
+            time::Duration,
         },
-        time::Duration,
+        tempfile::tempdir,
+        tokio_util::sync::CancellationToken,
     };
-
-    use assert2::assert;
-    use krabka_log::{Log, LogConfig};
-    use tempfile::tempdir;
-    use tokio_util::sync::CancellationToken;
-
-    use super::*;
-    use crate::test_support::wait_tasks_started;
 
     macro_rules! pending_move_fixture {
         ($dir:ident, $log:ident, $logs:ident, $started:ident, $dropped:ident) => {
@@ -116,9 +116,7 @@ mod tests {
     struct DropCounter(Arc<AtomicU64>);
 
     impl Drop for DropCounter {
-        fn drop(&mut self) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
+        fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
     }
 
     fn pending_move(started: &Arc<AtomicU64>, dropped: &Arc<AtomicU64>) -> JoinHandle<()> {

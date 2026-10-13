@@ -7,23 +7,23 @@
 //! other, so it stays whole in this file. The state it moves and the decision
 //! invariants it asserts live in the sibling modules.
 
-use std::collections::HashSet;
-
-use krabka_raft::NodeId;
-use krabka_verified::isr::{
-    AlterPartitionFacts, IsrAdmission, IsrMemberFacts, IsrMemberRole, ProposedIsr, isr_admission,
-    isr_maintenance_selected,
-};
-use stateright::{Model, Property};
-
-use super::{
-    decision::assert_decision,
-    elr,
-    failover_state::{FailoverAction, FailoverModel, FailoverState, pr_of},
-};
-use crate::{
-    elr::state::PartitionElr,
-    leader_election::{FailoverDecision, Ladder, failover_one},
+use {
+    super::{
+        decision::assert_decision,
+        elr,
+        failover_state::{FailoverAction, FailoverModel, FailoverState, pr_of},
+    },
+    crate::{
+        elr::state::PartitionElr,
+        leader_election::{FailoverDecision, Ladder, failover_one},
+    },
+    krabka_raft::NodeId,
+    krabka_verified::isr::{
+        AlterPartitionFacts, IsrAdmission, IsrMemberFacts, IsrMemberRole, ProposedIsr,
+        isr_admission, isr_maintenance_selected,
+    },
+    stateright::{Model, Property},
+    std::collections::HashSet,
 };
 
 impl FailoverModel {
@@ -71,56 +71,8 @@ impl FailoverModel {
 }
 
 impl Model for FailoverModel {
-    type State = FailoverState;
     type Action = FailoverAction;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![FailoverState {
-            leader: self.replicas[0],
-            isr: self.replicas.clone(),
-            replicas: self.replicas.clone(),
-            leader_epoch: 0,
-            alive: self.replicas.iter().copied().collect(),
-            // A partition whose ISR meets min ISR publishes no ELR.
-            elr: Vec::new(),
-            elected_from_elr: false,
-        }]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        // Die: any alive broker, keeping >= 1 alive.
-        if state.alive.len() > 1 {
-            for &r in &self.replicas {
-                if state.alive.contains(&r) {
-                    actions.push(FailoverAction::Die(r));
-                }
-            }
-        }
-        // Revive: any dead broker.
-        for &r in &self.replicas {
-            if !state.alive.contains(&r) {
-                actions.push(FailoverAction::Revive(r));
-            }
-        }
-        // Failover: any dead broker (the real scan's filter is replicas-or-isr;
-        // all model brokers are replicas), under the epoch cap.
-        if state.leader_epoch < self.max_epoch {
-            for &r in &self.replicas {
-                if !state.alive.contains(&r) {
-                    actions.push(FailoverAction::Failover(r));
-                }
-            }
-        }
-        // ExpandIsr: only a live leader proposes an ISR change, and only for
-        // a live follower outside the ISR.
-        if state.alive.contains(&state.leader) {
-            for &r in &self.replicas {
-                if state.alive.contains(&r) && !state.isr.contains(&r) {
-                    actions.push(FailoverAction::ExpandIsr(r));
-                }
-            }
-        }
-    }
+    type State = FailoverState;
 
     krabka_macros::model_transition!(last, action, state; {
             match action {
@@ -184,6 +136,54 @@ impl Model for FailoverModel {
             Some(state)
 
     });
+
+    fn init_states(&self) -> Vec<Self::State> {
+        vec![FailoverState {
+            leader: self.replicas[0],
+            isr: self.replicas.clone(),
+            replicas: self.replicas.clone(),
+            leader_epoch: 0,
+            alive: self.replicas.iter().copied().collect(),
+            // A partition whose ISR meets min ISR publishes no ELR.
+            elr: Vec::new(),
+            elected_from_elr: false,
+        }]
+    }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        // Die: any alive broker, keeping >= 1 alive.
+        if state.alive.len() > 1 {
+            for &r in &self.replicas {
+                if state.alive.contains(&r) {
+                    actions.push(FailoverAction::Die(r));
+                }
+            }
+        }
+        // Revive: any dead broker.
+        for &r in &self.replicas {
+            if !state.alive.contains(&r) {
+                actions.push(FailoverAction::Revive(r));
+            }
+        }
+        // Failover: any dead broker (the real scan's filter is replicas-or-isr;
+        // all model brokers are replicas), under the epoch cap.
+        if state.leader_epoch < self.max_epoch {
+            for &r in &self.replicas {
+                if !state.alive.contains(&r) {
+                    actions.push(FailoverAction::Failover(r));
+                }
+            }
+        }
+        // ExpandIsr: only a live leader proposes an ISR change, and only for
+        // a live follower outside the ISR.
+        if state.alive.contains(&state.leader) {
+            for &r in &self.replicas {
+                if state.alive.contains(&r) && !state.isr.contains(&r) {
+                    actions.push(FailoverAction::ExpandIsr(r));
+                }
+            }
+        }
+    }
 
     fn properties(&self) -> Vec<Property<Self>> {
         let mut properties = vec![
@@ -250,7 +250,5 @@ impl Model for FailoverModel {
         properties
     }
 
-    fn within_boundary(&self, state: &Self::State) -> bool {
-        state.leader_epoch <= self.max_epoch
-    }
+    fn within_boundary(&self, state: &Self::State) -> bool { state.leader_epoch <= self.max_epoch }
 }

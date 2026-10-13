@@ -1,11 +1,12 @@
-use tokio::{
-    io::{AsyncReadExt as _, AsyncWriteExt as _},
-    net::{TcpListener, TcpStream},
-};
-
-use crate::{
-    S3Config,
-    object_store_api::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path},
+use {
+    crate::{
+        S3Config,
+        object_store_api::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path},
+    },
+    tokio::{
+        io::{AsyncReadExt as _, AsyncWriteExt as _},
+        net::{TcpListener, TcpStream},
+    },
 };
 
 pub(crate) async fn read_request(socket: &mut tokio::net::TcpStream) -> String {

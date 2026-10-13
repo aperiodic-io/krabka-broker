@@ -4,25 +4,25 @@
 //! It pins the response shape a controller leader returns for a registered,
 //! caught-up broker.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_protocol::{
-    owned::broker_heartbeat_response::BrokerHeartbeatResponse,
-    primitives::uuid::Uuid as ProtocolUuid,
-};
-
-use super::*;
-use crate::{
-    BrokerHandle,
-    broker::Broker,
-    codes,
-    features::METADATA_VERSION,
-    handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
-    test_support::{
-        broker_registration, finalize_elr_version_on, peer, principal,
-        start_broker_with_authorizer as start_broker, test_ctx,
+use {
+    super::*,
+    crate::{
+        BrokerHandle,
+        broker::Broker,
+        codes,
+        features::METADATA_VERSION,
+        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+        test_support::{
+            broker_registration, finalize_elr_version_on, peer, principal,
+            start_broker_with_authorizer as start_broker, test_ctx,
+        },
     },
+    assert2::{assert, check},
+    krabka_protocol::{
+        owned::broker_heartbeat_response::BrokerHeartbeatResponse,
+        primitives::uuid::Uuid as ProtocolUuid,
+    },
+    std::sync::Arc,
 };
 
 fn request(
@@ -242,9 +242,7 @@ impl Cluster {
         )
     }
 
-    fn applied(&self) -> i64 {
-        self.broker.controller.current_metadata_offset()
-    }
+    fn applied(&self) -> i64 { self.broker.controller.current_metadata_offset() }
 
     /// The `(fenced, in_controlled_shutdown)` flags of `node`'s registration,
     /// and whether it still holds the epoch it registered at.
@@ -610,9 +608,12 @@ fn a_heartbeat_stores_its_cordoned_dirs_from_4_3_iv0() {
 /// holds it. Every change names the broker's registered epoch.
 #[test]
 fn each_transition_writes_kafkas_registration_change() {
-    use BrokerControlState::{ControlledShutdown, Fenced, ShutdownNow, Unfenced};
-    use krabka_metadata::{
-        BrokerRegistrationChangeRecord, FencingChange, MetadataImage, MetadataRecord, TopicRecord,
+    use {
+        BrokerControlState::{ControlledShutdown, Fenced, ShutdownNow, Unfenced},
+        krabka_metadata::{
+            BrokerRegistrationChangeRecord, FencingChange, MetadataImage, MetadataRecord,
+            TopicRecord,
+        },
     };
 
     let registered = |fenced: bool, in_controlled_shutdown: bool| {

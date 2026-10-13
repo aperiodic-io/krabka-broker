@@ -20,13 +20,9 @@ pub(crate) enum BrokerControlState {
 impl BrokerControlState {
     /// Whether a broker in this state is fenced. A broker that may shut down
     /// now is fenced, so nothing elects it while it stops.
-    pub(crate) const fn fenced(self) -> bool {
-        matches!(self, Self::Fenced | Self::ShutdownNow)
-    }
+    pub(crate) const fn fenced(self) -> bool { matches!(self, Self::Fenced | Self::ShutdownNow) }
 
-    pub(crate) const fn should_shut_down(self) -> bool {
-        matches!(self, Self::ShutdownNow)
-    }
+    pub(crate) const fn should_shut_down(self) -> bool { matches!(self, Self::ShutdownNow) }
 }
 
 /// What one heartbeat asks for: `wantFence` and `wantShutDown`.
@@ -188,10 +184,11 @@ impl ControllerLivenessState {
 
 #[cfg(test)]
 mod tests {
-    use BrokerControlState::{ControlledShutdown, Fenced, ShutdownNow, Unfenced};
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        BrokerControlState::{ControlledShutdown, Fenced, ShutdownNow, Unfenced},
+        assert2::{assert, check},
+    };
 
     const fn facts() -> HeartbeatFacts {
         HeartbeatFacts {

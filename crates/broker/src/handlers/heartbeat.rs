@@ -3,13 +3,14 @@
 //! This handler validates `(generation, member)`. It then refreshes the
 //! member's `last_heartbeat` clock inside the group's actor.
 
-use krabka_protocol::owned::{
-    heartbeat_request::HeartbeatRequest, heartbeat_response::HeartbeatResponse,
-};
-
-use crate::{
-    codes, coordinator::unified::actor::GroupActorMessage, handlers::ErrorCodeResponse as _,
-    task_util::ask,
+use {
+    crate::{
+        codes, coordinator::unified::actor::GroupActorMessage, handlers::ErrorCodeResponse as _,
+        task_util::ask,
+    },
+    krabka_protocol::owned::{
+        heartbeat_request::HeartbeatRequest, heartbeat_response::HeartbeatResponse,
+    },
 };
 
 context_handler! {
@@ -54,10 +55,11 @@ context_handler! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{handlers::group_read_denied, test_support::peer};
+    use {
+        super::*,
+        crate::{handlers::group_read_denied, test_support::peer},
+        assert2::assert,
+    };
 
     #[test]
     fn group_read_denied_yields_group_authorization_failed() {

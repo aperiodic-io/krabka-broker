@@ -8,28 +8,29 @@
 //! the description, its push is stored and described, and a group that is
 //! deleted and created again is asked again.
 
-use assert2::assert;
-use krabka_broker::{BrokerConfig, file_config::FileConfig};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    common::{
-        streams_group_describe_response as described,
-        streams_group_topology_description_update_request as pushed,
+use {
+    crate::{
+        streams_harness::{
+            connect, create_topic, finalize_streams_version, first_join, follow_up, topology,
+        },
+        support::{
+            start_group_coordinator_with_config,
+            streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
+        },
     },
-    delete_groups_request::DeleteGroupsRequest,
-    streams_group_describe_request::StreamsGroupDescribeRequest,
-    streams_group_describe_response::DescribedGroup,
-    streams_group_topology_description_update_request::StreamsGroupTopologyDescriptionUpdateRequest,
-    streams_group_topology_description_update_response::StreamsGroupTopologyDescriptionUpdateResponse,
-};
-
-use crate::{
-    streams_harness::{
-        connect, create_topic, finalize_streams_version, first_join, follow_up, topology,
-    },
-    support::{
-        start_group_coordinator_with_config,
-        streams::{StreamsFollowUpSetup, StreamsMemberEpoch},
+    assert2::assert,
+    krabka_broker::{BrokerConfig, file_config::FileConfig},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        common::{
+            streams_group_describe_response as described,
+            streams_group_topology_description_update_request as pushed,
+        },
+        delete_groups_request::DeleteGroupsRequest,
+        streams_group_describe_request::StreamsGroupDescribeRequest,
+        streams_group_describe_response::DescribedGroup,
+        streams_group_topology_description_update_request::StreamsGroupTopologyDescriptionUpdateRequest,
+        streams_group_topology_description_update_response::StreamsGroupTopologyDescriptionUpdateResponse,
     },
 };
 

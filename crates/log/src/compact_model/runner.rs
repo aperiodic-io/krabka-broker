@@ -4,10 +4,11 @@
 //! The bounds sit next to the assertions that prove a run was exhaustive,
 //! because a truncated search proves nothing and the two must move together.
 
-use stateright::Checker;
-
-use super::state::{Cleaner, CompactModel};
-use crate::model_check::run_bfs;
+use {
+    super::state::{Cleaner, CompactModel},
+    crate::model_check::run_bfs,
+    stateright::Checker,
+};
 
 // The `Compact` action converges many append/tick paths onto shared logs, so the
 // BFS's *generated* count (`state_count()`) runs ~2-2.5x the *unique* count. We

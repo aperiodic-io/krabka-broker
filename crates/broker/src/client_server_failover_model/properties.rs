@@ -5,21 +5,22 @@
 //! They are stated apart from the transition function so the claims can be
 //! read without the mechanics that make them reachable.
 
-use stateright::Property;
-
-use super::{
-    bounds::{
-        BASE_OFFSET, BASE_SEQUENCE, INITIAL_LEADER, MAX_METADATA_REFRESHES, MAX_SEND_ATTEMPTS,
-        PRODUCER_EPOCH, PRODUCER_ID,
+use {
+    super::{
+        bounds::{
+            BASE_OFFSET, BASE_SEQUENCE, INITIAL_LEADER, MAX_METADATA_REFRESHES, MAX_SEND_ATTEMPTS,
+            PRODUCER_EPOCH, PRODUCER_ID,
+        },
+        model::ClientServerFailoverModel,
+        state::{AcceptedBatch, FailoverState, ProduceResult},
+        witness::{
+            WITNESS_ACKED_BEFORE_FAILOVER, WITNESS_APPENDED_UNACKED,
+            WITNESS_DUPLICATE_AFTER_UNKNOWN, WITNESS_DUPLICATE_RESPONSE, WITNESS_NOT_LEADER,
+            WITNESS_PREPARED_RETRY, WITNESS_RETRY_AFTER_FAILOVER, WITNESS_TIMED_OUT_UNKNOWN,
+            WITNESS_UNKNOWN_RETRY_AFTER_FAILOVER,
+        },
     },
-    model::ClientServerFailoverModel,
-    state::{AcceptedBatch, FailoverState, ProduceResult},
-    witness::{
-        WITNESS_ACKED_BEFORE_FAILOVER, WITNESS_APPENDED_UNACKED, WITNESS_DUPLICATE_AFTER_UNKNOWN,
-        WITNESS_DUPLICATE_RESPONSE, WITNESS_NOT_LEADER, WITNESS_PREPARED_RETRY,
-        WITNESS_RETRY_AFTER_FAILOVER, WITNESS_TIMED_OUT_UNKNOWN,
-        WITNESS_UNKNOWN_RETRY_AFTER_FAILOVER,
-    },
+    stateright::Property,
 };
 
 impl ClientServerFailoverModel {

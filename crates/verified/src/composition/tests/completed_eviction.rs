@@ -1,8 +1,10 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{
-    completed_batches_preserve_first_retry, completed_eviction_bounds_waiters, recovered_window_row,
+use {
+    super::{
+        completed_batches_preserve_first_retry, completed_eviction_bounds_waiters,
+        recovered_window_row,
+    },
+    assert2::assert,
+    proptest::prelude::*,
 };
 
 #[test]

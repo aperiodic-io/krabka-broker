@@ -3,20 +3,20 @@
 //! PLAIN needs no per-connection exchange state, so the whole mechanism is
 //! one function that splits the credential payload and verifies it.
 
-use std::{collections::HashMap, hash::BuildHasher};
-
-use krabka_protocol::owned::{
-    sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
+use {
+    super::{
+        response::{fail_authenticate_with, sasl_ok},
+        state::{ConnectionAuth, SaslExchange, session_expiry},
+    },
+    crate::{codes::ILLEGAL_SASL_STATE, time_util::now_ms},
+    krabka_protocol::owned::{
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+    },
+    krabka_security::SaslMechanism,
+    krabka_units::Time,
+    std::{collections::HashMap, hash::BuildHasher},
 };
-use krabka_security::SaslMechanism;
-use krabka_units::Time;
-
-use super::{
-    response::{fail_authenticate_with, sasl_ok},
-    state::{ConnectionAuth, SaslExchange, session_expiry},
-};
-use crate::{codes::ILLEGAL_SASL_STATE, time_util::now_ms};
 
 /// Handles `SaslAuthenticate` (`api_key` 36) for the PLAIN mechanism.
 ///
@@ -109,18 +109,19 @@ pub fn handle_authenticate_plain<S: BuildHasher>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_security::AuthMethod;
-
-    use super::*;
-    use crate::{
-        network::auth::{
-            state::AuthenticatedSnapshot,
-            test_support::{
-                assert_failed_authenticate_response, assert_success_authenticate_response,
+    use {
+        super::*,
+        crate::{
+            network::auth::{
+                state::AuthenticatedSnapshot,
+                test_support::{
+                    assert_failed_authenticate_response, assert_success_authenticate_response,
+                },
             },
+            test_support::sasl_principal,
         },
-        test_support::sasl_principal,
+        assert2::{assert, check},
+        krabka_security::AuthMethod,
     };
 
     fn credentials() -> HashMap<String, String> {

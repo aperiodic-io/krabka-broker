@@ -5,21 +5,22 @@
 //! field becomes its own `FetchWriteOp::Records` op, so the caller can resolve
 //! it to a shared `Bytes` view or to a file region instead of a copy.
 
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{
-    Encode, ProtocolError,
-    owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
-    primitives::{
-        array::{put_array_len, put_nullable_array_len},
-        fixed::{put_i16, put_i32, put_i64},
-        string_bytes::{put_compact_string, put_string},
-        uuid::put_uuid,
+use {
+    crate::coordinator::unified::persistence::MAX_STRING_BYTES,
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{
+        Encode, ProtocolError,
+        owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+        primitives::{
+            array::{put_array_len, put_nullable_array_len},
+            fixed::{put_i16, put_i32, put_i64},
+            string_bytes::{put_compact_string, put_string},
+            uuid::put_uuid,
+        },
+        records::RecordsPayload,
+        tagged_fields::{WriteTaggedFields, encode_to_bytes},
     },
-    records::RecordsPayload,
-    tagged_fields::{WriteTaggedFields, encode_to_bytes},
 };
-
-use crate::coordinator::unified::persistence::MAX_STRING_BYTES;
 
 /// One ordered segment of a `FetchResponse` body write plan.
 #[derive(Debug, Clone)]

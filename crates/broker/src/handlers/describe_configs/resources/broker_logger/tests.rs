@@ -1,10 +1,11 @@
 //! What a `BROKER_LOGGER` describe answers, and what it refuses.
 
-use assert2::{assert, check};
-use krabka_telemetry::{LogLevel, LogLevelController};
-
-use super::{logger_configs, validate_resource_name};
-use crate::handlers::describe_configs::wire::CONFIG_SOURCE_DYNAMIC_BROKER_LOGGER;
+use {
+    super::{logger_configs, validate_resource_name},
+    crate::handlers::describe_configs::wire::CONFIG_SOURCE_DYNAMIC_BROKER_LOGGER,
+    assert2::{assert, check},
+    krabka_telemetry::{LogLevel, LogLevelController},
+};
 
 #[test]
 fn a_resource_name_must_be_this_node() {

@@ -38,14 +38,15 @@
 
 mod support;
 
-use std::{
-    collections::BTreeSet,
-    process::Command,
-    time::{Duration, Instant},
+use {
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    std::{
+        collections::BTreeSet,
+        process::Command,
+        time::{Duration, Instant},
+    },
 };
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
 
 /// The release both halves of the differential use: krabka's client is this
 /// image's `kafka-topics`, and the oracle broker is the same image.
@@ -121,9 +122,7 @@ fn parse_rows(stdout: &str) -> Vec<Row> {
 }
 
 /// The partition indices a set of rows covers.
-fn indices(rows: &[Row]) -> BTreeSet<i32> {
-    rows.iter().map(|row| row.partition).collect()
-}
+fn indices(rows: &[Row]) -> BTreeSet<i32> { rows.iter().map(|row| row.partition).collect() }
 
 /// What one side of the differential answered for one cluster in the
 /// failed-disk shape.
@@ -261,18 +260,15 @@ impl KrabkaCluster {
             })
             .await;
 
-        let created = kafka_topics_against(
-            &bootstrap,
-            &[
-                "--create",
-                "--topic",
-                TOPIC,
-                "--partitions",
-                &PARTITIONS.to_string(),
-                "--replication-factor",
-                "1",
-            ],
-        );
+        let created = kafka_topics_against(&bootstrap, &[
+            "--create",
+            "--topic",
+            TOPIC,
+            "--partitions",
+            &PARTITIONS.to_string(),
+            "--replication-factor",
+            "1",
+        ]);
         assert!(created.contains("Created topic"), "kafka-topics --create");
         for partition in 0..PARTITIONS {
             handle.wait_until_partition_present(TOPIC, partition).await;
@@ -344,9 +340,7 @@ impl KrabkaCluster {
         health_report(&describe_one, self.doomed.clone())
     }
 
-    async fn shutdown(self) {
-        self.handle.shutdown().await;
-    }
+    async fn shutdown(self) { self.handle.shutdown().await; }
 }
 
 // ---------------------------------------------------------------- oracle side
@@ -398,9 +392,7 @@ impl OracleCluster {
     /// The tool, aimed at the oracle's own loopback listener from inside its
     /// container, so the oracle needs no published port and cannot collide
     /// with a concurrent suite.
-    fn exec(&self, args: &[&str]) -> std::process::Output {
-        support::docker_exec(&self.name, args)
-    }
+    fn exec(&self, args: &[&str]) -> std::process::Output { support::docker_exec(&self.name, args) }
 
     fn wait_ready(&self) {
         let deadline = Instant::now() + CONVERGE_BUDGET;

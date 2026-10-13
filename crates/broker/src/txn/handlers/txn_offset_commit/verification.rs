@@ -15,26 +15,27 @@
 //! runs its own producer check under the append lock, with the guard this
 //! verification started, as it does for a `Produce`.
 
-use krabka_ids::PartitionIndex;
-use krabka_log::{ProducerId, TransactionalBatch, VerificationGuard};
-use krabka_protocol::owned::txn_offset_commit_request::TxnOffsetCommitRequest;
-use krabka_units::convert::TimeExt;
-
-use crate::{
-    broker::Broker,
-    codes,
-    coordinator::bootstrap::OFFSETS_TOPIC,
-    error::BrokerError,
-    partition::ProducerAppendCheck,
-    time_util::now_ms,
-    txn::{
-        coordinator::produce_verification::{
-            INTERNAL_REGISTRATION_VERSION, TransactionCheck, partition_verification_enabled,
-            skips_coordinator_verification,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        coordinator::bootstrap::OFFSETS_TOPIC,
+        error::BrokerError,
+        partition::ProducerAppendCheck,
+        time_util::now_ms,
+        txn::{
+            coordinator::produce_verification::{
+                INTERNAL_REGISTRATION_VERSION, TransactionCheck, partition_verification_enabled,
+                skips_coordinator_verification,
+            },
+            state::TopicPartition,
+            version::TxnVersion,
         },
-        state::TopicPartition,
-        version::TxnVersion,
     },
+    krabka_ids::PartitionIndex,
+    krabka_log::{ProducerId, TransactionalBatch, VerificationGuard},
+    krabka_protocol::owned::txn_offset_commit_request::TxnOffsetCommitRequest,
+    krabka_units::convert::TimeExt,
 };
 
 /// The first `TxnOffsetCommit` version whose verification adds the offsets
@@ -161,9 +162,7 @@ fn verification_code(code: i16, version: i16) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn a_coordinator_answer_becomes_the_code_kafka_puts_on_the_response() {

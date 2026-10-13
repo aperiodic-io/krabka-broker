@@ -5,15 +5,15 @@
 //! Together these carry a round from `PreparingRebalance` through
 //! `CompletingRebalance` to `Stable`.
 
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
+use {
+    super::group::{ClassicGroup, GroupState, InitialDelayedJoin},
+    crate::metadata_epoch::next_i32,
+    bytes::Bytes,
+    std::{
+        collections::HashMap,
+        time::{Duration, Instant},
+    },
 };
-
-use bytes::Bytes;
-
-use super::group::{ClassicGroup, GroupState, InitialDelayedJoin};
-use crate::metadata_epoch::next_i32;
 
 impl ClassicGroup {
     /// True once every member currently in `members` has sent a `JoinGroup`
@@ -268,11 +268,12 @@ impl ClassicGroup {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::classic_state::test_support::{
-        member_with_protocols, sample_member,
+    use {
+        super::*,
+        crate::coordinator::unified::classic_state::test_support::{
+            member_with_protocols, sample_member,
+        },
+        assert2::{assert, check},
     };
 
     #[test]
@@ -310,14 +311,14 @@ mod tests {
     #[test]
     fn resolve_metadata_updates_each_member() {
         let mut g = ClassicGroup::new("g");
-        g.add_member(member_with_protocols(
-            "m1",
-            vec![("range", b"r1"), ("cooperative_sticky", b"c1")],
-        ));
-        g.add_member(member_with_protocols(
-            "m2",
-            vec![("range", b"r2"), ("cooperative_sticky", b"c2")],
-        ));
+        g.add_member(member_with_protocols("m1", vec![
+            ("range", b"r1"),
+            ("cooperative_sticky", b"c1"),
+        ]));
+        g.add_member(member_with_protocols("m2", vec![
+            ("range", b"r2"),
+            ("cooperative_sticky", b"c2"),
+        ]));
         g.resolve_selected_protocol_metadata("cooperative_sticky");
         assert!(g.members["m1"].protocol_metadata.as_ref() == b"c1");
         assert!(g.members["m2"].protocol_metadata.as_ref() == b"c2");

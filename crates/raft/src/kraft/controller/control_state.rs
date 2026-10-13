@@ -2,21 +2,21 @@
 //! voter sets and `kraft.version` levels, together with the conversions between
 //! that history and the `VotersRecord` wire shape it is written to the log in.
 
-use std::collections::BTreeMap;
-
-use krabka_ids::Offset;
-use krabka_metadata::{KRaftVersionRecord, MetadataRecord, VoterSet, VotersRecord};
-use krabka_protocol::{
-    owned::voters_record::VotersRecord as WireVotersRecord,
-    records::{RecordBatch, metadata::control::ControlRecord},
-};
-use uuid::Uuid;
-
-use super::{KraftControlState, records::decode_control_record};
-use crate::{
-    error::{MetadataReplayError, RaftError},
-    kraft::types::NodeId,
-    voter_wire::{from_wire, record, to_wire},
+use {
+    super::{KraftControlState, records::decode_control_record},
+    crate::{
+        error::{MetadataReplayError, RaftError},
+        kraft::types::NodeId,
+        voter_wire::{from_wire, record, to_wire},
+    },
+    krabka_ids::Offset,
+    krabka_metadata::{KRaftVersionRecord, MetadataRecord, VoterSet, VotersRecord},
+    krabka_protocol::{
+        owned::voters_record::VotersRecord as WireVotersRecord,
+        records::{RecordBatch, metadata::control::ControlRecord},
+    },
+    std::collections::BTreeMap,
+    uuid::Uuid,
 };
 
 fn history_value_before<T>(history: &BTreeMap<i64, T>, frontier: i64) -> Option<&T> {

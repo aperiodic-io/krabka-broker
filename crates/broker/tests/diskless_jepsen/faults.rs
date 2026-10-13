@@ -19,15 +19,15 @@
 //! be filled in, and the two leader pairs have to name different nodes. A
 //! schedule that silently skipped a fault fails there rather than passing.
 
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
+use {
+    crate::{TOPIC, cluster::TestNode},
+    assert2::assert,
+    krabka_broker::NodeId,
+    std::{
+        path::{Path, PathBuf},
+        time::Duration,
+    },
 };
-
-use assert2::assert;
-use krabka_broker::NodeId;
-
-use crate::{TOPIC, cluster::TestNode};
 
 /// Name of the follower's durable-offset checkpoint, from
 /// `wal::quorum::follower::checkpoint`.

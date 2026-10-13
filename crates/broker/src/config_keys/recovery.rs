@@ -72,11 +72,12 @@ pub(crate) fn resolve_unclean_leader_election_enabled(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{
-        super::validation::{is_recognized, validate_topic_config},
-        *,
+    use {
+        super::{
+            super::validation::{is_recognized, validate_topic_config},
+            *,
+        },
+        assert2::assert,
     };
 
     #[test]
@@ -134,13 +135,14 @@ mod tests {
 
     #[test]
     fn recovery_settings_resolve_topic_over_cluster_default() {
-        use std::collections::BTreeMap;
-
-        use krabka_metadata::{
-            BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord,
-            TopicConfigRecord,
+        use {
+            krabka_metadata::{
+                BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord,
+                TopicConfigRecord,
+            },
+            std::collections::BTreeMap,
+            uuid::Uuid,
         };
-        use uuid::Uuid;
         let mut img = MetadataImage::new(Uuid::nil());
         assert!(resolve_recovery_strategy(&img, "t") == RecoveryStrategy::None);
         assert!(!resolve_unclean_leader_election_enabled(&img, "t"));
@@ -171,11 +173,13 @@ mod tests {
 
     #[test]
     fn invalid_topic_recovery_setting_does_not_expose_cluster_default() {
-        use krabka_metadata::{
-            BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord,
-            TopicConfigRecord,
+        use {
+            krabka_metadata::{
+                BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataImage, MetadataRecord,
+                TopicConfigRecord,
+            },
+            uuid::Uuid,
         };
-        use uuid::Uuid;
 
         let mut img = MetadataImage::new(Uuid::nil());
         img.apply(&MetadataRecord::V1BrokerConfig(BrokerConfigRecord {

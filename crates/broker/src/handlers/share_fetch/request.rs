@@ -6,16 +6,17 @@
 //! needs the piggybacked acknowledgement batches in a shape that no longer
 //! borrows the request.
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::share_fetch_request::{FetchPartition, ShareFetchRequest};
-
-use crate::{
-    broker::Broker,
-    codes,
-    coordinator::unified::share::config::ShareGroupConfig,
-    features::share_groups_enabled,
-    handlers::{RequestContext, group_read_denied},
-    share_partition::group_settings::GroupShareSettings,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        coordinator::unified::share::config::ShareGroupConfig,
+        features::share_groups_enabled,
+        handlers::{RequestContext, group_read_denied},
+        share_partition::group_settings::GroupShareSettings,
+    },
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::share_fetch_request::{FetchPartition, ShareFetchRequest},
 };
 
 /// The authorized member and resolved group settings shared by fetch and ack.
@@ -59,8 +60,20 @@ pub(crate) fn resolve_share_identity(
 
 /// Keep the settings snapshot and identity bindings alive for the whole handler.
 macro_rules! share_request_identity {
-    (($defaults:ident, $image:ident, $group:ident, $settings:ident, $lock_timeout:ident, $member:ident),
-        $response:ident, $broker:ident, $request:ident, $context:ident) => {
+    (
+        (
+            $defaults:ident,
+            $image:ident,
+            $group:ident,
+            $settings:ident,
+            $lock_timeout:ident,
+            $member:ident
+        ),
+        $response:ident,
+        $broker:ident,
+        $request:ident,
+        $context:ident
+    ) => {
         let $defaults = $broker.config.share_group.clone();
         let $image = $broker.controller.current_image();
         let crate::handlers::share_fetch::ShareRequestIdentity {
@@ -107,10 +120,11 @@ pub(super) fn collect_ack_batches(fp: &FetchPartition) -> Vec<AckBatch> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::owned::share_fetch_request::{AcknowledgementBatch, FetchTopic};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_protocol::owned::share_fetch_request::{AcknowledgementBatch, FetchTopic},
+    };
 
     #[test]
     fn collect_ack_batches_preserves_offsets_and_ack_types() {

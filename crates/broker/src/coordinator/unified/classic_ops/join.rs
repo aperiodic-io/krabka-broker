@@ -10,20 +10,20 @@
 //! from post-rebalance state, and `try_complete` runs Kafka's
 //! `completeClassicGroupJoin`.
 
-use std::time::{Duration, Instant};
-
-use bytes::Bytes;
-use krabka_protocol::owned::join_group_request::JoinGroupRequest;
-use uuid::Uuid;
-
-use crate::{
-    codes,
-    coordinator::unified::{
-        actor::{JoinResult, JoinResultMember},
-        classic_state::{ClassicGroup as ClassicState, GroupState, Member, select_protocol},
-        persistence::MAX_STRING_BYTES,
+use {
+    crate::{
+        codes,
+        coordinator::unified::{
+            actor::{JoinResult, JoinResultMember},
+            classic_state::{ClassicGroup as ClassicState, GroupState, Member, select_protocol},
+            persistence::MAX_STRING_BYTES,
+        },
+        metadata_epoch::next_i32,
     },
-    metadata_epoch::next_i32,
+    bytes::Bytes,
+    krabka_protocol::owned::join_group_request::JoinGroupRequest,
+    std::time::{Duration, Instant},
+    uuid::Uuid,
 };
 
 const DEFAULT_SESSION_TIMEOUT_MS: u64 = 30_000;
@@ -526,17 +526,17 @@ pub(crate) fn try_complete(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use assert2::{assert, check};
-    use krabka_protocol::owned::{
-        heartbeat_request::HeartbeatRequest, join_group_request::JoinGroupRequestProtocol,
-    };
-
-    use super::*;
-    use crate::coordinator::unified::classic_ops::{
-        handle_heartbeat,
-        test_support::{handle_join as join_as, join_ctx, join_req, stable_two_member_group},
+    use {
+        super::*,
+        crate::coordinator::unified::classic_ops::{
+            handle_heartbeat,
+            test_support::{handle_join as join_as, join_ctx, join_req, stable_two_member_group},
+        },
+        assert2::{assert, check},
+        krabka_protocol::owned::{
+            heartbeat_request::HeartbeatRequest, join_group_request::JoinGroupRequestProtocol,
+        },
+        std::collections::HashMap,
     };
 
     fn protocols(names: &[&str]) -> Vec<JoinGroupRequestProtocol> {
@@ -571,9 +571,7 @@ mod tests {
         JoinOutcome::of(JoinAction::Immediate(build_join_result(state, member_id)))
     }
 
-    fn parked() -> JoinOutcome {
-        JoinOutcome::of(JoinAction::Park)
-    }
+    fn parked() -> JoinOutcome { JoinOutcome::of(JoinAction::Park) }
 
     fn error(error_code: i16, member_id: &str) -> JoinOutcome {
         JoinOutcome::error(error_code, member_id)

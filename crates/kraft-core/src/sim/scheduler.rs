@@ -6,22 +6,26 @@
 //! cluster fingerprint stops changing, and the role reconciliation that decides
 //! which of a node's timers stay armed.
 
-use super::{
-    Sim,
-    node::{HEARTBEAT, deadline_millis, election_timeout_of},
-    trace::TraceAction,
-};
-use crate::{
-    action::Action,
-    event::Event,
-    simulation_support::{
-        SimulationTimer as SimTimer, StableFingerprint, clear_timer, earliest_timer, fingerprint,
-        reconcile_timers,
+use {
+    super::{
+        Sim,
+        node::{HEARTBEAT, deadline_millis, election_timeout_of},
+        trace::TraceAction,
     },
-    types::{Epoch, NodeId},
+    crate::{
+        action::Action,
+        event::Event,
+        simulation_support::{
+            SimulationTimer as SimTimer, StableFingerprint, clear_timer, earliest_timer,
+            fingerprint, reconcile_timers,
+        },
+        types::{Epoch, NodeId},
+    },
 };
 
 impl Sim {
+    krabka_macros::simulation_heartbeat!(crate, deadline_millis(HEARTBEAT));
+
     // ---- fingerprint / stability ---------------------------------------------
 
     fn fingerprint(&self) -> Vec<(NodeId, &'static str, Epoch, usize, i64)> {
@@ -53,15 +57,12 @@ impl Sim {
 
     pub(super) fn fire_next_timer(&mut self) -> bool {
         let best = earliest_timer(self.nodes.values().map(|node| {
-            (
-                node.id,
-                [
-                    node.election_deadline,
-                    node.fetch_deadline,
-                    node.heartbeat_deadline,
-                    node.check_quorum_deadline,
-                ],
-            )
+            (node.id, [
+                node.election_deadline,
+                node.fetch_deadline,
+                node.heartbeat_deadline,
+                node.check_quorum_deadline,
+            ])
         }));
         let Some((deadline, id, kind)) = best else {
             return false;
@@ -123,8 +124,6 @@ impl Sim {
             }
         }
     }
-
-    krabka_macros::simulation_heartbeat!(crate, deadline_millis(HEARTBEAT));
 
     pub(super) fn reconcile_timers_for_role(&mut self, id: NodeId) {
         let node = self.nodes.get_mut(&id).unwrap();

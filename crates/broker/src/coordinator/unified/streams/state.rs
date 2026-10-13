@@ -35,16 +35,17 @@
 //! member toward its target, `phase` the group lifecycle phase and its Kafka
 //! group-state string, and `task_map` the normalization of a role's task map.
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    time::{Duration, Instant},
-};
-
-use self::current_assignment::{TaskOwners, next_member_state};
-use crate::{
-    codes::{FENCED_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
-    coordinator::unified::INITIAL_GROUP_EPOCH,
-    metadata_epoch::next_i32,
+use {
+    self::current_assignment::{TaskOwners, next_member_state},
+    crate::{
+        codes::{FENCED_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
+        coordinator::unified::INITIAL_GROUP_EPOCH,
+        metadata_epoch::next_i32,
+    },
+    std::{
+        collections::{BTreeMap, HashMap},
+        time::{Duration, Instant},
+    },
 };
 
 mod current_assignment;
@@ -135,6 +136,28 @@ pub struct StreamsGroupState {
 pub const INITIAL_EPOCH: i32 = INITIAL_GROUP_EPOCH;
 
 impl StreamsGroupState {
+    crate::coordinator::unified::member_helpers::bump_group_epoch! {
+        /// Increments the group epoch. This mirrors the share and consumer state
+        /// machines: a fresh epoch makes the assignment stale, so the method marks
+        /// the group dirty.
+        self; self.dirty = true;
+    }
+
+    crate::coordinator::unified::member_helpers::expired_members_method!();
+
+    crate::coordinator::unified::member_helpers::evict_expired! {
+        /// Removes members whose `last_seen` is older than `session_timeout` and
+        /// returns the evicted member ids. The method marks the group dirty if it
+        /// removed any member.
+    }
+
+    crate::coordinator::unified::member_helpers::fence_rebalance_timeouts_method! {
+    /// Removes every member whose rebalance timeout fired at `now` while it
+    /// was still at the epoch that armed it, and returns the removed ids,
+    /// sorted. This is the fence of Kafka's
+    /// `scheduleStreamsGroupRebalanceTimeout`.
+    }
+
     pub fn new(group_id: impl Into<String>) -> Self {
         Self {
             group_id: group_id.into(),
@@ -154,13 +177,6 @@ impl StreamsGroupState {
             rebalance_deadlines: HashMap::new(),
             endpoint_information_epoch: 0,
         }
-    }
-
-    crate::coordinator::unified::member_helpers::bump_group_epoch! {
-        /// Increments the group epoch. This mirrors the share and consumer state
-        /// machines: a fresh epoch makes the assignment stale, so the method marks
-        /// the group dirty.
-        self; self.dirty = true;
     }
 
     /// Inserts or replaces a member.
@@ -211,14 +227,6 @@ impl StreamsGroupState {
             self.clear_shutdown_request_when_empty();
         }
         m
-    }
-
-    crate::coordinator::unified::member_helpers::expired_members_method!();
-
-    crate::coordinator::unified::member_helpers::evict_expired! {
-        /// Removes members whose `last_seen` is older than `session_timeout` and
-        /// returns the evicted member ids. The method marks the group dirty if it
-        /// removed any member.
     }
 
     /// Records `member_id` as the member that asked the application to shut
@@ -429,13 +437,6 @@ impl StreamsGroupState {
             .min()
     }
 
-    crate::coordinator::unified::member_helpers::fence_rebalance_timeouts_method! {
-    /// Removes every member whose rebalance timeout fired at `now` while it
-    /// was still at the epoch that armed it, and returns the removed ids,
-    /// sorted. This is the fence of Kafka's
-    /// `scheduleStreamsGroupRebalanceTimeout`.
-    }
-
     /// The members whose rebalance timeout fired at `now`, sorted, without
     /// removing them; the fired deadlines are dropped. See
     /// [`Self::fence_rebalance_timeouts`].
@@ -531,9 +532,10 @@ fn tasks_contained(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::{test_support::task_map, *};
+    use {
+        super::{test_support::task_map, *},
+        assert2::{assert, check},
+    };
 
     fn clean_member_group() -> StreamsGroupState {
         let mut group = StreamsGroupState::new("g");
@@ -896,11 +898,9 @@ mod tests {
     #[test]
     fn a_member_past_its_rebalance_timeout_is_fenced() {
         let rows = [
-            (
-                "still unrevoked at the deadline",
-                false,
-                vec!["m1".to_string()],
-            ),
+            ("still unrevoked at the deadline", false, vec![
+                "m1".to_string(),
+            ]),
             ("revoked before the deadline", true, vec![]),
         ];
         for (name, revokes, fenced) in rows {

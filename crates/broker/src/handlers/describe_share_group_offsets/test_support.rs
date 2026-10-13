@@ -4,9 +4,10 @@
 //! on a live broker, are each needed by more than one of the test modules
 //! under this handler, so they live in one file instead of once per module.
 
-use krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord};
-
-use crate::broker::Broker;
+use {
+    crate::broker::Broker,
+    krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord},
+};
 
 pub(super) fn image_with_topic(name: &str, topic_id: uuid::Uuid) -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());

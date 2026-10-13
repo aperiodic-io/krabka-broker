@@ -6,21 +6,22 @@
 //! the only one that speaks the config APIs, so it carries their request shapes
 //! on its own.
 
-use assert2::check;
-use krabka_broker::codes;
-use krabka_protocol::owned::{
-    describe_configs_request::DescribeConfigsRequest,
-    describe_configs_response::DescribeConfigsResourceResult,
-};
-
-use crate::{
-    BROKER_WITNESS, CONFIG_SOURCE_DYNAMIC_BROKER, CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
-    RESOURCE_TYPE_BROKER, SITE_A, STRETCH_PREFERRED_LEADER_SITE, WITNESS_ID, cluster_lock,
-    support::configs::{
-        ConfigOperation, IncrementalConfigsSetup, describe_resource, incremental_config,
-        incremental_request, incremental_resource,
+use {
+    crate::{
+        BROKER_WITNESS, CONFIG_SOURCE_DYNAMIC_BROKER, CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
+        RESOURCE_TYPE_BROKER, SITE_A, STRETCH_PREFERRED_LEADER_SITE, WITNESS_ID, cluster_lock,
+        support::configs::{
+            ConfigOperation, IncrementalConfigsSetup, describe_resource, incremental_config,
+            incremental_request, incremental_resource,
+        },
+        witness_cluster::{client_at, shutdown, start_stretch_cluster},
     },
-    witness_cluster::{client_at, shutdown, start_stretch_cluster},
+    assert2::check,
+    krabka_broker::codes,
+    krabka_protocol::owned::{
+        describe_configs_request::DescribeConfigsRequest,
+        describe_configs_response::DescribeConfigsResourceResult,
+    },
 };
 
 /// `DescribeConfigsResponse.ConfigType::BOOLEAN`, the byte the JVM

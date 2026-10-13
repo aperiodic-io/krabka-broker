@@ -20,25 +20,25 @@
 //! its async object-store calls with `block_in_place`, which a current-thread
 //! runtime refuses.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
 /// The `orders` topic with `partitions` partitions, so a sweep can walk more
 /// than one of them.
 use fixtures::orders_image as image_with_orders_partitions;
-use krabka_ids::PartitionIndex;
-use krabka_object_store::fault::{FaultInjectingStore, FaultKind, FaultPolicy, OpFault, StoreOp};
-use krabka_remote_storage::{RemoteLogSegmentState, RemoteStorageManager, S3RemoteStorage};
-
-use super::*;
-use crate::{
-    api_catalog::UnstableApiVersions,
-    metadata_source::MetadataSource,
-    metrics::{BrokerMetrics, TopicLabel},
-    remote_log_manager::test_support::{
-        self as fixtures, TEST_COPY_TIMEOUT, copy_exports, partition_snapshot,
-        rolled_tiered_partition_with_config,
+use {
+    super::*,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        metadata_source::MetadataSource,
+        metrics::{BrokerMetrics, TopicLabel},
+        remote_log_manager::test_support::{
+            self as fixtures, TEST_COPY_TIMEOUT, copy_exports, partition_snapshot,
+            rolled_tiered_partition_with_config,
+        },
     },
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_object_store::fault::{FaultInjectingStore, FaultKind, FaultPolicy, OpFault, StoreOp},
+    krabka_remote_storage::{RemoteLogSegmentState, RemoteStorageManager, S3RemoteStorage},
+    std::sync::Arc,
 };
 
 /// How long a stalled store holds a call. Long enough that a copy under the
@@ -75,16 +75,12 @@ impl CopyExportContext {
 
     async fn copy(&self, request: CopyExportRequest) -> usize {
         copy_exports(
-            &fixtures::configured_tier(
-                &self.rsm,
-                &self.rlmm,
-                fixtures::TierSetup {
-                    metrics: &self.metrics,
-                    index_cache: &self.index_cache,
-                    copy_timeout: request.copy_timeout,
-                    ..Default::default()
-                },
-            ),
+            &fixtures::configured_tier(&self.rsm, &self.rlmm, fixtures::TierSetup {
+                metrics: &self.metrics,
+                index_cache: &self.index_cache,
+                copy_timeout: request.copy_timeout,
+                ..Default::default()
+            }),
             request.exports,
         )
         .await
@@ -121,15 +117,12 @@ fn stalling_store() -> Arc<FaultInjectingStore> {
 fn tiered_partition(
     log_dir: &std::path::Path,
 ) -> (Arc<Partition>, Vec<krabka_log::SegmentExport>, LogConfig) {
-    let partition = rolled_tiered_partition_with_config(
-        log_dir,
-        LogConfig {
-            segment_size: bytes(256),
-            remote_storage_enable: true,
-            local_retention: Some(millis(1)),
-            ..LogConfig::default()
-        },
-    );
+    let partition = rolled_tiered_partition_with_config(log_dir, LogConfig {
+        segment_size: bytes(256),
+        remote_storage_enable: true,
+        local_retention: Some(millis(1)),
+        ..LogConfig::default()
+    });
     let (exports, config) = partition_snapshot(&partition);
     assert!(exports.len() >= 2, "the fixture needs sealed segments");
     (partition, exports, config)
@@ -143,7 +136,15 @@ fn orders_label() -> TopicLabel {
 
 /// Keep both the partition and object-store guards through the fault assertions.
 macro_rules! faulty_copy_fixture {
-    ($local:ident, $partition:ident, $exports:ident, $config:ident, $store:ident, $rsm:ident, $make:expr) => {
+    (
+        $local:ident,
+        $partition:ident,
+        $exports:ident,
+        $config:ident,
+        $store:ident,
+        $rsm:ident,
+        $make:expr
+    ) => {
         let $local = tempfile::tempdir().unwrap();
         let ($partition, $exports, $config) = tiered_partition($local.path());
         let ($store, $rsm) = store_backend($make);
@@ -200,15 +201,11 @@ async fn a_throttling_store_finishes_nothing_and_moves_the_error_and_lag_series(
         throttling_store
     );
     fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
-    let tier = fixtures::configured_tier(
-        &rsm,
-        &rlmm,
-        fixtures::TierSetup {
-            metrics: &metrics,
-            index_cache: &index_cache,
-            ..Default::default()
-        },
-    );
+    let tier = fixtures::configured_tier(&rsm, &rlmm, fixtures::TierSetup {
+        metrics: &metrics,
+        index_cache: &index_cache,
+        ..Default::default()
+    });
 
     let copied = copy_exports(&tier, exports.clone()).await;
 
@@ -260,16 +257,12 @@ async fn a_stalled_copy_is_abandoned_at_its_deadline() {
 
     let started = std::time::Instant::now();
     let copied = copy_exports(
-        &fixtures::configured_tier(
-            &rsm,
-            &rlmm,
-            fixtures::TierSetup {
-                metrics: &metrics,
-                index_cache: &index_cache,
-                copy_timeout: SHORT_COPY_DEADLINE,
-                ..Default::default()
-            },
-        ),
+        &fixtures::configured_tier(&rsm, &rlmm, fixtures::TierSetup {
+            metrics: &metrics,
+            index_cache: &index_cache,
+            copy_timeout: SHORT_COPY_DEADLINE,
+            ..Default::default()
+        }),
         vec![exports[0].clone()],
     )
     .await;
@@ -317,16 +310,12 @@ async fn a_stalled_partition_does_not_stop_the_sweep_reaching_the_next() {
     tick_all(
         &partitions,
         &*controller,
-        &fixtures::configured_tier(
-            &rsm,
-            &rlmm,
-            fixtures::TierSetup {
-                metrics: &metrics,
-                index_cache: &index_cache,
-                copy_timeout: SHORT_COPY_DEADLINE,
-                ..Default::default()
-            },
-        ),
+        &fixtures::configured_tier(&rsm, &rlmm, fixtures::TierSetup {
+            metrics: &metrics,
+            index_cache: &index_cache,
+            copy_timeout: SHORT_COPY_DEADLINE,
+            ..Default::default()
+        }),
         NodeId(1),
         1,
         SweepConcurrency::default(),

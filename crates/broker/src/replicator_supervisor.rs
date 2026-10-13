@@ -19,22 +19,22 @@
 //!    rather than a task teardown and a fresh dial. `num.replica.fetchers`
 //!    (`[runtime] replica_fetchers`) says how many fetchers a leader gets.
 
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-
-use dashmap::DashMap;
-use krabka_log::LogConfig;
-use krabka_raft::NodeId;
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-
 #[cfg(test)]
 use crate::replicator_supervisor::test_support::{SupervisorPartitionSetup, SupervisorTopicSetup};
 #[cfg(test)]
 use crate::share_coordinator::coordinator::test_support::assert_recovered_epoch_is_fenced;
+use {
+    dashmap::DashMap,
+    krabka_log::LogConfig,
+    krabka_raft::NodeId,
+    std::{
+        collections::HashMap,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
+    tokio::task::JoinHandle,
+    tokio_util::sync::CancellationToken,
+};
 
 mod desired_sets;
 mod dir_assignments;
@@ -48,30 +48,32 @@ mod test_support;
 mod topic_config;
 mod wal_followers;
 
-use self::dir_assignments::{AssignDirsReporter, NetworkAssignDirsReporter};
 pub(crate) use self::{
     desired_sets::{desired_follower_set, desired_local_set, desired_wal_placements},
     materialize::{MaterializePartitionConfig, materialize_partition},
     topic_config::push_topic_configs,
 };
-use crate::{
-    api_catalog::UnstableApiVersions,
-    broker::registered_listener_endpoint,
-    config::ReplicationRuntimeConfig,
-    controller_endpoint::ControllerDialer,
-    diskless::hot_tail::HotTailCache,
-    log_dir_id::LogDirIds,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    replicator::{FollowedPartitions, ReplicationConnectionConfig},
-    share_coordinator::coordinator::ShareCoordinator,
-    throttle::ThrottleState,
-    txn::coordinator::TxnCoordinator,
-    wal::quorum::registry::{ShardId, WalShardRegistry},
+use {
+    self::dir_assignments::{AssignDirsReporter, NetworkAssignDirsReporter},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        broker::registered_listener_endpoint,
+        config::ReplicationRuntimeConfig,
+        controller_endpoint::ControllerDialer,
+        diskless::hot_tail::HotTailCache,
+        log_dir_id::LogDirIds,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        replicator::{FollowedPartitions, ReplicationConnectionConfig},
+        share_coordinator::coordinator::ShareCoordinator,
+        throttle::ThrottleState,
+        txn::coordinator::TxnCoordinator,
+        wal::quorum::registry::{ShardId, WalShardRegistry},
+    },
 };
 
 /// A `(topic, partition)` pair. The supervisor keys follower tasks, local
@@ -384,30 +386,30 @@ impl ReplicatorSupervisor {
         }
     }
 
-    pub(crate) fn spawn(self) -> JoinHandle<()> {
-        tokio::spawn(self.run())
-    }
+    pub(crate) fn spawn(self) -> JoinHandle<()> { tokio::spawn(self.run()) }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::Offset;
-
-    use super::*;
-    use crate::{
-        codes,
-        replicator_supervisor::test_support::{
-            broker_record, image_with, partition_record, supervisor_fixture, topic_record,
+    use {
+        super::*,
+        crate::{
+            codes,
+            replicator_supervisor::test_support::{
+                broker_record, image_with, partition_record, supervisor_fixture, topic_record,
+            },
+            share_coordinator::{
+                bootstrap,
+                config::ShareCoordinatorConfig,
+                coordinator::{
+                    LoadStatus, ShareStateError, message, test_support::image_with_topic,
+                },
+            },
         },
-        share_coordinator::{
-            bootstrap,
-            config::ShareCoordinatorConfig,
-            coordinator::{LoadStatus, ShareStateError, message, test_support::image_with_topic},
-        },
+        assert2::assert,
+        krabka_ids::PartitionIndex,
+        krabka_log::Offset,
+        std::time::Duration,
     };
 
     async fn await_share_status(coordinator: &ShareCoordinator, expected: LoadStatus) {

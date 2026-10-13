@@ -18,14 +18,14 @@
 //! This file holds the ticker and the configuration it reads. The sweep that
 //! those three conditions describe lives in [`sweep`].
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_units::convert::TimeExt as _;
-use tokio_util::sync::CancellationToken;
-use tracing::debug;
-
-use self::sweep::{UncleanablePartitions, tick_all};
-use crate::{metrics::BrokerMetrics, partition_registry::PartitionRegistry, time_util};
+use {
+    self::sweep::{UncleanablePartitions, tick_all},
+    crate::{metrics::BrokerMetrics, partition_registry::PartitionRegistry, time_util},
+    krabka_units::convert::TimeExt as _,
+    std::{sync::Arc, time::Duration},
+    tokio_util::sync::CancellationToken,
+    tracing::debug,
+};
 
 mod sweep;
 

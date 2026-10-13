@@ -6,13 +6,13 @@
 //! configuration holds. The TLS and SASL tables live here too because both are
 //! written either at the top level or inline on a listener.
 
-use std::net::SocketAddr;
-
-use krabka_security::ListenerProtocol;
-use schemars::JsonSchema;
-use serde::Deserialize;
-
-use crate::{SslPrincipalMapper, config::ListenerSpec, file_config::FileConfigError};
+use {
+    crate::{SslPrincipalMapper, config::ListenerSpec, file_config::FileConfigError},
+    krabka_security::ListenerProtocol,
+    schemars::JsonSchema,
+    serde::Deserialize,
+    std::net::SocketAddr,
+};
 
 #[krabka_macros::config_table(open)]
 pub struct FileTlsConfig {
@@ -55,9 +55,7 @@ pub struct FileTlsConfig {
 
 /// Kafka's `ssl.principal.mapping.rules` default: pass the Subject DN
 /// through unchanged.
-fn default_principal_mapping_rules() -> Vec<String> {
-    vec!["DEFAULT".to_owned()]
-}
+fn default_principal_mapping_rules() -> Vec<String> { vec!["DEFAULT".to_owned()] }
 
 /// Whether a TLS listener asks for and requires a client certificate,
 /// Kafka's `ssl.client.auth`. `Disabled` is the default and never asks;
@@ -174,10 +172,11 @@ impl FileListener {
 
 #[cfg(test)]
 mod listener_auth_tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::file_config::{FileConfig, test_support::configured_unwrap_parse};
+    use {
+        super::*,
+        crate::file_config::{FileConfig, test_support::configured_unwrap_parse},
+        assert2::assert,
+    };
 
     #[test]
     fn file_listener_parses_per_listener_tls_config_inline() {
@@ -341,10 +340,11 @@ client_auth = "Required"
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::file_config::FileConfig;
+    use {
+        super::*,
+        crate::file_config::FileConfig,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn snake_case_protocol_names() {

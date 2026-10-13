@@ -8,12 +8,12 @@
 //! magic to detect "this is one of ours". Kafka's own producers leave their own
 //! headers in there, and this driver must not misread their bytes.
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use bytes::{Bytes, BytesMut};
-use krabka_units::prelude::*;
-
-use crate::numeric::saturating_u128_to_u64;
+use {
+    crate::numeric::saturating_u128_to_u64,
+    bytes::{Bytes, BytesMut},
+    krabka_units::prelude::*,
+    std::time::{SystemTime, UNIX_EPOCH},
+};
 
 /// Magic prefix on every record, so a consumer can confirm that this driver
 /// produced the record and that it is not data already in the topic.

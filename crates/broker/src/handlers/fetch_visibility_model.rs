@@ -25,10 +25,11 @@
 //! all. See the design spec
 //! `docs/superpowers/specs/2026-06-14-krabka-fetch-hwm-visibility-model-design.md`.
 
-use assert2::assert;
-use stateright::{Checker, Model, Property};
-
-use super::{FetchWatermarks, Offset, compute_visibility_window};
+use {
+    super::{FetchWatermarks, Offset, compute_visibility_window},
+    assert2::assert,
+    stateright::{Checker, Model, Property},
+};
 
 const MAX_STATES: usize = 200_000;
 const MAX_DEPTH: usize = 40;
@@ -74,19 +75,15 @@ enum VisAction {
 /// Neither the fetch shape, the log end nor the delivery watermark is an input:
 /// the broker reports the true high watermark on a scheduled topic too, and a
 /// follower learns the committed bound rather than the leader's log end.
-fn response_hw(s: &VisState) -> i64 {
-    s.hw
-}
+fn response_hw(s: &VisState) -> i64 { s.hw }
 
 /// Kafka's reported last stable offset, `UnifiedLog.lastStableOffset`: the
 /// first unstable offset capped at the high watermark, whoever fetches.
-fn response_lso(s: &VisState) -> i64 {
-    s.lso.min(s.hw)
-}
+fn response_lso(s: &VisState) -> i64 { s.lso.min(s.hw) }
 
 impl Model for VisModel {
-    type State = VisState;
     type Action = VisAction;
+    type State = VisState;
 
     fn init_states(&self) -> Vec<Self::State> {
         vec![VisState {
@@ -214,9 +211,7 @@ impl Model for VisModel {
         ]
     }
 
-    fn within_boundary(&self, s: &Self::State) -> bool {
-        s.log_end <= self.max_offset
-    }
+    fn within_boundary(&self, s: &Self::State) -> bool { s.log_end <= self.max_offset }
 }
 
 /// KIP-227: a watermark advance must never lower the reported HW/LSO. The

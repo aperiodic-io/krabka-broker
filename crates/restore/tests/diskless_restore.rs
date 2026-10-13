@@ -1,21 +1,23 @@
-use assert2::check;
-use bytes::{Bytes, BytesMut};
-use clap::Parser as _;
-use krabka_audit::FileEd25519Signer;
-use krabka_ids::Offset;
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch, validate_one_v2_batch};
-use krabka_remote_storage::{
-    ObjectEntry, RlmmCacheDump, Sha256Digest,
-    diskless::{
-        CAPTURE_HEAD_NAME, CapturedWalRange, DisklessPartitionCapture, DisklessWalCapture,
-        WalIndexEntry, WalObjectBuilder,
+use {
+    assert2::check,
+    bytes::{Bytes, BytesMut},
+    clap::Parser as _,
+    krabka_audit::FileEd25519Signer,
+    krabka_ids::Offset,
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch, validate_one_v2_batch},
+    krabka_remote_storage::{
+        ObjectEntry, RlmmCacheDump, Sha256Digest,
+        diskless::{
+            CAPTURE_HEAD_NAME, CapturedWalRange, DisklessPartitionCapture, DisklessWalCapture,
+            WalIndexEntry, WalObjectBuilder,
+        },
     },
+    krabka_remote_storage_topic::snapshot::Snapshot,
+    krabka_restore::{Cli, RestoreError, restore},
+    ring::{rand::SystemRandom, signature::Ed25519KeyPair},
+    uuid::Uuid,
 };
-use krabka_remote_storage_topic::snapshot::Snapshot;
-use krabka_restore::{Cli, RestoreError, restore};
-use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-use uuid::Uuid;
 
 fn fixture(root: &std::path::Path, object: bool, corrupt: bool) -> (DisklessWalCapture, Uuid) {
     fixture_with_second_base(root, object, corrupt, 1)
@@ -151,19 +153,14 @@ fn trusted_args(
     public_key: &std::path::Path,
     head: &str,
 ) -> krabka_restore::RestoreArgs {
-    capture_args(
-        archive,
-        target,
-        capture,
-        &[
-            "--worm-key-id".to_owned(),
-            "capture-key".to_owned(),
-            "--worm-public-key".to_owned(),
-            public_key.display().to_string(),
-            "--worm-expect-head".to_owned(),
-            format!("{CAPTURE_HEAD_NAME}={head}"),
-        ],
-    )
+    capture_args(archive, target, capture, &[
+        "--worm-key-id".to_owned(),
+        "capture-key".to_owned(),
+        "--worm-public-key".to_owned(),
+        public_key.display().to_string(),
+        "--worm-expect-head".to_owned(),
+        format!("{CAPTURE_HEAD_NAME}={head}"),
+    ])
 }
 
 fn write_capture(path: &std::path::Path, capture: &DisklessWalCapture) {

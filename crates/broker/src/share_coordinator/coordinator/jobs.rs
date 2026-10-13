@@ -17,18 +17,18 @@
 //! Kafka runs the two timers only while share groups are enabled
 //! (`isShareGroupsEnabled`: `share.version` 1 or more in the image).
 
-use std::{collections::HashSet, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
-use tokio::{sync::watch, time::Instant};
-use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
-
-use super::{LoadStatus, ShareCoordinator, Term, state_machine::StateRecord};
-use crate::{
-    coordinator::topic_deletion::deleted_topics, features::share_groups_enabled,
-    time_util::duration_millis,
+use {
+    super::{LoadStatus, ShareCoordinator, Term, state_machine::StateRecord},
+    crate::{
+        coordinator::topic_deletion::deleted_topics, features::share_groups_enabled,
+        time_util::duration_millis,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
+    std::{collections::HashSet, sync::Arc},
+    tokio::{sync::watch, time::Instant},
+    tokio_util::sync::CancellationToken,
+    tracing::{info, warn},
 };
 
 impl ShareCoordinator {
@@ -224,9 +224,7 @@ impl ShareCoordinator {
 
 /// Whether the timers run for `image`: a finalized `share.version` of 1 or
 /// more.
-pub(crate) fn periodic_jobs_enabled(image: &MetadataImage) -> bool {
-    share_groups_enabled(image)
-}
+pub(crate) fn periodic_jobs_enabled(image: &MetadataImage) -> bool { share_groups_enabled(image) }
 
 /// The topic ids of `previous` that `next` does not hold.
 fn deleted_topic_ids(previous: &MetadataImage, next: &MetadataImage) -> HashSet<uuid::Uuid> {

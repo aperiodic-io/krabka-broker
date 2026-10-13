@@ -3,11 +3,12 @@
 //! doubling backoff and one cancellable sleep, and a shutdown token always
 //! wins over a pending delay.
 
-use krabka_client_core::Connection;
-
-use super::Config;
 pub(super) use crate::replicator::connection::sleep_or_cancel;
-use crate::replicator::connection::{LeaderDial, connect_leader_with_backoff};
+use {
+    super::Config,
+    crate::replicator::connection::{LeaderDial, connect_leader_with_backoff},
+    krabka_client_core::Connection,
+};
 
 pub(super) async fn connect_with_backoff(config: &Config) -> Result<Connection, String> {
     connect_leader_with_backoff(&LeaderDial {

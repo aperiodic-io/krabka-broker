@@ -4,13 +4,14 @@
 //! The verbatim, decode-free counterpart lives in the sibling `read_raw`
 //! module.
 
-use krabka_ids::Offset;
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{ByteSize, ByteSizeExt};
-use tracing::instrument;
-
-use super::Segment;
-use crate::{config::DEFAULT_READ_BUFFER_CAP, error::LogError};
+use {
+    super::Segment,
+    crate::{config::DEFAULT_READ_BUFFER_CAP, error::LogError},
+    krabka_ids::Offset,
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{ByteSize, ByteSizeExt},
+    tracing::instrument,
+};
 
 impl Segment {
     /// Read batches from `offset` or just before it, up to about `max_bytes`
@@ -73,13 +74,15 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use krabka_units::prelude::kibibytes;
-
-    use super::*;
-    use crate::segment::test_support::{
-        FIRST_LARGE_TIMESTAMP_BATCH, NO_LIMIT, ONE_RECORD_BATCH, RecordCount, RecordTimestamp,
-        SECOND_LARGE_TIMESTAMP_BATCH, SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup,
-        SeededSegmentSetup, THIRD_SINGLE_RECORD_BATCH, sample_batch, seeded_fixture, test_segment,
+    use {
+        super::*,
+        crate::segment::test_support::{
+            FIRST_LARGE_TIMESTAMP_BATCH, NO_LIMIT, ONE_RECORD_BATCH, RecordCount, RecordTimestamp,
+            SECOND_LARGE_TIMESTAMP_BATCH, SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup,
+            SeededSegmentSetup, THIRD_SINGLE_RECORD_BATCH, sample_batch, seeded_fixture,
+            test_segment,
+        },
+        krabka_units::prelude::kibibytes,
     };
 
     // `Segment::read` maps the absolute fetch offset to a relative index key

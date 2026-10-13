@@ -6,20 +6,21 @@
 //! membership change. The connection therefore blocks here for exactly as long
 //! as the earlier `Notify`-based wait.
 
-use krabka_protocol::owned::{
-    join_group_request::JoinGroupRequest,
-    join_group_response::{JoinGroupResponse, JoinGroupResponseMember},
-};
-
-use crate::{
-    codes,
-    coordinator::unified::{
-        actor::{GroupActorMessage, GroupKindTag, join_append_error_code},
-        config::NextGenConfig,
-        streams::migration::DowngradeOutcome,
+use {
+    crate::{
+        codes,
+        coordinator::unified::{
+            actor::{GroupActorMessage, GroupKindTag, join_append_error_code},
+            config::NextGenConfig,
+            streams::migration::DowngradeOutcome,
+        },
+        task_util::ask,
+        time_util::now_ms,
     },
-    task_util::ask,
-    time_util::now_ms,
+    krabka_protocol::owned::{
+        join_group_request::JoinGroupRequest,
+        join_group_response::{JoinGroupResponse, JoinGroupResponseMember},
+    },
 };
 
 context_handler! {
@@ -225,10 +226,11 @@ fn respond(version: i16, mut resp: JoinGroupResponse) -> JoinGroupResponse {
 
 #[cfg(test)]
 mod tests {
-    use krabka_protocol::{Decode, owned::join_group_response};
-
-    use super::*;
-    use crate::handlers::encode_response;
+    use {
+        super::*,
+        crate::handlers::encode_response,
+        krabka_protocol::{Decode, owned::join_group_response},
+    };
 
     /// #791: Kafka's `GroupCoordinatorService.joinGroup` request checks with
     /// the default `group.min.session.timeout.ms` and
@@ -268,14 +270,11 @@ mod tests {
                 (Some("range".to_owned()), Some("range".to_owned())),
             ] {
                 let bytes = encode_response(
-                    &respond(
-                        version,
-                        JoinGroupResponse {
-                            error_code: codes::GROUP_AUTHORIZATION_FAILED,
-                            protocol_name: sent.clone(),
-                            ..Default::default()
-                        },
-                    ),
+                    &respond(version, JoinGroupResponse {
+                        error_code: codes::GROUP_AUTHORIZATION_FAILED,
+                        protocol_name: sent.clone(),
+                        ..Default::default()
+                    }),
                     version,
                 )
                 .expect("encode");

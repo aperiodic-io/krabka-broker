@@ -1,7 +1,8 @@
-use creusot_std::prelude::*;
-
-use super::{WalCopyBatch, WalCopyObservation};
-use crate::composition::wal_copy::wal_copy_byte_count;
+use {
+    super::{WalCopyBatch, WalCopyObservation},
+    crate::composition::wal_copy::wal_copy_byte_count,
+    creusot_std::prelude::*,
+};
 
 // cargo-mutants: #[cfg(creusot)] logical reference shape, absent from runtime.
 #[cfg_attr(test, mutants::skip)]

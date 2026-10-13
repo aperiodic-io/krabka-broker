@@ -1,8 +1,6 @@
 //! The error code that a handler answers when a controller write fails.
 
-use krabka_raft::RaftError;
-
-use crate::codes;
+use {crate::codes, krabka_raft::RaftError};
 
 /// The error code for a `submit_change` that failed with `error`.
 ///
@@ -25,11 +23,7 @@ pub(crate) fn submit_failure_code(error: &RaftError, otherwise: i16) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_raft::RaftError;
-
-    use super::submit_failure_code;
-    use crate::codes;
+    use {super::submit_failure_code, crate::codes, assert2::check, krabka_raft::RaftError};
 
     #[test]
     fn an_uncommitted_controller_tail_answers_not_controller() {

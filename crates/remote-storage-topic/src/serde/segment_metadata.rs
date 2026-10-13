@@ -7,20 +7,20 @@
 //! and the field order below is the order the JVM `RemoteLogMetadataSerde`
 //! writes them in.
 
-use std::collections::BTreeMap;
-
-use krabka_ids::LeaderEpoch;
-use krabka_protocol::owned::remote_log_segment_metadata_record::{
-    RemoteLogSegmentIdEntry as SegIdEntry, RemoteLogSegmentMetadataRecord, SegmentLeaderEpochEntry,
-    TopicIdPartitionEntry as TpEntry,
+use {
+    super::primitives::{
+        bytes_to_custom_metadata, custom_metadata_to_bytes, domain_uuid_to_proto,
+        i8_to_segment_state, proto_uuid_to_domain, segment_state_to_i8,
+    },
+    crate::error::CodecError,
+    krabka_ids::LeaderEpoch,
+    krabka_protocol::owned::remote_log_segment_metadata_record::{
+        RemoteLogSegmentIdEntry as SegIdEntry, RemoteLogSegmentMetadataRecord,
+        SegmentLeaderEpochEntry, TopicIdPartitionEntry as TpEntry,
+    },
+    krabka_remote_storage::{RemoteLogSegmentId, RemoteLogSegmentMetadata, TopicIdPartition},
+    std::collections::BTreeMap,
 };
-use krabka_remote_storage::{RemoteLogSegmentId, RemoteLogSegmentMetadata, TopicIdPartition};
-
-use super::primitives::{
-    bytes_to_custom_metadata, custom_metadata_to_bytes, domain_uuid_to_proto, i8_to_segment_state,
-    proto_uuid_to_domain, segment_state_to_i8,
-};
-use crate::error::CodecError;
 
 fn tp_to_proto_add(tp: &TopicIdPartition) -> TpEntry {
     TpEntry {

@@ -24,22 +24,23 @@ mod support;
 /// The client id every request header in this suite carries.
 const CLIENT_ID: &str = "krabka-ip-quota-test";
 
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_protocol::{Encode, owned::api_versions_request::ApiVersionsRequest};
-use tokio::net::TcpStream;
-
-use crate::{
-    cluster::{
-        start_single_broker_plaintext, start_single_broker_plaintext_with_conn_caps,
-        start_single_broker_sasl_plaintext_with_users,
+use {
+    crate::{
+        cluster::{
+            start_single_broker_plaintext, start_single_broker_plaintext_with_conn_caps,
+            start_single_broker_sasl_plaintext_with_users,
+        },
+        kafka_wire::{
+            ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup,
+            quotas::{QuotaAlterSetup, QuotaDescribeSetup},
+        },
+        quota_admin::{drive_alter_client_quotas_sasl, drive_describe_client_quotas_sasl},
+        support::wire::CorrelationId as WireCorrelationId,
     },
-    kafka_wire::{
-        ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup,
-        quotas::{QuotaAlterSetup, QuotaDescribeSetup},
-    },
-    quota_admin::{drive_alter_client_quotas_sasl, drive_describe_client_quotas_sasl},
-    support::wire::CorrelationId as WireCorrelationId,
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_protocol::{Encode, owned::api_versions_request::ApiVersionsRequest},
+    tokio::net::TcpStream,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,10 +57,11 @@ async fn ip_quota_alter_then_describe_round_trip() {
 
     let alter_resp = drive_alter_client_quotas_sasl(
         addr,
-        vec![(
-            vec![("ip".into(), Some("127.0.0.1".into()))],
-            vec![("connection_creation_rate".into(), 2.0, false)],
-        )],
+        vec![(vec![("ip".into(), Some("127.0.0.1".into()))], vec![(
+            "connection_creation_rate".into(),
+            2.0,
+            false,
+        )])],
         &QuotaAlterSetup {
             authentication: PlainAuthenticationSetup::admin(CLIENT_ID),
             ..Default::default()

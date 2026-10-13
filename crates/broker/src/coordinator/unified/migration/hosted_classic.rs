@@ -8,24 +8,24 @@
 //! `Heartbeat` asks the member to rejoin while it has not reconciled to the
 //! group's target assignment.
 
-use std::{
-    collections::HashSet,
-    time::{Duration, Instant},
-};
-
-use bytes::Bytes;
-use krabka_protocol::owned::{
-    heartbeat_request::HeartbeatRequest, sync_group_request::SyncGroupRequest,
-};
-
-use super::assignment::{consumer_assignment_blob, embedded_protocol_version};
-use crate::{
-    codes,
-    coordinator::unified::{
-        actor::{JoinResult, SyncResult},
-        consumer_state::{ClassicMemberFacade, GroupState as ConsumerState, MemberState},
-        persistence_next_gen::MemberAssignmentState,
-        reconciler::ReconcileInput,
+use {
+    super::assignment::{consumer_assignment_blob, embedded_protocol_version},
+    crate::{
+        codes,
+        coordinator::unified::{
+            actor::{JoinResult, SyncResult},
+            consumer_state::{ClassicMemberFacade, GroupState as ConsumerState, MemberState},
+            persistence_next_gen::MemberAssignmentState,
+            reconciler::ReconcileInput,
+        },
+    },
+    bytes::Bytes,
+    krabka_protocol::owned::{
+        heartbeat_request::HeartbeatRequest, sync_group_request::SyncGroupRequest,
+    },
+    std::{
+        collections::HashSet,
+        time::{Duration, Instant},
     },
 };
 
@@ -310,13 +310,10 @@ pub(crate) fn build_hosted_classic_join_result(member: &MemberState) -> JoinResu
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use assert2::check;
-    use krabka_protocol::primitives::uuid::Uuid;
-
-    use super::*;
-    use crate::coordinator::unified::actor::test_support::topic_reconcile_input;
+    use {
+        super::*, crate::coordinator::unified::actor::test_support::topic_reconcile_input,
+        assert2::check, krabka_protocol::primitives::uuid::Uuid, std::collections::HashMap,
+    };
 
     const TOPIC: Uuid = Uuid([7; 16]);
     const TARGET_EPOCH: i32 = 5;
@@ -373,9 +370,7 @@ mod tests {
         state
     }
 
-    fn image() -> ReconcileInput {
-        topic_reconcile_input("t", TOPIC, 2)
-    }
+    fn image() -> ReconcileInput { topic_reconcile_input("t", TOPIC, 2) }
 
     fn sync_request(member_id: &str, generation_id: i32) -> SyncGroupRequest {
         SyncGroupRequest {

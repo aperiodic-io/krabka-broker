@@ -3,21 +3,21 @@
 //! metrics poller that reports on it. It lives apart from the rest of startup
 //! because it also rewraps the configured authorizer.
 
-use std::sync::Arc;
-
-use krabka_ids::PartitionIndex;
-use krabka_units::{
-    Time,
-    convert::{ByteSizeExt as _, TimeExt as _},
-};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    audit_authorizer::AuditingAuthorizer, audit_recovery::recover_from_partition_tail,
-    audit_sink::KafkaTopicAuditSink, broker::Broker, config::BrokerConfig,
-    metadata_source::MetadataSource, metrics::BrokerMetrics, partition_registry::PartitionRegistry,
-    time_util::system_timer,
+use {
+    crate::{
+        audit_authorizer::AuditingAuthorizer, audit_recovery::recover_from_partition_tail,
+        audit_sink::KafkaTopicAuditSink, broker::Broker, config::BrokerConfig,
+        metadata_source::MetadataSource, metrics::BrokerMetrics,
+        partition_registry::PartitionRegistry, time_util::system_timer,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_units::{
+        Time,
+        convert::{ByteSizeExt as _, TimeExt as _},
+    },
+    std::sync::Arc,
+    tokio::task::JoinHandle,
+    tokio_util::sync::CancellationToken,
 };
 
 fn audit_signer(config: &BrokerConfig) -> Option<Arc<krabka_audit::FileEd25519Signer>> {
@@ -195,21 +195,18 @@ pub(super) fn start_audit_pipeline(
             krabka_audit::ChainState::resume(sequence, head)
         });
         let stats = Arc::new(krabka_audit::AuditStats::new());
-        let writer = krabka_audit::AuditWriter::new(
-            receiver,
-            krabka_audit::AuditWriterParams {
-                sink,
-                product: Broker::audit_product(),
-                signer: audit_signer(config),
-                checkpoint_every_n: config.audit_checkpoint_every_n,
-                checkpoint_every: config.audit_checkpoint_every,
-                chain,
-                spool,
-                stats: Arc::clone(&stats),
-                replay_every: config.audit_spool_replay_interval,
-                timer: system_timer(),
-            },
-        );
+        let writer = krabka_audit::AuditWriter::new(receiver, krabka_audit::AuditWriterParams {
+            sink,
+            product: Broker::audit_product(),
+            signer: audit_signer(config),
+            checkpoint_every_n: config.audit_checkpoint_every_n,
+            checkpoint_every: config.audit_checkpoint_every,
+            chain,
+            spool,
+            stats: Arc::clone(&stats),
+            replay_every: config.audit_spool_replay_interval,
+            timer: system_timer(),
+        });
         let writer_handle = tokio::spawn(writer.run());
         spawn_audit_metrics(
             stats,
@@ -229,10 +226,7 @@ pub(super) fn start_audit_pipeline(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::minutes;
-
-    use super::*;
+    use {super::*, assert2::assert, krabka_units::minutes};
 
     #[tokio::test]
     async fn audit_metrics_cancellation_releases_log_before_next_poll() {

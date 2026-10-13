@@ -5,24 +5,25 @@
 //! the controller, and where a rejected append becomes a wire error code that
 //! an operator can act on.
 
-use krabka_audit::{AuditOutcome, PrivilegedPhase};
-use krabka_metadata::{BreakGlassProposalRecord, MetadataRecord};
-use krabka_protocol::krabka::break_glass::ApproveBreakGlassRequest;
-
-use super::{Attempt, decide};
-use crate::{
-    break_glass::{
-        action_name,
-        config::BreakGlassPolicy,
-        handlers::{
-            PrivilegedAudit, Refusal, admit_privileged_request, from_wire_uuid, principal_name,
-            submit_error,
+use {
+    super::{Attempt, decide},
+    crate::{
+        break_glass::{
+            action_name,
+            config::BreakGlassPolicy,
+            handlers::{
+                PrivilegedAudit, Refusal, admit_privileged_request, from_wire_uuid, principal_name,
+                submit_error,
+            },
         },
+        broker::Broker,
+        codes,
+        handlers::RequestContext,
+        time_util::now_ms,
     },
-    broker::Broker,
-    codes,
-    handlers::RequestContext,
-    time_util::now_ms,
+    krabka_audit::{AuditOutcome, PrivilegedPhase},
+    krabka_metadata::{BreakGlassProposalRecord, MetadataRecord},
+    krabka_protocol::krabka::break_glass::ApproveBreakGlassRequest,
 };
 
 /// Apply the request to the stored proposal and write the result.
@@ -42,18 +43,13 @@ pub(super) async fn settle(
             ),
         )
     })?;
-    let updated = decide(
-        policy,
-        &broker.config.operator_keys,
-        stored,
-        &Attempt {
-            principal: &principal_name(ctx),
-            key_id: &req.key_id,
-            signature: &req.signature,
-            withdraw: req.withdraw,
-            now_ms: now_ms(),
-        },
-    )?;
+    let updated = decide(policy, &broker.config.operator_keys, stored, &Attempt {
+        principal: &principal_name(ctx),
+        key_id: &req.key_id,
+        signature: &req.signature,
+        withdraw: req.withdraw,
+        now_ms: now_ms(),
+    })?;
     let counterparties: Vec<String> = updated
         .approvals
         .iter()

@@ -14,31 +14,31 @@
 //! property therefore prevents a target member from receiving an active task
 //! until the previous owner reports that it released the task.
 
-use std::{
-    collections::{BTreeMap, HashSet},
-    time::{Duration, Instant},
-};
-
-use stateright::{Checker, Model};
-
-use super::{
-    ActorState,
-    reconciliation::compute_and_install_target,
-    records::{apply_seed, snapshot_seed},
-};
-use crate::{
-    coordinator::unified::{
-        actor::reconciliation_model_support::model_properties,
-        streams::{
-            config::{StreamsAssignorKind, StreamsGroupConfig},
-            persistence::{StoredSubtopology, StreamsGroupTopologyValue},
-            state::{
-                INITIAL_EPOCH, OwnedTasks, RoleTasks, StreamsGroupState, StreamsGroupStatePhase,
-                StreamsMemberAssignmentState, StreamsMemberState,
+use {
+    super::{
+        ActorState,
+        reconciliation::compute_and_install_target,
+        records::{apply_seed, snapshot_seed},
+    },
+    crate::{
+        coordinator::unified::{
+            actor::reconciliation_model_support::model_properties,
+            streams::{
+                config::{StreamsAssignorKind, StreamsGroupConfig},
+                persistence::{StoredSubtopology, StreamsGroupTopologyValue},
+                state::{
+                    INITIAL_EPOCH, OwnedTasks, RoleTasks, StreamsGroupState,
+                    StreamsGroupStatePhase, StreamsMemberAssignmentState, StreamsMemberState,
+                },
             },
         },
+        model_check::run_bfs,
     },
-    model_check::run_bfs,
+    stateright::{Checker, Model},
+    std::{
+        collections::{BTreeMap, HashSet},
+        time::{Duration, Instant},
+    },
 };
 
 const SUBTOPOLOGY: &str = "s";
@@ -412,63 +412,8 @@ fn phase_coherent(group: &StreamsGroupState) -> bool {
 }
 
 impl Model for StreamsModel {
-    type State = State;
     type Action = Action;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        let mut actor = ActorState::new("g".to_string());
-        let topology = topology(1);
-        actor.state.topology_epoch = topology.epoch;
-        actor.state.topology = Some(super::super::state::StoredTopologyHandle {
-            epoch: topology.epoch,
-        });
-        actor.topology = Some(topology);
-        vec![State {
-            actor,
-            origin: Instant::now(),
-            clock: 0,
-            partitions: 1,
-            witnesses: 0,
-            replayed: false,
-        }]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        if state.actor.state.group_epoch < MAX_GROUP_EPOCH {
-            for member_id in ["a", "b"] {
-                if state.actor.state.members.contains_key(member_id) {
-                    if !state.actor.state.members[member_id]
-                        .active_pending_revocation
-                        .is_empty()
-                    {
-                        actions.push(Action::CurrentHeartbeat(member_id, ReportKind::Holding));
-                    }
-                    actions.push(Action::CurrentHeartbeat(member_id, ReportKind::Released));
-                    if state.witnesses & WITNESS_STALE_FENCED == 0 {
-                        actions.push(Action::StaleHeartbeat(member_id));
-                    }
-                    if state.witnesses & WITNESS_FORWARD_FENCED == 0 {
-                        actions.push(Action::ForwardHeartbeat(member_id));
-                    }
-                    actions.push(Action::Leave(member_id));
-                } else {
-                    actions.push(Action::Join(member_id));
-                }
-            }
-            if state.partitions == 1 && state.actor.state.topology_epoch < MAX_TOPOLOGY_EPOCH {
-                actions.push(Action::ChangeTopology(2));
-            }
-            if state.clock < MAX_CLOCK && !state.actor.state.members.is_empty() {
-                actions.push(Action::TimeoutTick);
-            }
-        }
-        if state.witnesses & WITNESS_UNKNOWN_FENCED == 0 {
-            actions.push(Action::UnknownHeartbeat);
-        }
-        if !state.replayed {
-            actions.push(Action::Replay);
-        }
-    }
+    type State = State;
 
     krabka_macros::model_transition! { last, action, state; {
         match action {
@@ -637,6 +582,61 @@ impl Model for StreamsModel {
         sometimes "active_task_withheld" => |state| state.witnesses & WITNESS_WITHHELD != 0,
         sometimes "active_task_released" => |state| state.witnesses & WITNESS_RELEASED != 0,
         sometimes "two_members_joined" => |state| state.actor.state.members.len() == 2,
+    }
+
+    fn init_states(&self) -> Vec<Self::State> {
+        let mut actor = ActorState::new("g".to_string());
+        let topology = topology(1);
+        actor.state.topology_epoch = topology.epoch;
+        actor.state.topology = Some(super::super::state::StoredTopologyHandle {
+            epoch: topology.epoch,
+        });
+        actor.topology = Some(topology);
+        vec![State {
+            actor,
+            origin: Instant::now(),
+            clock: 0,
+            partitions: 1,
+            witnesses: 0,
+            replayed: false,
+        }]
+    }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        if state.actor.state.group_epoch < MAX_GROUP_EPOCH {
+            for member_id in ["a", "b"] {
+                if state.actor.state.members.contains_key(member_id) {
+                    if !state.actor.state.members[member_id]
+                        .active_pending_revocation
+                        .is_empty()
+                    {
+                        actions.push(Action::CurrentHeartbeat(member_id, ReportKind::Holding));
+                    }
+                    actions.push(Action::CurrentHeartbeat(member_id, ReportKind::Released));
+                    if state.witnesses & WITNESS_STALE_FENCED == 0 {
+                        actions.push(Action::StaleHeartbeat(member_id));
+                    }
+                    if state.witnesses & WITNESS_FORWARD_FENCED == 0 {
+                        actions.push(Action::ForwardHeartbeat(member_id));
+                    }
+                    actions.push(Action::Leave(member_id));
+                } else {
+                    actions.push(Action::Join(member_id));
+                }
+            }
+            if state.partitions == 1 && state.actor.state.topology_epoch < MAX_TOPOLOGY_EPOCH {
+                actions.push(Action::ChangeTopology(2));
+            }
+            if state.clock < MAX_CLOCK && !state.actor.state.members.is_empty() {
+                actions.push(Action::TimeoutTick);
+            }
+        }
+        if state.witnesses & WITNESS_UNKNOWN_FENCED == 0 {
+            actions.push(Action::UnknownHeartbeat);
+        }
+        if !state.replayed {
+            actions.push(Action::Replay);
+        }
     }
 
     fn within_boundary(&self, state: &Self::State) -> bool {

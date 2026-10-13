@@ -5,8 +5,6 @@
 //! The fake peer is a real `TcpListener` that parses the request header itself,
 //! so the assertions are about bytes rather than about a mock.
 
-use bytes::BufMut;
-use krabka_ids::ApiVersion;
 use krabka_protocol::{
     Encode,
     // The generated `ApiVersion` message struct is aliased so the
@@ -14,10 +12,13 @@ use krabka_protocol::{
     // header assertions use.
     owned::api_versions_response::{ApiVersion as WireApiVersion, ApiVersionsResponse},
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-use super::*;
-use crate::{kraft::transport::api_key, network::dialer::PlaintextDialer};
+use {
+    super::*,
+    crate::{kraft::transport::api_key, network::dialer::PlaintextDialer},
+    bytes::BufMut,
+    krabka_ids::ApiVersion,
+    tokio::io::{AsyncReadExt, AsyncWriteExt},
+};
 
 struct TestRecordingDialer {
     options: Arc<std::sync::Mutex<Vec<ConnectionOptions>>>,

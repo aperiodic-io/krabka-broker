@@ -2,21 +2,21 @@
 //! [`S3RemoteStorage`], the segment metadata and on-disk segment files a copy
 //! needs, and the throwaway signing key and chain stamp a WORM archive needs.
 
-use std::sync::Arc;
-
-use krabka_object_store::fault::{FaultInjectingStore, FaultPolicy};
-use object_store::{ObjectStore, memory::InMemory};
-use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use super::S3RemoteStorage;
 pub(super) use crate::test_support::{sample_data, sample_metadata, write_file};
-use crate::{
-    metadata::RemoteLogSegmentMetadata,
-    storage_manager::RemoteStorageManager,
-    test_support::TransactionIndex,
-    worm::{ChainHead, ChainStamp, EpochId, ManifestSeq, WormChainRecord, WormConfig},
+use {
+    super::S3RemoteStorage,
+    crate::{
+        metadata::RemoteLogSegmentMetadata,
+        storage_manager::RemoteStorageManager,
+        test_support::TransactionIndex,
+        worm::{ChainHead, ChainStamp, EpochId, ManifestSeq, WormChainRecord, WormConfig},
+    },
+    krabka_object_store::fault::{FaultInjectingStore, FaultPolicy},
+    object_store::{ObjectStore, memory::InMemory},
+    ring::{rand::SystemRandom, signature::Ed25519KeyPair},
+    std::sync::Arc,
+    tempfile::TempDir,
+    uuid::Uuid,
 };
 
 pub(super) const WORM_KEY_ID: &str = "s3-worm-key";
@@ -100,9 +100,7 @@ pub(super) async fn seeded_blocking(
 }
 
 /// The chain epoch every stamped fixture belongs to.
-pub(super) fn worm_epoch() -> EpochId {
-    EpochId(Uuid::from_u128(0x5eed))
-}
+pub(super) fn worm_epoch() -> EpochId { EpochId(Uuid::from_u128(0x5eed)) }
 
 /// A [`WormConfig`] naming a throwaway PKCS#8 Ed25519 key written into
 /// `dir`. `ring` mints it because `krabka-audit` exposes no key generator.

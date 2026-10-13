@@ -16,15 +16,16 @@
 //! KIP-919 Admin router like the other broker-owned APIs. There is exactly one
 //! implementation of each, not a second one here that skips the bookkeeping.
 
-use bytes::Bytes;
-use krabka_protocol::owned::controller_registration_request;
+use {bytes::Bytes, krabka_protocol::owned::controller_registration_request};
 
 mod controller;
 mod listeners;
 mod response;
 
-use self::controller::controller_registration;
-use crate::{RaftError, kraft::KraftController};
+use {
+    self::controller::controller_registration,
+    crate::{RaftError, kraft::KraftController},
+};
 
 const SUCCESS: i16 = 0;
 const UNKNOWN_SERVER_ERROR: i16 = -1;
@@ -37,9 +38,7 @@ const INVALID_REGISTRATION: i16 = 119;
 /// [`super::api_versions::table`].
 pub(super) const SUPPORTED_APIS: [i16; 1] = [controller_registration_request::API_KEY];
 
-pub(super) fn is_controller_api(api_key: i16) -> bool {
-    SUPPORTED_APIS.contains(&api_key)
-}
+pub(super) fn is_controller_api(api_key: i16) -> bool { SUPPORTED_APIS.contains(&api_key) }
 
 pub(super) async fn dispatch(
     api_key: i16,
@@ -71,9 +70,7 @@ fn raft_error_code(error: &RaftError) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// The controller answers the lifecycle APIs it declares and nothing else.
     #[test]
@@ -119,19 +116,22 @@ mod tests {
 
     #[tokio::test]
     async fn controller_registration_dispatch_and_error_paths() {
-        use krabka_protocol::{
-            Decode, Encode,
-            owned::{
-                controller_registration_request::{
-                    self, ControllerRegistrationRequest, Listener as WireListener,
+        use {
+            crate::{
+                NodeId,
+                server::test_support::{
+                    single_voter_engine, test_engine_with_voters, wait_for_leader,
                 },
-                controller_registration_response::ControllerRegistrationResponse,
             },
-        };
-
-        use crate::{
-            NodeId,
-            server::test_support::{single_voter_engine, test_engine_with_voters, wait_for_leader},
+            krabka_protocol::{
+                Decode, Encode,
+                owned::{
+                    controller_registration_request::{
+                        self, ControllerRegistrationRequest, Listener as WireListener,
+                    },
+                    controller_registration_response::ControllerRegistrationResponse,
+                },
+            },
         };
 
         let reg_req = |id: i32| {

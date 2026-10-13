@@ -4,13 +4,13 @@
 //! Each search reads sealed segments oldest-first and then the active
 //! segment, and ties resolve to the earliest offset as KIP-734 requires.
 
-use std::time::SystemTime;
-
-use krabka_ids::Offset;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-
-use super::Log;
-use crate::{error::LogError, name, retention, segment::Segment};
+use {
+    super::Log,
+    crate::{error::LogError, name, retention, segment::Segment},
+    krabka_ids::Offset,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
+    std::time::SystemTime,
+};
 
 impl Log {
     /// Legacy `ListOffsets` v0 segment boundaries at or before `timestamp`,
@@ -233,17 +233,19 @@ impl Log {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{bytes, kibibytes};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        config::LogConfig,
-        log::test_support::{
-            configured_test_log, gzip_value, rolled_sample_log, test_log, tiny_segments, ts_batch,
+    use {
+        super::*,
+        crate::{
+            config::LogConfig,
+            log::test_support::{
+                configured_test_log, gzip_value, rolled_sample_log, test_log, tiny_segments,
+                ts_batch,
+            },
+            segment::Segment,
         },
-        segment::Segment,
+        assert2::check,
+        krabka_units::prelude::{bytes, kibibytes},
+        tempfile::tempdir,
     };
 
     /// The largest timestamp in the log wins, and the first segment holding it

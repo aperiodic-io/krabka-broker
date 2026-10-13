@@ -16,13 +16,14 @@
 //! beside `serve`, since no command line can commit an unsupported level to a
 //! started broker.
 
-use std::{
-    process::{Command, Stdio},
-    time::{Duration, Instant},
+use {
+    assert2::{assert, check},
+    krabka_metadata::{MetadataRecord, TopicRecord},
+    std::{
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    },
 };
-
-use assert2::{assert, check};
-use krabka_metadata::{MetadataRecord, TopicRecord};
 
 /// A loopback port that nothing holds at the moment, for the controller
 /// listener. `krabka format` records it as the voter's endpoint, so it has to be

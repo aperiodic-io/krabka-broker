@@ -42,6 +42,15 @@
 use criterion::{criterion_group, criterion_main};
 
 /// Every response size the sweep covers, and the label each is reported under.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+))]
 const SIZES: [(&str, usize); 5] = [
     ("4KiB", 4 * 1024),
     ("16KiB", 16 * 1024),
@@ -62,29 +71,29 @@ const SIZES: [(&str, usize); 5] = [
     target_os = "dragonfly",
 ))]
 mod sweep {
-    use std::{
-        io::Write as _,
-        sync::Arc,
-        time::{Duration, Instant},
-    };
-
-    use assert2::assert;
-    use bytes::{BufMut, Bytes, BytesMut};
-    use criterion::{Criterion, Throughput};
-    use krabka_broker::{
-        fetch_drain::{
-            WriteOp, resolve_records_inline, resolve_records_sendfile, write_fetch_plan,
+    use {
+        super::SIZES,
+        assert2::assert,
+        bytes::{BufMut, Bytes, BytesMut},
+        criterion::{Criterion, Throughput},
+        krabka_broker::{
+            fetch_drain::{
+                WriteOp, resolve_records_inline, resolve_records_sendfile, write_fetch_plan,
+            },
+            metrics::{BrokerMetrics, FetchDrainPath, FetchDrainPathLabel},
         },
-        metrics::{BrokerMetrics, FetchDrainPath, FetchDrainPathLabel},
+        krabka_protocol::records::{FileRegion, RecordsPayload},
+        std::{
+            io::Write as _,
+            sync::Arc,
+            time::{Duration, Instant},
+        },
+        tokio::{
+            io::AsyncReadExt as _,
+            net::{TcpListener, TcpStream},
+            runtime::Runtime,
+        },
     };
-    use krabka_protocol::records::{FileRegion, RecordsPayload};
-    use tokio::{
-        io::AsyncReadExt as _,
-        net::{TcpListener, TcpStream},
-        runtime::Runtime,
-    };
-
-    use super::SIZES;
 
     /// Untimed drains run before the measured ones, over the same socket.
     ///
@@ -311,7 +320,7 @@ mod sweep {
             let cost = |case| {
                 (0..RUNS)
                     .map(|_| {
-                        timed_drains(&response, case, u64::from(SAMPLES)).as_secs_f64() * 1e9
+                        timed_drains(&response, case, u64::from(SAMPLES)).as_secs_f64() * 1.0e9
                             / f64::from(SAMPLES)
                     })
                     .fold(f64::INFINITY, f64::min)

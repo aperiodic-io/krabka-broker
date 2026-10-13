@@ -4,11 +4,12 @@
 //! entry that is blank, unreadable, malformed, or repeated stops the load, so
 //! the broker never runs against a partial trust set.
 
-use assert2::{assert, check};
-use tempfile::TempDir;
-
-use super::{entry, fresh_key, write_key_file};
-use crate::operator_keys::{OperatorKey, OperatorKeyError, OperatorKeys};
+use {
+    super::{entry, fresh_key, write_key_file},
+    crate::operator_keys::{OperatorKey, OperatorKeyError, OperatorKeys},
+    assert2::{assert, check},
+    tempfile::TempDir,
+};
 
 #[test]
 fn load_binds_every_key_to_its_principal() {

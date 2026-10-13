@@ -1,17 +1,18 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::spec::{
     admitted_membership, has_node, prefix_node_extend, reconfiguration_admitted,
     single_change_shape,
 };
-use crate::{
-    reconfiguration::{
-        CurrentVoterSet, ReconfigurationLeadership, TargetMembership, TargetVoter, VoterChangeKind,
-        VoterChangeRequest, VoterReconfigurationDecision, VoterReconfigurationPlan,
-        voter_reconfiguration_decision,
+use {
+    crate::{
+        reconfiguration::{
+            CurrentVoterSet, ReconfigurationLeadership, TargetMembership, TargetVoter,
+            VoterChangeKind, VoterChangeRequest, VoterReconfigurationDecision,
+            VoterReconfigurationPlan, voter_reconfiguration_decision,
+        },
+        wal::wal_voter_set_valid,
     },
-    wal::wal_voter_set_valid,
+    creusot_std::prelude::*,
 };
 
 /// Apply an admitted one-voter plan to actual logical IDs. The old first ID

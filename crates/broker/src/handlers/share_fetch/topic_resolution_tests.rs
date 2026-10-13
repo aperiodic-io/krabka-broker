@@ -8,28 +8,30 @@
 //! `KafkaApis.getAcknowledgeBatchesFromShareFetchRequest` also answers
 //! `UNKNOWN_TOPIC_ID` as the acknowledge error of those partitions.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::{
-        share_fetch_request::{AcknowledgementBatch, ShareFetchRequest},
-        share_fetch_response::{PartitionData, ShareFetchResponse, ShareFetchableTopicResponse},
+use {
+    crate::{
+        authorizer::{AllowAllAuthorizer, Authorizer},
+        broker::BrokerHandle,
+        codes,
+        handlers::test_support::{
+            ClientTopicSetup, ShareWireSetup, create_topic as create_topic_from_test_support,
+            share_fetch_wire,
+        },
+        test_support::start_broker_no_audit_with,
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordsPayload,
-};
-
-use crate::{
-    authorizer::{AllowAllAuthorizer, Authorizer},
-    broker::BrokerHandle,
-    codes,
-    handlers::test_support::{
-        ClientTopicSetup, ShareWireSetup, create_topic as create_topic_from_test_support,
-        share_fetch_wire,
+    assert2::assert,
+    bytes::Bytes,
+    krabka_protocol::{
+        owned::{
+            share_fetch_request::{AcknowledgementBatch, ShareFetchRequest},
+            share_fetch_response::{
+                PartitionData, ShareFetchResponse, ShareFetchableTopicResponse,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordsPayload,
     },
-    test_support::start_broker_no_audit_with,
+    std::sync::Arc,
 };
 
 /// An id that no topic in these tests has.
@@ -57,14 +59,11 @@ async fn start(authorizer: Arc<dyn Authorizer>) -> (BrokerHandle, tempfile::Temp
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    create_topic_from_test_support(
-        broker,
-        ClientTopicSetup {
-            client_id: "share-fetch-resolution-test",
-            name,
-            ..Default::default()
-        },
-    )
+    create_topic_from_test_support(broker, ClientTopicSetup {
+        client_id: "share-fetch-resolution-test",
+        name,
+        ..Default::default()
+    })
     .await
 }
 
@@ -120,23 +119,17 @@ async fn share_fetch(
     version: i16,
     request: &ShareFetchRequest,
 ) -> ShareFetchResponse {
-    share_fetch_wire(
-        broker,
-        request,
-        ShareWireSetup {
-            version: krabka_ids::ApiVersion(version),
-            ..Default::default()
-        },
-    )
+    share_fetch_wire(broker, request, ShareWireSetup {
+        version: krabka_ids::ApiVersion(version),
+        ..Default::default()
+    })
     .await
 }
 
 /// The empty record set, as a client decodes it. Kafka's
 /// `ShareFetchResponse.partitionResponse` sets `MemoryRecords.EMPTY` on every
 /// row.
-fn no_records() -> RecordsPayload {
-    RecordsPayload::Legacy(Bytes::new())
-}
+fn no_records() -> RecordsPayload { RecordsPayload::Legacy(Bytes::new()) }
 
 /// A response with one topic row for partition 0.
 fn one_row(topic_id: WireUuid, partition: PartitionData) -> ShareFetchResponse {
@@ -288,25 +281,19 @@ async fn a_piggybacked_acknowledgement_on_an_unresolved_id_answers_unknown_topic
         .map(|topic_id| {
             (
                 topic_id,
-                one_row(
-                    topic_id,
-                    PartitionData {
-                        partition_index: 0,
-                        records: Some(no_records()),
-                        error_code: codes::UNKNOWN_TOPIC_ID,
-                        ..Default::default()
-                    },
-                ),
-                one_row(
-                    topic_id,
-                    PartitionData {
-                        partition_index: 0,
-                        records: Some(no_records()),
-                        error_code: codes::UNKNOWN_TOPIC_ID,
-                        acknowledge_error_code: codes::UNKNOWN_TOPIC_ID,
-                        ..Default::default()
-                    },
-                ),
+                one_row(topic_id, PartitionData {
+                    partition_index: 0,
+                    records: Some(no_records()),
+                    error_code: codes::UNKNOWN_TOPIC_ID,
+                    ..Default::default()
+                }),
+                one_row(topic_id, PartitionData {
+                    partition_index: 0,
+                    records: Some(no_records()),
+                    error_code: codes::UNKNOWN_TOPIC_ID,
+                    acknowledge_error_code: codes::UNKNOWN_TOPIC_ID,
+                    ..Default::default()
+                }),
             )
         })
         .collect();

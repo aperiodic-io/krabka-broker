@@ -11,12 +11,12 @@
 //!
 //! The byte layout stays the same, so `kafka-dump-log` can read these files.
 
-use std::path::PathBuf;
-
-use krabka_ids::{LeaderEpoch, Offset};
 pub use krabka_verified::{EpochEntry, epoch_and_offset_for_entries};
-
-use crate::io::LogIo;
+use {
+    crate::io::LogIo,
+    krabka_ids::{LeaderEpoch, Offset},
+    std::path::PathBuf,
+};
 
 mod file;
 mod lookup;
@@ -46,19 +46,13 @@ impl LeaderEpochCheckpoint {
     /// Only [`crate::Log::test_set_io`] calls this: the checkpoint is opened
     /// with the real filesystem and stays there unless a test replaces it.
     #[cfg(any(test, feature = "test-helpers"))]
-    pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn LogIo>) {
-        self.io = io;
-    }
+    pub(crate) fn set_io(&mut self, io: std::sync::Arc<dyn LogIo>) { self.io = io; }
 
     #[must_use]
-    pub fn latest_epoch(&self) -> Option<LeaderEpoch> {
-        self.entries.iter().map(|e| e.epoch).max()
-    }
+    pub fn latest_epoch(&self) -> Option<LeaderEpoch> { self.entries.iter().map(|e| e.epoch).max() }
 
     #[must_use]
-    pub fn entries(&self) -> &[EpochEntry] {
-        &self.entries
-    }
+    pub fn entries(&self) -> &[EpochEntry] { &self.entries }
 }
 
 pub(crate) fn is_strict_successor(previous: &EpochEntry, next: &EpochEntry) -> bool {

@@ -2,18 +2,18 @@
 //! effect, and the ordering relations between runtime scalars that no single
 //! domain owns.
 
-use std::time::Duration;
-
-use krabka_security::SaslMechanism;
-use krabka_units::{
-    ByteSize,
-    convert::{ByteSizeExt, TimeExt},
-};
-
-use crate::{
-    BrokerError,
-    config::{BrokerConfig, RlmmKind},
-    internal_topics::validate_audit_topic_name,
+use {
+    crate::{
+        BrokerError,
+        config::{BrokerConfig, RlmmKind},
+        internal_topics::validate_audit_topic_name,
+    },
+    krabka_security::SaslMechanism,
+    krabka_units::{
+        ByteSize,
+        convert::{ByteSizeExt, TimeExt},
+    },
+    std::time::Duration,
 };
 
 impl BrokerConfig {
@@ -372,14 +372,15 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_security::ListenerProtocol;
-    use krabka_units::{Time, bytes, millis};
-
-    use super::*;
-    use crate::config::{
-        PlainCredentials, RemoteStorageBackend,
-        test_support::{RuntimeInvalidator, assert_invalid_runtime, base},
+    use {
+        super::*,
+        crate::config::{
+            PlainCredentials, RemoteStorageBackend,
+            test_support::{RuntimeInvalidator, assert_invalid_runtime, base},
+        },
+        assert2::assert,
+        krabka_security::ListenerProtocol,
+        krabka_units::{Time, bytes, millis},
     };
 
     /// Kafka's `super.users` accepts any principal, `User:ANONYMOUS`
@@ -389,12 +390,10 @@ mod tests {
     /// there needs `ClusterAction`.
     #[test]
     fn accepts_every_super_user_set_kafka_accepts() {
-        let cases: [&[&str]; 4] = [
-            &[],
-            &["operator"],
-            &["ANONYMOUS"],
-            &["ANONYMOUS", "operator"],
-        ];
+        let cases: [&[&str]; 4] = [&[], &["operator"], &["ANONYMOUS"], &[
+            "ANONYMOUS",
+            "operator",
+        ]];
         for super_users in cases {
             let mut config = BrokerConfig::default();
             config

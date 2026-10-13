@@ -5,16 +5,17 @@
 //! leave an operator with nothing to act on. Each row here names the check it
 //! expects and the messages are compared for uniqueness at the end.
 
-use assert2::check;
-use krabka_metadata::TopicFreezeRecord;
-use krabka_units::{convert::TimeExt as _, minutes};
-
-use super::{
-    ALICE, BOB, CLUSTER_ID, NOW_MS, OTHER_CLUSTER_ID, check_against, record, signed, trust,
-};
-use crate::{
-    codes,
-    freeze::signing::{FreezeSignatureCheck, SignatureRefusal, verify_freeze_signature},
+use {
+    super::{
+        ALICE, BOB, CLUSTER_ID, NOW_MS, OTHER_CLUSTER_ID, check_against, record, signed, trust,
+    },
+    crate::{
+        codes,
+        freeze::signing::{FreezeSignatureCheck, SignatureRefusal, verify_freeze_signature},
+    },
+    assert2::check,
+    krabka_metadata::TopicFreezeRecord,
+    krabka_units::{convert::TimeExt as _, minutes},
 };
 
 /// The refusal reasons are what the response message reads, so each one
@@ -45,14 +46,10 @@ fn each_refusal_names_its_own_check_under_one_code() {
         ),
         (
             "an author the key does not speak for",
-            signed(
-                &trust.alice,
-                CLUSTER_ID,
-                &TopicFreezeRecord {
-                    set_by: BOB.to_owned(),
-                    ..good.clone()
-                },
-            ),
+            signed(&trust.alice, CLUSTER_ID, &TopicFreezeRecord {
+                set_by: BOB.to_owned(),
+                ..good.clone()
+            }),
             check_against(&trust, BOB),
             SignatureRefusal::AuthorIsNotTheKeyPrincipal,
         ),
@@ -64,14 +61,10 @@ fn each_refusal_names_its_own_check_under_one_code() {
         ),
         (
             "a timestamp outside the skew window",
-            signed(
-                &trust.alice,
-                CLUSTER_ID,
-                &TopicFreezeRecord {
-                    set_at_ms: NOW_MS + minutes(5).millis_i64() + 1,
-                    ..good.clone()
-                },
-            ),
+            signed(&trust.alice, CLUSTER_ID, &TopicFreezeRecord {
+                set_at_ms: NOW_MS + minutes(5).millis_i64() + 1,
+                ..good.clone()
+            }),
             check_against(&trust, ALICE),
             SignatureRefusal::TimestampOutsideSkewWindow,
         ),

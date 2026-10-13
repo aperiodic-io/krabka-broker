@@ -1,9 +1,10 @@
-use assert2::check;
-use krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord};
-use krabka_units::bytes;
-use uuid::Uuid;
-
-use super::*;
+use {
+    super::*,
+    assert2::check,
+    krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord},
+    krabka_units::bytes,
+    uuid::Uuid,
+};
 
 const NODE: NodeId = NodeId(1);
 

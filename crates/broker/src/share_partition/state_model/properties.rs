@@ -6,140 +6,25 @@
 //! directly, so this file is where the model meets the real code. It is one
 //! `impl` block and cannot be split further.
 
-use assert2::assert;
-use krabka_log::Offset;
-use stateright::{Model, Property};
-
-use super::{
-    config::{LOCK, ShareModel},
-    invariants::{
-        assert_transition, delivery_complete_count_is_terminal_in_window, lock_consistency,
-        mutual_exclusion, window_integrity,
+use {
+    super::{
+        config::{LOCK, ShareModel},
+        invariants::{
+            assert_transition, delivery_complete_count_is_terminal_in_window, lock_consistency,
+            mutual_exclusion, window_integrity,
+        },
+        observe::{acquired_runs, deferred_offsets, offset_state},
+        state::{ShareAction, ShareState},
     },
-    observe::{acquired_runs, deferred_offsets, offset_state},
-    state::{ShareAction, ShareState},
+    crate::share_partition::state::{AckType, AcquisitionState, RecordState},
+    assert2::assert,
+    krabka_log::Offset,
+    stateright::{Model, Property},
 };
-use crate::share_partition::state::{AckType, AcquisitionState, RecordState};
 
 impl Model for ShareModel {
-    type State = ShareState;
     type Action = ShareAction;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![ShareState {
-            sm: AcquisitionState::new(Offset(0)),
-            clock: 0,
-            hwm: Offset(0),
-            log_start: Offset(0),
-        }]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        let has_available = state
-            .sm
-            .batches
-            .iter()
-            .any(|b| b.state == RecordState::Available);
-        let has_acquired = state
-            .sm
-            .batches
-            .iter()
-            .any(|b| b.state == RecordState::Acquired);
-
-        if state.hwm < self.max_offset {
-            actions.push(ShareAction::Produce);
-        }
-        // Materialize only when there are produced-but-unmaterialized records and
-        // no Available batch remains (the real `materialize` no-ops otherwise).
-        if state.sm.end_offset < state.hwm && !has_available {
-            actions.push(ShareAction::Materialize);
-        }
-        if has_available {
-            for member in 0..self.members {
-                actions.push(ShareAction::Acquire {
-                    member,
-                    max_records: 1,
-                });
-                actions.push(ShareAction::Acquire {
-                    member,
-                    max_records: i32::MAX,
-                });
-            }
-        }
-        // Data-dependent: ack/renew only over ranges a member actually holds.
-        for member in 0..self.members {
-            let name = Self::member_name(member);
-            for (first, last) in acquired_runs(&state.sm, &name) {
-                for ack in [AckType::Accept, AckType::Release, AckType::Reject] {
-                    actions.push(ShareAction::Acknowledge {
-                        member,
-                        first,
-                        last,
-                        ack,
-                    });
-                }
-                actions.push(ShareAction::Renew {
-                    member,
-                    first,
-                    last,
-                });
-                // A split (first half) exercises partial-ack / partial-renew.
-                if last > first {
-                    let mid = first + (last.0 - first.0) / 2;
-                    for ack in [AckType::Accept, AckType::Release, AckType::Reject] {
-                        actions.push(ShareAction::Acknowledge {
-                            member,
-                            first,
-                            last: mid,
-                            ack,
-                        });
-                    }
-                    actions.push(ShareAction::Renew {
-                        member,
-                        first,
-                        last: mid,
-                    });
-                }
-            }
-        }
-        if self.allow_defer {
-            // Every sub-range of the window that covers something the schedule
-            // could still hold back. Ranges rather than single offsets, so the
-            // model exercises the splits `defer_internal` makes at its edges.
-            for first in state.sm.start_offset.0..state.sm.end_offset.0 {
-                for last in first..state.sm.end_offset.0 {
-                    let defers_something = (first..=last).any(|raw| {
-                        offset_state(&state.sm, Offset(raw)) == Some(RecordState::Available)
-                    });
-                    if defers_something {
-                        actions.push(ShareAction::Defer {
-                            first: Offset(first),
-                            last: Offset(last),
-                        });
-                    }
-                }
-            }
-            if !deferred_offsets(&state.sm).is_empty() {
-                actions.push(ShareAction::PromoteDeferred);
-            }
-        }
-        if has_acquired {
-            actions.push(ShareAction::ExpireLocks);
-        }
-        if state.clock < self.max_tick {
-            actions.push(ShareAction::Tick);
-        }
-        if self.allow_reload && state.sm.end_offset > state.sm.start_offset {
-            actions.push(ShareAction::Reload);
-        }
-        if self.allow_log_start_advance {
-            for raw in (state.log_start.0 + 1)..=state.sm.end_offset.0 {
-                actions.push(ShareAction::AdvanceLogStart {
-                    new_start: Offset(raw),
-                });
-            }
-        }
-    }
+    type State = ShareState;
 
     krabka_macros::model_transition! { last, action, state; {
         match action {
@@ -264,6 +149,122 @@ impl Model for ShareModel {
         assert_transition(&last.sm, &state.sm, action);
         Some(state)
     }}
+
+    fn init_states(&self) -> Vec<Self::State> {
+        vec![ShareState {
+            sm: AcquisitionState::new(Offset(0)),
+            clock: 0,
+            hwm: Offset(0),
+            log_start: Offset(0),
+        }]
+    }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        let has_available = state
+            .sm
+            .batches
+            .iter()
+            .any(|b| b.state == RecordState::Available);
+        let has_acquired = state
+            .sm
+            .batches
+            .iter()
+            .any(|b| b.state == RecordState::Acquired);
+
+        if state.hwm < self.max_offset {
+            actions.push(ShareAction::Produce);
+        }
+        // Materialize only when there are produced-but-unmaterialized records and
+        // no Available batch remains (the real `materialize` no-ops otherwise).
+        if state.sm.end_offset < state.hwm && !has_available {
+            actions.push(ShareAction::Materialize);
+        }
+        if has_available {
+            for member in 0..self.members {
+                actions.push(ShareAction::Acquire {
+                    member,
+                    max_records: 1,
+                });
+                actions.push(ShareAction::Acquire {
+                    member,
+                    max_records: i32::MAX,
+                });
+            }
+        }
+        // Data-dependent: ack/renew only over ranges a member actually holds.
+        for member in 0..self.members {
+            let name = Self::member_name(member);
+            for (first, last) in acquired_runs(&state.sm, &name) {
+                for ack in [AckType::Accept, AckType::Release, AckType::Reject] {
+                    actions.push(ShareAction::Acknowledge {
+                        member,
+                        first,
+                        last,
+                        ack,
+                    });
+                }
+                actions.push(ShareAction::Renew {
+                    member,
+                    first,
+                    last,
+                });
+                // A split (first half) exercises partial-ack / partial-renew.
+                if last > first {
+                    let mid = first + (last.0 - first.0) / 2;
+                    for ack in [AckType::Accept, AckType::Release, AckType::Reject] {
+                        actions.push(ShareAction::Acknowledge {
+                            member,
+                            first,
+                            last: mid,
+                            ack,
+                        });
+                    }
+                    actions.push(ShareAction::Renew {
+                        member,
+                        first,
+                        last: mid,
+                    });
+                }
+            }
+        }
+        if self.allow_defer {
+            // Every sub-range of the window that covers something the schedule
+            // could still hold back. Ranges rather than single offsets, so the
+            // model exercises the splits `defer_internal` makes at its edges.
+            for first in state.sm.start_offset.0..state.sm.end_offset.0 {
+                for last in first..state.sm.end_offset.0 {
+                    let defers_something = (first..=last).any(|raw| {
+                        offset_state(&state.sm, Offset(raw)) == Some(RecordState::Available)
+                    });
+                    if defers_something {
+                        actions.push(ShareAction::Defer {
+                            first: Offset(first),
+                            last: Offset(last),
+                        });
+                    }
+                }
+            }
+            if !deferred_offsets(&state.sm).is_empty() {
+                actions.push(ShareAction::PromoteDeferred);
+            }
+        }
+        if has_acquired {
+            actions.push(ShareAction::ExpireLocks);
+        }
+        if state.clock < self.max_tick {
+            actions.push(ShareAction::Tick);
+        }
+        if self.allow_reload && state.sm.end_offset > state.sm.start_offset {
+            actions.push(ShareAction::Reload);
+        }
+        if self.allow_log_start_advance {
+            for raw in (state.log_start.0 + 1)..=state.sm.end_offset.0 {
+                actions.push(ShareAction::AdvanceLogStart {
+                    new_start: Offset(raw),
+                });
+            }
+        }
+    }
 
     fn properties(&self) -> Vec<Property<Self>> {
         let mut properties = vec![

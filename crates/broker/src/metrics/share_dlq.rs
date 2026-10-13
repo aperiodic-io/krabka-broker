@@ -53,9 +53,7 @@ fn label(group_id: &str) -> ShareGroupIdLabel {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// The three counts of a group: records written, produce attempts, and
     /// failed writes.

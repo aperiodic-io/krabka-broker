@@ -215,16 +215,16 @@ pub(super) fn offset_gaps(segments: &mut [(i64, i64)]) -> Vec<OffsetGap> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::check;
-
-    use super::*;
-    use crate::worm::{
-        archiver::WormArchiver,
-        chain::WormChainRecord,
-        manifest::{ChainStamp, manifest_head},
-        verify::test_support::{Archive, SEGMENT_SPAN, put_raw},
+    use {
+        super::*,
+        crate::worm::{
+            archiver::WormArchiver,
+            chain::WormChainRecord,
+            manifest::{ChainStamp, manifest_head},
+            verify::test_support::{Archive, SEGMENT_SPAN, put_raw},
+        },
+        assert2::check,
+        std::sync::Arc,
     };
 
     #[test]

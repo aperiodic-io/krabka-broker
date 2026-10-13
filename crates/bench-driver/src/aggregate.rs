@@ -8,14 +8,14 @@
 //! Plotly graphs read these aggregates, so one place computes "the average" and
 //! no renderer re-derives it.
 
-use std::collections::BTreeMap;
-
-use krabka_units::prelude::*;
-
-use crate::{
-    ids::TimeOffsetMs,
-    numeric::{mebibytes_f64, millis_f64, to_f64},
-    scenario::{BrokerSample, RunOutput, Sample, Stack},
+use {
+    crate::{
+        ids::TimeOffsetMs,
+        numeric::{mebibytes_f64, millis_f64, to_f64},
+        scenario::{BrokerSample, RunOutput, Sample, Stack},
+    },
+    krabka_units::prelude::*,
+    std::collections::BTreeMap,
 };
 
 /// Mean and spread of a single scalar metric over the runs of one
@@ -78,9 +78,7 @@ pub struct ScalarMetric {
 
 impl ScalarMetric {
     #[must_use]
-    pub fn value(&self, r: &RunOutput) -> f64 {
-        (self.extract)(r)
-    }
+    pub fn value(&self, r: &RunOutput) -> f64 { (self.extract)(r) }
 }
 
 /// The headline scalar metrics rendered as krabka-vs-kafka bars.
@@ -355,10 +353,12 @@ fn series_from_buckets(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::scenario::{
-        Topology,
-        fixture::{RunSetup, empty_run as run},
+    use {
+        super::*,
+        crate::scenario::{
+            Topology,
+            fixture::{RunSetup, empty_run as run},
+        },
     };
 
     fn sample(t: TimeOffsetMs, producer_rate: Frequency) -> Sample {

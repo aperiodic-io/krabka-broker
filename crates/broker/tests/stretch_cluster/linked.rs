@@ -5,18 +5,18 @@
 //! second one leaves a *live* site that could misbehave. The cut is one-way,
 //! for the reasons the crate documentation gives.
 
-use std::{net::SocketAddr, time::Duration};
-
-use krabka_broker::{Broker, BrokerConfig, BrokerError, BrokerHandle};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use tempfile::TempDir;
-
-use crate::{
-    NODE_A,
-    produce::initialize_sites,
-    profile::{apply_stretch_config, wait_for_stretch_metadata},
-    support::{self, ClusterBootstrapSetup, NodeIndex, relay::SiteLink},
-    within,
+use {
+    crate::{
+        NODE_A,
+        produce::initialize_sites,
+        profile::{apply_stretch_config, wait_for_stretch_metadata},
+        support::{self, ClusterBootstrapSetup, NodeIndex, relay::SiteLink},
+        within,
+    },
+    krabka_broker::{Broker, BrokerConfig, BrokerError, BrokerHandle},
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    std::{net::SocketAddr, time::Duration},
+    tempfile::TempDir,
 };
 
 /// A three-site cluster whose peers reach each site only through a relay.
@@ -128,20 +128,14 @@ impl LinkedCluster {
         self.handles[index].as_ref().expect("broker is running")
     }
 
-    pub fn addr(&self, index: usize) -> String {
-        self.configs[index].listen_addr.to_string()
-    }
+    pub fn addr(&self, index: usize) -> String { self.configs[index].listen_addr.to_string() }
 
     /// Take a site off the network as its peers see it, including the
     /// connections they already hold open.
-    pub fn cut(&self, index: usize) {
-        self.links[index].cut();
-    }
+    pub fn cut(&self, index: usize) { self.links[index].cut(); }
 
     /// Put it back.
-    pub fn heal(&self, index: usize) {
-        self.links[index].heal();
-    }
+    pub fn heal(&self, index: usize) { self.links[index].heal(); }
 
     pub async fn shutdown(mut self) {
         for handle in self.handles.drain(..).flatten() {

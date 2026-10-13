@@ -6,15 +6,16 @@
 //! `INVALID_REQUEST`. A request leader epoch above the stored one is persisted
 //! before the answer, so the older share-partition leader is fenced.
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::{
-    read_share_group_state_request::ReadShareGroupStateRequest,
-    read_share_group_state_response::{
-        PartitionResult, ReadShareGroupStateResponse, ReadStateResult, StateBatch,
+use {
+    crate::share_coordinator::coordinator::ShareCoordinator,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::{
+        read_share_group_state_request::ReadShareGroupStateRequest,
+        read_share_group_state_response::{
+            PartitionResult, ReadShareGroupStateResponse, ReadStateResult, StateBatch,
+        },
     },
 };
-
-use crate::share_coordinator::coordinator::ShareCoordinator;
 
 super::share_state_handler!(
     ReadShareGroupStateRequest,
@@ -68,14 +69,15 @@ async fn read_state(
 
 #[cfg(test)]
 mod tests {
-    use krabka_protocol::{
-        UnknownTaggedFields,
-        owned::read_share_group_state_request::{PartitionData, ReadStateData},
-        primitives::uuid::Uuid as ProtoUuid,
+    use {
+        super::*,
+        crate::codes,
+        krabka_protocol::{
+            UnknownTaggedFields,
+            owned::read_share_group_state_request::{PartitionData, ReadStateData},
+            primitives::uuid::Uuid as ProtoUuid,
+        },
     };
-
-    use super::*;
-    use crate::codes;
 
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([33; 16]);
     const WIRE_TOPIC: ProtoUuid = ProtoUuid([33; 16]);

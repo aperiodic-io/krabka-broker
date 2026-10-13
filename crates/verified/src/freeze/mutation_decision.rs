@@ -1,10 +1,11 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::logic;
-use super::{
-    FreezeIdentityState, FreezeMutationDecision, FreezeMutationKind, FreezeScopeDecision,
-    FreezeScopeRank, FreezeSignatureDecision, FreezeSignatureFacts,
+use {
+    super::{
+        FreezeIdentityState, FreezeMutationDecision, FreezeMutationKind, FreezeScopeDecision,
+        FreezeScopeRank, FreezeSignatureDecision, FreezeSignatureFacts,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Mathematical skew-window predicate, without machine-integer overflow.

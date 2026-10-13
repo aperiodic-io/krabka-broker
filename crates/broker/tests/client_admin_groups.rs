@@ -1,8 +1,9 @@
 mod support;
 
-use krabka_client_consumer::{AutoOffsetReset, Consumer};
-
-use crate::support::client_admin::*;
+use {
+    crate::support::client_admin::*,
+    krabka_client_consumer::{AutoOffsetReset, Consumer},
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lists_groups_and_committed_offsets() {

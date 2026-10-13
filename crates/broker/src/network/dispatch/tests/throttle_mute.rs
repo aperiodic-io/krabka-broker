@@ -9,30 +9,30 @@
 //! code before writing, which each test distinguishes by giving the response
 //! a deadline far shorter than the window it must beat.
 
-use std::time::{Duration, Instant};
-
-use assert2::check;
-use bytes::BytesMut;
-use futures_util::{SinkExt as _, StreamExt as _};
-use krabka_metadata::{ClientQuotaRecord, EntityKey, MetadataRecord, QuotaEntity};
-use krabka_protocol::{
-    Decode, Encode as _,
-    owned::{fetch_response::FetchResponse, produce_response::ProduceResponse},
-    records::{Record, RecordBatch},
-};
-use krabka_units::{Time, convert::TimeExt as _, millis};
-use tokio::net::TcpStream;
-use tokio_util::codec::Framed;
-
-use super::request_frame;
-use crate::{
-    BrokerHandle,
-    network::{
-        codec::KafkaCodec,
-        dispatch::test_support::plaintext_loop,
-        test_support::{FrameCorrelationId, RequestFrameSetup},
+use {
+    super::request_frame,
+    crate::{
+        BrokerHandle,
+        network::{
+            codec::KafkaCodec,
+            dispatch::test_support::plaintext_loop,
+            test_support::{FrameCorrelationId, RequestFrameSetup},
+        },
+        test_support::start_broker_with,
     },
-    test_support::start_broker_with,
+    assert2::check,
+    bytes::BytesMut,
+    futures_util::{SinkExt as _, StreamExt as _},
+    krabka_metadata::{ClientQuotaRecord, EntityKey, MetadataRecord, QuotaEntity},
+    krabka_protocol::{
+        Decode, Encode as _,
+        owned::{fetch_response::FetchResponse, produce_response::ProduceResponse},
+        records::{Record, RecordBatch},
+    },
+    krabka_units::{Time, convert::TimeExt as _, millis},
+    std::time::{Duration, Instant},
+    tokio::net::TcpStream,
+    tokio_util::codec::Framed,
 };
 
 /// `Produce` wire `api_key`.
@@ -397,13 +397,10 @@ async fn acks_zero_produce_writes_no_response_and_still_mutes() {
 #[tokio::test]
 async fn a_request_tripping_two_quotas_is_muted_once_for_the_longest_window() {
     let mute_window = millis(1000);
-    let (handle, _dir) = broker_with_anonymous_quotas(
-        mute_window,
-        &[
-            ("producer_byte_rate", 4800.0),
-            ("request_percentage", 0.0001),
-        ],
-    )
+    let (handle, _dir) = broker_with_anonymous_quotas(mute_window, &[
+        ("producer_byte_rate", 4800.0),
+        ("request_percentage", 0.0001),
+    ])
     .await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
@@ -728,13 +725,10 @@ async fn acks_zero_produce_is_exempt_from_the_request_quota() {
 #[tokio::test]
 async fn a_controller_mutation_and_the_request_quota_resolve_in_one_observation() {
     const VERSION: i16 = 7;
-    let (handle, _dir) = broker_with_anonymous_quotas(
-        millis(1000),
-        &[
-            ("controller_mutation_rate", 1.0),
-            ("request_percentage", 0.0001),
-        ],
-    )
+    let (handle, _dir) = broker_with_anonymous_quotas(millis(1000), &[
+        ("controller_mutation_rate", 1.0),
+        ("request_percentage", 0.0001),
+    ])
     .await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 

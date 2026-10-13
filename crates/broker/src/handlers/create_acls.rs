@@ -12,15 +12,16 @@
 //! Binding validation lives in `validate`, the result rows in `response`, and
 //! the audit trail in `audit`.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{
-    AclEntry, AclOperation, MetadataImage, MetadataRecord, PatternType, PermissionType,
-    ResourceType,
-};
-use krabka_protocol::owned::{
-    create_acls_request::CreateAclsRequest,
-    create_acls_response::{AclCreationResult, CreateAclsResponse},
+use {
+    krabka_metadata::{
+        AclEntry, AclOperation, MetadataImage, MetadataRecord, PatternType, PermissionType,
+        ResourceType,
+    },
+    krabka_protocol::owned::{
+        create_acls_request::CreateAclsRequest,
+        create_acls_response::{AclCreationResult, CreateAclsResponse},
+    },
+    std::collections::HashSet,
 };
 
 mod audit;
@@ -32,13 +33,17 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    audit::{audit_created_acls, created_acl_resources},
-    response::{acl_error_result, acl_success_result, apply_submit_error, create_acls_response},
-    validate::{HostCheck, has_filter_only_element, has_unknown_element, validate},
+use {
+    self::{
+        audit::{audit_created_acls, created_acl_resources},
+        response::{
+            acl_error_result, acl_success_result, apply_submit_error, create_acls_response,
+        },
+        validate::{HostCheck, has_filter_only_element, has_unknown_element, validate},
+    },
+    super::acl_wire::{MAX_ACL_RECORDS_PER_REQUEST, NO_AUTHORIZER_EXCEPTION_MESSAGE},
+    crate::codes,
 };
-use super::acl_wire::{MAX_ACL_RECORDS_PER_REQUEST, NO_AUTHORIZER_EXCEPTION_MESSAGE};
-use crate::codes;
 
 /// The message Kafka's controller gives the `PolicyViolationException` that
 /// `EventHandlerExceptionInfo` makes of a `BoundedListTooLongException`.

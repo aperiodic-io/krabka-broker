@@ -20,11 +20,12 @@
 //! the check is not an allocation guard here. It is the verdict the operator
 //! configured, reached on the same records Kafka reaches it on.
 
-use krabka_compression::CompressionType;
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-
-use crate::error::LogError;
+use {
+    crate::error::LogError,
+    krabka_compression::CompressionType,
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
+};
 
 /// Refuse `batch` if Kafka's iterator would refuse it after reading its first
 /// `read` records, under `limit`.
@@ -62,10 +63,11 @@ pub(crate) fn check_records_read(
 
 #[cfg(test)]
 mod tests {
-    use krabka_protocol::records::{Attributes, Record};
-    use krabka_units::prelude::bytes as byte_size;
-
-    use super::*;
+    use {
+        super::*,
+        krabka_protocol::records::{Attributes, Record},
+        krabka_units::prelude::bytes as byte_size,
+    };
 
     krabka_macros::record_limit_fixture!(record);
 

@@ -6,15 +6,16 @@
 //! `RemotePartitionDeleteState` ordinal and is therefore part of the wire
 //! format.
 
-use krabka_protocol::owned::remote_partition_delete_metadata_record::{
-    RemotePartitionDeleteMetadataRecord, TopicIdPartitionEntry as TpEntryDel,
+use {
+    super::primitives::{domain_uuid_to_proto, proto_uuid_to_domain},
+    crate::error::CodecError,
+    krabka_protocol::owned::remote_partition_delete_metadata_record::{
+        RemotePartitionDeleteMetadataRecord, TopicIdPartitionEntry as TpEntryDel,
+    },
+    krabka_remote_storage::{
+        RemotePartitionDeleteMetadata, RemotePartitionDeleteState, TopicIdPartition,
+    },
 };
-use krabka_remote_storage::{
-    RemotePartitionDeleteMetadata, RemotePartitionDeleteState, TopicIdPartition,
-};
-
-use super::primitives::{domain_uuid_to_proto, proto_uuid_to_domain};
-use crate::error::CodecError;
 
 fn partition_state_to_i8(s: RemotePartitionDeleteState) -> i8 {
     match s {

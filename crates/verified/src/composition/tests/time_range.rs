@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 fn cursor_oracle(
     entries: &[(i64, u32)],
@@ -119,11 +117,9 @@ fn time_range_rejects_invalid_extents_and_preserves_signed_extremes() {
     }
     for end in [0, 1, i64::from(u32::MAX)] {
         check_range(
-            (
-                &[0, 1, u32::MAX],
-                &[i64::MAX, i64::MIN, i64::MAX],
-                &[(0, 0)],
-            ),
+            (&[0, 1, u32::MAX], &[i64::MAX, i64::MIN, i64::MAX], &[(
+                0, 0,
+            )]),
             (0, end, 1),
             (i64::MIN, i64::MIN),
         );

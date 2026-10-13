@@ -3,22 +3,22 @@
 //! kept apart from the event-driven liveness services that share the same
 //! startup phase.
 
-use std::sync::Arc;
-
-use krabka_units::convert::TimeExt as _;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    config::BrokerConfig,
-    config_keys::{
-        node_min_insync_replicas, resolve_broker_witness, resolve_preferred_leader_site,
+use {
+    crate::{
+        config::BrokerConfig,
+        config_keys::{
+            node_min_insync_replicas, resolve_broker_witness, resolve_preferred_leader_site,
+        },
+        health::HealthState,
+        heartbeat::controller_state::ControllerLivenessState,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        metrics::{BrokerMetrics, DirectoryLabel, RaftStateLabel},
+        partition_registry::PartitionRegistry,
     },
-    health::HealthState,
-    heartbeat::controller_state::ControllerLivenessState,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    metrics::{BrokerMetrics, DirectoryLabel, RaftStateLabel},
-    partition_registry::PartitionRegistry,
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
 };
 
 /// Epoch milliseconds for the KIP-835 time-since-last-applied-record gauge.
@@ -313,15 +313,16 @@ pub(super) fn spawn_broker_gauge_updater(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::{millis, secs};
-
-    use super::*;
-    use crate::{
-        broker::test_support::fake_source,
-        handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
-        metrics::BrokerMetrics,
-        test_support::{broker_registration, single_partition_topic},
+    use {
+        super::*,
+        crate::{
+            broker::test_support::fake_source,
+            handlers::test_support::{ReplicatedPartitionSetup, replicated_partition},
+            metrics::BrokerMetrics,
+            test_support::{broker_registration, single_partition_topic},
+        },
+        assert2::{assert, check},
+        krabka_units::{millis, secs},
     };
 
     #[test]

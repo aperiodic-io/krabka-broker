@@ -3,9 +3,10 @@
 //! The snapshot implements [`AclSource`] with EXACTLY the broker's matching
 //! semantics.
 
-use krabka_metadata::{AclEntry, PatternType, ResourceType};
-
-use crate::{AclEntries, AclSource};
+use {
+    crate::{AclEntries, AclSource},
+    krabka_metadata::{AclEntry, PatternType, ResourceType},
+};
 
 /// Immutable ACL snapshot. Each refresh rebuilds it wholesale.
 #[derive(Debug, Clone, Default)]
@@ -38,13 +39,10 @@ impl AclCache {
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
+    pub fn len(&self) -> usize { self.entries.len() }
+
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
 }
 
 impl AclSource for AclCache {
@@ -64,19 +62,18 @@ impl AclSource for AclCache {
         Box::new(self.entries.iter().filter(move |e| e.resource_type == rt))
     }
 
-    fn cidr_hosts_supported(&self) -> bool {
-        self.cidr_hosts_supported
-    }
+    fn cidr_hosts_supported(&self) -> bool { self.cidr_hosts_supported }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use krabka_metadata::{AclOperation, MetadataImage, MetadataRecord, ResourceType};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::test_support::{AclSetup, acl as entry};
+    use {
+        super::*,
+        crate::test_support::{AclSetup, acl as entry},
+        krabka_metadata::{AclOperation, MetadataImage, MetadataRecord, ResourceType},
+        uuid::Uuid,
+    };
 
     /// A stable, comparable identity for an `AclEntry`.
     ///
@@ -173,13 +170,14 @@ mod tests {
     /// range at or above it. A cache that is not told compares as text.
     #[test]
     fn a_cache_reads_a_slash_host_as_the_cluster_does() {
-        use krabka_metadata::{
-            FeatureLevelRecord,
-            metadata_version::{CIDR_ACL_MIN_LEVEL, METADATA_VERSION_FEATURE},
+        use {
+            crate::{AuthorizationRequest, AuthorizationResult, Authorizer, SimpleAclAuthorizer},
+            krabka_metadata::{
+                FeatureLevelRecord,
+                metadata_version::{CIDR_ACL_MIN_LEVEL, METADATA_VERSION_FEATURE},
+            },
+            krabka_security::{AuthMethod, Principal},
         };
-        use krabka_security::{AuthMethod, Principal};
-
-        use crate::{AuthorizationRequest, AuthorizationResult, Authorizer, SimpleAclAuthorizer};
 
         let range_allow = AclEntry {
             host: "10.0.0.0/8".into(),

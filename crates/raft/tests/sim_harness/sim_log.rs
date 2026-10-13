@@ -2,9 +2,7 @@
 //! satisfies so that the real-log binary compiles the trait without also
 //! carrying the fake's implementation in the same file.
 
-use krabka_raft::kraft::types::Epoch;
-
-use super::node_log::SimNodeLog;
+use {super::node_log::SimNodeLog, krabka_raft::kraft::types::Epoch};
 
 /// A growable in-memory replicated log.
 ///
@@ -45,7 +43,5 @@ impl SimNodeLog for SimLog {
         }
     }
 
-    fn record_count(&self) -> usize {
-        self.epochs.len()
-    }
+    fn record_count(&self) -> usize { self.epochs.len() }
 }

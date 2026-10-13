@@ -60,11 +60,7 @@ impl RejectReason {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check, std::collections::BTreeSet};
 
     #[test]
     fn every_reject_reason_has_a_label_and_a_message() {

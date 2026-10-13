@@ -74,16 +74,17 @@
 //! never released at all until the relay shuts down. There is nothing to "fix"
 //! here.
 
-use std::{
-    net::SocketAddr,
-    sync::{Arc, Mutex},
+use {
+    std::{
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+    },
+    tokio::{
+        net::{TcpListener, TcpStream},
+        task::JoinHandle,
+    },
+    tokio_util::{sync::CancellationToken, task::TaskTracker},
 };
-
-use tokio::{
-    net::{TcpListener, TcpStream},
-    task::JoinHandle,
-};
-use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 /// A loopback TCP forwarder that a test can cut and heal.
 pub struct Relay {
@@ -133,9 +134,7 @@ impl Relay {
 
     /// The address brokers should be pointed at.
     #[must_use]
-    pub fn addr(&self) -> SocketAddr {
-        self.addr
-    }
+    pub fn addr(&self) -> SocketAddr { self.addr }
 
     /// Drop every live connection and refuse new ones until [`Relay::heal`].
     pub fn cut(&self) {
@@ -171,9 +170,7 @@ impl Relay {
         self.state.conns.wait().await;
     }
 
-    fn link(&self) -> CancellationToken {
-        self.state.link.lock().expect("relay link lock").clone()
-    }
+    fn link(&self) -> CancellationToken { self.state.link.lock().expect("relay link lock").clone() }
 }
 
 impl Drop for Relay {
@@ -211,15 +208,11 @@ impl SiteLink {
 
     /// The address peers should use for this node's controller listener.
     #[must_use]
-    pub fn controller_addr(&self) -> SocketAddr {
-        self.controller.addr()
-    }
+    pub fn controller_addr(&self) -> SocketAddr { self.controller.addr() }
 
     /// The address peers and clients should use for this node's data listener.
     #[must_use]
-    pub fn client_addr(&self) -> SocketAddr {
-        self.client.addr()
-    }
+    pub fn client_addr(&self) -> SocketAddr { self.client.addr() }
 
     /// Partition the whole site away.
     pub fn cut(&self) {

@@ -25,13 +25,14 @@
 //! It answers `SNAPSHOT_NOT_FOUND` for the metadata partition and
 //! `UNKNOWN_TOPIC_OR_PARTITION` for any other.
 
-use bytes::Bytes;
-use krabka_protocol::owned::{
-    fetch_snapshot_request::FetchSnapshotRequest,
-    fetch_snapshot_response::{FetchSnapshotResponse, PartitionSnapshot, TopicSnapshot},
+use {
+    crate::codes,
+    bytes::Bytes,
+    krabka_protocol::owned::{
+        fetch_snapshot_request::FetchSnapshotRequest,
+        fetch_snapshot_response::{FetchSnapshotResponse, PartitionSnapshot, TopicSnapshot},
+    },
 };
-
-use crate::codes;
 
 /// The single Kafka-side topic name that represents the `KRaft` metadata
 /// log. It mirrors
@@ -105,26 +106,26 @@ fn without_metadata_log(req: &FetchSnapshotRequest) -> FetchSnapshotResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-    use krabka_protocol::owned::{
-        fetch_snapshot_request::{
-            self, PartitionSnapshot as ReqPartition, SnapshotId as ReqSnapshotId,
-            TopicSnapshot as ReqTopic,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            test_support::{
+                GrantsInPrincipalName, decode_response, encode_request, peer,
+                start_broker_no_audit_with,
+            },
         },
-        fetch_snapshot_response::{self, LeaderIdAndEpoch},
-    };
-    use krabka_raft::SnapshotRange;
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        test_support::{
-            GrantsInPrincipalName, decode_response, encode_request, peer,
-            start_broker_no_audit_with,
+        assert2::{assert, check},
+        base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+        krabka_protocol::owned::{
+            fetch_snapshot_request::{
+                self, PartitionSnapshot as ReqPartition, SnapshotId as ReqSnapshotId,
+                TopicSnapshot as ReqTopic,
+            },
+            fetch_snapshot_response::{self, LeaderIdAndEpoch},
         },
+        krabka_raft::SnapshotRange,
+        std::sync::Arc,
     };
 
     /// A request for partition 0 of the metadata topic, at the given id,
@@ -192,7 +193,13 @@ mod tests {
     /// `FetchSnapshotRequest.getErrorResponse`: a top-level
     /// `CLUSTER_AUTHORIZATION_FAILED` and no snapshot bytes.
     macro_rules! snapshot_wire {
-        (($user:ident, $context:ident, $bytes:ident), $grants:expr, $broker:ident, $version:expr, $address:ident) => {
+        (
+            ($user:ident, $context:ident, $bytes:ident),
+            $grants:expr,
+            $broker:ident,
+            $version:expr,
+            $address:ident
+        ) => {
             let $user = crate::test_support::principal($grants);
             let $context = crate::test_support::request_context(&$user, &$address, "snapshot-test");
             let $bytes = crate::test_support::dispatch_context(

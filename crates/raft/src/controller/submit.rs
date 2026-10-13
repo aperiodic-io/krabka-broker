@@ -4,21 +4,21 @@
 //! leader is isolated here so the encode and translate halves stay testable
 //! without a live quorum.
 
-use std::sync::Arc;
-
-use krabka_metadata::{MetadataImage, MetadataRecord};
-
-use super::{ControllerHandle, connection_options};
-use crate::{
-    DelegationTokenMutation, SubmitChangeResult,
-    error::RaftError,
-    network::OutboundDialer,
-    types::{NodeId, controller_endpoint_addr as endpoint_addr_from_endpoints},
-    wire::{
-        API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_SUBMIT_CHANGE, KrabkaSubmitChangeRequest,
-        KrabkaSubmitChangeResponse, PRIVATE_CLUSTER_AUTHORIZATION_FAILED,
-        PRIVATE_UNSUPPORTED_VERSION, SUBMIT_CHANGE_UNCOMMITTED_TAIL, private_request_version,
+use {
+    super::{ControllerHandle, connection_options},
+    crate::{
+        DelegationTokenMutation, SubmitChangeResult,
+        error::RaftError,
+        network::OutboundDialer,
+        types::{NodeId, controller_endpoint_addr as endpoint_addr_from_endpoints},
+        wire::{
+            API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_SUBMIT_CHANGE, KrabkaSubmitChangeRequest,
+            KrabkaSubmitChangeResponse, PRIVATE_CLUSTER_AUTHORIZATION_FAILED,
+            PRIVATE_UNSUPPORTED_VERSION, SUBMIT_CHANGE_UNCOMMITTED_TAIL, private_request_version,
+        },
     },
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    std::sync::Arc,
 };
 
 impl ControllerHandle {
@@ -37,6 +37,7 @@ impl ControllerHandle {
             .submit_change_if_image(records, expected_image)
             .await
     }
+
     /// Submit a batch of metadata records. Returns `Ok(())` once committed AND
     /// applied on the leader. Pre-validation lives in the engine. On a follower
     /// (`NotLeader` with a known leader), forwards directly to the leader's
@@ -416,20 +417,22 @@ fn translate_submit_change_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        DelegationTokenMutation, SubmitChangeResult,
-        controller::test_support::{
-            bootstrap_controller, joining_controller, submit_change_response_bytes, topic_record,
+    use {
+        super::*,
+        crate::{
+            DelegationTokenMutation, SubmitChangeResult,
+            controller::test_support::{
+                bootstrap_controller, joining_controller, submit_change_response_bytes,
+                topic_record,
+            },
+            wire::{
+                API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
+                KrabkaSubmitChangeRequest, PRIVATE_CLUSTER_AUTHORIZATION_FAILED,
+                PRIVATE_UNSUPPORTED_VERSION, SUBMIT_CHANGE_UNCOMMITTED_TAIL,
+            },
         },
-        wire::{
-            API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
-            KrabkaSubmitChangeRequest, PRIVATE_CLUSTER_AUTHORIZATION_FAILED,
-            PRIVATE_UNSUPPORTED_VERSION, SUBMIT_CHANGE_UNCOMMITTED_TAIL,
-        },
+        assert2::check,
+        uuid::Uuid,
     };
 
     #[test]
@@ -718,12 +721,9 @@ mod tests {
             0,
         )
         .expect_err("code 1 is an error");
-        assert2::assert!(matches!(
-            err,
-            RaftError::NotLeader {
-                current_leader: Some(NodeId(9))
-            }
-        ));
+        assert2::assert!(matches!(err, RaftError::NotLeader {
+            current_leader: Some(NodeId(9))
+        }));
 
         // A negative leader_hint falls back to None (unknown), NOT to the dialed
         // leader id — distinguishing the `>= 0` guard.
@@ -734,12 +734,9 @@ mod tests {
             0,
         )
         .expect_err("code 3 is an error");
-        assert2::assert!(matches!(
-            err,
-            RaftError::NotLeader {
-                current_leader: None
-            }
-        ));
+        assert2::assert!(matches!(err, RaftError::NotLeader {
+            current_leader: None
+        }));
     }
 
     #[test]
@@ -785,21 +782,14 @@ mod tests {
             .expect_send_submit_change()
             .returning(|_, _, _, _| Ok(submit_change_response_bytes(1, 4)));
 
-        let err = forward_submit_via(
-            &transport,
-            NodeId(7),
-            "leader-host:9093",
-            0,
-            &[topic_record("z")],
-        )
+        let err = forward_submit_via(&transport, NodeId(7), "leader-host:9093", 0, &[
+            topic_record("z"),
+        ])
         .await
         .expect_err("not leader");
-        assert2::assert!(matches!(
-            err,
-            RaftError::NotLeader {
-                current_leader: Some(NodeId(4))
-            }
-        ));
+        assert2::assert!(matches!(err, RaftError::NotLeader {
+            current_leader: Some(NodeId(4))
+        }));
     }
 
     #[tokio::test]
@@ -816,13 +806,9 @@ mod tests {
                 )))
             });
 
-        let err = forward_submit_via(
-            &transport,
-            NodeId(7),
-            "leader-host:9093",
-            0,
-            &[topic_record("z")],
-        )
+        let err = forward_submit_via(&transport, NodeId(7), "leader-host:9093", 0, &[
+            topic_record("z"),
+        ])
         .await
         .expect_err("network error");
         assert2::assert!(matches!(err, RaftError::Network(_)));
@@ -830,8 +816,7 @@ mod tests {
 
     #[test]
     fn encode_delegation_token_mutation_body_frames_mutations() {
-        use krabka_metadata::DelegationTokenRecord;
-        use krabka_security::KafkaPrincipal;
+        use {krabka_metadata::DelegationTokenRecord, krabka_security::KafkaPrincipal};
 
         let rec = DelegationTokenRecord {
             token_id: "tok".into(),
@@ -877,12 +862,9 @@ mod tests {
             .forward_raw(API_KEY_METADATA_FETCH, 0, bytes::Bytes::new())
             .await
             .expect_err("no leader is known yet");
-        assert2::assert!(matches!(
-            err,
-            RaftError::NotLeader {
-                current_leader: None
-            }
-        ));
+        assert2::assert!(matches!(err, RaftError::NotLeader {
+            current_leader: None
+        }));
         ctrl.shutdown().await;
     }
 

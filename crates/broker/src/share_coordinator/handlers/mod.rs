@@ -147,27 +147,28 @@ use state_results;
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::{path::Path, sync::Arc};
-
-    use krabka_ids::{NodeId, PartitionIndex};
-    use krabka_log::Offset;
-
-    use crate::{
-        broker::Broker,
-        partition_registry::PartitionRegistry,
-        share_coordinator::{
-            bootstrap,
-            config::ShareCoordinatorConfig,
-            coordinator::{
-                LoadStatus, ShareCoordinator,
-                test_support::{
-                    DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, image_with_topic,
-                    manual_clock, open_state_partition, share_write, state_batch,
+    use {
+        crate::{
+            broker::Broker,
+            partition_registry::PartitionRegistry,
+            share_coordinator::{
+                bootstrap,
+                config::ShareCoordinatorConfig,
+                coordinator::{
+                    LoadStatus, ShareCoordinator,
+                    test_support::{
+                        DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup,
+                        image_with_topic, manual_clock, open_state_partition, share_write,
+                        state_batch,
+                    },
                 },
+                persistence::StateBatch,
             },
-            persistence::StateBatch,
+            topic_creator::TopicCreator,
         },
-        topic_creator::TopicCreator,
+        krabka_ids::{NodeId, PartitionIndex},
+        krabka_log::Offset,
+        std::{path::Path, sync::Arc},
     };
 
     pub(crate) fn batch(bounds: std::ops::RangeInclusive<Offset>) -> StateBatch {
@@ -365,7 +366,7 @@ pub(crate) mod test_support {
 
     /// Check each read operation against the whole independently supplied expected response.
     macro_rules! stored_response_rows {
-        ($rows:expr, $topic:expr, ($partitions:expr, $partition:expr), $serve:ident) => {
+        ($rows:expr, $topic:expr,($partitions:expr, $partition:expr), $serve:ident) => {
             for (index, (led, req, expected)) in $rows.into_iter().enumerate() {
                 let dir = tempfile::TempDir::new().expect("tempdir");
                 let (coordinator, image) = super::super::test_support::stored_state(

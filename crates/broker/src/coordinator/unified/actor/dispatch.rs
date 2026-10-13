@@ -5,34 +5,35 @@
 //! and delegates to the module that implements that RPC. The return value is
 //! the actor loop's keep-running flag.
 
-use krabka_protocol::{
-    owned::{heartbeat_request::HeartbeatRequest, leave_group_request::LeaveGroupRequest},
-    records::RecordBatch,
-};
-use tokio::sync::oneshot;
-
-use super::{
-    ActorServices, ErrorCode, GroupActorMessage, ParkedWaiters,
-    classic_join::handle_classic_join_message,
-    classic_leave::{handle_classic_delete_message, handle_classic_leave_message},
-    classic_sync::handle_classic_sync_message,
-    commit_validation::validate_commit_message,
-    heartbeat::handle_actor_heartbeat,
-    messages::{LeaveResult, classic_leave_result},
-    metadata_update::on_metadata_update,
-    offset_delete::offset_delete_guard,
-    retention::handle_reap_message,
-    seed::apply_seed,
-    topic_deletion::reply_delete_topic_offsets,
-    views::{build_classic_view, build_describe, inspect_any},
-    waiters::drain_parked_for_unload,
-};
-use crate::{
-    codes,
-    coordinator::unified::{
-        ClientIdentity, classic_ops, classic_state::OffsetEntry, group::CoordinatorGroup,
-        migration, offsets_log::OffsetsLog,
+use {
+    super::{
+        ActorServices, ErrorCode, GroupActorMessage, ParkedWaiters,
+        classic_join::handle_classic_join_message,
+        classic_leave::{handle_classic_delete_message, handle_classic_leave_message},
+        classic_sync::handle_classic_sync_message,
+        commit_validation::validate_commit_message,
+        heartbeat::handle_actor_heartbeat,
+        messages::{LeaveResult, classic_leave_result},
+        metadata_update::on_metadata_update,
+        offset_delete::offset_delete_guard,
+        retention::handle_reap_message,
+        seed::apply_seed,
+        topic_deletion::reply_delete_topic_offsets,
+        views::{build_classic_view, build_describe, inspect_any},
+        waiters::drain_parked_for_unload,
     },
+    crate::{
+        codes,
+        coordinator::unified::{
+            ClientIdentity, classic_ops, classic_state::OffsetEntry, group::CoordinatorGroup,
+            migration, offsets_log::OffsetsLog,
+        },
+    },
+    krabka_protocol::{
+        owned::{heartbeat_request::HeartbeatRequest, leave_group_request::LeaveGroupRequest},
+        records::RecordBatch,
+    },
+    tokio::sync::oneshot,
 };
 
 fn handle_classic_heartbeat_message(
@@ -285,12 +286,13 @@ pub(super) async fn handle_actor_message(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_log::Offset;
-
-    use super::*;
-    use crate::coordinator::unified::actor::test_support::{
-        classic_member, make_coordinator, rpc, seed_completing_classic,
+    use {
+        super::*,
+        crate::coordinator::unified::actor::test_support::{
+            classic_member, make_coordinator, rpc, seed_completing_classic,
+        },
+        assert2::assert,
+        krabka_log::Offset,
     };
 
     /// Kafka's `GroupMetadataManager.onUnloaded` answers every awaiting
@@ -300,9 +302,10 @@ mod tests {
     /// of joining the old broker once more.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_answers_parked_joiners_and_followers_not_coordinator() {
-        use krabka_protocol::owned::sync_group_request::SyncGroupRequest;
-
-        use crate::coordinator::unified::actor::{JoinResult, SyncResult, test_support::rpc};
+        use {
+            crate::coordinator::unified::actor::{JoinResult, SyncResult, test_support::rpc},
+            krabka_protocol::owned::sync_group_request::SyncGroupRequest,
+        };
 
         // A member that waits in `JoinGroup`, behind the initial delay.
         let (coord, _log) = make_coordinator();
@@ -328,15 +331,12 @@ mod tests {
         let seeded = seed_completing_classic(&coord, &["m1", "m2"]);
         let handle = seeded.handle;
         let generation = seeded.generation;
-        let sync_rx = rpc::begin_classic_sync(
-            &handle,
-            SyncGroupRequest {
-                group_id: "g".into(),
-                generation_id: generation,
-                member_id: "m2".into(),
-                ..Default::default()
-            },
-        )
+        let sync_rx = rpc::begin_classic_sync(&handle, SyncGroupRequest {
+            group_id: "g".into(),
+            generation_id: generation,
+            member_id: "m2".into(),
+            ..Default::default()
+        })
         .await;
         rpc::shutdown(&handle).await;
         assert!(
@@ -361,17 +361,14 @@ mod tests {
         let group = Box::new(CoordinatorGroup::seeded(
             "g",
             GroupKind::Classic(cs),
-            [(
-                ("t".to_string(), 0),
-                OffsetEntry {
-                    offset: Offset(7),
-                    leader_epoch: 0,
-                    metadata: String::new(),
-                    commit_timestamp_ms: 0,
-                    expire_timestamp_ms: None,
-                    topic_id: None,
-                },
-            )]
+            [(("t".to_string(), 0), OffsetEntry {
+                offset: Offset(7),
+                leader_epoch: 0,
+                metadata: String::new(),
+                commit_timestamp_ms: 0,
+                expire_timestamp_ms: None,
+                topic_id: None,
+            })]
             .into(),
         ));
         coord.seed_classic("g", group);

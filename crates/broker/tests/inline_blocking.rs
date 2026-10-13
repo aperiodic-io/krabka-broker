@@ -11,22 +11,24 @@
 //! shuts down without starting one. The control case, the same run without
 //! the guard, shows that the count does see the blocking pool.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::create_topics_request::{CreatableTopic, CreateTopicsRequest},
-    records::RecordBatch,
-};
-
-use crate::support::{
-    fetch::{FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch},
-    produce::{SinglePartitionProduceSetup, send_batch},
-    records::{batch_from_records, value_record},
+use {
+    crate::support::{
+        fetch::{
+            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+        },
+        produce::{SinglePartitionProduceSetup, send_batch},
+        records::{batch_from_records, value_record},
+    },
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_protocol::{
+        owned::create_topics_request::{CreatableTopic, CreateTopicsRequest},
+        records::RecordBatch,
+    },
+    std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 mod support;

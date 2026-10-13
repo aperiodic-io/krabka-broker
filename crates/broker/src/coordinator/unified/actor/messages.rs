@@ -2,31 +2,32 @@
 //! the structured results the parking classic RPCs reply with, kept together
 //! because every handler module speaks this one protocol.
 
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::{
-        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-        consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
-        heartbeat_request::HeartbeatRequest, join_group_request::JoinGroupRequest,
-        leave_group_request::LeaveGroupRequest, leave_group_response::MemberResponse,
-        sync_group_request::SyncGroupRequest,
-    },
-    records::RecordBatch,
-};
-use tokio::sync::oneshot;
-
-use super::{ClassicView, DescribeView, ErrorCode, ReapOutcome};
-use crate::{
-    codes,
-    coordinator::{
-        DeleteGroupError, GroupSnapshot,
-        unified::{
-            GroupSeed,
-            classic_state::OffsetEntry,
-            group::{CoordinatorGroup, GroupOffsets, OffsetFetchMember},
-            regex_resolver::TopicRegexResolver,
+use {
+    super::{ClassicView, DescribeView, ErrorCode, ReapOutcome},
+    crate::{
+        codes,
+        coordinator::{
+            DeleteGroupError, GroupSnapshot,
+            unified::{
+                GroupSeed,
+                classic_state::OffsetEntry,
+                group::{CoordinatorGroup, GroupOffsets, OffsetFetchMember},
+                regex_resolver::TopicRegexResolver,
+            },
         },
     },
+    bytes::Bytes,
+    krabka_protocol::{
+        owned::{
+            consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+            consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
+            heartbeat_request::HeartbeatRequest, join_group_request::JoinGroupRequest,
+            leave_group_request::LeaveGroupRequest, leave_group_response::MemberResponse,
+            sync_group_request::SyncGroupRequest,
+        },
+        records::RecordBatch,
+    },
+    tokio::sync::oneshot,
 };
 
 #[derive(Debug)]
@@ -337,9 +338,7 @@ pub(super) fn classic_leave_result(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn classic_leave_result_uses_the_wire_versions_error_shape() {

@@ -7,15 +7,15 @@
 //! the I/O sit together here, apart from the flag handling that decides what
 //! goes in them.
 
-use std::{ffi::OsString, io, path::Path};
-
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use krabka_metadata::MetadataRecord;
-use serde::Serialize;
-use serde_wincode::SerdeCompat;
-use wincode::Serialize as _;
-
-use crate::{ids::ClusterId, meta_properties::MetaProperties};
+use {
+    crate::{ids::ClusterId, meta_properties::MetaProperties},
+    base64::{Engine as _, engine::general_purpose::STANDARD},
+    krabka_metadata::MetadataRecord,
+    serde::Serialize,
+    serde_wincode::SerdeCompat,
+    std::{ffi::OsString, io, path::Path},
+    wincode::Serialize as _,
+};
 
 pub(super) const ZERO_CHECKPOINT_NAME: &str = "00000000000000000000-0000000000.checkpoint";
 
@@ -30,9 +30,7 @@ pub(super) struct Fault(Option<OsString>);
 
 impl Fault {
     /// Reads [`FAIL_AFTER_ENV`].
-    pub(super) fn from_env() -> Self {
-        Self(std::env::var_os(FAIL_AFTER_ENV))
-    }
+    pub(super) fn from_env() -> Self { Self(std::env::var_os(FAIL_AFTER_ENV)) }
 
     /// Fails when `path` is the file the fault names.
     fn after(&self, path: &Path) -> Result<(), String> {

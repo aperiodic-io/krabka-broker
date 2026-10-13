@@ -18,9 +18,7 @@
 //! what the broker advertised. [`parse_single_broker`] keeps the first kind and
 //! drops the second.
 
-use std::fmt;
-
-use krabka_protocol::owned::api_versions_response::ApiVersion;
+use {krabka_protocol::owned::api_versions_response::ApiVersion, std::fmt};
 
 /// The name the tool printed for a row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,9 +157,7 @@ fn parse_version(text: &str, line: &str) -> Result<i16, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// A block shaped exactly like `mirror.gcr.io/apache/kafka:4.3.1`'s tool
     /// writes one, carrying every row kind at once: a two-bound range, a

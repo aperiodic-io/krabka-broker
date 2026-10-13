@@ -2,19 +2,19 @@
 //! broker must host: the follower replicator set, the local materialization
 //! set, and the diskless WAL voter placements.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
-use krabka_raft::NodeId;
-
-use super::TopicPartition;
-use crate::{
-    config_keys::resolve_diskless,
-    wal::quorum::{
-        placement::select_voters,
-        registry::{ShardId, WalPlacement},
+use {
+    super::TopicPartition,
+    crate::{
+        config_keys::resolve_diskless,
+        wal::quorum::{
+            placement::select_voters,
+            registry::{ShardId, WalPlacement},
+        },
     },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
+    krabka_raft::NodeId,
+    std::collections::{HashMap, HashSet},
 };
 
 /// `(topic, partition)` pairs where `node_id` is in `replicas` AND
@@ -75,17 +75,18 @@ pub(crate) fn desired_wal_placements(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{MetadataRecord, TopicRecord};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        replicator_supervisor::test_support::{
-            SupervisorPartitionSetup, SupervisorTopicSetup, broker_record, image_with,
-            partition_record, three_replica_image, topic_record,
+    use {
+        super::*,
+        crate::{
+            replicator_supervisor::test_support::{
+                SupervisorPartitionSetup, SupervisorTopicSetup, broker_record, image_with,
+                partition_record, three_replica_image, topic_record,
+            },
+            test_support::PartitionCount,
         },
-        test_support::PartitionCount,
+        assert2::assert,
+        krabka_metadata::{MetadataRecord, TopicRecord},
+        uuid::Uuid,
     };
 
     #[test]

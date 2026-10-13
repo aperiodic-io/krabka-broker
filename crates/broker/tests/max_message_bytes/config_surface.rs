@@ -2,20 +2,21 @@
 //! max.message.bytes=...`, `kafka-configs --alter --add-config`, and the
 //! `DescribeConfigs` read-back both of them show.
 
-use assert2::check;
-use krabka_broker::codes;
-use krabka_client_core::Client;
-use krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult;
-
-use crate::{
-    support::{
-        self,
-        configs::{TopicConfigMutationSetup, alter_topic_config, topic_config},
+use {
+    crate::{
+        support::{
+            self,
+            configs::{TopicConfigMutationSetup, alter_topic_config, topic_config},
+        },
+        wire::{
+            MAX_MESSAGE_BYTES, accepted, create_topic, orders_fixture, produce_batch_of_wire_len,
+            too_large,
+        },
     },
-    wire::{
-        MAX_MESSAGE_BYTES, accepted, create_topic, orders_fixture, produce_batch_of_wire_len,
-        too_large,
-    },
+    assert2::check,
+    krabka_broker::codes,
+    krabka_client_core::Client,
+    krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult,
 };
 
 /// `ConfigSource::DYNAMIC_TOPIC_CONFIG`, which is what a stored topic
@@ -38,12 +39,10 @@ const CAP: usize = 2048;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_topics_accepts_the_key_and_describe_configs_echoes_it() {
     let p = support::start().await;
-    create_topic(
-        &p.broker,
-        &p.client,
-        "orders",
-        &[(MAX_MESSAGE_BYTES, &CAP.to_string())],
-    )
+    create_topic(&p.broker, &p.client, "orders", &[(
+        MAX_MESSAGE_BYTES,
+        &CAP.to_string(),
+    )])
     .await;
 
     check!(
@@ -129,14 +128,11 @@ async fn describe_max_message_bytes(client: &Client, topic: &str) -> DescribeCon
 
 /// Drive `kafka-configs --alter --add-config max.message.bytes=<value>`.
 async fn set_max_message_bytes(client: &Client, topic: &str, value: &str) -> (i16, Option<String>) {
-    alter_topic_config(
-        client,
-        TopicConfigMutationSetup {
-            topic,
-            name: MAX_MESSAGE_BYTES,
-            value: Some(value),
-            ..Default::default()
-        },
-    )
+    alter_topic_config(client, TopicConfigMutationSetup {
+        topic,
+        name: MAX_MESSAGE_BYTES,
+        value: Some(value),
+        ..Default::default()
+    })
     .await
 }

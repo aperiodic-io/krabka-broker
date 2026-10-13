@@ -5,8 +5,7 @@
 //! every implementation consults. [`FileOpaConfig`] holds the decision-endpoint
 //! knobs the `opa` variant needs, with Strimzi's defaults.
 
-use schemars::JsonSchema;
-use serde::Deserialize;
+use {schemars::JsonSchema, serde::Deserialize};
 
 /// TOML shape of `[authorization]`. `type` (renamed to `authz_type` on
 /// the Rust side to avoid shadowing the keyword) defaults to
@@ -111,25 +110,22 @@ const DEFAULT_OPA_MAXIMUM_CACHE_SIZE: usize = 50_000;
 /// `KafkaAuthorizationOpa` default.
 const DEFAULT_OPA_EXPIRE_AFTER_MS: i64 = 60 * 60 * 1_000;
 
-fn default_opa_maximum_cache_size() -> usize {
-    DEFAULT_OPA_MAXIMUM_CACHE_SIZE
-}
+fn default_opa_maximum_cache_size() -> usize { DEFAULT_OPA_MAXIMUM_CACHE_SIZE }
 
-fn default_opa_expire_after_ms() -> i64 {
-    DEFAULT_OPA_EXPIRE_AFTER_MS
-}
+fn default_opa_expire_after_ms() -> i64 { DEFAULT_OPA_EXPIRE_AFTER_MS }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{Time, convert::TimeExt as _};
-
-    use super::*;
-    use crate::{
-        authorizer::{AuthorizationRequest, opa::OpaAuthorizer},
-        config::BrokerConfig,
-        file_config::test_support::configured_unwrap_parse,
-        test_support::{peer, sasl_principal},
+    use {
+        super::*,
+        crate::{
+            authorizer::{AuthorizationRequest, opa::OpaAuthorizer},
+            config::BrokerConfig,
+            file_config::test_support::configured_unwrap_parse,
+            test_support::{peer, sasl_principal},
+        },
+        assert2::assert,
+        krabka_units::{Time, convert::TimeExt as _},
     };
 
     /// Both `super_users` lists take Kafka's `User:<name>` form, and
@@ -177,9 +173,7 @@ super_users = ["operator", "admin"]
     }
     // `[authorization]` TOML section → `Arc<dyn Authorizer>`.
 
-    fn test_principal(name: &str) -> krabka_security::Principal {
-        sasl_principal(name)
-    }
+    fn test_principal(name: &str) -> krabka_security::Principal { sasl_principal(name) }
 
     fn topic_read_request<'a>(
         principal: &'a krabka_security::Principal,
@@ -196,9 +190,7 @@ super_users = ["operator", "admin"]
 
     #[test]
     fn authorization_section_simple_builds_simple_acl_authorizer() {
-        use krabka_metadata::MetadataImage;
-
-        use crate::authorizer::AuthorizationResult;
+        use {crate::authorizer::AuthorizationResult, krabka_metadata::MetadataImage};
 
         let toml = r#"
 [authorization]
@@ -239,9 +231,7 @@ super_users = ["admin"]
     /// ACL for the resource.
     #[test]
     fn allow_everyone_if_no_acl_found_toml_flows_to_simple_acl_authorizer() {
-        use krabka_metadata::MetadataImage;
-
-        use crate::authorizer::AuthorizationResult;
+        use {crate::authorizer::AuthorizationResult, krabka_metadata::MetadataImage};
 
         let img = MetadataImage::new(uuid::Uuid::nil());
         let alice = test_principal("alice");
@@ -283,9 +273,7 @@ allow_everyone_if_no_acl_found = true
     }
     #[test]
     fn authorization_section_opa_builds_opa_authorizer() {
-        use krabka_metadata::MetadataImage;
-
-        use crate::authorizer::AuthorizationResult;
+        use {crate::authorizer::AuthorizationResult, krabka_metadata::MetadataImage};
 
         // `OpaAuthorizer::new` captures `Handle::try_current()` — needs
         // an active tokio runtime. `Runtime::new()` defaults to
@@ -336,9 +324,10 @@ expire_after_ms = 60000
         // And the built authorizer must Deny on OPA error (fail-closed).
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            use krabka_metadata::MetadataImage;
-
-            use crate::authorizer::{AuthorizationResult, Authorizer};
+            use {
+                crate::authorizer::{AuthorizationResult, Authorizer},
+                krabka_metadata::MetadataImage,
+            };
 
             let auth = OpaAuthorizer::new(
                 std::collections::HashSet::new(),
@@ -372,9 +361,7 @@ url = "http://opa.invalid:8181/v1/data/k/a"
     }
     #[test]
     fn authorization_section_absent_defaults_to_allow_all() {
-        use krabka_metadata::MetadataImage;
-
-        use crate::authorizer::AuthorizationResult;
+        use {crate::authorizer::AuthorizationResult, krabka_metadata::MetadataImage};
 
         let cfg = configured_unwrap_parse("").unwrap();
 

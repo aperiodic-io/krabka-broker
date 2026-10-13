@@ -21,12 +21,14 @@
 //!   pattern (`authorize_by_resource_type`). Deny of both →
 //!   `error_code = CLUSTER_AUTHORIZATION_FAILED (31)`.
 
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    init_producer_id_request::InitProducerIdRequest,
-    init_producer_id_response::InitProducerIdResponse,
+use {
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        init_producer_id_request::InitProducerIdRequest,
+        init_producer_id_response::InitProducerIdResponse,
+    },
+    krabka_units::convert::TimeExt as _,
 };
-use krabka_units::convert::TimeExt as _;
 
 mod identity;
 mod transactional;
@@ -34,13 +36,15 @@ mod transactional;
 #[cfg(test)]
 mod tests;
 
-use self::transactional::handle_transactional;
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult},
-    codes,
-    error::BrokerError,
-    replicator_supervisor::materialize_partition,
-    txn::coordinator::leadership::LoadStatus,
+use {
+    self::transactional::handle_transactional,
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult},
+        codes,
+        error::BrokerError,
+        replicator_supervisor::materialize_partition,
+        txn::coordinator::leadership::LoadStatus,
+    },
 };
 
 /// How long a transactional `InitProducerId` waits for the load of its

@@ -36,9 +36,7 @@ pub(crate) async fn probe_ktls_support() -> bool {
 /// On non-Linux targets kTLS does not exist. The probe is a constant `false`,
 /// and TLS listeners always serve the userspace rustls path.
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn probe_ktls_support() -> std::future::Ready<bool> {
-    std::future::ready(false)
-}
+pub(crate) fn probe_ktls_support() -> std::future::Ready<bool> { std::future::ready(false) }
 
 #[cfg(target_os = "linux")]
 async fn try_probe_ktls() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

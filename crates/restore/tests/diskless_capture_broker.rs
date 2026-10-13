@@ -8,33 +8,34 @@
 //! process, lets it flush a committed prefix into the index, and requires the
 //! capture to freeze that prefix without writing anything.
 
-use std::{
-    collections::BTreeMap,
-    net::SocketAddr,
-    time::{Duration, Instant},
+use {
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_backup::{
+        archive::ArchiveArgs,
+        capture::capture_key,
+        manifest::{DISKLESS_WAL_INDEX, GROUP_OFFSETS, MANIFEST, Manifest},
+        run,
+    },
+    krabka_broker::{
+        Broker, BrokerConfig, BrokerHandle, KafkaRlmmConfig, NodeId, RemoteStorageBackend, RlmmKind,
+    },
+    krabka_client_admin::{AdminClient, CreateTopicSpec, TopicMutationOptions},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+        primitives::uuid::Uuid as WireUuid,
+        records::{Record, RecordBatch},
+    },
+    krabka_remote_storage::diskless::{DisklessPartitionCapture, DisklessWalCapture},
+    std::{
+        collections::BTreeMap,
+        net::SocketAddr,
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
+    uuid::Uuid,
 };
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_backup::{
-    archive::ArchiveArgs,
-    capture::capture_key,
-    manifest::{DISKLESS_WAL_INDEX, GROUP_OFFSETS, MANIFEST, Manifest},
-    run,
-};
-use krabka_broker::{
-    Broker, BrokerConfig, BrokerHandle, KafkaRlmmConfig, NodeId, RemoteStorageBackend, RlmmKind,
-};
-use krabka_client_admin::{AdminClient, CreateTopicSpec, TopicMutationOptions};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-    primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch},
-};
-use krabka_remote_storage::diskless::{DisklessPartitionCapture, DisklessWalCapture};
-use tempfile::TempDir;
-use uuid::Uuid;
 
 /// The diskless data topic the broker flushes into the index.
 const TOPIC: &str = "events";

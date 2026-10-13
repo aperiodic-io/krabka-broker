@@ -3,18 +3,17 @@
 //! materialized and not as an error. It propagates IO errors for every other
 //! failure mode.
 
-use std::{fs, io, path::Path};
-
-use krabka_log::name::parse_log_filename;
+use {
+    krabka_log::name::parse_log_filename,
+    std::{fs, io, path::Path},
+};
 
 /// Sums every regular file in a partition directory: the disk the partition
 /// uses.
 ///
 /// # Errors
 /// Returns an error when the directory cannot be read.
-pub fn sum_partition_dir(path: &Path) -> Result<u64, io::Error> {
-    sum_files(path, |_| true)
-}
+pub fn sum_partition_dir(path: &Path) -> Result<u64, io::Error> { sum_files(path, |_| true) }
 
 /// Sums the `.log` segment files of a partition directory, and nothing else:
 /// Kafka's `UnifiedLog.size`, which `DescribeLogDirs` reports as
@@ -47,11 +46,7 @@ fn sum_files(path: &Path, keep: impl Fn(&str) -> bool) -> Result<u64, io::Error>
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert, std::io::Write};
 
     #[test]
     fn empty_dir_returns_zero() {

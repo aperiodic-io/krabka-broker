@@ -4,16 +4,17 @@
 //! are each built by more than one of the test modules under this module, so
 //! the builders live in one file instead of once per module.
 
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_units::millis;
-
-use crate::barrier::{
-    persistence::{
-        CutStatus, CutValue, GroupValue, InjectionStartValue, PartitionOffset, TopicOffsets,
-        TopicTarget,
+use {
+    crate::barrier::{
+        persistence::{
+            CutStatus, CutValue, GroupValue, InjectionStartValue, PartitionOffset, TopicOffsets,
+            TopicTarget,
+        },
+        state::TargetPartition,
     },
-    state::TargetPartition,
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_units::millis,
 };
 
 pub(super) fn target(topic: &str, count: i32) -> TopicTarget {

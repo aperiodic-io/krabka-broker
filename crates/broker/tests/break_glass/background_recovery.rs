@@ -7,19 +7,19 @@
 //! is today's behaviour, `audit-only` recovers and counts the bypass, and
 //! `require` fails closed and leaves the partition visibly offline.
 
-use std::time::Duration;
-
-use assert2::check;
-use krabka_broker::{BrokerHandle, NodeId, config::BackgroundUncleanRecovery};
-use krabka_metadata::{
-    BreakGlassAction as GatedAction, MetadataRecord, PartitionRecord, TopicConfigRecord,
-};
-
-use crate::{
-    cluster::{index_of, plain_client, start_gated_cluster},
-    support::{self, shutdown_cluster},
-    topics::create_topic,
-    transitions::bypassed,
+use {
+    crate::{
+        cluster::{index_of, plain_client, start_gated_cluster},
+        support::{self, shutdown_cluster},
+        topics::create_topic,
+        transitions::bypassed,
+    },
+    assert2::check,
+    krabka_broker::{BrokerHandle, NodeId, config::BackgroundUncleanRecovery},
+    krabka_metadata::{
+        BreakGlassAction as GatedAction, MetadataRecord, PartitionRecord, TopicConfigRecord,
+    },
+    std::time::Duration,
 };
 
 /// One row of the background-recovery table.

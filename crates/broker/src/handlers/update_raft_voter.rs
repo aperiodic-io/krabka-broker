@@ -27,19 +27,20 @@
 //! `KafkaRaftClient.hasValidClusterId` returns true for a null cluster id. The
 //! add and remove paths already read it that way.
 
-use krabka_metadata::{Voter, VoterEndpoint};
-use krabka_protocol::owned::{
-    update_raft_voter_request::UpdateRaftVoterRequest,
-    update_raft_voter_response::UpdateRaftVoterResponse,
-};
-use krabka_raft::{reconfig::UpdateVoter, voter_requests};
-
-use crate::{
-    codes,
-    handlers::{
-        ErrorCodeResponse as _, cluster_action_denied,
-        raft_voter::{Admitted, Refusals},
+use {
+    crate::{
+        codes,
+        handlers::{
+            ErrorCodeResponse as _, cluster_action_denied,
+            raft_voter::{Admitted, Refusals},
+        },
     },
+    krabka_metadata::{Voter, VoterEndpoint},
+    krabka_protocol::owned::{
+        update_raft_voter_request::UpdateRaftVoterRequest,
+        update_raft_voter_response::UpdateRaftVoterResponse,
+    },
+    krabka_raft::{reconfig::UpdateVoter, voter_requests},
 };
 
 crate::handlers::raft_voter::handler!(broker, version, req_bytes, ctx, {
@@ -108,24 +109,24 @@ crate::handlers::raft_voter::handler!(broker, version, req_bytes, ctx, {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_protocol::{
-        Decode as _,
-        owned::update_raft_voter_request::{KRaftVersionFeature, Listener},
-        primitives::uuid::Uuid as ProtoUuid,
-    };
-
-    use crate::{
-        handlers::{
-            add_raft_voter::handle as add_raft_voter_handle, encode_response,
-            remove_raft_voter::handle,
+    use {
+        crate::{
+            handlers::{
+                add_raft_voter::handle as add_raft_voter_handle, encode_response,
+                remove_raft_voter::handle,
+            },
+            test_support::{
+                DenyAll, decode_response as decode_other_response,
+                encode_request as encode_other_request,
+            },
         },
-        test_support::{
-            DenyAll, decode_response as decode_other_response,
-            encode_request as encode_other_request,
+        assert2::assert,
+        krabka_protocol::{
+            Decode as _,
+            owned::update_raft_voter_request::{KRaftVersionFeature, Listener},
+            primitives::uuid::Uuid as ProtoUuid,
         },
+        std::sync::Arc,
     };
 
     fn request(voter_id: i32) -> UpdateRaftVoterRequest {
@@ -160,8 +161,10 @@ mod tests {
         UpdateRaftVoterResponse
     );
 
-    use super::*;
-    use crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx};
+    use {
+        super::*,
+        crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx},
+    };
 
     /// Decode and encode round-trip at the min and max versions.
     #[test]
@@ -329,13 +332,15 @@ mod tests {
     /// principal with only the other one does not.
     #[tokio::test]
     async fn each_raft_voter_api_checks_its_own_cluster_operation() {
-        use assert2::check;
-        use krabka_metadata::AclOperation;
-        use krabka_protocol::owned::{
-            add_raft_voter_request::{self, AddRaftVoterRequest},
-            add_raft_voter_response::AddRaftVoterResponse,
-            remove_raft_voter_request::RemoveRaftVoterRequest,
-            remove_raft_voter_response::RemoveRaftVoterResponse,
+        use {
+            assert2::check,
+            krabka_metadata::AclOperation,
+            krabka_protocol::owned::{
+                add_raft_voter_request::{self, AddRaftVoterRequest},
+                add_raft_voter_response::AddRaftVoterResponse,
+                remove_raft_voter_request::RemoveRaftVoterRequest,
+                remove_raft_voter_response::RemoveRaftVoterResponse,
+            },
         };
 
         /// Authorizer that allows exactly one cluster operation and denies

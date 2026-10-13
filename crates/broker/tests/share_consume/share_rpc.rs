@@ -4,19 +4,20 @@
 //! renew-ack that extends a lock without changing record state, and retries
 //! the first fetch until the acquire pass returns records.
 
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_protocol::owned::share_acknowledge_response::ShareAcknowledgeResponse;
-
 pub use crate::support::share::{acquired_count, share_fetch_req};
-use crate::{
-    NONE, RENEW,
-    harness::wire,
-    support::share::{
-        AcknowledgeRequestSetup, FetchSessionMode, RenewalMode, ShareAck, ShareFetchSetup,
-        ShareSessionEpoch, ShareSessionSetup, acknowledge_partition, acknowledge_request,
-        acknowledge_success, acknowledge_topic, acknowledgement, fetch_row,
+use {
+    crate::{
+        NONE, RENEW,
+        harness::wire,
+        support::share::{
+            AcknowledgeRequestSetup, FetchSessionMode, RenewalMode, ShareAck, ShareFetchSetup,
+            ShareSessionEpoch, ShareSessionSetup, acknowledge_partition, acknowledge_request,
+            acknowledge_success, acknowledge_topic, acknowledgement, fetch_row,
+        },
     },
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_protocol::owned::share_acknowledge_response::ShareAcknowledgeResponse,
 };
 
 /// `ShareFetch`. This helper retries while the share-state leadership and
@@ -108,13 +109,13 @@ pub async fn share_renew(
         member_id: Some(setup.session.member.into()),
         epoch: setup.session.epoch,
         mode: RenewalMode::Renew,
-        topics: vec![acknowledge_topic(
-            wire(setup.session.topic_id),
-            vec![acknowledge_partition(
-                setup.session.partition.0,
-                vec![acknowledgement(setup.first.0, setup.last.0, vec![RENEW])],
-            )],
-        )],
+        topics: vec![acknowledge_topic(wire(setup.session.topic_id), vec![
+            acknowledge_partition(setup.session.partition.0, vec![acknowledgement(
+                setup.first.0,
+                setup.last.0,
+                vec![RENEW],
+            )]),
+        ])],
     });
     let resp: ShareAcknowledgeResponse = client.send(req).await.expect("ShareAcknowledge renew");
     assert!(

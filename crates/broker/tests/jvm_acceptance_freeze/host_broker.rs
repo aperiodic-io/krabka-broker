@@ -8,16 +8,16 @@
 //! break-glass cases make and the freeze cases do not, and [`sasl_props`] is
 //! the client-side half of the first of them.
 
-use std::net::SocketAddr;
-
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle, config::ListenerSpec};
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tempfile::TempDir;
-
-use crate::{
-    jvm_acceptance::plain_client_properties,
-    support::{self, JvmBrokerSetup, controller_voters},
-    vocabulary::{SASL_LISTENER, approver_set},
+use {
+    crate::{
+        jvm_acceptance::plain_client_properties,
+        support::{self, JvmBrokerSetup, controller_voters},
+        vocabulary::{SASL_LISTENER, approver_set},
+    },
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle, config::ListenerSpec},
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::net::SocketAddr,
+    tempfile::TempDir,
 };
 
 /// One broker on the host, addressed the two ways this suite needs.
@@ -56,16 +56,13 @@ pub(super) async fn start_jvm_broker(adjust: impl FnOnce(&mut BrokerConfig)) -> 
         .parse()
         .expect("an allocated controller address");
 
-    let mut config = support::jvm_broker_config(
-        dir.path().to_path_buf(),
-        JvmBrokerSetup {
-            listen,
-            controller,
-            advertised: listeners.advertised.clone(),
-            voters: controller_voters(&[(1, controller)]),
-            ..Default::default()
-        },
-    );
+    let mut config = support::jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
+        listen,
+        controller,
+        advertised: listeners.advertised.clone(),
+        voters: controller_voters(&[(1, controller)]),
+        ..Default::default()
+    });
     adjust(&mut config);
 
     // `Broker::start` waits for a metadata leader before it returns, so the
@@ -119,6 +116,4 @@ pub(super) fn gate_on(config: &mut BrokerConfig) {
 }
 
 /// The JVM client properties for one PLAIN operator.
-pub(super) fn sasl_props(user: &str, pass: &str) -> String {
-    plain_client_properties(user, pass)
-}
+pub(super) fn sasl_props(user: &str, pass: &str) -> String { plain_client_properties(user, pass) }

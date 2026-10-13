@@ -6,21 +6,22 @@
 //! than borrowed from the broker's own encoder, which is what makes a verified
 //! signature evidence that the two layouts agree.
 
-use assert2::assert;
-use krabka_broker::codes;
-use krabka_client_core::Client;
-use krabka_protocol::{
-    krabka::break_glass::{
-        ApproveBreakGlassRequest, ApproveBreakGlassResponse, DescribeBreakGlassRequest,
-        DescribedBreakGlassProposal, ProposeBreakGlassRequest,
+use {
+    crate::{
+        cluster::Cluster,
+        principals::{ALICE, BOB, CAROL},
+        support,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    cluster::Cluster,
-    principals::{ALICE, BOB, CAROL},
-    support,
+    assert2::assert,
+    krabka_broker::codes,
+    krabka_client_core::Client,
+    krabka_protocol::{
+        krabka::break_glass::{
+            ApproveBreakGlassRequest, ApproveBreakGlassResponse, DescribeBreakGlassRequest,
+            DescribedBreakGlassProposal, ProposeBreakGlassRequest,
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 // KFC-9 pins these as the wire values of the broker's action enum. They are

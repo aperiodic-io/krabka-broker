@@ -4,8 +4,10 @@
 //! Both values gate the copy, retention and delete passes, so they live apart
 //! from any one of them.
 
-use krabka_remote_storage::{ChainStamp, EpochId, RemoteLogSegmentMetadata, next_chain_stamp};
-use uuid::Uuid;
+use {
+    krabka_remote_storage::{ChainStamp, EpochId, RemoteLogSegmentMetadata, next_chain_stamp},
+    uuid::Uuid,
+};
 
 /// Whether the remote tier this partition writes to is a write-once archive.
 ///

@@ -41,15 +41,16 @@
 //! [`fetch_bound`](self::bound::fetch_bound) and
 //! [`last_fetchable_offset`](self::bound::last_fetchable_offset).
 
-use std::collections::HashSet;
-
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    Decode,
-    owned::{
-        list_offsets_request::ListOffsetsRequest,
-        list_offsets_response::{ListOffsetsResponse, ListOffsetsTopicResponse},
+use {
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        Decode,
+        owned::{
+            list_offsets_request::ListOffsetsRequest,
+            list_offsets_response::{ListOffsetsResponse, ListOffsetsTopicResponse},
+        },
     },
+    std::collections::HashSet,
 };
 
 mod bound;
@@ -70,16 +71,18 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    bound::fetch_bound,
-    remote::{concurrently, remote_timeout},
-    resolve::resolve_partition,
-    response::error_response,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    handlers::{RequestContext, acl_denied},
+use {
+    self::{
+        bound::fetch_bound,
+        remote::{concurrently, remote_timeout},
+        resolve::resolve_partition,
+        response::error_response,
+    },
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{RequestContext, acl_denied},
+    },
 };
 
 /// The `(topic_index, partition)` rows whose `(name, partition)` key appears

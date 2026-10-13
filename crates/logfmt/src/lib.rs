@@ -28,22 +28,23 @@
 
 #![forbid(unsafe_code)]
 
-use std::fmt;
-
-use serde_json::{Map, Value};
-use tracing::{
-    Event, Level, Subscriber,
-    field::{Field, Visit},
-};
-use tracing_subscriber::{
-    Layer, Registry,
-    fmt::{
-        FmtContext, FormatEvent, FormatFields, MakeWriter,
-        format::Writer,
-        time::{FormatTime, SystemTime},
+use {
+    serde_json::{Map, Value},
+    std::fmt,
+    tracing::{
+        Event, Level, Subscriber,
+        field::{Field, Visit},
     },
-    layer::Filter,
-    registry::LookupSpan,
+    tracing_subscriber::{
+        Layer, Registry,
+        fmt::{
+            FmtContext, FormatEvent, FormatFields, MakeWriter,
+            format::Writer,
+            time::{FormatTime, SystemTime},
+        },
+        layer::Filter,
+        registry::LookupSpan,
+    },
 };
 
 /// Map a `tracing` [`Level`] to a Google Cloud Logging `LogSeverity` string.
@@ -74,25 +75,17 @@ impl JsonVisitor {
 }
 
 impl Visit for JsonVisitor {
-    fn record_str(&mut self, field: &Field, value: &str) {
-        self.insert(field, Value::from(value));
-    }
+    fn record_str(&mut self, field: &Field, value: &str) { self.insert(field, Value::from(value)); }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.insert(field, Value::from(value));
     }
 
-    fn record_i64(&mut self, field: &Field, value: i64) {
-        self.insert(field, Value::from(value));
-    }
+    fn record_i64(&mut self, field: &Field, value: i64) { self.insert(field, Value::from(value)); }
 
-    fn record_u64(&mut self, field: &Field, value: u64) {
-        self.insert(field, Value::from(value));
-    }
+    fn record_u64(&mut self, field: &Field, value: u64) { self.insert(field, Value::from(value)); }
 
-    fn record_f64(&mut self, field: &Field, value: f64) {
-        self.insert(field, Value::from(value));
-    }
+    fn record_f64(&mut self, field: &Field, value: f64) { self.insert(field, Value::from(value)); }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         // The event message is recorded here as a `fmt::Arguments`, whose
@@ -174,15 +167,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::Write,
-        sync::{Arc, Mutex},
+    use {
+        super::*,
+        assert2::check,
+        std::{
+            io::Write,
+            sync::{Arc, Mutex},
+        },
+        tracing_subscriber::layer::SubscriberExt as _,
     };
-
-    use assert2::check;
-    use tracing_subscriber::layer::SubscriberExt as _;
-
-    use super::*;
 
     #[derive(Clone)]
     struct Buf(Arc<Mutex<Vec<u8>>>);
@@ -192,16 +185,14 @@ mod tests {
             self.0.lock().unwrap().extend_from_slice(bytes);
             Ok(bytes.len())
         }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
+
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
     }
 
     impl<'a> MakeWriter<'a> for Buf {
         type Writer = Buf;
-        fn make_writer(&'a self) -> Self::Writer {
-            self.clone()
-        }
+
+        fn make_writer(&'a self) -> Self::Writer { self.clone() }
     }
 
     /// Capture the JSON emitted for a single event by `emit`.

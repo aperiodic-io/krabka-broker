@@ -6,14 +6,16 @@
 //! window, `set_at_ms` is newer than the entry the record replaces, and the
 //! signature verifies over the canonical bytes.
 
-use krabka_metadata::TopicFreezeRecord;
-use krabka_units::{Time, convert::TimeExt as _};
-use krabka_verified::{
-    FreezeIdentityState, FreezeSignatureDecision, FreezeSignatureFacts, freeze_signature_decision,
+use {
+    super::{SignatureRefusal, freeze_signing_bytes},
+    crate::operator_keys::OperatorKeys,
+    krabka_metadata::TopicFreezeRecord,
+    krabka_units::{Time, convert::TimeExt as _},
+    krabka_verified::{
+        FreezeIdentityState, FreezeSignatureDecision, FreezeSignatureFacts,
+        freeze_signature_decision,
+    },
 };
-
-use super::{SignatureRefusal, freeze_signing_bytes};
-use crate::operator_keys::OperatorKeys;
 
 /// Everything outside the record that a signature check reads.
 pub(crate) struct FreezeSignatureCheck<'a> {

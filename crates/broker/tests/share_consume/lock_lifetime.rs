@@ -4,21 +4,21 @@
 //! a renew-ack extends the deadline so the sweep leaves the record acquired.
 //! The last test is the un-renewed control for the renew case.
 
-use std::time::Duration;
-
-use assert2::assert;
-
-use crate::{
-    NONE,
-    harness::initialize_consumption,
-    share_rpc::{
-        ShareRenewSetup, acquired_count, fetch_empty, fetch_redelivered, fetch_until_acquired,
-        share_fetch, share_renew,
+use {
+    crate::{
+        NONE,
+        harness::initialize_consumption,
+        share_rpc::{
+            ShareRenewSetup, acquired_count, fetch_empty, fetch_redelivered, fetch_until_acquired,
+            share_fetch, share_renew,
+        },
+        support::share::{
+            ConsumptionSetup, ShareFetchSetup, ShareRecordCount, ShareSessionEpoch,
+            ShareSessionSetup, ShareTopicSetup, permitted_topic_fixture,
+        },
     },
-    support::share::{
-        ConsumptionSetup, ShareFetchSetup, ShareRecordCount, ShareSessionEpoch, ShareSessionSetup,
-        ShareTopicSetup, permitted_topic_fixture,
-    },
+    assert2::assert,
+    std::time::Duration,
 };
 
 /// The background sweep reverts an acquired-but-unacknowledged lock that
@@ -105,13 +105,10 @@ async fn renew_extends_lock_not_redelivered() {
     // expires) to reset the deadline to renew-time + 500ms ≈ T0+700ms. Epoch
     // is now 2. This sleep proves renew timing; it is NOT a flaky state-guess.
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let renew = share_renew(
-        &client,
-        ShareRenewSetup {
-            session: ShareSessionSetup::joined(&member, tid),
-            ..Default::default()
-        },
-    )
+    let renew = share_renew(&client, ShareRenewSetup {
+        session: ShareSessionSetup::joined(&member, tid),
+        ..Default::default()
+    })
     .await;
     assert!(
         renew.error_code == NONE,
@@ -171,14 +168,10 @@ async fn lock_fixture(
             }
         })
         .await;
-    let (member, _) = initialize_consumption(
-        &broker,
-        &client,
-        ConsumptionSetup {
-            topic_id: tid,
-            count: ShareRecordCount(1),
-        },
-    )
+    let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
+        topic_id: tid,
+        count: ShareRecordCount(1),
+    })
     .await;
 
     (permit, broker, client, dir, tid, member)

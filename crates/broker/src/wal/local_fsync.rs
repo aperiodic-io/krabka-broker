@@ -2,14 +2,14 @@
 //! partition's existing local `Log`. Production diskless partitions use the
 //! quorum WAL.
 
-use std::sync::{Arc, Mutex};
-
-use async_trait::async_trait;
-use krabka_ids::Offset;
-use krabka_log::Log;
-
-use super::WalStore;
-use crate::{blocking::run_blocking, error::BrokerError, partition_writer::storage_failure_error};
+use {
+    super::WalStore,
+    crate::{blocking::run_blocking, error::BrokerError, partition_writer::storage_failure_error},
+    async_trait::async_trait,
+    krabka_ids::Offset,
+    krabka_log::Log,
+    std::sync::{Arc, Mutex},
+};
 
 /// A [`WalStore`] backed by the partition's local `Log` plus an explicit
 /// `fsync` (`Log::sync`).
@@ -19,9 +19,7 @@ pub struct LocalFsyncWal {
 
 impl LocalFsyncWal {
     #[must_use]
-    pub fn new(log: Arc<Mutex<Log>>) -> Self {
-        Self { log }
-    }
+    pub fn new(log: Arc<Mutex<Log>>) -> Self { Self { log } }
 }
 
 #[async_trait]
@@ -56,13 +54,13 @@ impl WalStore for LocalFsyncWal {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use assert2::assert;
-    use krabka_log::{Log, LogConfig};
-
-    use super::*;
-    use crate::partition::ProduceData;
+    use {
+        super::*,
+        crate::partition::ProduceData,
+        assert2::assert,
+        krabka_log::{Log, LogConfig},
+        std::sync::{Arc, Mutex},
+    };
 
     fn wal(dir: &std::path::Path) -> LocalFsyncWal {
         let log = Arc::new(Mutex::new(Log::open(dir, LogConfig::default()).unwrap()));

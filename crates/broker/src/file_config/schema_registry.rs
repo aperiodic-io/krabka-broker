@@ -5,10 +5,7 @@
 //! Confluent-compatible registry client each broker holds for KFC-7
 //! broker-side schema validation.
 
-use std::path::PathBuf;
-
-use schemars::JsonSchema;
-use serde::Deserialize;
+use {schemars::JsonSchema, serde::Deserialize, std::path::PathBuf};
 
 /// TOML shape of `[schema_registry]`. Mirrors the constructor arguments of
 /// [`crate::schema_validation::SchemaValidator::new`], the one registry client
@@ -68,22 +65,21 @@ fn default_schema_registry_maximum_cache_size() -> usize {
     DEFAULT_SCHEMA_REGISTRY_MAXIMUM_CACHE_SIZE
 }
 
-fn default_schema_registry_expire_after_ms() -> i64 {
-    DEFAULT_SCHEMA_REGISTRY_EXPIRE_AFTER_MS
-}
+fn default_schema_registry_expire_after_ms() -> i64 { DEFAULT_SCHEMA_REGISTRY_EXPIRE_AFTER_MS }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::{
-        config::BrokerConfig,
-        file_config::{
-            FileConfig, FileConfigError,
-            test_support::{configured, configured_unwrap_parse},
+    use {
+        super::*,
+        crate::{
+            config::BrokerConfig,
+            file_config::{
+                FileConfig, FileConfigError,
+                test_support::{configured, configured_unwrap_parse},
+            },
         },
+        assert2::assert,
+        krabka_units::millis,
     };
 
     #[test]

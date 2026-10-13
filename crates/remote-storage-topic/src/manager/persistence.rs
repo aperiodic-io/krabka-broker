@@ -7,13 +7,14 @@
 //! policy, and the accessor the assignment reconciler uses, so the one place
 //! that owns that policy is easy to find.
 
-use tracing::instrument;
-
-use super::TopicBasedRemoteLogMetadataManager;
-use crate::{
-    error::{CodecError, SnapshotError},
-    log::PartitionStart,
-    snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
+use {
+    super::TopicBasedRemoteLogMetadataManager,
+    crate::{
+        error::{CodecError, SnapshotError},
+        log::PartitionStart,
+        snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
+    },
+    tracing::instrument,
 };
 
 impl TopicBasedRemoteLogMetadataManager {
@@ -113,22 +114,22 @@ impl TopicBasedRemoteLogMetadataManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use krabka_ids::LeaderEpoch;
-    use krabka_remote_storage::{PartitionDump, RemoteLogMetadataManager, RlmmCacheDump};
-
-    use super::*;
-    use crate::{
-        log::{InProcessMetadataEventLog, MetadataEventLog},
-        manager::test_support::{
-            finish, on_blocking, snapshot_test_dir, start_manager_in, start_seeded_manager_in,
-            started, tp, wait_ready,
+    use {
+        super::*,
+        crate::{
+            log::{InProcessMetadataEventLog, MetadataEventLog},
+            manager::test_support::{
+                finish, on_blocking, snapshot_test_dir, start_manager_in, start_seeded_manager_in,
+                started, tp, wait_ready,
+            },
+            partitioning::metadata_partition_for,
+            serde::MetadataEvent,
+            snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
         },
-        partitioning::metadata_partition_for,
-        serde::MetadataEvent,
-        snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
+        assert2::{assert, check},
+        krabka_ids::LeaderEpoch,
+        krabka_remote_storage::{PartitionDump, RemoteLogMetadataManager, RlmmCacheDump},
+        std::sync::Arc,
     };
 
     fn snapshot_with_offsets(committed_offsets: Vec<i64>) -> Snapshot {
@@ -173,10 +174,9 @@ mod tests {
     async fn oversized_snapshot_count_falls_back_to_replay() {
         let dir = snapshot_test_dir("oversized-count");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join(SNAPSHOT_FILE_NAME),
-            [0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1],
-        )
+        std::fs::write(dir.join(SNAPSHOT_FILE_NAME), [
+            0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1,
+        ])
         .unwrap();
         let log: Arc<dyn MetadataEventLog> = InProcessMetadataEventLog::new(4);
         let mp = metadata_partition_for(&tp(), log.partition_count());
@@ -301,11 +301,11 @@ mod tests {
         // First lifetime: seed three finished segments, then shutdown-flush.
         let pre_cache;
         {
-            let m = start_seeded_manager_in(
-                log.clone(),
-                dir.clone(),
-                &[(10, 0, 99), (11, 100, 199), (12, 200, 299)],
-            )
+            let m = start_seeded_manager_in(log.clone(), dir.clone(), &[
+                (10, 0, 99),
+                (11, 100, 199),
+                (12, 200, 299),
+            ])
             .await;
             pre_cache = m.list_remote_log_segments(&tp()).unwrap();
             m.shutdown_and_flush().await;

@@ -8,13 +8,14 @@
 //! observe the same three handles: broker registration on every node, and the
 //! `tiered_storage_rlmm_topic_backed` gauge flipping on every node.
 
-use krabka_broker::{
-    BootstrapMode, Broker, BrokerConfig, BrokerHandle, KafkaRlmmConfig, RemoteStorageBackend,
-    RlmmKind,
+use {
+    crate::support::{self, NodeIndex, controller_voters, node_config},
+    krabka_broker::{
+        BootstrapMode, Broker, BrokerConfig, BrokerHandle, KafkaRlmmConfig, RemoteStorageBackend,
+        RlmmKind,
+    },
+    tempfile::TempDir,
 };
-use tempfile::TempDir;
-
-use crate::support::{self, NodeIndex, controller_voters, node_config};
 
 /// Boots three in-process brokers with a shared Local remote tier and a
 /// topic-backed RLMM.

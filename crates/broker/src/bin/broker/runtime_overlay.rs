@@ -4,11 +4,12 @@
 //! precedence rules as the operator's TOML file, and that config then applies
 //! to the `BrokerConfig` the broker starts from.
 
-use krabka_broker::{BrokerConfig, config::DEFAULT_CONTROLLED_SHUTDOWN_DRAIN_TIMEOUT};
-use krabka_client_core::{ClientFrameMax, ConnectionDispatchQueueCapacity};
-use krabka_units::Time;
-
-use crate::{cli::Args, runtime_args::RuntimeArgs};
+use {
+    crate::{cli::Args, runtime_args::RuntimeArgs},
+    krabka_broker::{BrokerConfig, config::DEFAULT_CONTROLLED_SHUTDOWN_DRAIN_TIMEOUT},
+    krabka_client_core::{ClientFrameMax, ConnectionDispatchQueueCapacity},
+    krabka_units::Time,
+};
 
 impl RuntimeArgs {
     fn as_file_runtime(&self) -> krabka_broker::file_config::RuntimeFileConfig {

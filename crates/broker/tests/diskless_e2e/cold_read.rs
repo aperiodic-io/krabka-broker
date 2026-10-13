@@ -11,17 +11,17 @@
 //! so `OFFSET_OUT_OF_RANGE` is the only answer the log path can give and the
 //! object store is the only thing that can rescue it.
 
-use std::time::Duration;
-
-use assert2::assert;
-
-use crate::{
-    RECORDS, TOPIC,
-    topic::{flushing_workload, seeded_leader},
-    wire::{
-        OFFSET_OUT_OF_RANGE, assert_matches_produced, delete_records_below, earliest_offset,
-        fetch_error_code, fetch_log,
+use {
+    crate::{
+        RECORDS, TOPIC,
+        topic::{flushing_workload, seeded_leader},
+        wire::{
+            OFFSET_OUT_OF_RANGE, assert_matches_produced, delete_records_below, earliest_offset,
+            fetch_error_code, fetch_log,
+        },
     },
+    assert2::assert,
+    std::time::Duration,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

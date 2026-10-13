@@ -1,33 +1,33 @@
 //! Tests for the rebuild of a classic group's members and state from a
 //! persisted `GroupMetadata` value.
 
-use std::{collections::HashMap, time::Duration};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
-    records::RecordBatch,
-};
-use tokio::sync::oneshot;
-
-use super::{
-    apply::apply_group_metadata,
-    replay::{Replayed, apply_record, finalize},
-    test_support::{bare_coordinator, classic_group_record},
-};
-use crate::{
-    codes,
-    coordinator::{
-        persistence::{self, GroupMetadataValue, MemberMetadata},
-        unified::{
-            actor::{GroupActorHandle, GroupActorMessage, JoinResult, JoinResultMember},
-            classic_state::{
-                ClassicGroup as ClassicState, GroupState as ClassicGroupState, Member,
+use {
+    super::{
+        apply::apply_group_metadata,
+        replay::{Replayed, apply_record, finalize},
+        test_support::{bare_coordinator, classic_group_record},
+    },
+    crate::{
+        codes,
+        coordinator::{
+            persistence::{self, GroupMetadataValue, MemberMetadata},
+            unified::{
+                actor::{GroupActorHandle, GroupActorMessage, JoinResult, JoinResultMember},
+                classic_state::{
+                    ClassicGroup as ClassicState, GroupState as ClassicGroupState, Member,
+                },
+                regex_resolver::no_topic_regex_resolver,
             },
-            regex_resolver::no_topic_regex_resolver,
         },
     },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_protocol::{
+        owned::join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
+        records::RecordBatch,
+    },
+    std::{collections::HashMap, time::Duration},
+    tokio::sync::oneshot,
 };
 
 fn stored_member(
@@ -117,20 +117,18 @@ fn replay_rebuilds_the_group_as_kafka_loads_it() {
     let cases = [
         (
             "a static member with a stored rebalance timeout",
-            stored_group(
-                "consumer",
-                Some("range"),
-                vec![stored_member(Some("inst"), 45_000, 30_000)],
-            ),
+            stored_group("consumer", Some("range"), vec![stored_member(
+                Some("inst"),
+                45_000,
+                30_000,
+            )]),
             loaded_group(Some("inst"), secs(45), secs(30)),
         ),
         (
             "a member whose stored rebalance timeout is -1",
-            stored_group(
-                "consumer",
-                Some("range"),
-                vec![stored_member(None, -1, 30_000)],
-            ),
+            stored_group("consumer", Some("range"), vec![stored_member(
+                None, -1, 30_000,
+            )]),
             loaded_group(None, secs(30), secs(30)),
         ),
         (

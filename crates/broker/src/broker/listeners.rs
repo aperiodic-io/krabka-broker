@@ -8,22 +8,22 @@
 //! name another one. A controller-only node serves the controller APIs on its
 //! controller listener, which the metadata phase binds.
 
-use std::{net::SocketAddr, sync::Arc};
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use tokio::{net::TcpListener, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    broker::{Broker, accept::accept_loop},
-    config::{BrokerConfig, ListenerSpec},
-    error::BrokerError,
-    future_log::{FutureLogState, MovePolicy, resume_move},
-    log_dir,
-    partition_registry::PartitionRegistry,
-    platform::{Sockets, bind_listener},
-    throttle::ThrottleState,
+use {
+    crate::{
+        broker::{Broker, accept::accept_loop},
+        config::{BrokerConfig, ListenerSpec},
+        error::BrokerError,
+        future_log::{FutureLogState, MovePolicy, resume_move},
+        log_dir,
+        partition_registry::PartitionRegistry,
+        platform::{Sockets, bind_listener},
+        throttle::ThrottleState,
+    },
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    std::{net::SocketAddr, sync::Arc},
+    tokio::{net::TcpListener, task::JoinHandle},
+    tokio_util::sync::CancellationToken,
 };
 
 pub(super) struct ListenerStartup {
@@ -202,16 +202,17 @@ pub(super) fn spawn_listener_tasks(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_security::ListenerProtocol;
-
-    use super::*;
-    use crate::{
-        SslPrincipalMapper,
-        config::{
-            ListenerSpec,
-            NodeRole::{Broker, Controller},
+    use {
+        super::*,
+        crate::{
+            SslPrincipalMapper,
+            config::{
+                ListenerSpec,
+                NodeRole::{Broker, Controller},
+            },
         },
+        assert2::{assert, check},
+        krabka_security::ListenerProtocol,
     };
 
     fn spec(name: &str, bind_addr: SocketAddr) -> ListenerSpec {

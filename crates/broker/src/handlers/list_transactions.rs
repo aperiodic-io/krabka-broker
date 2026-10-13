@@ -17,13 +17,14 @@
 //! enum already matches the JVM names verbatim (`Empty`, `Ongoing`, ...),
 //! so the mapping is direct.
 
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    list_transactions_request::ListTransactionsRequest,
-    list_transactions_response::{ListTransactionsResponse, TransactionState},
+use {
+    crate::{codes, re2j::compile_full_match, txn::state::TxnState},
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        list_transactions_request::ListTransactionsRequest,
+        list_transactions_response::{ListTransactionsResponse, TransactionState},
+    },
 };
-
-use crate::{codes, re2j::compile_full_match, txn::state::TxnState};
 
 /// Every state name Kafka's `TransactionState.fromName` resolves. The handler
 /// echoes any filter string outside this set back in the KIP-664
@@ -193,13 +194,14 @@ context_handler! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        broker::Broker,
-        handlers::{RequestContext, test_support::transaction_admin_tests::*},
-        test_support::dispatch_wire,
+    use {
+        super::*,
+        crate::{
+            broker::Broker,
+            handlers::{RequestContext, test_support::transaction_admin_tests::*},
+            test_support::dispatch_wire,
+        },
+        assert2::assert,
     };
 
     #[test]
@@ -291,9 +293,7 @@ mod tests {
     /// versions. This also protects the producer-id filter from being inverted.
     #[tokio::test]
     async fn filters_follow_wire_versions_and_keep_matching_entries() {
-        use krabka_log::ProducerId;
-
-        use crate::txn::state::TxnEntry;
+        use {crate::txn::state::TxnEntry, krabka_log::ProducerId};
 
         let max_ver = krabka_protocol::owned::list_transactions_response::MAX_VERSION;
         broker_fixture!((broker_handle, _dir, broker), allow_all);
@@ -394,22 +394,17 @@ mod tests {
     /// `Set` in `KafkaApis`).
     #[tokio::test]
     async fn dead_transactions_are_never_listed_and_unknown_filters_are_unique() {
-        use krabka_log::ProducerId;
-
-        use crate::txn::state::TxnEntry;
+        use {crate::txn::state::TxnEntry, krabka_log::ProducerId};
 
         let version = krabka_protocol::owned::list_transactions_response::MAX_VERSION;
         broker_fixture!((broker_handle, _dir, broker), allow_all);
         let coordinator = &broker.txn_coordinator;
         // Two transactions in one state partition: one ongoing, one dying.
         let (ongoing_id, dead_id) = ("txn-list-ongoing", "txn-list-dead");
-        lead_transaction_state_partitions(
-            &broker_handle,
-            &[
-                coordinator.partition_for(ongoing_id),
-                coordinator.partition_for(dead_id),
-            ],
-        )
+        lead_transaction_state_partitions(&broker_handle, &[
+            coordinator.partition_for(ongoing_id),
+            coordinator.partition_for(dead_id),
+        ])
         .await;
         for tid in [ongoing_id, dead_id] {
             let dead = tid == dead_id;

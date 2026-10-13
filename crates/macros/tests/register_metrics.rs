@@ -2,12 +2,14 @@
 //! the text exposition of the registry it registers into. `prometheus-client`
 //! ends every help text with a period of its own.
 
-use assert2::assert;
-use krabka_macros::RegisterMetrics;
-use prometheus_client::{
-    encoding::text::encode,
-    metrics::{counter::Counter, family::Family, gauge::Gauge, histogram::Histogram},
-    registry::Registry,
+use {
+    assert2::assert,
+    krabka_macros::RegisterMetrics,
+    prometheus_client::{
+        encoding::text::encode,
+        metrics::{counter::Counter, family::Family, gauge::Gauge, histogram::Histogram},
+        registry::Registry,
+    },
 };
 
 type Labels = Vec<(String, String)>;

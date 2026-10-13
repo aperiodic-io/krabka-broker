@@ -11,10 +11,9 @@
 //! `macro_rules!` is textually scoped and every `runtime_*` module expands the
 //! `set_runtime_*` macros it defines.
 
-use krabka_security::ListenerProtocol;
-use krabka_units::Time;
-use schemars::JsonSchema;
-use serde::Deserialize;
+use {
+    krabka_security::ListenerProtocol, krabka_units::Time, schemars::JsonSchema, serde::Deserialize,
+};
 
 #[macro_use]
 mod runtime_macros;
@@ -78,9 +77,10 @@ pub use self::{
 /// `Option<Time>`, `Option<ByteSize>` and `Option<Ratio>` field at its marker
 /// here and at its `krabka_units::serde_units::human` codec.
 pub mod schema_units {
-    use std::borrow::Cow;
-
-    use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+    use {
+        schemars::{JsonSchema, Schema, SchemaGenerator, json_schema},
+        std::borrow::Cow,
+    };
 
     macro_rules! unit_marker {
         ($name:ident, $format:literal, $doc:literal) => {
@@ -454,9 +454,7 @@ pub struct FileConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn config_schema_produces_non_empty_json_object() {

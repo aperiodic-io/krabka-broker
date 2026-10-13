@@ -5,13 +5,14 @@
 //! Both tests here drive the argv-parsing entry point rather than `restore`,
 //! so they also cover the flag handling that sits in front of the pipeline.
 
-use assert2::check;
-use krabka_log::name;
-use krabka_restore::{EXIT_OK, run_from_args};
-
-use crate::{
-    args::{RestoreOptions, restore_argv},
-    fixture::{Fixture, build_fixture},
+use {
+    crate::{
+        args::{RestoreOptions, restore_argv},
+        fixture::{Fixture, build_fixture},
+    },
+    assert2::check,
+    krabka_log::name,
+    krabka_restore::{EXIT_OK, run_from_args},
 };
 
 struct CliRestore {

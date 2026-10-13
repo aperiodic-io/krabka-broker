@@ -1,8 +1,9 @@
 //! Explicit wire inputs and feature oracles shared by storage and broker tests.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::{fixtures::name as fixture_name, meta::arguments};
+use {
+    crate::{fixtures::name as fixture_name, meta::arguments},
+    moxy::{ast::ParseError, token::TokenStream},
+};
 
 pub(crate) fn supported_feature_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {
     let name = fixture_name(input)?;

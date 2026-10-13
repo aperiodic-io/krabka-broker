@@ -5,13 +5,13 @@
 //! different names and paths, so each rebalance protocol gets its own
 //! preparation function.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-
-use crate::{
-    GROUP, NEXT_GEN_GROUP, TOPIC, TYPELESS_GROUP,
-    groups_docker::{docker_logs, exec, exec_detached},
+use {
+    crate::{
+        GROUP, NEXT_GEN_GROUP, TOPIC, TYPELESS_GROUP,
+        groups_docker::{docker_logs, exec, exec_detached},
+    },
+    assert2::assert,
+    std::time::{Duration, Instant},
 };
 
 pub(crate) fn wait_for_broker(api_versions_tool: &str) {

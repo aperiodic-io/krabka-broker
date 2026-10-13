@@ -2,11 +2,14 @@
 //! `krabka-client-core` client against a started broker, and creating the topic
 //! whose configuration, partitions, or records the test then drives.
 
-use assert2::assert;
-
-use crate::support::{
-    client::connect_owned,
-    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        client::connect_owned,
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        },
+    },
+    assert2::assert,
 };
 
 pub(crate) async fn build_client(addr: std::net::SocketAddr) -> krabka_client_core::Client {

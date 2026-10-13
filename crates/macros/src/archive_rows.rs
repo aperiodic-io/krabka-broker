@@ -1,11 +1,12 @@
 //! Share the archive walk while keeping Creusot's bindings in one expansion context.
 
-use moxy::{
-    ast::ParseError,
-    token::{Ident, Span, TokenStream},
+use {
+    crate::{fixtures::name, meta::arguments},
+    moxy::{
+        ast::ParseError,
+        token::{Ident, Span, TokenStream},
+    },
 };
-
-use crate::{fixtures::name, meta::arguments};
 
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
     let mut sections = vec![TokenStream::new()];

@@ -1,20 +1,20 @@
-use std::{sync::Arc, time::Duration};
-
-use async_trait::async_trait;
-use krabka_ids::{LeaderEpoch, Offset, PartitionIndex};
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_protocol::records::RecordBatch;
-use tokio::sync::{oneshot, watch};
-
-use crate::{
-    codes,
-    coordinator::partitioner::partition_for_group,
-    error::BrokerError,
-    metadata_source::MetadataSource,
-    partition::{
-        Partition, ProduceData, ProduceJob, ProducerAppendCheck, Uncommitted, WriterMessage,
+use {
+    crate::{
+        codes,
+        coordinator::partitioner::partition_for_group,
+        error::BrokerError,
+        metadata_source::MetadataSource,
+        partition::{
+            Partition, ProduceData, ProduceJob, ProducerAppendCheck, Uncommitted, WriterMessage,
+        },
+        partition_registry::PartitionRegistry,
     },
-    partition_registry::PartitionRegistry,
+    async_trait::async_trait,
+    krabka_ids::{LeaderEpoch, Offset, PartitionIndex},
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_protocol::records::RecordBatch,
+    std::{sync::Arc, time::Duration},
+    tokio::sync::{oneshot, watch},
 };
 
 #[cfg(test)]
@@ -276,11 +276,12 @@ pub(crate) fn write_failure_code(error: &BrokerError) -> i16 {
 }
 
 pub mod fake {
-    use krabka_protocol::records::RecordBatch;
-    use tokio::sync::Mutex;
-
-    use super::{BrokerError, OFFSETS_TOPIC, OffsetsLog, async_trait};
-    use crate::coordinator::unified::persistence_next_gen::NextGenKey;
+    use {
+        super::{BrokerError, OFFSETS_TOPIC, OffsetsLog, async_trait},
+        crate::coordinator::unified::persistence_next_gen::NextGenKey,
+        krabka_protocol::records::RecordBatch,
+        tokio::sync::Mutex,
+    };
 
     /// Which classic metadata operation a test expects in the append log.
     #[derive(Clone, Copy)]
@@ -337,9 +338,7 @@ pub mod fake {
             }
         }
 
-        pub async fn batches(&self) -> Vec<RecordBatch> {
-            self.appended.lock().await.clone()
-        }
+        pub async fn batches(&self) -> Vec<RecordBatch> { self.appended.lock().await.clone() }
 
         /// Snapshot the records grouped by their original append batch.
         pub async fn record_batches(&self) -> Vec<Vec<krabka_protocol::records::Record>> {

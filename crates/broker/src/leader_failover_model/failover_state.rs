@@ -11,13 +11,13 @@
 //! the assignment, which is what tells a clean pick that walks the ISR apart
 //! from Kafka's.
 
-use std::collections::{BTreeSet, HashSet};
-
-use krabka_metadata::{MetadataImage, PartitionRecord};
-use krabka_raft::NodeId;
-
-use super::elr;
-use crate::config_keys::RecoveryStrategy;
+use {
+    super::elr,
+    crate::config_keys::RecoveryStrategy,
+    krabka_metadata::{MetadataImage, PartitionRecord},
+    krabka_raft::NodeId,
+    std::collections::{BTreeSet, HashSet},
+};
 
 /// Bounded config for the failover-scan model.
 pub(super) struct FailoverModel {
@@ -100,9 +100,7 @@ impl FailoverModel {
     /// ordinary course. At `min.insync.replicas` 1 the rule publishes one only
     /// for an ISR that has emptied outright, so the ELR anti-vacuity
     /// witnesses are stated only above it.
-    pub(super) fn elr_configured(&self) -> bool {
-        self.min_isr > 1
-    }
+    pub(super) fn elr_configured(&self) -> bool { self.min_isr > 1 }
 }
 
 /// Build a minimal `PartitionRecord` from the model state to drive the real

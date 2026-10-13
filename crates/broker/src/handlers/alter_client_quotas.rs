@@ -5,12 +5,13 @@
 //! submit that carries every accepted entry. Entry validation and the records
 //! it produces live in `entries`; the response rows live in `response`.
 
-use std::collections::HashSet;
-
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::owned::{
-    alter_client_quotas_request::AlterClientQuotasRequest,
-    alter_client_quotas_response::AlterClientQuotasResponse,
+use {
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::owned::{
+        alter_client_quotas_request::AlterClientQuotasRequest,
+        alter_client_quotas_response::AlterClientQuotasResponse,
+    },
+    std::collections::HashSet,
 };
 
 mod entries;
@@ -21,11 +22,13 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    entries::{Alteration, alter_client_quotas},
-    response::{apply_submit_error, err_entry, ok_entry, whole_request_error},
+use {
+    self::{
+        entries::{Alteration, alter_client_quotas},
+        response::{apply_submit_error, err_entry, ok_entry, whole_request_error},
+    },
+    crate::{codes::CLUSTER_AUTHORIZATION_FAILED, quota::parse_ip_literal},
 };
-use crate::{codes::CLUSTER_AUTHORIZATION_FAILED, quota::parse_ip_literal};
 
 context_handler! {
     AlterClientQuotasRequest => AlterClientQuotasResponse,

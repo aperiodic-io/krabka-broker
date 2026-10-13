@@ -1,6 +1,4 @@
-use assert2::check;
-
-use super::*;
+use {super::*, assert2::check};
 
 /// A local segment that is neither blocked nor expired.
 const fn fresh(size: u64) -> LocalRetentionSegment {

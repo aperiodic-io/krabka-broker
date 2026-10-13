@@ -7,19 +7,21 @@
 //! `ActivationRecordsGenerator.recordsForEmptyLog` does, and every node reads
 //! them from the log.
 
-use std::sync::Arc;
-
-use krabka_units::convert::TimeExt as _;
-
-use crate::{
-    clean_shutdown::restart_was_clean,
-    config::BrokerConfig,
-    config_keys::{BROKER_WITNESS, STRETCH_PREFERRED_LEADER_SITE, WITNESS_TRUE},
-    elr::withdraw_elr_membership,
-    error::BrokerError,
-    host_port::{advertised_host, local_host_name, parse_advertised_host_port, parse_host_port},
-    log_dir_id::LogDirIds,
-    metadata_source::MetadataSource,
+use {
+    crate::{
+        clean_shutdown::restart_was_clean,
+        config::BrokerConfig,
+        config_keys::{BROKER_WITNESS, STRETCH_PREFERRED_LEADER_SITE, WITNESS_TRUE},
+        elr::withdraw_elr_membership,
+        error::BrokerError,
+        host_port::{
+            advertised_host, local_host_name, parse_advertised_host_port, parse_host_port,
+        },
+        log_dir_id::LogDirIds,
+        metadata_source::MetadataSource,
+    },
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
 };
 
 fn self_registration_record(config: &BrokerConfig) -> krabka_metadata::BrokerRegistrationRecord {

@@ -11,10 +11,11 @@
 //! An existing topic of the same name is not a collision: Kafka answers it
 //! `TOPIC_ALREADY_EXISTS`, and so does the committing path here.
 
-use krabka_log::topic_name::{topic_names_collide, validate_topic_name};
-use krabka_metadata::MetadataImage;
-
-use crate::codes;
+use {
+    crate::codes,
+    krabka_log::topic_name::{topic_names_collide, validate_topic_name},
+    krabka_metadata::MetadataImage,
+};
 
 /// The raft metadata log. It is a topic name in Kafka, and no client may
 /// create it.

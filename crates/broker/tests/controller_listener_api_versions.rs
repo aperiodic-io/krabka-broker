@@ -9,26 +9,26 @@
 
 mod support;
 
-use std::net::SocketAddr;
-
-use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        api_versions_response::{ApiVersion, ApiVersionsResponse},
-        sasl_authenticate_request::SaslAuthenticateRequest,
-        sasl_handshake_request::SaslHandshakeRequest,
+use {
+    crate::support::discovery::api_versions_request_for,
+    assert2::{assert, check},
+    krabka_broker::{Broker, BrokerConfig},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            api_versions_response::{ApiVersion, ApiVersionsResponse},
+            sasl_authenticate_request::SaslAuthenticateRequest,
+            sasl_handshake_request::SaslHandshakeRequest,
+        },
+    },
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::net::SocketAddr,
+    tempfile::TempDir,
+    tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
     },
 };
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tempfile::TempDir;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
-
-use crate::support::discovery::api_versions_request_for;
 
 // A request frame; flexible selects v2, and the prefix keeps the original u32 limit.
 krabka_macros::vector_request_fixture!(frame, u32);

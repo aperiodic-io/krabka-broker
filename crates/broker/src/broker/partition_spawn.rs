@@ -3,33 +3,33 @@
 //! caller in the crate that materialises a partition goes through here, so the
 //! spawn paths live apart from the broker's startup sequence.
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicI32, AtomicU64},
-};
-
-use krabka_ids::PartitionIndex;
-
-use crate::{
-    config::BrokerConfig,
-    delivery::DeliveryHandles,
-    diskless::hot_tail::HotTailCache,
-    error::BrokerError,
-    log_dir_status::LogDirRegistry,
-    partition::{
-        Partition, PartitionRuntimeConfig, ReplicationTarget, WriterMessage,
-        empty_marker_materialization, initial_replication_target,
-    },
-    partition_writer::run_with_sequencer,
-    producer_state::ProducerState,
-    replica_state::ReplicaState,
-    wal::{
-        SharedWal,
-        quorum::{
-            QuorumWalStore,
-            engine::WalShardEngine,
-            registry::{ShardId, WalShardRegistry},
+use {
+    crate::{
+        config::BrokerConfig,
+        delivery::DeliveryHandles,
+        diskless::hot_tail::HotTailCache,
+        error::BrokerError,
+        log_dir_status::LogDirRegistry,
+        partition::{
+            Partition, PartitionRuntimeConfig, ReplicationTarget, WriterMessage,
+            empty_marker_materialization, initial_replication_target,
         },
+        partition_writer::run_with_sequencer,
+        producer_state::ProducerState,
+        replica_state::ReplicaState,
+        wal::{
+            SharedWal,
+            quorum::{
+                QuorumWalStore,
+                engine::WalShardEngine,
+                registry::{ShardId, WalShardRegistry},
+            },
+        },
+    },
+    krabka_ids::PartitionIndex,
+    std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicI32, AtomicU64},
     },
 };
 

@@ -1,24 +1,24 @@
 //! Diskless WAL cold-read path from flushed object-store runs.
 
-use std::{fmt::Display, io, sync::Arc};
-
-use bytes::Bytes;
-use krabka_protocol::records::{RecordBatch, RecordsPayload};
-use krabka_remote_storage::{RemoteStorageError, first_record_at_or_after_timestamp};
-use krabka_verified::{DisklessBatchStep, diskless_batch_step};
-use object_store::{GetOptions, GetRange, ObjectStore, path::Path};
-use tokio::sync::Mutex as AsyncMutex;
-use uuid::Uuid;
-
-use super::wal_index::WalIndexCache;
 #[cfg(test)]
 use crate::config::BrokerConfig;
-use crate::{
-    broker::Broker,
-    codes,
-    error::BrokerError,
-    handlers::fetch::{LiveOffsets, PendingRead},
-    partition::Partition,
+use {
+    super::wal_index::WalIndexCache,
+    crate::{
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        handlers::fetch::{LiveOffsets, PendingRead},
+        partition::Partition,
+    },
+    bytes::Bytes,
+    krabka_protocol::records::{RecordBatch, RecordsPayload},
+    krabka_remote_storage::{RemoteStorageError, first_record_at_or_after_timestamp},
+    krabka_verified::{DisklessBatchStep, diskless_batch_step},
+    object_store::{GetOptions, GetRange, ObjectStore, path::Path},
+    std::{fmt::Display, io, sync::Arc},
+    tokio::sync::Mutex as AsyncMutex,
+    uuid::Uuid,
 };
 
 /// Shared state that serves diskless offsets. The broker trimmed these offsets
@@ -62,9 +62,7 @@ impl DisklessReadHandle {
 
     /// Clone the raw object-store handle for the background WAL flusher.
     #[must_use]
-    pub(crate) fn object_store(&self) -> Arc<dyn ObjectStore> {
-        Arc::clone(&self.store)
-    }
+    pub(crate) fn object_store(&self) -> Arc<dyn ObjectStore> { Arc::clone(&self.store) }
 
     async fn read_run(
         &self,
@@ -90,13 +88,10 @@ impl DisklessReadHandle {
             .checked_add(byte_len)
             .ok_or_else(|| BrokerError::Txn("diskless WAL byte range overflow".into()))?;
         self.store
-            .get_opts(
-                &Path::from(object_key),
-                GetOptions {
-                    range: Some(GetRange::Bounded(byte_start..range_end)),
-                    ..Default::default()
-                },
-            )
+            .get_opts(&Path::from(object_key), GetOptions {
+                range: Some(GetRange::Bounded(byte_start..range_end)),
+                ..Default::default()
+            })
             .await
             .map_err(|error| BrokerError::Txn(format!("diskless WAL get: {error}")))?
             .bytes()
@@ -170,13 +165,10 @@ impl DisklessReadHandle {
                 .ok_or_else(|| wal_timestamp_error("WAL byte range overflow"))?;
             let data = self
                 .store
-                .get_opts(
-                    &Path::from(key),
-                    GetOptions {
-                        range: Some(GetRange::Bounded(entry.byte_start..end)),
-                        ..Default::default()
-                    },
-                )
+                .get_opts(&Path::from(key), GetOptions {
+                    range: Some(GetRange::Bounded(entry.byte_start..end)),
+                    ..Default::default()
+                })
                 .await
                 .map_err(wal_timestamp_error)?
                 .bytes()
@@ -307,24 +299,25 @@ fn first_batch_bytes_at_or_after(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::BytesMut;
-    use krabka_compression::CompressionType;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{Log, LogConfig};
-    use krabka_protocol::{
-        Decode, Encode,
-        owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
-        primitives::uuid::Uuid as WireUuid,
-        records::{Attributes, Record, RecordBatch},
-    };
-    use object_store::{ObjectStoreExt, PutPayload, path::Path};
-
-    use super::*;
-    use crate::{
-        broker::spawn_partition,
-        config::{RemoteStorageBackend, RlmmKind},
-        diskless::wal_index::{WalFlushRecord, WalIndexEntry},
+    use {
+        super::*,
+        crate::{
+            broker::spawn_partition,
+            config::{RemoteStorageBackend, RlmmKind},
+            diskless::wal_index::{WalFlushRecord, WalIndexEntry},
+        },
+        assert2::assert,
+        bytes::BytesMut,
+        krabka_compression::CompressionType,
+        krabka_ids::PartitionIndex,
+        krabka_log::{Log, LogConfig},
+        krabka_protocol::{
+            Decode, Encode,
+            owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+            primitives::uuid::Uuid as WireUuid,
+            records::{Attributes, Record, RecordBatch},
+        },
+        object_store::{ObjectStoreExt, PutPayload, path::Path},
     };
 
     #[bon::builder]
@@ -482,11 +475,12 @@ mod tests {
 
     #[tokio::test]
     async fn combined_timestamp_lookup_finds_evicted_wal_records_before_local_matches() {
-        use krabka_remote_storage::TopicIdPartition;
-
-        use crate::{
-            handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
-            partition::test_support::test_partition,
+        use {
+            crate::{
+                handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
+                partition::test_support::test_partition,
+            },
+            krabka_remote_storage::TopicIdPartition,
         };
         let id = Uuid::from_u128(95);
         let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));

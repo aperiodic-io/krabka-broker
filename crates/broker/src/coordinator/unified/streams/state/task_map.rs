@@ -21,9 +21,10 @@ pub(super) fn normalize_task_map(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{super::test_support::task_map, *};
+    use {
+        super::{super::test_support::task_map, *},
+        assert2::assert,
+    };
 
     #[test]
     fn normalize_sorts_dedups_and_drops_empty() {

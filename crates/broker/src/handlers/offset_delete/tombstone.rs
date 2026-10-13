@@ -7,9 +7,10 @@
 //! tombstones go through the group coordinator's offsets log, which does the
 //! same. The error mapping for a write that fails lives here with it.
 
-use krabka_protocol::records::RecordBatch;
-
-use crate::{broker::Broker, codes};
+use {
+    crate::{broker::Broker, codes},
+    krabka_protocol::records::RecordBatch,
+};
 
 /// Append `batch` to the `__consumer_offsets` partition of `group_id`, and
 /// return once it is committed.
@@ -47,10 +48,7 @@ fn operation_error_code(code: i16) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::test_support::COORDINATOR_WRITE_ERROR_CASES;
+    use {super::*, crate::test_support::COORDINATOR_WRITE_ERROR_CASES, assert2::check};
 
     #[test]
     fn write_errors_map_as_kafka_handle_operation_exception() {

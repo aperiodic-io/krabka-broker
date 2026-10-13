@@ -59,27 +59,27 @@
 //! Memory safety: stateright BFS keeps every visited unique state resident, so
 //! each run is fenced with `within_boundary` and `target_state_count`.
 
-use std::collections::BTreeSet;
-
-use krabka_log::ProducerId;
-use stateright::Model;
-
-use super::{
-    decision::decide_phase1_transition,
-    handlers::end_txn::{
-        prepare_completion_identities_with_fresh, prepare_server_abort_identities_with_fresh,
+use {
+    super::{
+        decision::decide_phase1_transition,
+        handlers::end_txn::{
+            prepare_completion_identities_with_fresh, prepare_server_abort_identities_with_fresh,
+        },
+        state::{TxnEntry, TxnState},
+        two_pc::{resolve_txn_timeout, should_abort_idle_txn},
+        version::TxnVersion,
     },
-    state::{TxnEntry, TxnState},
-    two_pc::{resolve_txn_timeout, should_abort_idle_txn},
-    version::TxnVersion,
-};
-use crate::{
-    coordinator::unified::actor::reconciliation_model_support::{
-        model_properties, pinned_model_runner,
+    crate::{
+        coordinator::unified::actor::reconciliation_model_support::{
+            model_properties, pinned_model_runner,
+        },
+        txn::decision_model_support::{
+            begin_transaction, complete_prepared, fenced_as_kafka, initialize,
+        },
     },
-    txn::decision_model_support::{
-        begin_transaction, complete_prepared, fenced_as_kafka, initialize,
-    },
+    krabka_log::ProducerId,
+    stateright::Model,
+    std::collections::BTreeSet,
 };
 
 const MAX_STATES: usize = 1_000_000;
@@ -206,9 +206,7 @@ enum TwoPcAction {
     Tick,
 }
 
-fn st(id: i8) -> TxnState {
-    TxnState::from_kafka_status(id).expect("valid TxnState id in model")
-}
+fn st(id: i8) -> TxnState { TxnState::from_kafka_status(id).expect("valid TxnState id in model") }
 
 /// Reconstructs the real `TxnEntry` so the real decision functions behave as
 /// in a live run. Partitions do not change these decisions.
@@ -335,50 +333,8 @@ impl TwoPcModel {
 }
 
 impl Model for TwoPcModel {
-    type State = TwoPcProj;
     type Action = TwoPcAction;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        // A tid that completed its first, classic InitProducerId at time 0.
-        let timeout_ms = resolve_txn_timeout(false, FIRST_TIMEOUT_MS, MAX_TIMEOUT_MS)
-            .expect("the first timeout is valid");
-        let entry = TxnEntry::new_empty("tid".to_string(), PID, 0, timeout_ms, CLOCK[0]);
-        let mut s = TwoPcProj {
-            pid: 0,
-            epoch: 0,
-            state: 0,
-            timeout_ms: 0,
-            start_ms: 0,
-            clock: 0,
-            enable_2pc: false,
-            requested_ms: FIRST_TIMEOUT_MS,
-            generation: 0,
-            last_finalized: None,
-            violations: BTreeSet::new(),
-            witnesses: BTreeSet::new(),
-        };
-        project(&mut s, &entry);
-        vec![s]
-    }
-
-    fn actions(&self, _: &Self::State, actions: &mut Vec<Self::Action>) {
-        // Every action is offered in every state; the production decisions
-        // in `next_state` refuse the ones that do not apply.
-        for requested in REQUESTS {
-            actions.push(TwoPcAction::Init(false, requested));
-        }
-        // The requested timeout is not read under 2PC, valid or not.
-        actions.push(TwoPcAction::Init(true, FIRST_TIMEOUT_MS));
-        actions.push(TwoPcAction::Init(true, 0));
-        actions.extend([
-            TwoPcAction::BeginTxn,
-            TwoPcAction::EndTxn(true),
-            TwoPcAction::EndTxn(false),
-            TwoPcAction::Complete,
-            TwoPcAction::TimeoutSweep,
-            TwoPcAction::Tick,
-        ]);
-    }
+    type State = TwoPcProj;
 
     krabka_macros::model_transition! { last, action, s; {
         match action {
@@ -449,9 +405,49 @@ impl Model for TwoPcModel {
         },
     }
 
-    fn within_boundary(&self, state: &Self::State) -> bool {
-        state.epoch <= self.max_epoch
+    fn init_states(&self) -> Vec<Self::State> {
+        // A tid that completed its first, classic InitProducerId at time 0.
+        let timeout_ms = resolve_txn_timeout(false, FIRST_TIMEOUT_MS, MAX_TIMEOUT_MS)
+            .expect("the first timeout is valid");
+        let entry = TxnEntry::new_empty("tid".to_string(), PID, 0, timeout_ms, CLOCK[0]);
+        let mut s = TwoPcProj {
+            pid: 0,
+            epoch: 0,
+            state: 0,
+            timeout_ms: 0,
+            start_ms: 0,
+            clock: 0,
+            enable_2pc: false,
+            requested_ms: FIRST_TIMEOUT_MS,
+            generation: 0,
+            last_finalized: None,
+            violations: BTreeSet::new(),
+            witnesses: BTreeSet::new(),
+        };
+        project(&mut s, &entry);
+        vec![s]
     }
+
+    fn actions(&self, _: &Self::State, actions: &mut Vec<Self::Action>) {
+        // Every action is offered in every state; the production decisions
+        // in `next_state` refuse the ones that do not apply.
+        for requested in REQUESTS {
+            actions.push(TwoPcAction::Init(false, requested));
+        }
+        // The requested timeout is not read under 2PC, valid or not.
+        actions.push(TwoPcAction::Init(true, FIRST_TIMEOUT_MS));
+        actions.push(TwoPcAction::Init(true, 0));
+        actions.extend([
+            TwoPcAction::BeginTxn,
+            TwoPcAction::EndTxn(true),
+            TwoPcAction::EndTxn(false),
+            TwoPcAction::Complete,
+            TwoPcAction::TimeoutSweep,
+            TwoPcAction::Tick,
+        ]);
+    }
+
+    fn within_boundary(&self, state: &Self::State) -> bool { state.epoch <= self.max_epoch }
 }
 
 pinned_model_runner! {

@@ -6,20 +6,20 @@
 //! the walk. A directory whose manifests do not all decode never reaches the
 //! walk: the refusal is the finding.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use object_store::ObjectStore;
-
-use super::{
-    TrustedManifestKeys, VerifyRequest,
-    listing::{DirListing, orphans},
-    manifest_read::{KeyedManifest, ManifestRead, read_manifest},
-    report::{PartitionVerifyReport, VerifyBreak, broken_before_walk},
-    walk::walk_partition,
-};
-use crate::worm::{
-    error::WormError,
-    manifest::{MANIFEST_SUFFIX, ManifestBody, ObjectEntry},
+use {
+    super::{
+        TrustedManifestKeys, VerifyRequest,
+        listing::{DirListing, orphans},
+        manifest_read::{KeyedManifest, ManifestRead, read_manifest},
+        report::{PartitionVerifyReport, VerifyBreak, broken_before_walk},
+        walk::walk_partition,
+    },
+    crate::worm::{
+        error::WormError,
+        manifest::{MANIFEST_SUFFIX, ManifestBody, ObjectEntry},
+    },
+    object_store::ObjectStore,
+    std::{collections::BTreeMap, sync::Arc},
 };
 
 /// Verifies one partition directory, or `None` when the request filters it out.
@@ -82,12 +82,13 @@ fn selected(request: &VerifyRequest, body: Option<&ManifestBody>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::worm::verify::{
-        test_support::{Archive, PARTITION, TOPIC},
-        verify_archive,
+    use {
+        super::*,
+        crate::worm::verify::{
+            test_support::{Archive, PARTITION, TOPIC},
+            verify_archive,
+        },
+        assert2::check,
     };
 
     #[tokio::test]

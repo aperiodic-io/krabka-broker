@@ -8,26 +8,28 @@
 
 mod support;
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::{assert, check};
-use krabka_broker::{BrokerHandle, codes};
-use krabka_client_producer::{OwnedTransaction, Producer, ProducerRecord};
-use krabka_protocol::owned::{
-    describe_transactions_request::DescribeTransactionsRequest,
-    describe_transactions_response::{TopicData, TransactionState as DescribedTransactionState},
-    list_transactions_request::ListTransactionsRequest,
-    list_transactions_response::{
-        ListTransactionsResponse, TransactionState as ListedTransactionState,
-    },
-};
-use tempfile::TempDir;
-
 pub use crate::support::boot_single;
-use crate::support::{
-    client::connect_client,
-    producer::string_record,
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        client::connect_client,
+        producer::string_record,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    assert2::{assert, check},
+    krabka_broker::{BrokerHandle, codes},
+    krabka_client_producer::{OwnedTransaction, Producer, ProducerRecord},
+    krabka_protocol::owned::{
+        describe_transactions_request::DescribeTransactionsRequest,
+        describe_transactions_response::{
+            TopicData, TransactionState as DescribedTransactionState,
+        },
+        list_transactions_request::ListTransactionsRequest,
+        list_transactions_response::{
+            ListTransactionsResponse, TransactionState as ListedTransactionState,
+        },
+    },
+    std::{sync::Arc, time::Duration},
+    tempfile::TempDir,
 };
 
 /// `ListTransactions`, retried while the coordinator loads its state
@@ -118,9 +120,7 @@ async fn create_topic(bootstrap: &str, name: &str) {
     );
 }
 
-fn rec(topic: &str, v: &str) -> ProducerRecord {
-    string_record(topic, v)
-}
+fn rec(topic: &str, v: &str) -> ProducerRecord { string_record(topic, v) }
 
 async fn admin_client(bootstrap: &str) -> krabka_client_core::Client {
     connect_client(bootstrap, None).await
@@ -246,13 +246,10 @@ async fn list_transactions_state_filter_excludes_non_matching() {
     let client = admin_client(&bootstrap).await;
     // Filter to "Empty" only — our txn is Ongoing, so the row should
     // be excluded.
-    let r = list_transactions(
-        &client,
-        &ListTransactionsRequest {
-            state_filters: vec!["Empty".into()],
-            ..Default::default()
-        },
-    )
+    let r = list_transactions(&client, &ListTransactionsRequest {
+        state_filters: vec!["Empty".into()],
+        ..Default::default()
+    })
     .await;
     assert!(
         r == ListTransactionsResponse::default(),
@@ -267,13 +264,10 @@ async fn list_transactions_reports_unknown_state_filters() {
     let (broker, bootstrap, _dir) = boot_single().await;
 
     let client = admin_client(&bootstrap).await;
-    let r = list_transactions(
-        &client,
-        &ListTransactionsRequest {
-            state_filters: vec!["Ongoing".into(), "BogusState".into(), "Empty".into()],
-            ..Default::default()
-        },
-    )
+    let r = list_transactions(&client, &ListTransactionsRequest {
+        state_filters: vec!["Ongoing".into(), "BogusState".into(), "Empty".into()],
+        ..Default::default()
+    })
     .await;
     assert!(
         r == ListTransactionsResponse {

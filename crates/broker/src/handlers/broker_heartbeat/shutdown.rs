@@ -9,14 +9,14 @@
 //! new leader. That is what the dead-broker failover scan computes, so this
 //! module asks it about the broker.
 
-use std::sync::Arc;
-
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_raft::NodeId;
-
-use crate::{
-    heartbeat::controller_state::ControllerLivenessState,
-    leader_election::compute_failover_changes, metrics::BrokerMetrics,
+use {
+    crate::{
+        heartbeat::controller_state::ControllerLivenessState,
+        leader_election::compute_failover_changes, metrics::BrokerMetrics,
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    krabka_raft::NodeId,
+    std::sync::Arc,
 };
 
 /// The partition changes that take `broker` out of every ISR and every
@@ -61,17 +61,18 @@ pub(super) async fn leave_isrs(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{LeaderEpoch, PartitionRecord};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        handlers::broker_heartbeat::test_support::{
-            ElectionSetup, image_with_dir_partition, liveness_with,
+    use {
+        super::*,
+        crate::{
+            handlers::broker_heartbeat::test_support::{
+                ElectionSetup, image_with_dir_partition, liveness_with,
+            },
+            leader_election::test_support::mark_witnesses_in_image,
+            test_support::replica_nodes,
         },
-        leader_election::test_support::mark_witnesses_in_image,
-        test_support::replica_nodes,
+        assert2::check,
+        krabka_metadata::{LeaderEpoch, PartitionRecord},
+        uuid::Uuid,
     };
 
     /// One partition, and what leaving its ISR does to it.

@@ -1,10 +1,12 @@
 //! Tunables for `Log`. Defaults match Apache Kafka 4.2.
 
-use krabka_compression::CompressionType;
-use krabka_protocol::records::TimestampType;
-use krabka_units::prelude::{
-    ByteSize, Ratio, Time, TimeExt as _, bytes, days, fraction, gibibytes, hours, kibibytes,
-    mebibytes, millis,
+use {
+    krabka_compression::CompressionType,
+    krabka_protocol::records::TimestampType,
+    krabka_units::prelude::{
+        ByteSize, Ratio, Time, TimeExt as _, bytes, days, fraction, gibibytes, hours, kibibytes,
+        mebibytes, millis,
+    },
 };
 
 /// Kafka's `segment.bytes` default: roll the active segment at 1 GiB.
@@ -449,9 +451,10 @@ impl LogConfig {
 #[cfg(test)]
 mod tests {
 
-    use krabka_units::prelude::{ByteSizeExt as _, TimeExt, bytes, secs};
-
-    use super::*;
+    use {
+        super::*,
+        krabka_units::prelude::{ByteSizeExt as _, TimeExt, bytes, secs},
+    };
 
     #[test]
     fn defaults_match_kafka_4x() {

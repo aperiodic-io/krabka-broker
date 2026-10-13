@@ -6,14 +6,15 @@
 //! range, and a transaction marker written by that same producer still
 //! survives.
 
-use assert2::check;
-use krabka_ids::{Offset, ProducerId};
-use krabka_log::LogConfig;
-
-use crate::{
-    archive::build_archive,
-    fixtures::{commit_marker, producer_batch, transactional_batch, value_record},
-    harness::{check_batches, empty_first_batch, reopen, run_restore},
+use {
+    crate::{
+        archive::build_archive,
+        fixtures::{commit_marker, producer_batch, transactional_batch, value_record},
+        harness::{check_batches, empty_first_batch, reopen, run_restore},
+    },
+    assert2::check,
+    krabka_ids::{Offset, ProducerId},
+    krabka_log::LogConfig,
 };
 
 // ---------------------------------------------------------------------
@@ -24,10 +25,10 @@ use crate::{
 #[tokio::test]
 async fn exclude_producer_id_drops_only_that_producers_batch() {
     let mut fixture = vec![
-        producer_batch(
-            101,
-            vec![value_record(0, "p101-1"), value_record(1, "p101-2")],
-        ),
+        producer_batch(101, vec![
+            value_record(0, "p101-1"),
+            value_record(1, "p101-2"),
+        ]),
         producer_batch(202, vec![value_record(0, "p202-1")]),
     ];
     let archive = build_archive("orders", 0, &mut fixture);

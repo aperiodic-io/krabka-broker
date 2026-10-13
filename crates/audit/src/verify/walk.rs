@@ -8,19 +8,20 @@
 //! mirrors, kept in one file because a break found by either one is reported the
 //! same way.
 
-use krabka_protocol::records::Record;
-use krabka_verified::{
-    AuditCheckpointAdmission, AuditLossMarkerAdmission, ChainStep, audit_checkpoint_admission,
-    audit_loss_marker_admission, chain_step,
-};
-
-use super::{TrustedKeys, VerifyBreak, VerifyLoss, VerifyReport};
-use crate::{
-    chain::{GENESIS_HEAD, chain_hash, from_hex32},
-    checkpoint::Checkpoint,
-    event::AuditEventClass,
-    ids::{CheckpointCount, RecordCount, Seq},
-    sink::{HEADER_PREV_HASH, HEADER_SEQ},
+use {
+    super::{TrustedKeys, VerifyBreak, VerifyLoss, VerifyReport},
+    crate::{
+        chain::{GENESIS_HEAD, chain_hash, from_hex32},
+        checkpoint::Checkpoint,
+        event::AuditEventClass,
+        ids::{CheckpointCount, RecordCount, Seq},
+        sink::{HEADER_PREV_HASH, HEADER_SEQ},
+    },
+    krabka_protocol::records::Record,
+    krabka_verified::{
+        AuditCheckpointAdmission, AuditLossMarkerAdmission, ChainStep, audit_checkpoint_admission,
+        audit_loss_marker_admission, chain_step,
+    },
 };
 
 pub(super) fn header<'a>(record: &'a Record, key: &str) -> Option<&'a [u8]> {

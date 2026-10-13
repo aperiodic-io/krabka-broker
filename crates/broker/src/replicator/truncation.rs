@@ -11,26 +11,27 @@
 //! `ListOffsets(EARLIEST_LOCAL_TIMESTAMP)` lookup and restarts the log at the
 //! leader's local log start.
 
-use krabka_client_core::Connection;
-use krabka_ids::LeaderEpoch;
-use krabka_log::Offset;
-use krabka_protocol::owned::{
-    fetch_response::EpochEndOffset,
-    list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
-    list_offsets_response::ListOffsetsResponse,
-    offset_for_leader_epoch_request::{
-        OffsetForLeaderEpochRequest, OffsetForLeaderPartition, OffsetForLeaderTopic,
-    },
-};
-use tracing::{info, warn};
-
-use super::{
-    Config, connection::connection_options, replication_target_changed, response::RowAction,
-    task_replication_target,
-};
 #[cfg(test)]
 use crate::config::ReplicationRuntimeConfig;
-use crate::{codes, network::client::InterBrokerError, partition::Partition};
+use {
+    super::{
+        Config, connection::connection_options, replication_target_changed, response::RowAction,
+        task_replication_target,
+    },
+    crate::{codes, network::client::InterBrokerError, partition::Partition},
+    krabka_client_core::Connection,
+    krabka_ids::LeaderEpoch,
+    krabka_log::Offset,
+    krabka_protocol::owned::{
+        fetch_response::EpochEndOffset,
+        list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
+        list_offsets_response::ListOffsetsResponse,
+        offset_for_leader_epoch_request::{
+            OffsetForLeaderEpochRequest, OffsetForLeaderPartition, OffsetForLeaderTopic,
+        },
+    },
+    tracing::{info, warn},
+};
 
 /// Where this follower truncates for a KIP-320 `diverging_epoch` row, as
 /// `AbstractFetcherThread.getOffsetTruncationState` computes it.
@@ -581,13 +582,14 @@ fn build_offset_for_leader_epoch_request(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_raft::NodeId;
-
-    use super::*;
-    use crate::replicator::{
-        ensure_local_partition,
-        test_support::{LEADER_ID, NODE_ID, PARTITION, TOPIC, image_with_leader, test_config},
+    use {
+        super::*,
+        crate::replicator::{
+            ensure_local_partition,
+            test_support::{LEADER_ID, NODE_ID, PARTITION, TOPIC, image_with_leader, test_config},
+        },
+        assert2::assert,
+        krabka_raft::NodeId,
     };
 
     /// One row per branch of `getOffsetTruncationState`.
@@ -800,10 +802,11 @@ mod tests {
             ("no row at all", response(TOPIC, Vec::new())),
             (
                 "an error row",
-                response(
-                    TOPIC,
-                    vec![row(PARTITION, codes::UNKNOWN_LEADER_EPOCH, 4_096)],
-                ),
+                response(TOPIC, vec![row(
+                    PARTITION,
+                    codes::UNKNOWN_LEADER_EPOCH,
+                    4_096,
+                )]),
             ),
             (
                 "an undefined offset",

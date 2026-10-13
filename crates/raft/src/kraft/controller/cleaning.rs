@@ -10,11 +10,12 @@
 //! The size rule runs first and the age rule second, as in Kafka. Each walks
 //! the snapshots from the oldest and stops at the first one it keeps.
 
-use krabka_ids::Offset;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _, Time, TimeExt as _};
-
-use super::{Engine, KraftController, checkpoint::checkpoint_ids};
-use crate::{error::RaftError, snapshot::SnapshotReader};
+use {
+    super::{Engine, KraftController, checkpoint::checkpoint_ids},
+    crate::{error::RaftError, snapshot::SnapshotReader},
+    krabka_ids::Offset,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _, Time, TimeExt as _},
+};
 
 /// One snapshot the cleaning weighs: its `(end_offset, epoch)` id and the
 /// size of its `.checkpoint` file.
@@ -174,10 +175,11 @@ fn delete_checkpoints_below(dir: &std::path::Path, id: (i64, i32)) -> Vec<(i64, 
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{bytes, millis};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_units::prelude::{bytes, millis},
+    };
 
     /// The size rule counts the log and the snapshots still kept, and breaks
     /// only strictly above the limit, as Kafka's `logSize + snapshotsSize >

@@ -17,23 +17,23 @@
 //! Tests can wrap an existing store directly or use [`build_faulty_object_store`]
 //! to hand a fault policy to code that takes an `Arc<dyn ObjectStore>`.
 
-use std::{
-    collections::BTreeMap,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
+use {
+    crate::{build::build_object_store, config::ObjectStoreConfig, error::ObjectStoreError},
+    bytes::Bytes,
+    futures_util::stream::{BoxStream, StreamExt as _},
+    object_store::{
+        CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
+        PutMultipartOptions, PutOptions, PutPayload, PutResult, path::Path,
     },
-    time::Duration,
+    std::{
+        collections::BTreeMap,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::Duration,
+    },
 };
-
-use bytes::Bytes;
-use futures_util::stream::{BoxStream, StreamExt as _};
-use object_store::{
-    CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
-    PutMultipartOptions, PutOptions, PutPayload, PutResult, path::Path,
-};
-
-use crate::{build::build_object_store, config::ObjectStoreConfig, error::ObjectStoreError};
 
 /// The operation classes a [`FaultPolicy`] can single out.
 ///
@@ -170,9 +170,7 @@ pub struct FaultPolicy {
 impl FaultPolicy {
     /// A policy that injects nothing.
     #[must_use]
-    pub fn none() -> Self {
-        Self::default()
-    }
+    pub fn none() -> Self { Self::default() }
 
     /// Apply `fault` to `op`, replacing any previous entry for it.
     #[must_use]
@@ -192,9 +190,7 @@ impl FaultPolicy {
 
     /// The fault configured for `op`, if any.
     #[must_use]
-    pub fn fault(&self, op: StoreOp) -> Option<OpFault> {
-        self.faults.get(&op).copied()
-    }
+    pub fn fault(&self, op: StoreOp) -> Option<OpFault> { self.faults.get(&op).copied() }
 }
 
 /// Per-operation call counters, so a test can assert how many times the store
@@ -274,9 +270,7 @@ impl FaultInjectingStore {
     /// How many calls of class `op` have reached this store, failed ones
     /// included.
     #[must_use]
-    pub fn attempts(&self, op: StoreOp) -> u64 {
-        self.counters.slot(op).load(Ordering::SeqCst)
-    }
+    pub fn attempts(&self, op: StoreOp) -> u64 { self.counters.slot(op).load(Ordering::SeqCst) }
 
     /// Count the call, sleep out any injected latency, and report whether the
     /// caller should be failed.
@@ -303,9 +297,7 @@ impl std::fmt::Display for FaultInjectingStore {
 
 /// The path a listing fault reports. Listing has no single location, and the
 /// error kinds that matter carry the store name rather than the path.
-fn listing_path() -> Path {
-    Path::from("")
-}
+fn listing_path() -> Path { Path::from("") }
 
 #[async_trait::async_trait]
 impl ObjectStore for FaultInjectingStore {
@@ -430,11 +422,12 @@ pub fn build_faulty_object_store(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use object_store::ObjectStoreExt as _;
-
-    use super::*;
-    use crate::{config::ObjectStoreConfig, test_support::round_trip};
+    use {
+        super::*,
+        crate::{config::ObjectStoreConfig, test_support::round_trip},
+        assert2::{assert, check},
+        object_store::ObjectStoreExt as _,
+    };
 
     fn memory(policy: FaultPolicy) -> Arc<FaultInjectingStore> {
         build_faulty_object_store(&ObjectStoreConfig::InMemory, policy).unwrap()

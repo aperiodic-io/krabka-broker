@@ -13,19 +13,20 @@
 //! reassignment at once when the ISR already allows it, keep or elect a leader,
 //! and bump the leader epoch when a replica leaves.
 
-use std::collections::BTreeSet;
-
-use krabka_metadata::{MetadataImage, PartitionRecord};
-use krabka_raft::NodeId;
-
-use crate::{
-    codes::{
-        ELIGIBLE_LEADERS_NOT_AVAILABLE, INVALID_REPLICA_ASSIGNMENT, INVALID_REPLICATION_FACTOR,
-        INVALID_REQUEST, NO_REASSIGNMENT_IN_PROGRESS, POLICY_VIOLATION, UNKNOWN_TOPIC_OR_PARTITION,
+use {
+    crate::{
+        codes::{
+            ELIGIBLE_LEADERS_NOT_AVAILABLE, INVALID_REPLICA_ASSIGNMENT, INVALID_REPLICATION_FACTOR,
+            INVALID_REQUEST, NO_REASSIGNMENT_IN_PROGRESS, POLICY_VIOLATION,
+            UNKNOWN_TOPIC_OR_PARTITION,
+        },
+        config_keys::resolve_unclean_leader_election_enabled,
+        metadata_epoch::next_partition_change,
+        reassignment::{CompletedReassignment, maybe_complete_reassignment, remap_directories},
     },
-    config_keys::resolve_unclean_leader_election_enabled,
-    metadata_epoch::next_partition_change,
-    reassignment::{CompletedReassignment, maybe_complete_reassignment, remap_directories},
+    krabka_metadata::{MetadataImage, PartitionRecord},
+    krabka_raft::NodeId,
+    std::collections::BTreeSet,
 };
 
 /// Per-row rejection: a Kafka wire error code and a readable message.
@@ -360,18 +361,19 @@ fn build(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::{LeaderEpoch, MetadataRecord, TopicConfigRecord};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
-        handlers::alter_partition_reassignments::test_support::{
-            ReassignmentImageSetup, ReplicaBrokerId, ReplicationFactorPolicy, img_with,
-            pending_reassignment_image,
+    use {
+        super::*,
+        crate::{
+            config_keys::UNCLEAN_LEADER_ELECTION_ENABLE,
+            handlers::alter_partition_reassignments::test_support::{
+                ReassignmentImageSetup, ReplicaBrokerId, ReplicationFactorPolicy, img_with,
+                pending_reassignment_image,
+            },
+            test_support::{PartitionEpoch, ReassignmentSetup},
         },
-        test_support::{PartitionEpoch, ReassignmentSetup},
+        assert2::{assert, check},
+        krabka_metadata::{LeaderEpoch, MetadataRecord, TopicConfigRecord},
+        uuid::Uuid,
     };
 
     /// The record the fixture partition `foo-0` becomes.

@@ -1,9 +1,7 @@
 //! The `main` that `cli_main!` writes, run in a child copy of this test
 //! binary so that its `std::process::exit` ends the child and not the suite.
 
-use std::process::Command;
-
-use assert2::assert;
+use {assert2::assert, std::process::Command};
 
 /// The exit code a child's `run_from_args` returns. Its presence marks the
 /// child.
@@ -34,17 +32,13 @@ mod fake_cli {
 mod default_runtime {
     krabka_macros::cli_main!(super::fake_cli);
 
-    pub fn run() {
-        main();
-    }
+    pub fn run() { main(); }
 }
 
 mod single_threaded {
     krabka_macros::cli_main!(super::fake_cli, flavor = "current_thread");
 
-    pub fn run() {
-        main();
-    }
+    pub fn run() { main(); }
 }
 
 /// Runs `test` in a child copy of this binary whose `run_from_args` expects

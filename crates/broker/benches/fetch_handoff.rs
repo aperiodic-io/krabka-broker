@@ -26,15 +26,16 @@
 //! each pays the per-partition cost 200 times over a few hundred microseconds
 //! of real reading.
 
-use std::{
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
+use {
+    criterion::{Criterion, criterion_group, criterion_main},
+    krabka_log::{Log, LogConfig, Offset},
+    krabka_units::prelude::{ByteSize, mebibytes},
+    std::{
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
 };
-
-use criterion::{Criterion, criterion_group, criterion_main};
-use krabka_log::{Log, LogConfig, Offset};
-use krabka_units::prelude::{ByteSize, mebibytes};
-use tempfile::TempDir;
 
 /// Partition counts: a single-partition fetch, a modest subscription, and the
 /// wide one from the issue that motivated the measurement.
@@ -91,9 +92,7 @@ fn read_one(partition: &BenchPartition) -> usize {
         .len()
 }
 
-fn read_all(partitions: &[BenchPartition]) -> usize {
-    partitions.iter().map(read_one).sum()
-}
+fn read_all(partitions: &[BenchPartition]) -> usize { partitions.iter().map(read_one).sum() }
 
 /// The three hand-off shapes, in report order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -233,7 +232,7 @@ fn bench_ratio(_c: &mut Criterion) {
                         .map(|_| {
                             timed_fetches(&runtime, handoff, &partitions, u64::from(SAMPLES))
                                 .as_secs_f64()
-                                * 1e6
+                                * 1.0e6
                                 / f64::from(SAMPLES)
                         })
                         .fold(f64::INFINITY, f64::min)

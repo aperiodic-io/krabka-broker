@@ -25,18 +25,18 @@ mod support;
 #[path = "fetch_min_bytes/wire.rs"]
 mod wire;
 
-use std::{
-    process::Command,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use base64::Engine as _;
-use krabka_client_core::Client;
-
-use crate::{
-    support::discovery::topic_metadata_request,
-    wire::{HELD_AT_LEAST, min_bytes_exchange},
+use {
+    crate::{
+        support::discovery::topic_metadata_request,
+        wire::{HELD_AT_LEAST, min_bytes_exchange},
+    },
+    assert2::assert,
+    base64::Engine as _,
+    krabka_client_core::Client,
+    std::{
+        process::Command,
+        time::{Duration, Instant},
+    },
 };
 
 /// The Kafka release krabka is compared against: the newest image

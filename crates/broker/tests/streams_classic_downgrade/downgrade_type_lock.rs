@@ -3,22 +3,22 @@
 //! sees the converted group as `streams` and refuses to delete it while a
 //! member is live.
 
-use std::time::Duration;
-
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    delete_groups_request::DeleteGroupsRequest,
-    join_group_request::JoinGroupRequest,
-    join_group_response::JoinGroupResponse,
-    leave_group_request::{LeaveGroupRequest, MemberIdentity},
-    list_groups_request::ListGroupsRequest,
-};
-
-use crate::{
-    CONVERGE_TRIES, ERR_INCONSISTENT_GROUP_PROTOCOL, ERR_NON_EMPTY_GROUP, ERR_NONE,
-    downgrade_classic_join::{classic_join_sync, join_request},
-    downgrade_harness::{boot, connect, create_topic, finalize_streams_version},
-    downgrade_streams_join::{streams_join_and_converge, topology},
+use {
+    crate::{
+        CONVERGE_TRIES, ERR_INCONSISTENT_GROUP_PROTOCOL, ERR_NON_EMPTY_GROUP, ERR_NONE,
+        downgrade_classic_join::{classic_join_sync, join_request},
+        downgrade_harness::{boot, connect, create_topic, finalize_streams_version},
+        downgrade_streams_join::{streams_join_and_converge, topology},
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        delete_groups_request::DeleteGroupsRequest,
+        join_group_request::JoinGroupRequest,
+        join_group_response::JoinGroupResponse,
+        leave_group_request::{LeaveGroupRequest, MemberIdentity},
+        list_groups_request::ListGroupsRequest,
+    },
+    std::time::Duration,
 };
 
 /// A streams group with a LIVE member refuses every classic `JoinGroup`, static
@@ -56,13 +56,10 @@ async fn streams_group_with_live_member_rejects_classic_join() {
             "a dynamic member's join with a member id",
             join_request("g2", "m-1"),
         ),
-        (
-            "a static member's join",
-            JoinGroupRequest {
-                group_instance_id: Some("instance-1".into()),
-                ..join_request("g2", "")
-            },
-        ),
+        ("a static member's join", JoinGroupRequest {
+            group_instance_id: Some("instance-1".into()),
+            ..join_request("g2", "")
+        }),
         (
             "a static member's join with a member id",
             JoinGroupRequest {

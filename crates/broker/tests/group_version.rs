@@ -9,12 +9,13 @@
 use assert2::assert;
 mod support;
 
-use krabka_protocol::owned::{
-    consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-    update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest},
+use {
+    crate::support::consumer_groups::joining_consumer,
+    krabka_protocol::owned::{
+        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest},
+    },
 };
-
-use crate::support::consumer_groups::joining_consumer;
 
 const UNSUPPORTED_VERSION: i16 = 35;
 

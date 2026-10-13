@@ -3,28 +3,28 @@
 //! Every request goes through the dispatch registry, so a test also fails when
 //! one of the apis goes back to a dispatch kind that gets no principal.
 
-use std::sync::Arc;
-
-use assert2::check;
-use krabka_log::Offset;
-use krabka_protocol::owned::{
-    add_offsets_to_txn_request::{self, AddOffsetsToTxnRequest},
-    add_offsets_to_txn_response::AddOffsetsToTxnResponse,
-    write_txn_markers_request::{
-        self, WritableTxnMarker, WritableTxnMarkerTopic, WriteTxnMarkersRequest,
+use {
+    crate::{
+        codes,
+        test_support::{
+            GrantsInPrincipalName, StandalonePartitionSetup, decode_response, dispatch_context,
+            encode_request, peer, principal, request_context, start_broker_no_audit_with,
+        },
     },
-    write_txn_markers_response::{
-        WritableTxnMarkerPartitionResult, WritableTxnMarkerResult, WritableTxnMarkerTopicResult,
-        WriteTxnMarkersResponse,
+    assert2::check,
+    krabka_log::Offset,
+    krabka_protocol::owned::{
+        add_offsets_to_txn_request::{self, AddOffsetsToTxnRequest},
+        add_offsets_to_txn_response::AddOffsetsToTxnResponse,
+        write_txn_markers_request::{
+            self, WritableTxnMarker, WritableTxnMarkerTopic, WriteTxnMarkersRequest,
+        },
+        write_txn_markers_response::{
+            WritableTxnMarkerPartitionResult, WritableTxnMarkerResult,
+            WritableTxnMarkerTopicResult, WriteTxnMarkersResponse,
+        },
     },
-};
-
-use crate::{
-    codes,
-    test_support::{
-        GrantsInPrincipalName, StandalonePartitionSetup, decode_response, dispatch_context,
-        encode_request, peer, principal, request_context, start_broker_no_audit_with,
-    },
+    std::sync::Arc,
 };
 
 /// Kafka's `KafkaApis.handleAddOffsetsToTxnRequest` checks `Write` on the

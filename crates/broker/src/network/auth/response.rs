@@ -10,10 +10,11 @@
 //! for [`generic_failure_message`] to fill in at dispatch, where the mechanism
 //! and whether the exchange is a re-authentication are known.
 
-use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse;
-use krabka_security::SaslMechanism;
-
-use crate::codes::SASL_AUTHENTICATION_FAILED;
+use {
+    crate::codes::SASL_AUTHENTICATION_FAILED,
+    krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse,
+    krabka_security::SaslMechanism,
+};
 
 /// Builds a [`SASL_AUTHENTICATION_FAILED`] response whose client-facing text
 /// is Kafka's generic invalid-credentials sentence.
@@ -80,9 +81,7 @@ pub fn generic_failure_message(mechanism: SaslMechanism, reauthentication: bool)
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn generic_failure_message_names_only_phase_and_mechanism() {

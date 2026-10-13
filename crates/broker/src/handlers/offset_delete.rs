@@ -29,14 +29,17 @@
 //! group-level response and the encoder, and `tombstone` the
 //! `__consumer_offsets` append.
 
-use krabka_metadata::AclOperation;
-use krabka_protocol::{
-    owned::{
-        offset_delete_request::OffsetDeleteRequest, offset_delete_response::OffsetDeleteResponse,
+use {
+    krabka_metadata::AclOperation,
+    krabka_protocol::{
+        owned::{
+            offset_delete_request::OffsetDeleteRequest,
+            offset_delete_response::OffsetDeleteResponse,
+        },
+        records::RecordBatch,
     },
-    records::RecordBatch,
+    tokio::sync::oneshot,
 };
-use tokio::sync::oneshot;
 
 mod response;
 mod rows;
@@ -46,12 +49,14 @@ mod test_support;
 mod tests;
 mod tombstone;
 
-use self::{
-    rows::{Rows, build_response_rows},
-    tombstone::append_tombstones,
-};
-use crate::{
-    codes, coordinator::unified::actor::GroupActorMessage, handlers::ErrorCodeResponse as _,
+use {
+    self::{
+        rows::{Rows, build_response_rows},
+        tombstone::append_tombstones,
+    },
+    crate::{
+        codes, coordinator::unified::actor::GroupActorMessage, handlers::ErrorCodeResponse as _,
+    },
 };
 
 context_handler! {

@@ -1,15 +1,14 @@
 //! Shared group-handler fixtures and subscription authorization cases.
 
-use std::collections::HashSet;
-
-use assert2::assert;
-use krabka_metadata::{
-    AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, ResourceType,
+use {
+    assert2::assert,
+    krabka_metadata::{
+        AclOperation, FeatureLevelRecord, MetadataImage, MetadataRecord, ResourceType,
+    },
+    std::collections::HashSet,
 };
 
-pub(super) fn acl_authorizer() -> SimpleAclAuthorizer {
-    SimpleAclAuthorizer::new(HashSet::new())
-}
+pub(super) fn acl_authorizer() -> SimpleAclAuthorizer { SimpleAclAuthorizer::new(HashSet::new()) }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
 pub(super) struct GroupAclSetup<'a> {
@@ -115,17 +114,18 @@ fn topic_record(name: &str, topic_id: uuid::Uuid, partitions: PartitionCount) ->
     })
 }
 
-use krabka_raft::NodeId;
-
-use crate::{
-    BrokerHandle,
-    authorizer::{Authorizer, SimpleAclAuthorizer},
-    broker::Broker,
-    handlers::test_support::single_replica_partition,
-    test_support::{
-        AllowAclSetup, PartitionCount, StreamsJoinSetup, allow_acl, peer, principal,
-        request_context, sasl_principal, start_group_broker, streams_join_request,
+use {
+    crate::{
+        BrokerHandle,
+        authorizer::{Authorizer, SimpleAclAuthorizer},
+        broker::Broker,
+        handlers::test_support::single_replica_partition,
+        test_support::{
+            AllowAclSetup, PartitionCount, StreamsJoinSetup, allow_acl, peer, principal,
+            request_context, sasl_principal, start_group_broker, streams_join_request,
+        },
     },
+    krabka_raft::NodeId,
 };
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -164,9 +164,7 @@ pub(super) fn topic_with_partitions(setup: GroupTopicSetup<'_>) -> Vec<MetadataR
 }
 
 /// The SASL/PLAIN principal `User:alice` that the ACLs above name.
-pub(super) fn alice() -> krabka_security::Principal {
-    sasl_principal("alice")
-}
+pub(super) fn alice() -> krabka_security::Principal { sasl_principal("alice") }
 
 /// Kafka's explicit-name Describe check, shared by consumer and share heartbeats.
 pub(super) fn subscribed_names_describe_denied_table() {

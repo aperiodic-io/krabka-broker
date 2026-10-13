@@ -18,9 +18,7 @@
 //! [`parse_election`] therefore reduces the whole output to one outcome per
 //! partition, and the oracle and krabka are compared on that map.
 
-use std::collections::BTreeMap;
-
-use serde_json::json;
+use {serde_json::json, std::collections::BTreeMap};
 
 /// A partition, in the `topic-index` spelling the tools print.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -238,9 +236,7 @@ fn exception_class(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn each_of_the_three_election_outcomes_is_read_off_its_own_line() {

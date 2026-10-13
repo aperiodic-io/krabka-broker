@@ -3,22 +3,23 @@
 //! offset-aware strategies that defer to the recovery manager, and the
 //! witness role the scan reads out of the metadata image.
 
-use assert2::assert;
-use krabka_metadata::LeaderEpoch;
-
-use super::*;
-use crate::{
-    config_keys::{
-        ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS, UNCLEAN_LEADER_ELECTION_ENABLE,
-        UNCLEAN_RECOVERY_STRATEGY,
+use {
+    super::*,
+    crate::{
+        config_keys::{
+            ELIGIBLE_LEADER_REPLICAS, MIN_INSYNC_REPLICAS, UNCLEAN_LEADER_ELECTION_ENABLE,
+            UNCLEAN_RECOVERY_STRATEGY,
+        },
+        leader_election::test_support::{
+            ElectionSetup, ElrFinalization, ExpectedPartitionSetup, TopicConfigSetup,
+            elected_partition, expected_clean_election, expected_partition, failover,
+            failover_with_alive, img_with_partition, liveness_with_alive, mark_witnesses_in_image,
+            one_partition_change, set_cluster_default, set_topic_configs,
+        },
+        metrics::BrokerMetrics,
     },
-    leader_election::test_support::{
-        ElectionSetup, ElrFinalization, ExpectedPartitionSetup, TopicConfigSetup,
-        elected_partition, expected_clean_election, expected_partition, failover,
-        failover_with_alive, img_with_partition, liveness_with_alive, mark_witnesses_in_image,
-        one_partition_change, set_cluster_default, set_topic_configs,
-    },
-    metrics::BrokerMetrics,
+    assert2::assert,
+    krabka_metadata::LeaderEpoch,
 };
 
 fn unclean_single_isr_image() -> krabka_metadata::MetadataImage {
@@ -27,6 +28,14 @@ fn unclean_single_isr_image() -> krabka_metadata::MetadataImage {
         configs: &[(UNCLEAN_LEADER_ELECTION_ENABLE, "true")],
         ..Default::default()
     })
+}
+
+async fn assert_unclean_election(img: &MetadataImage) {
+    let plan = failover_with_alive(img, NodeId(1), &[2u64, 3]).await;
+    assert!(plan.recoveries.is_empty());
+    let change = one_partition_change(&plan.changes);
+    assert!(change.leader == 2);
+    assert!(change.isr == vec![NodeId(2)]);
 }
 
 /// Only the preferred replica is in the ISR; broker three precedes broker two among followers.
@@ -220,14 +229,7 @@ async fn failover_unclean_does_not_apply_when_isr_still_has_alive_member() {
         configs: &[(UNCLEAN_LEADER_ELECTION_ENABLE, "true")],
         ..Default::default()
     });
-    let plan = failover_with_alive(&img, /*dead=*/ NodeId(1), &[2u64, 3]).await;
-    assert!(plan.recoveries.is_empty());
-    let pr = one_partition_change(&plan.changes);
-    assert!(pr.leader == 2);
-    assert!(
-        pr.isr == vec![NodeId(2)],
-        "clean ISR-only election keeps the surviving ISR member, not a singleton-of-some-other-replica"
-    );
+    assert_unclean_election(&img).await;
 }
 
 #[tokio::test]
@@ -293,19 +295,11 @@ async fn topic_none_overrides_cluster_strategy_and_uses_cluster_legacy_flag() {
     });
     set_cluster_default(&mut img, UNCLEAN_RECOVERY_STRATEGY, "Balanced");
     set_cluster_default(&mut img, UNCLEAN_LEADER_ELECTION_ENABLE, "true");
-    set_topic_configs(
-        &mut img,
-        TopicConfigSetup {
-            entries: &[(UNCLEAN_RECOVERY_STRATEGY, "None")],
-            ..Default::default()
-        },
-    );
-    let plan = failover_with_alive(&img, NodeId(1), &[2u64, 3]).await;
-
-    assert!(plan.recoveries.is_empty());
-    let change = one_partition_change(&plan.changes);
-    assert!(change.leader == 2);
-    assert!(change.isr == vec![NodeId(2)]);
+    set_topic_configs(&mut img, TopicConfigSetup {
+        entries: &[(UNCLEAN_RECOVERY_STRATEGY, "None")],
+        ..Default::default()
+    });
+    assert_unclean_election(&img).await;
 }
 
 #[tokio::test]
@@ -400,13 +394,10 @@ async fn failover_elects_an_eligible_leader_replica_cleanly_under_every_policy()
             (MIN_INSYNC_REPLICAS, "2"),
         ];
         overrides.extend_from_slice(case.policy);
-        set_topic_configs(
-            &mut img,
-            TopicConfigSetup {
-                entries: &overrides,
-                ..Default::default()
-            },
-        );
+        set_topic_configs(&mut img, TopicConfigSetup {
+            entries: &overrides,
+            ..Default::default()
+        });
         let l = ControllerLivenessState::new(krabka_units::secs(10));
         for n in [2u64, 3] {
             l.record_heartbeat(n).await;
@@ -449,17 +440,14 @@ async fn failover_elects_an_eligible_leader_replica_cleanly_under_every_policy()
 #[tokio::test]
 async fn a_dead_eligible_leader_replica_leaves_the_unclean_election_to_decide() {
     let mut img = preferred_replica_alone_in_isr();
-    set_topic_configs(
-        &mut img,
-        TopicConfigSetup {
-            entries: &[
-                (ELIGIBLE_LEADER_REPLICAS, "0:2:"),
-                (MIN_INSYNC_REPLICAS, "2"),
-                (UNCLEAN_LEADER_ELECTION_ENABLE, "true"),
-            ],
-            ..Default::default()
-        },
-    );
+    set_topic_configs(&mut img, TopicConfigSetup {
+        entries: &[
+            (ELIGIBLE_LEADER_REPLICAS, "0:2:"),
+            (MIN_INSYNC_REPLICAS, "2"),
+            (UNCLEAN_LEADER_ELECTION_ENABLE, "true"),
+        ],
+        ..Default::default()
+    });
     let l = ControllerLivenessState::new(krabka_units::secs(10));
     l.record_heartbeat(3).await;
     let metrics = BrokerMetrics::new();

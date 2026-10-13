@@ -11,16 +11,18 @@
 //! the `IllegalStateException` that Kafka throws does. See
 //! [`replay_policy`](super::replay_policy).
 
-use super::{
-    group_coordinator::GroupCoordinator,
-    persistence_next_gen::{self, CurrentMemberAssignmentValue, MemberAssignmentState},
-    replay_policy::{
-        ExistingGroup, GroupLookup, LEAVE_GROUP_MEMBER_EPOCH, ModernGroupType, group_tombstone,
-        persisted_group, target_metadata, target_metadata_tombstone,
+use {
+    super::{
+        group_coordinator::GroupCoordinator,
+        persistence_next_gen::{self, CurrentMemberAssignmentValue, MemberAssignmentState},
+        replay_policy::{
+            ExistingGroup, GroupLookup, LEAVE_GROUP_MEMBER_EPOCH, ModernGroupType, group_tombstone,
+            persisted_group, target_metadata, target_metadata_tombstone,
+        },
+        seeds::GroupSeed,
     },
-    seeds::GroupSeed,
+    crate::error::BrokerError,
 };
-use crate::error::BrokerError;
 
 /// The fields of a member that Kafka's replay creates from a current
 /// assignment record alone: `ConsumerGroupMember.Builder`'s defaults.
@@ -375,16 +377,18 @@ impl GroupCoordinator {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-    use crate::coordinator::unified::{
-        persistence_next_gen::{
-            AssignedTopicPartitions, GroupMetadataValue, NextGenKey, RegularExpressionValue,
-            TargetAssignmentMemberValue, TargetAssignmentMetadataValue,
-        },
-        share::persistence::ShareGroupMetadataValue,
-        test_support::{
-            check_replay_cases, deletion_replay_cases, next_current, next_member, proto_uuid,
-            replay_tombstone_constructor,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            persistence_next_gen::{
+                AssignedTopicPartitions, GroupMetadataValue, NextGenKey, RegularExpressionValue,
+                TargetAssignmentMemberValue, TargetAssignmentMetadataValue,
+            },
+            share::persistence::ShareGroupMetadataValue,
+            test_support::{
+                check_replay_cases, deletion_replay_cases, next_current, next_member, proto_uuid,
+                replay_tombstone_constructor,
+            },
         },
     };
 
@@ -450,35 +454,28 @@ mod tests {
 
     fn replay(coord: &GroupCoordinator, record: &Record) -> Result<(), BrokerError> {
         match record.clone() {
-            Record::Group(epoch) => coord.replay_group_metadata(
-                "g",
-                GroupMetadataValue {
-                    epoch,
-                    metadata_hash: 9,
-                },
-            ),
+            Record::Group(epoch) => coord.replay_group_metadata("g", GroupMetadataValue {
+                epoch,
+                metadata_hash: 9,
+            }),
             Record::Member(member) => {
                 coord.replay_member_metadata("g", member, next_member(member))
             }
-            Record::TargetEpoch(epoch) => coord.replay_target_assignment_metadata(
-                "g",
-                TargetAssignmentMetadataValue {
+            Record::TargetEpoch(epoch) => {
+                coord.replay_target_assignment_metadata("g", TargetAssignmentMetadataValue {
                     assignment_epoch: epoch,
                     assignment_timestamp_ms: 4,
-                },
-            ),
+                })
+            }
             Record::Target(member) => coord.replay_target_assignment_member("g", member, target()),
             Record::Current(member, epoch) => {
                 coord.replay_current_member_assignment("g", member, next_current(epoch))
             }
             Record::Regex(regex) => coord.replay_regular_expression("g", regex, resolved()),
-            Record::ShareGroup => coord.replay_share_group_metadata(
-                "g",
-                ShareGroupMetadataValue {
-                    epoch: 1,
-                    metadata_hash: 0,
-                },
-            ),
+            Record::ShareGroup => coord.replay_share_group_metadata("g", ShareGroupMetadataValue {
+                epoch: 1,
+                metadata_hash: 0,
+            }),
             Record::Tombstone(key) => coord.replay_next_gen_tombstone(&key),
         }
     }

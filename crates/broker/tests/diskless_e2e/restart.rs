@@ -25,16 +25,16 @@
 //! acknowledged is decided by exactly when the crash landed, so asserting on
 //! them would be asserting on the timing rather than on the invariant.
 
-use std::time::Duration;
-
-use assert2::assert;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    RECORDS, TOPIC, VOTERS,
-    cluster::wait_for,
-    topic::{flushing_workload, seeded_leader},
-    wire::{assert_matches_produced, fetch_log, produce_until_stopped},
+use {
+    crate::{
+        RECORDS, TOPIC, VOTERS,
+        cluster::wait_for,
+        topic::{flushing_workload, seeded_leader},
+        wire::{assert_matches_produced, fetch_log, produce_until_stopped},
+    },
+    assert2::assert,
+    std::time::Duration,
+    tokio_util::sync::CancellationToken,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

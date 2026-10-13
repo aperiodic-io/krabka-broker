@@ -1,14 +1,16 @@
 //! The rows `DescribeUserScramCredentials` returns for an authorized caller: a
 //! seeded credential, an unknown user, and a user named twice in one request.
 
-use assert2::assert;
-use krabka_security::SaslMechanism;
-
-use crate::{
-    scram_cluster::{
-        admin_test_password, seed_scram_credential, start_single_broker_sasl_plaintext_with_users,
+use {
+    crate::{
+        scram_cluster::{
+            admin_test_password, seed_scram_credential,
+            start_single_broker_sasl_plaintext_with_users,
+        },
+        scram_driver::drive_describe_user_scram_credentials_sasl,
     },
-    scram_driver::drive_describe_user_scram_credentials_sasl,
+    assert2::assert,
+    krabka_security::SaslMechanism,
 };
 
 const KAFKA_DUPLICATE_RESOURCE: i16 = 92;
@@ -19,10 +21,10 @@ const WIRE_MECH_SCRAM_SHA_512: i8 = 2;
 /// that mechanism=2 (SCRAM-SHA-512) appears in the response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_all_users_round_trip() {
-    let (handle, _dir, addr) = start_single_broker_sasl_plaintext_with_users(
+    let (handle, _dir, addr) = start_single_broker_sasl_plaintext_with_users("admin", &[(
         "admin",
-        &[("admin", &admin_test_password())],
-    )
+        &admin_test_password(),
+    )])
     .await;
 
     // Seed alice's SCRAM credential directly via metadata (bypasses the
@@ -72,10 +74,10 @@ async fn describe_all_users_round_trip() {
 /// the per-user row carries `error_code = 91` (`RESOURCE_NOT_FOUND`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn describe_unknown_user_returns_error() {
-    let (_handle, _dir, addr) = start_single_broker_sasl_plaintext_with_users(
+    let (_handle, _dir, addr) = start_single_broker_sasl_plaintext_with_users("admin", &[(
         "admin",
-        &[("admin", &admin_test_password())],
-    )
+        &admin_test_password(),
+    )])
     .await;
 
     let (top_err, per_user) = drive_describe_user_scram_credentials_sasl(

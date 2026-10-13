@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::fetch_response_byte_budget;
+use {super::fetch_response_byte_budget, assert2::assert};
 
 #[test]
 fn consumer_fetch_uses_the_smallest_request_broker_and_quota_budgets() {

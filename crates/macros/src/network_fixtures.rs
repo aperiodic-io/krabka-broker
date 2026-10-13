@@ -1,11 +1,12 @@
 //! Independent wire and file-region fixtures shared by network tests and benchmarks.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::{
-    fixtures::{name, named_items, named_root},
-    meta::arguments,
-    sendfile_match::platform_cfg,
+use {
+    crate::{
+        fixtures::{name, named_items, named_root},
+        meta::arguments,
+        sendfile_match::platform_cfg,
+    },
+    moxy::{ast::ParseError, token::TokenStream},
 };
 
 pub(crate) fn request_frame(input: TokenStream) -> Result<TokenStream, ParseError> {

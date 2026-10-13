@@ -6,12 +6,13 @@
 //! succeed are the same in every test, so they are spelled once here and go
 //! through `Cli`, the parser the binary itself uses.
 
-use std::{net::SocketAddr, path::Path};
-
-use clap::Parser as _;
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle, NodeId};
-use krabka_restore::{Cli, RestoreArgs};
-use tokio::net::TcpListener;
+use {
+    clap::Parser as _,
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle, NodeId},
+    krabka_restore::{Cli, RestoreArgs},
+    std::{net::SocketAddr, path::Path},
+    tokio::net::TcpListener,
+};
 
 /// Build `RestoreArgs` with a valid target-side flag set (`--node-id`,
 /// `--standalone`, `--controller-listener`) so `format_target` succeeds, plus
@@ -66,14 +67,10 @@ impl ControllerListener {
         log_dir: &Path,
         extra: &[&str],
     ) -> RestoreArgs {
-        restore_args(
-            archive_root,
-            log_dir,
-            RestoreOptions {
-                controller_listener: &self.addr.to_string(),
-                extra,
-            },
-        )
+        restore_args(archive_root, log_dir, RestoreOptions {
+            controller_listener: &self.addr.to_string(),
+            extra,
+        })
     }
 
     /// Start node 1 under `config` with its controller listening here. The

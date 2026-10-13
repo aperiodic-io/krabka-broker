@@ -6,9 +6,10 @@
 //! to the signature check, so one operator's key never signs in another's
 //! name.
 
-use std::collections::BTreeMap;
-
-use super::{OperatorKeyEntry, OperatorKeyError, key_file::read_public_key};
+use {
+    super::{OperatorKeyEntry, OperatorKeyError, key_file::read_public_key},
+    std::collections::BTreeMap,
+};
 
 /// One loaded operator key and the principal it is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,24 +22,18 @@ pub struct OperatorKey {
 impl OperatorKey {
     /// Stable identifier that a signed record names.
     #[must_use]
-    pub fn key_id(&self) -> &str {
-        &self.key_id
-    }
+    pub fn key_id(&self) -> &str { &self.key_id }
 
     /// The principal this key speaks for.
     ///
     /// A record that claims another author is refused even when its signature
     /// verifies, so one operator's key cannot sign in another's name.
     #[must_use]
-    pub fn principal(&self) -> &str {
-        &self.principal
-    }
+    pub fn principal(&self) -> &str { &self.principal }
 
     /// The raw 32-byte Ed25519 public key.
     #[must_use]
-    pub fn public_key(&self) -> &[u8] {
-        &self.public_key
-    }
+    pub fn public_key(&self) -> &[u8] { &self.public_key }
 }
 
 /// The loaded, validated operator key trust set.
@@ -90,35 +85,26 @@ impl OperatorKeys {
             }
             let public_key = read_public_key(&entry.key_id, &entry.public_key_path)?;
             by_principal.insert(entry.principal.clone(), entry.key_id.clone());
-            by_id.insert(
-                entry.key_id.clone(),
-                OperatorKey {
-                    key_id: entry.key_id.clone(),
-                    principal: entry.principal.clone(),
-                    public_key,
-                },
-            );
+            by_id.insert(entry.key_id.clone(), OperatorKey {
+                key_id: entry.key_id.clone(),
+                principal: entry.principal.clone(),
+                public_key,
+            });
         }
         Ok(Self { by_id })
     }
 
     /// The key registered under `key_id`, with the principal it is bound to.
     #[must_use]
-    pub fn get(&self, key_id: &str) -> Option<&OperatorKey> {
-        self.by_id.get(key_id)
-    }
+    pub fn get(&self, key_id: &str) -> Option<&OperatorKey> { self.by_id.get(key_id) }
 
     /// How many keys the trust set holds.
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.by_id.len()
-    }
+    pub fn len(&self) -> usize { self.by_id.len() }
 
     /// Whether no operator key is provisioned.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.by_id.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.by_id.is_empty() }
 
     /// Verify `signature` over `message` as made by `key_id` on behalf of
     /// `principal`.

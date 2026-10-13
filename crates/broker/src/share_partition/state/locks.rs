@@ -7,11 +7,11 @@
 //! closes. All three return records to `Available` and keep `delivery_count`,
 //! so the next hand-out counts as a redelivery.
 
-use std::time::{Duration, Instant};
-
-use krabka_log::Offset;
-
-use super::{AcquisitionState, InFlightBatch, RecordState, window::give_back};
+use {
+    super::{AcquisitionState, InFlightBatch, RecordState, window::give_back},
+    krabka_log::Offset,
+    std::time::{Duration, Instant},
+};
 
 impl AcquisitionState {
     /// Renews the acquisition lock on the range `[first, last]` that `member`
@@ -95,12 +95,13 @@ impl AcquisitionState {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::share_partition::state::{
-        AckType, AcquiredRange,
-        test_support::{LOCK, t0},
+    use {
+        super::*,
+        crate::share_partition::state::{
+            AckType, AcquiredRange,
+            test_support::{LOCK, t0},
+        },
+        assert2::assert,
     };
 
     #[test]

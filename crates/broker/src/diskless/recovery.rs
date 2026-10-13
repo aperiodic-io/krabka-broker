@@ -1,11 +1,11 @@
 //! Crash-restart recovery helpers for diskless WAL partitions.
 
-use std::sync::Arc;
-
-use krabka_ids::{Offset, PartitionIndex};
-use krabka_log::{Log, LogConfig};
-
-use crate::{error::BrokerError, producer_state::ProducerState};
+use {
+    crate::{error::BrokerError, producer_state::ProducerState},
+    krabka_ids::{Offset, PartitionIndex},
+    krabka_log::{Log, LogConfig},
+    std::sync::Arc,
+};
 
 /// Returns the log-open config for a partition. It forces tail validation for
 /// a diskless log.
@@ -53,15 +53,16 @@ pub(crate) async fn rebuild_producer_state(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::records::RecordBatch;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        producer_state::Decision,
-        test_support::{RecordCount, RepeatedRecordsSetup, repeated_records_batch},
-        txn::marker::{MarkerType, build_marker_batch},
+    use {
+        super::*,
+        crate::{
+            producer_state::Decision,
+            test_support::{RecordCount, RepeatedRecordsSetup, repeated_records_batch},
+            txn::marker::{MarkerType, build_marker_batch},
+        },
+        assert2::assert,
+        krabka_protocol::records::RecordBatch,
+        tempfile::tempdir,
     };
 
     fn idempotent_batch(base_offset: i64, base_sequence: i32, count: i32) -> RecordBatch {

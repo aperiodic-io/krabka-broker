@@ -7,20 +7,20 @@
 //! apart. Both reach it through [`super::leader`], which checks the leadership
 //! of the partition first and waits for the marker to commit after.
 
-use std::{collections::HashMap, sync::Arc};
-
-use krabka_log::Offset;
-use krabka_verified::transaction::{
-    TransactionMarkerMaterializationDecision as Decision, TransactionMarkerPartitionState,
-    TransactionMarkerRequest,
-};
-
-use super::offsets::{pending_offset_entries, resolve_pending_offsets};
-use crate::{
-    coordinator::{bootstrap::OFFSETS_TOPIC, unified::GroupCoordinator},
-    error::BrokerError,
-    partition::Partition,
-    txn::marker::{MarkerType, build_marker_batch},
+use {
+    super::offsets::{pending_offset_entries, resolve_pending_offsets},
+    crate::{
+        coordinator::{bootstrap::OFFSETS_TOPIC, unified::GroupCoordinator},
+        error::BrokerError,
+        partition::Partition,
+        txn::marker::{MarkerType, build_marker_batch},
+    },
+    krabka_log::Offset,
+    krabka_verified::transaction::{
+        TransactionMarkerMaterializationDecision as Decision, TransactionMarkerPartitionState,
+        TransactionMarkerRequest,
+    },
+    std::{collections::HashMap, sync::Arc},
 };
 
 /// Append a transaction marker and, on a `__consumer_offsets` partition,
@@ -277,26 +277,27 @@ pub(crate) struct MarkerAppend {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_ids::PartitionIndex;
-
-    use super::*;
-    use crate::{
-        codes::{INVALID_PRODUCER_EPOCH, NONE, from_broker_error},
-        coordinator::{
-            persistence::OffsetCommitValue,
-            unified::{actor::test_support::rpc, classic_state::OffsetEntry},
-        },
-        partition::Partition,
-        test_support::StandalonePartitionSetup,
-        txn::handlers::write_txn_markers::{
-            CommittedOffsets,
-            test_support::{
-                local_offsets_partition, open_partition, single_transactional_batch, start_broker,
-                transactional_offset_batch,
+    use {
+        super::*,
+        crate::{
+            codes::{INVALID_PRODUCER_EPOCH, NONE, from_broker_error},
+            coordinator::{
+                persistence::OffsetCommitValue,
+                unified::{actor::test_support::rpc, classic_state::OffsetEntry},
+            },
+            partition::Partition,
+            test_support::StandalonePartitionSetup,
+            txn::handlers::write_txn_markers::{
+                CommittedOffsets,
+                test_support::{
+                    local_offsets_partition, open_partition, single_transactional_batch,
+                    start_broker, transactional_offset_batch,
+                },
             },
         },
+        assert2::assert,
+        bytes::Bytes,
+        krabka_ids::PartitionIndex,
     };
 
     #[tokio::test]
@@ -369,30 +370,22 @@ mod tests {
             .expect("install stamp source");
 
         let producer_id = krabka_log::ProducerId(700);
-        part.produce_batch(single_transactional_batch(
-            (producer_id, 2),
-            Record {
-                value: Some(Bytes::from_static(b"event")),
-                ..Record::default()
-            },
-        ))
+        part.produce_batch(single_transactional_batch((producer_id, 2), Record {
+            value: Some(Bytes::from_static(b"event")),
+            ..Record::default()
+        }))
         .await
         .expect("append transactional data");
         assert!(part.stamp_for_offset(krabka_log::Offset(0)).is_none());
 
-        append_marker_and_materialize(
-            &part,
-            None,
-            "stamped-orders",
-            MarkerAppend {
-                producer_id,
-                producer_epoch: 2,
-                marker_type: MarkerType::Commit,
-                coordinator_epoch: 0,
-                commit_stamp: Some(900),
-                transaction_version: 0,
-            },
-        )
+        append_marker_and_materialize(&part, None, "stamped-orders", MarkerAppend {
+            producer_id,
+            producer_epoch: 2,
+            marker_type: MarkerType::Commit,
+            coordinator_epoch: 0,
+            commit_stamp: Some(900),
+            transaction_version: 0,
+        })
         .await
         .expect("commit marker");
 
@@ -443,21 +436,14 @@ mod tests {
             cases.into_iter().enumerate()
         {
             let topic = format!("tv-marker-{index}");
-            let part = open_partition(
-                &broker,
-                dir.path(),
-                StandalonePartitionSetup {
-                    topic: &topic,
-                    ..Default::default()
-                },
-            );
-            part.produce_batch(single_transactional_batch(
-                (producer_id, 4),
-                Record {
-                    value: Some(Bytes::from_static(b"event")),
-                    ..Record::default()
-                },
-            ))
+            let part = open_partition(&broker, dir.path(), StandalonePartitionSetup {
+                topic: &topic,
+                ..Default::default()
+            });
+            part.produce_batch(single_transactional_batch((producer_id, 4), Record {
+                value: Some(Bytes::from_static(b"event")),
+                ..Record::default()
+            }))
             .await
             .expect("append transactional data");
             let marker = MarkerAppend {
@@ -474,16 +460,11 @@ mod tests {
                     .expect("close the transaction");
             }
             let before = part.log_end_offset();
-            let result = append_marker_and_materialize(
-                &part,
-                None,
-                &topic,
-                MarkerAppend {
-                    producer_epoch: marker_epoch,
-                    transaction_version,
-                    ..marker
-                },
-            )
+            let result = append_marker_and_materialize(&part, None, &topic, MarkerAppend {
+                producer_epoch: marker_epoch,
+                transaction_version,
+                ..marker
+            })
             .await;
             let answered = result.map_or_else(|error| from_broker_error(&error), |_| NONE);
             actual.push((label, answered, part.log_end_offset() != before));
@@ -499,63 +480,47 @@ mod tests {
 
         let (broker_handle, dir) = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
-        open_partition(
-            &broker,
-            dir.path(),
-            StandalonePartitionSetup {
-                topic: "fenced-orders",
-                ..Default::default()
-            },
-        );
+        open_partition(&broker, dir.path(), StandalonePartitionSetup {
+            topic: "fenced-orders",
+            ..Default::default()
+        });
         let part = broker
             .partitions
             .get("fenced-orders", PartitionIndex(0))
             .expect("local partition");
         let producer_id = krabka_log::ProducerId(701);
         let append_data = |epoch| {
-            single_transactional_batch(
-                (producer_id, epoch),
-                Record {
-                    value: Some(Bytes::from_static(b"event")),
-                    ..Record::default()
-                },
-            )
+            single_transactional_batch((producer_id, epoch), Record {
+                value: Some(Bytes::from_static(b"event")),
+                ..Record::default()
+            })
         };
         part.produce_batch(append_data(5))
             .await
             .expect("append first transaction");
         let before_marker = part.log_end_offset();
 
-        let malformed = append_marker_and_materialize(
-            &part,
-            None,
-            "fenced-orders",
-            MarkerAppend {
-                producer_id: krabka_log::ProducerId(-1),
-                producer_epoch: 0,
-                marker_type: MarkerType::Commit,
-                coordinator_epoch: 0,
-                commit_stamp: None,
-                transaction_version: 0,
-            },
-        )
+        let malformed = append_marker_and_materialize(&part, None, "fenced-orders", MarkerAppend {
+            producer_id: krabka_log::ProducerId(-1),
+            producer_epoch: 0,
+            marker_type: MarkerType::Commit,
+            coordinator_epoch: 0,
+            commit_stamp: None,
+            transaction_version: 0,
+        })
         .await;
         assert!(matches!(malformed, Err(BrokerError::Txn(_))));
 
-        let stale_producer = append_marker_and_materialize(
-            &part,
-            None,
-            "fenced-orders",
-            MarkerAppend {
+        let stale_producer =
+            append_marker_and_materialize(&part, None, "fenced-orders", MarkerAppend {
                 producer_id,
                 producer_epoch: 4,
                 marker_type: MarkerType::Commit,
                 coordinator_epoch: 10,
                 commit_stamp: None,
                 transaction_version: 0,
-            },
-        )
-        .await;
+            })
+            .await;
         assert!(matches!(
             stale_producer,
             Err(BrokerError::ProducerEpochFenced { .. })
@@ -592,20 +557,16 @@ mod tests {
             .await
             .expect("append next transaction");
         let before_stale_coordinator = part.log_end_offset();
-        let stale_coordinator = append_marker_and_materialize(
-            &part,
-            None,
-            "fenced-orders",
-            MarkerAppend {
+        let stale_coordinator =
+            append_marker_and_materialize(&part, None, "fenced-orders", MarkerAppend {
                 producer_id,
                 producer_epoch: 6,
                 marker_type: MarkerType::Abort,
                 coordinator_epoch: 9,
                 commit_stamp: None,
                 transaction_version: 0,
-            },
-        )
-        .await;
+            })
+            .await;
         assert!(matches!(
             stale_coordinator,
             Err(BrokerError::CoordinatorEpochFenced { .. })
@@ -821,20 +782,14 @@ mod tests {
         let markers_before_retry = marker_count();
 
         let mut retained = CommittedOffsets::new();
-        retained.insert(
-            group_id.into(),
-            vec![(
-                ("orders".into(), 3),
-                OffsetEntry {
-                    offset: Offset(88),
-                    leader_epoch: 2,
-                    metadata: "retained".into(),
-                    commit_timestamp_ms: i64::MAX,
-                    expire_timestamp_ms: None,
-                    topic_id: None,
-                },
-            )],
-        );
+        retained.insert(group_id.into(), vec![(("orders".into(), 3), OffsetEntry {
+            offset: Offset(88),
+            leader_epoch: 2,
+            metadata: "retained".into(),
+            commit_timestamp_ms: i64::MAX,
+            expire_timestamp_ms: None,
+            topic_id: None,
+        })]);
         part.marker_materialization.lock().await.insert(
             producer_id,
             (MarkerType::Commit, after_marker.get() - 1, retained),

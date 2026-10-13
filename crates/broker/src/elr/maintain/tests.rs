@@ -1,24 +1,23 @@
 //! The KIP-966 state machine: what one partition's ELR becomes when a change
 //! applies, and the `V1PartitionElr` records the publisher appends for it.
 
-use assert2::assert;
-use krabka_metadata::{
-    LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionElrRecord, PartitionRecord,
-    PartitionUpdateRecord, TopicConfigRecord, TopicRecord,
-};
-
-use super::{ElrPublisher, leaderless_partition_elr, next_partition_elr};
-use crate::{
-    config_keys::{MIN_INSYNC_REPLICAS, RETENTION_MS},
-    elr::state::{PartitionElr, TopicElr},
-    test_support::finalize_elr_version,
+use {
+    super::{ElrPublisher, leaderless_partition_elr, next_partition_elr},
+    crate::{
+        config_keys::{MIN_INSYNC_REPLICAS, RETENTION_MS},
+        elr::state::{PartitionElr, TopicElr},
+        test_support::finalize_elr_version,
+    },
+    assert2::assert,
+    krabka_metadata::{
+        LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionElrRecord, PartitionRecord,
+        PartitionUpdateRecord, TopicConfigRecord, TopicRecord,
+    },
 };
 
 const TOPIC: &str = "orders";
 
-fn nodes(ids: &[u64]) -> Vec<NodeId> {
-    ids.iter().copied().map(NodeId).collect()
-}
+fn nodes(ids: &[u64]) -> Vec<NodeId> { ids.iter().copied().map(NodeId).collect() }
 
 fn partition(leader: u64, replicas: &[u64], isr: &[u64]) -> PartitionRecord {
     PartitionRecord {
@@ -36,9 +35,7 @@ fn partition(leader: u64, replicas: &[u64], isr: &[u64]) -> PartitionRecord {
 }
 
 /// The ordinary three-replica fixture led by node 1, with an explicit ISR.
-fn three_replica_partition(isr: &[u64]) -> PartitionRecord {
-    partition(1, &[1, 2, 3], isr)
-}
+fn three_replica_partition(isr: &[u64]) -> PartitionRecord { partition(1, &[1, 2, 3], isr) }
 
 /// `record` under leader epoch `epoch`: the change that elects, as the
 /// scans bump the epoch on every election.
@@ -671,11 +668,9 @@ fn a_partition_change_migrates_legacy_elr_without_losing_it() {
 fn a_recovered_topic_drops_the_key_and_keeps_the_rest() {
     let before = three_replica_partition(&[1]);
     let image = image(Some("2"), Some("0:2,3:"), &before);
-    let mut changes = vec![MetadataRecord::V1Partition(partition(
-        1,
-        &[1, 2, 3],
-        &[1, 2],
-    ))];
+    let mut changes = vec![MetadataRecord::V1Partition(partition(1, &[1, 2, 3], &[
+        1, 2,
+    ]))];
 
     ElrPublisher::new(&image).extend(&mut changes);
 

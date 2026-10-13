@@ -6,14 +6,15 @@
 //! The answer follows Kafka's `ControllerApis.handleDescribeCluster` and
 //! `AuthHelper.computeDescribeClusterResponse`.
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bytes::{Bytes, BytesMut};
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::describe_cluster_response::{
-    DescribeClusterBroker, DescribeClusterResponse,
+use {
+    crate::{ClusterGrants, ClusterOperation, error::RaftError, kraft::KraftController},
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    bytes::{Bytes, BytesMut},
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::describe_cluster_response::{
+        DescribeClusterBroker, DescribeClusterResponse,
+    },
 };
-
-use crate::{ClusterGrants, ClusterOperation, error::RaftError, kraft::KraftController};
 
 /// `DescribeCluster` (KIP-919) — served on the controller listener so an
 /// `AdminClient` bootstrapped with `--bootstrap-controller` can discover the
@@ -176,20 +177,21 @@ fn controller_nodes(image: &MetadataImage, listener_name: &str) -> Vec<DescribeC
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{BrokerEndpoint, ControllerRegistrationRecord, MetadataRecord, NodeId};
-    use krabka_protocol::{
-        Decode, Encode, owned::describe_cluster_request::DescribeClusterRequest,
-    };
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        UnstableApiVersions,
-        server::{
-            api_versions::{ApiVersionsView, api_versions_response_body},
-            test_support::{decoded, test_engine_with_voters, voter},
+    use {
+        super::*,
+        crate::{
+            UnstableApiVersions,
+            server::{
+                api_versions::{ApiVersionsView, api_versions_response_body},
+                test_support::{decoded, test_engine_with_voters, voter},
+            },
         },
+        assert2::check,
+        krabka_metadata::{BrokerEndpoint, ControllerRegistrationRecord, MetadataRecord, NodeId},
+        krabka_protocol::{
+            Decode, Encode, owned::describe_cluster_request::DescribeClusterRequest,
+        },
+        uuid::Uuid,
     };
 
     /// The controller registrations of a case: each node id and its
@@ -406,9 +408,7 @@ mod tests {
                 operation == ClusterOperation::Alter
             }
 
-            fn cluster_authorized_operations(&self) -> i32 {
-                1 << 7
-            }
+            fn cluster_authorized_operations(&self) -> i32 { 1 << 7 }
         }
 
         let (engine, _dir) = test_engine_with_voters(1, [voter(1, Vec::new())]);
@@ -447,15 +447,12 @@ mod tests {
         use krabka_protocol::owned::api_versions_response::ApiVersionsResponse;
 
         let image = MetadataImage::new(Uuid::nil());
-        let av = api_versions_response_body(
-            4,
-            ApiVersionsView {
-                image: &image,
-                metadata_offset: -1,
-                admin_router: None,
-                unstable: UnstableApiVersions::Disabled,
-            },
-        );
+        let av = api_versions_response_body(4, ApiVersionsView {
+            image: &image,
+            metadata_offset: -1,
+            admin_router: None,
+            unstable: UnstableApiVersions::Disabled,
+        });
         let avr = decoded::<ApiVersionsResponse>(&av, 4);
         check!(avr.api_keys.iter().any(|k| k.api_key == 60));
     }

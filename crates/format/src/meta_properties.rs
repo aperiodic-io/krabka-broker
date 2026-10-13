@@ -28,18 +28,18 @@
 //! writes the same bytes, with the time in UTC. It reads what
 //! `Properties.load` reads, so it reads the file of every Java version.
 
-use std::{
-    collections::HashMap,
-    fs,
-    io::{self, Write as _},
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
+use {
+    crate::ids::{ClusterId, DirectoryId, KafkaUuidError},
+    std::{
+        collections::HashMap,
+        fs,
+        io::{self, Write as _},
+        path::Path,
+        time::{SystemTime, UNIX_EPOCH},
+    },
+    thiserror::Error,
+    time::OffsetDateTime,
 };
-
-use thiserror::Error;
-use time::OffsetDateTime;
-
-use crate::ids::{ClusterId, DirectoryId, KafkaUuidError};
 
 /// The file name, Kafka's `MetaPropertiesEnsemble.META_PROPERTIES_NAME`.
 pub const META_PROPERTIES: &str = "meta.properties";
@@ -221,9 +221,7 @@ impl MetaProperties {
     ///
     /// Returns the first I/O error. A rename that fails removes the
     /// temporary file, as Kafka does.
-    pub fn write(&self, dir: &Path) -> io::Result<()> {
-        self.write_observed(dir, |_| Ok(()))
-    }
+    pub fn write(&self, dir: &Path) -> io::Result<()> { self.write_observed(dir, |_| Ok(())) }
 
     /// [`Self::write`], calling `after` with the path of each file once it
     /// is written: the temporary file, then `meta.properties`. An error from
@@ -347,13 +345,9 @@ fn load_properties(bytes: &[u8]) -> Result<HashMap<String, String>, MetaProperti
 }
 
 /// The white space that `Properties.load` skips.
-fn is_white_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\x0c')
-}
+fn is_white_space(byte: u8) -> bool { matches!(byte, b' ' | b'\t' | b'\x0c') }
 
-fn is_line_end(byte: u8) -> bool {
-    matches!(byte, b'\n' | b'\r')
-}
+fn is_line_end(byte: u8) -> bool { matches!(byte, b'\n' | b'\r') }
 
 /// The logical lines of a properties file, as `Properties.LineReader` reads
 /// them.
@@ -509,12 +503,7 @@ fn java_date(now: SystemTime) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::check;
-    use uuid::Uuid;
-
-    use super::*;
+    use {super::*, assert2::check, std::time::Duration, uuid::Uuid};
 
     const CLUSTER: &str = "AQIDBAUGBwgJCgsMDQ4PEA";
     const DIRECTORY: &str = "U-hCdTzaSPyFB3swwc7Qdw";
@@ -529,9 +518,7 @@ mod tests {
         Result<Option<ClusterId>, String>,
     );
 
-    fn at(seconds: u64) -> SystemTime {
-        UNIX_EPOCH + Duration::from_secs(seconds)
-    }
+    fn at(seconds: u64) -> SystemTime { UNIX_EPOCH + Duration::from_secs(seconds) }
 
     fn meta(node_id: i32, directory_id: Option<&str>) -> MetaProperties {
         MetaProperties {
@@ -832,20 +819,14 @@ mod tests {
             (
                 "no directory id is no conflict",
                 vec![
-                    (
-                        "/a",
-                        MetaProperties {
-                            directory_id: None,
-                            ..file(c1, 1, 0)
-                        },
-                    ),
-                    (
-                        "/b",
-                        MetaProperties {
-                            directory_id: None,
-                            ..file(c1, 1, 0)
-                        },
-                    ),
+                    ("/a", MetaProperties {
+                        directory_id: None,
+                        ..file(c1, 1, 0)
+                    }),
+                    ("/b", MetaProperties {
+                        directory_id: None,
+                        ..file(c1, 1, 0)
+                    }),
                 ],
                 None,
                 Some(1),

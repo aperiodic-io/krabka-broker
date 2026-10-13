@@ -5,22 +5,24 @@
 //! and sequence bookkeeping runs against `check_pure`, the real broker-side
 //! idempotent-producer check, rather than against a restatement of it.
 
-use super::{
-    bounds::{
-        BASE_OFFSET, BASE_SEQUENCE, MAX_LOG_LEN, MAX_SEND_ATTEMPTS, PRODUCER_EPOCH, PRODUCER_ID,
+use {
+    super::{
+        bounds::{
+            BASE_OFFSET, BASE_SEQUENCE, MAX_LOG_LEN, MAX_SEND_ATTEMPTS, PRODUCER_EPOCH, PRODUCER_ID,
+        },
+        state::{
+            AcceptedBatch, BatchState, FailoverState, LogBatch, ProduceResult,
+            ProducerEntryProjection, RequestOutcome,
+        },
+        witness::{
+            WITNESS_APPENDED_UNACKED, WITNESS_DUPLICATE_AFTER_UNKNOWN, WITNESS_DUPLICATE_RESPONSE,
+            WITNESS_FAILOVER, WITNESS_NOT_LEADER, WITNESS_PREPARED_RETRY, WITNESS_RETRY,
+            WITNESS_RETRY_AFTER_FAILOVER, WITNESS_TIMED_OUT_UNKNOWN,
+            WITNESS_UNKNOWN_RETRY_AFTER_FAILOVER,
+        },
     },
-    state::{
-        AcceptedBatch, BatchState, FailoverState, LogBatch, ProduceResult, ProducerEntryProjection,
-        RequestOutcome,
-    },
-    witness::{
-        WITNESS_APPENDED_UNACKED, WITNESS_DUPLICATE_AFTER_UNKNOWN, WITNESS_DUPLICATE_RESPONSE,
-        WITNESS_FAILOVER, WITNESS_NOT_LEADER, WITNESS_PREPARED_RETRY, WITNESS_RETRY,
-        WITNESS_RETRY_AFTER_FAILOVER, WITNESS_TIMED_OUT_UNKNOWN,
-        WITNESS_UNKNOWN_RETRY_AFTER_FAILOVER,
-    },
+    crate::producer_state::{Decision, check_pure},
 };
-use crate::producer_state::{Decision, check_pure};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SendKind {

@@ -5,14 +5,14 @@
 //! become visible under `read_committed` once the commit marker advances the
 //! LSO. `txn_offset_commit_materialize.rs` covers the offset-visibility half.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_client_consumer::{AutoOffsetReset, Consumer, IsolationLevel};
-
-use crate::{
-    support::producer::{default_producer, transactional_producer},
-    txn_harness::{boot_single, create_topic, rec, send_ok},
+use {
+    crate::{
+        support::producer::{default_producer, transactional_producer},
+        txn_harness::{boot_single, create_topic, rec, send_ok},
+    },
+    assert2::assert,
+    krabka_client_consumer::{AutoOffsetReset, Consumer, IsolationLevel},
+    std::time::Duration,
 };
 
 /// Consume-process-produce loop with `send_offsets_to_transaction`. After the

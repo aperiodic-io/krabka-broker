@@ -2,17 +2,18 @@
 //! stamps, what a commit marker stamps later, and the guarantee that an
 //! unstamped partition writes identical bytes.
 
-use assert2::check;
-use krabka_units::prelude::mebibytes;
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    log::test_support::{
-        abort_marker, append_transaction, check_stamps, commit_marker, install_stamps,
-        rolling_test_log, sample_batch, stamped_test_log, test_log, transactional_batch,
+use {
+    super::*,
+    crate::{
+        log::test_support::{
+            abort_marker, append_transaction, check_stamps, commit_marker, install_stamps,
+            rolling_test_log, sample_batch, stamped_test_log, test_log, transactional_batch,
+        },
+        test_support::{open_log, stamp_entry},
     },
-    test_support::{open_log, stamp_entry},
+    assert2::check,
+    krabka_units::prelude::mebibytes,
+    tempfile::tempdir,
 };
 
 // ---- .stampindex append-path wiring tests ----
@@ -33,17 +34,14 @@ fn stampindex_records_appended_batches_and_resolves_offsets() {
     log.append(&mut sample_batch(3)).unwrap(); // offsets 3..=5, stamp 1020
 
     // Query surface resolves every covered offset to its batch's stamp.
-    check_stamps(
-        &log,
-        &[
-            (0, Some(1_000)),
-            (1, Some(1_000)),
-            (2, Some(1_010)),
-            (3, Some(1_020)),
-            (5, Some(1_020)),
-            (6, None),
-        ],
-    );
+    check_stamps(&log, &[
+        (0, Some(1_000)),
+        (1, Some(1_000)),
+        (2, Some(1_010)),
+        (3, Some(1_020)),
+        (5, Some(1_020)),
+        (6, None),
+    ]);
 
     // The durable on-disk sidecar holds exactly one entry per data batch.
     assert2::assert!(
@@ -82,15 +80,12 @@ fn control_markers_are_not_stamped() {
     // A following non-txn data batch at offset 3.
     log.append(&mut sample_batch(1)).unwrap();
 
-    check_stamps(
-        &log,
-        &[
-            (0, Some(1)), // txn data
-            (1, Some(1)),
-            (2, None),    // commit marker: unstamped
-            (3, Some(2)), // next data batch
-        ],
-    );
+    check_stamps(&log, &[
+        (0, Some(1)), // txn data
+        (1, Some(1)),
+        (2, None),    // commit marker: unstamped
+        (3, Some(2)), // next data batch
+    ]);
 
     assert2::assert!(
         crate::log::test_support::stamp_entries(dir.path(), 0)
@@ -152,10 +147,12 @@ fn supplied_commit_stamp_is_recorded_and_observed() {
         .unwrap();
     log.append(&mut sample_batch(1)).unwrap();
 
-    check_stamps(
-        &log,
-        &[(0, Some(100)), (1, Some(100)), (2, None), (3, Some(101))],
-    );
+    check_stamps(&log, &[
+        (0, Some(100)),
+        (1, Some(100)),
+        (2, None),
+        (3, Some(101)),
+    ]);
 }
 
 #[test]

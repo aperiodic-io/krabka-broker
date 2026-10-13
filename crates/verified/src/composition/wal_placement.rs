@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{election_has_quorum, select_wal_voters, wal_voter_set_valid};
+use {
+    super::{election_has_quorum, select_wal_voters, wal_voter_set_valid},
+    creusot_std::prelude::*,
+};
 
 type InstalledPlacement = (Vec<(u64, u64)>, Vec<u64>, bool);
 type RackLossPlacement = (Vec<(u64, u64)>, Vec<u64>, bool, bool);

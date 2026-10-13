@@ -3,13 +3,13 @@
 //! Every fixture writes a real Ed25519 public key into a temporary directory,
 //! so a test loads a trust set the way a broker does: from files on disk.
 
-use std::path::PathBuf;
-
-use ring::signature::{Ed25519KeyPair, KeyPair as _};
-use tempfile::TempDir;
-
-use super::OperatorKeyEntry;
-use crate::test_support::fresh_ed25519_key;
+use {
+    super::OperatorKeyEntry,
+    crate::test_support::fresh_ed25519_key,
+    ring::signature::{Ed25519KeyPair, KeyPair as _},
+    std::path::PathBuf,
+    tempfile::TempDir,
+};
 
 mod fingerprint;
 mod load;

@@ -16,31 +16,31 @@
 //! is when the group writes the trunk tags at all (`ActorState::trunk_records`);
 //! Kafka 4.3.1 has neither KIP-1331 nor the tags.
 
-use std::time::Instant;
-
-use krabka_protocol::owned::{
-    common::streams_group_topology_description_update_request::topology_description::TopologyDescription as WireDescription,
-    streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-};
-
-use super::{
-    ActorState, chrono_now_ms,
-    records::{flush_pending, group_metadata_value},
-};
-use crate::{
-    codes,
-    coordinator::unified::{
-        GroupCoordinator,
-        offsets_log::OffsetsLog,
-        streams::{
-            config::StreamsGroupConfig,
-            description::{Jitter, StoredDescription, TopologyDescription},
-            persistence::PendingStreamsRecords,
-            topology::status,
-        },
+use {
+    super::{
+        ActorState, chrono_now_ms,
+        records::{flush_pending, group_metadata_value},
     },
-    error::BrokerError,
+    crate::{
+        codes,
+        coordinator::unified::{
+            GroupCoordinator,
+            offsets_log::OffsetsLog,
+            streams::{
+                config::StreamsGroupConfig,
+                description::{Jitter, StoredDescription, TopologyDescription},
+                persistence::PendingStreamsRecords,
+                topology::status,
+            },
+        },
+        error::BrokerError,
+    },
+    krabka_protocol::owned::{
+        common::streams_group_topology_description_update_request::topology_description::TopologyDescription as WireDescription,
+        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
+    std::time::Instant,
 };
 
 /// A `StreamsGroupTopologyDescriptionUpdate` that the handler passed to the

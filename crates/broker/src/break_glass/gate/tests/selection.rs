@@ -4,12 +4,13 @@
 //! to, and the topic names that read as a partition of another topic. When two
 //! proposals authorize the same request, the one that expires first is spent.
 
-use assert2::check;
-use krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord};
-use uuid::Uuid;
-
-use super::{NOW_MS, config, consumed_record, image_of, proposal};
-use crate::break_glass::{ALL_ACTIONS, action_name, gate::authorize};
+use {
+    super::{NOW_MS, config, consumed_record, image_of, proposal},
+    crate::break_glass::{ALL_ACTIONS, action_name, gate::authorize},
+    assert2::check,
+    krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord},
+    uuid::Uuid,
+};
 
 #[test]
 fn a_proposal_covers_a_target_by_the_documented_rule() {

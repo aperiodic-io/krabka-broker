@@ -3,19 +3,19 @@
 //! and the writer live together because they are the two halves of one
 //! byte-for-byte Kafka format, and a change to either has to move the other.
 
-use std::{
-    fmt::Write as _,
-    fs,
-    path::{Path, PathBuf},
-};
-
-use krabka_ids::{LeaderEpoch, Offset};
-
-use super::{EpochEntry, LeaderEpochCheckpoint, is_strict_successor};
-use crate::{
-    error::LogError,
-    index::open_index,
-    io::{IoTarget, write_atomic},
+use {
+    super::{EpochEntry, LeaderEpochCheckpoint, is_strict_successor},
+    crate::{
+        error::LogError,
+        index::open_index,
+        io::{IoTarget, write_atomic},
+    },
+    krabka_ids::{LeaderEpoch, Offset},
+    std::{
+        fmt::Write as _,
+        fs,
+        path::{Path, PathBuf},
+    },
 };
 
 /// The `leader-epoch-checkpoint` format version this build writes and reads:
@@ -140,8 +140,10 @@ fn parse_column<T: std::str::FromStr>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::leader_epoch_checkpoint::test_support::{checkpoint, fresh};
+    use {
+        super::*,
+        crate::leader_epoch_checkpoint::test_support::{checkpoint, fresh},
+    };
 
     /// The golden file: Kafka's text layout, version line `0` first.
     const GOLDEN: &str = "0\n3\n0 0\n1 50\n2 100\n";

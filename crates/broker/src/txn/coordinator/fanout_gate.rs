@@ -7,9 +7,7 @@
 //! send more requests while the durable state is `PrepareCommit` or
 //! `PrepareAbort`.
 
-use tokio::sync::watch;
-
-use crate::error::BrokerError;
+use {crate::error::BrokerError, tokio::sync::watch};
 
 /// What the transaction-marker fan-out does when it reaches the gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -33,9 +31,7 @@ pub(crate) struct MarkerFanoutGate {
 }
 
 impl MarkerFanoutGate {
-    pub(crate) fn set_mode(&self, mode: MarkerFanoutMode) {
-        self.mode.send_replace(mode);
-    }
+    pub(crate) fn set_mode(&self, mode: MarkerFanoutMode) { self.mode.send_replace(mode); }
 
     /// Wait until `count` fan-outs reached the gate while it was not open.
     pub(crate) async fn wait_for_arrivals(&self, count: usize) {
@@ -75,11 +71,7 @@ impl MarkerFanoutGate {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert, std::sync::Arc};
 
     #[tokio::test]
     async fn gate_passes_holds_and_fails_as_its_mode_says() {

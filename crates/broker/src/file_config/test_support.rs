@@ -1,7 +1,9 @@
 //! Shared parse-and-apply setup for file configuration tests.
 
-use super::{FileConfig, FileConfigError};
-use crate::config::BrokerConfig;
+use {
+    super::{FileConfig, FileConfigError},
+    crate::config::BrokerConfig,
+};
 
 pub(super) fn configured(
     source: &str,

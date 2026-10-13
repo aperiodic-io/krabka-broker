@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::restore_selection::selection_ordered;
-use super::{
-    FetchWatermarks, RestoreAbortedTxn, RestoreSegmentExtent, aborted_transaction_interval,
-    aborted_transaction_overlaps, fetch_visibility, restore_txn_index_entry_valid,
-    truncation_frontier,
+use {
+    super::{
+        FetchWatermarks, RestoreAbortedTxn, RestoreSegmentExtent, aborted_transaction_interval,
+        aborted_transaction_overlaps, fetch_visibility, restore_txn_index_entry_valid,
+        truncation_frontier,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

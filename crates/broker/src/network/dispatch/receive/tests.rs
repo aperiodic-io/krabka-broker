@@ -1,19 +1,19 @@
-use std::{
-    io,
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+use {
+    super::{ReceiveError, RequestByteBudget, receive_request},
+    assert2::assert,
+    bytes::Bytes,
+    std::{
+        io,
+        pin::Pin,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        task::{Context, Poll},
+        time::Duration,
     },
-    task::{Context, Poll},
-    time::Duration,
+    tokio::io::{AsyncRead, ReadBuf},
 };
-
-use assert2::assert;
-use bytes::Bytes;
-use tokio::io::{AsyncRead, ReadBuf};
-
-use super::{ReceiveError, RequestByteBudget, receive_request};
 
 struct CountingRead {
     remaining: Bytes,

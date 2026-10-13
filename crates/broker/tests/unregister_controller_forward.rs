@@ -5,19 +5,20 @@
 
 mod support;
 
-use assert2::check;
-use krabka_metadata::{
-    NodeId as MetadataNodeId, metadata_version::CONTROLLER_UNREGISTRATION_MIN_LEVEL,
-};
-use krabka_protocol::owned::{
-    unregister_controller_request::UnregisterControllerRequest,
-    update_features_request::UpdateFeaturesRequest,
-};
-
-use crate::support::{
-    client::connect_owned,
-    configs::{controller_registration, feature_update},
-    shutdown_cluster, start_n_node_with,
+use {
+    crate::support::{
+        client::connect_owned,
+        configs::{controller_registration, feature_update},
+        shutdown_cluster, start_n_node_with,
+    },
+    assert2::check,
+    krabka_metadata::{
+        NodeId as MetadataNodeId, metadata_version::CONTROLLER_UNREGISTRATION_MIN_LEVEL,
+    },
+    krabka_protocol::owned::{
+        unregister_controller_request::UnregisterControllerRequest,
+        update_features_request::UpdateFeaturesRequest,
+    },
 };
 
 /// The cluster is first moved to trunk's 4.4-IV2 (33), the level the RPC

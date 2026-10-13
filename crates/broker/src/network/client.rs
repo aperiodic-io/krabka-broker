@@ -6,18 +6,18 @@
 //! The replicator's Fetch path, the raft transport's outbound dial, and the
 //! controller-heartbeat loop all use this client.
 
-use std::sync::Arc;
-
-use krabka_client_core::ClientDuplex;
-use krabka_security::ListenerProtocol;
 #[cfg(not(target_family = "wasm"))]
 use krabka_units::convert::ByteSizeExt as _;
-use krabka_units::{ByteSize, mebibytes};
-use thiserror::Error;
-use tokio::net::TcpStream;
-use tokio_rustls::TlsConnector;
-
-use crate::{config::InterBrokerCredentials, host_port::parse_host_port};
+use {
+    crate::{config::InterBrokerCredentials, host_port::parse_host_port},
+    krabka_client_core::ClientDuplex,
+    krabka_security::ListenerProtocol,
+    krabka_units::{ByteSize, mebibytes},
+    std::sync::Arc,
+    thiserror::Error,
+    tokio::net::TcpStream,
+    tokio_rustls::TlsConnector,
+};
 
 /// Socket buffer applied to an outbound inter-broker connection when the
 /// caller does not supply the broker's configured value. It matches the
@@ -41,16 +41,11 @@ const DEFAULT_SOCKET_BUFFER: ByteSize = mebibytes(1);
 /// accept side: an untuned connection still works, just less efficiently.
 #[cfg(not(target_family = "wasm"))]
 fn tune_outbound_socket(stream: &TcpStream, send_buffer: ByteSize, receive_buffer: ByteSize) {
-    tune_socket(
-        stream,
-        send_buffer,
-        receive_buffer,
-        [
-            |e| tracing::debug!(error = %e, "TCP_NODELAY set failed on outbound socket"),
-            |e| tracing::debug!(error = %e, "SO_SNDBUF set failed on outbound socket"),
-            |e| tracing::debug!(error = %e, "SO_RCVBUF set failed on outbound socket"),
-        ],
-    );
+    tune_socket(stream, send_buffer, receive_buffer, [
+        |e| tracing::debug!(error = %e, "TCP_NODELAY set failed on outbound socket"),
+        |e| tracing::debug!(error = %e, "SO_SNDBUF set failed on outbound socket"),
+        |e| tracing::debug!(error = %e, "SO_RCVBUF set failed on outbound socket"),
+    ]);
 }
 
 /// Apply options in their original order; callers retain their diagnostic call sites.
@@ -362,17 +357,17 @@ impl krabka_raft::OutboundDialer for InterBrokerDialer {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use krabka_units::kibibytes;
-
-    use super::{
-        DEFAULT_SOCKET_BUFFER, InterBrokerClient, to_client_creds, tune_outbound_socket,
-        unbracket_host,
-    };
-    use crate::{
-        config::InterBrokerCredentials,
-        network::test_support::{check_socket_tuning, tcp_pair},
+    use {
+        super::{
+            DEFAULT_SOCKET_BUFFER, InterBrokerClient, to_client_creds, tune_outbound_socket,
+            unbracket_host,
+        },
+        crate::{
+            config::InterBrokerCredentials,
+            network::test_support::{check_socket_tuning, tcp_pair},
+        },
+        krabka_units::kibibytes,
+        std::path::PathBuf,
     };
 
     #[tokio::test]

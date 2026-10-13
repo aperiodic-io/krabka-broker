@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::list_offsets_selection_model;
-use super::{ListOffsetsKind, ListOffsetsSelectionDecision, ListOffsetsSelectionFacts};
+use {
+    super::{ListOffsetsKind, ListOffsetsSelectionDecision, ListOffsetsSelectionFacts},
+    creusot_std::prelude::*,
+};
 
 /// Apply the common final clamp after any local, diskless, or remote lookup.
 ///

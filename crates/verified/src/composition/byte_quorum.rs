@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    FetchWatermarks, WalCopyBatch, covering_copy_preserves_logical_fetch,
-    installed_wal_quorum_bounds_fetch, wal_voter_set_valid,
+use {
+    super::{
+        FetchWatermarks, WalCopyBatch, covering_copy_preserves_logical_fetch,
+        installed_wal_quorum_bounds_fetch, wal_voter_set_valid,
+    },
+    creusot_std::prelude::*,
 };
 mod copy_vote;
 use copy_vote::authenticated_copy_vote;

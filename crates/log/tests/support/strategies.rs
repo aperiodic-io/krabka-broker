@@ -1,8 +1,10 @@
 //! Shared proptest strategies for `krabka-log` integration tests.
 
-use bytes::Bytes;
-use krabka_protocol::records::{Record, RecordBatch};
-use proptest::prelude::*;
+use {
+    bytes::Bytes,
+    krabka_protocol::records::{Record, RecordBatch},
+    proptest::prelude::*,
+};
 
 /// Arbitrary [`RecordBatch`] with the given record-count range and bounded key
 /// and value sizes.

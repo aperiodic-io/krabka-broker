@@ -3,26 +3,26 @@
 //! partition again only when its own notifier fires, until the accumulated
 //! bytes clear the floor, an epoch check fails, or `max_wait_ms` runs out.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_log::Offset;
-use krabka_protocol::owned::fetch_response::{FetchableTopicResponse, PartitionData};
-use krabka_units::convert::ByteSizeExt as _;
-use tokio::sync::Notify;
-
-use super::{
-    plan::{
-        PendingRead, ReadRole, apply_epoch_checks, leader_refusal, record_follower_position,
-        required_leader,
+use {
+    super::{
+        plan::{
+            PendingRead, ReadRole, apply_epoch_checks, leader_refusal, record_follower_position,
+            required_leader,
+        },
+        read::{LiveOffsets, ReadRequest, do_read},
+        remote::try_remote_read,
+        request::EffectivePartition,
+        response::group_into_topic_responses,
     },
-    read::{LiveOffsets, ReadRequest, do_read},
-    remote::try_remote_read,
-    request::EffectivePartition,
-    response::group_into_topic_responses,
-};
-use crate::{
-    broker::Broker, codes, diskless::read::try_diskless_read, metrics::RequestPhases,
-    partition::Partition,
+    crate::{
+        broker::Broker, codes, diskless::read::try_diskless_read, metrics::RequestPhases,
+        partition::Partition,
+    },
+    krabka_log::Offset,
+    krabka_protocol::owned::fetch_response::{FetchableTopicResponse, PartitionData},
+    krabka_units::convert::ByteSizeExt as _,
+    std::{sync::Arc, time::Duration},
+    tokio::sync::Notify,
 };
 
 /// The initial pass and a long-poll re-read use the same planned read inputs.
@@ -97,9 +97,7 @@ struct ReadAccounting {
 }
 
 impl LongPollState {
-    fn total(&self) -> usize {
-        self.bytes.iter().sum()
-    }
+    fn total(&self) -> usize { self.bytes.iter().sum() }
 
     /// The `max_bytes` to give this partition's read: whatever
     /// `partition_max_bytes` asked for, capped at what the response has left.
@@ -327,16 +325,12 @@ pub(super) async fn execute_pending_reads(
         read.max_bytes = budget;
         let cold = serve_from_cold_tier(broker, read, &partition, phases).await;
         read.max_bytes = requested_max_bytes;
-        state.record_read(
-            index,
-            read,
-            ReadAccounting {
-                local_bytes,
-                cold_bytes: cold,
-                budget,
-                allow_first_batch_overrun: min_one_batch,
-            },
-        );
+        state.record_read(index, read, ReadAccounting {
+            local_bytes,
+            cold_bytes: cold,
+            budget,
+            allow_first_batch_overrun: min_one_batch,
+        });
         // Kafka's `Partition.fetchRecords` records the follower's position
         // only after its read succeeded, so the row this read just filled
         // reports the high watermark from before that position counted.
@@ -562,16 +556,12 @@ async fn reread_woken(
     read.max_bytes = read_budget;
     let cold = serve_from_cold_tier(broker, read, &part, phases).await;
     read.max_bytes = requested_max_bytes;
-    state.record_read(
-        index,
-        read,
-        ReadAccounting {
-            local_bytes: bytes,
-            cold_bytes: cold,
-            budget: read_budget,
-            allow_first_batch_overrun: min_one_batch,
-        },
-    );
+    state.record_read(index, read, ReadAccounting {
+        local_bytes: bytes,
+        cold_bytes: cold,
+        budget: read_budget,
+        allow_first_batch_overrun: min_one_batch,
+    });
 }
 
 /// Serve `read`'s offset out of the cold tier when the local log no longer
@@ -629,25 +619,26 @@ async fn serve_from_cold_tier(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::{Bytes, BytesMut};
-    use krabka_ids::Offset;
-    use krabka_log::{Log, LogConfig};
-    use krabka_protocol::{
-        primitives::uuid::Uuid as WireUuid,
-        records::{Record, RecordBatch, RecordsPayload},
-    };
-    use object_store::{ObjectStoreExt as _, PutPayload, path::Path};
-
-    use crate::{
-        broker::{Broker, spawn_partition},
-        codes::{NONE, OFFSET_OUT_OF_RANGE},
-        diskless::wal_index::WalFlushRecord,
-        handlers::test_support::partition,
-        metrics::RequestPhases,
-        partition::{Partition, test_support::test_partition},
-        producer_state::ProducerState,
-        test_support::{StandalonePartitionSetup, StorageMode},
+    use {
+        crate::{
+            broker::{Broker, spawn_partition},
+            codes::{NONE, OFFSET_OUT_OF_RANGE},
+            diskless::wal_index::WalFlushRecord,
+            handlers::test_support::partition,
+            metrics::RequestPhases,
+            partition::{Partition, test_support::test_partition},
+            producer_state::ProducerState,
+            test_support::{StandalonePartitionSetup, StorageMode},
+        },
+        assert2::assert,
+        bytes::{Bytes, BytesMut},
+        krabka_ids::Offset,
+        krabka_log::{Log, LogConfig},
+        krabka_protocol::{
+            primitives::uuid::Uuid as WireUuid,
+            records::{Record, RecordBatch, RecordsPayload},
+        },
+        object_store::{ObjectStoreExt as _, PutPayload, path::Path},
     };
 
     fn wide_partition_fetch_request() -> super::EffectivePartition {
@@ -858,23 +849,15 @@ mod tests {
             crate::handlers::test_support::start_broker()
         );
 
-        let part_a = nonempty_local_partition(
-            &broker,
-            dir.path(),
-            NonemptyPartitionSetup {
-                topic: TOPIC_A,
-                payload: PAYLOAD,
-            },
-        )
+        let part_a = nonempty_local_partition(&broker, dir.path(), NonemptyPartitionSetup {
+            topic: TOPIC_A,
+            payload: PAYLOAD,
+        })
         .await;
-        let part_b = nonempty_local_partition(
-            &broker,
-            dir.path(),
-            NonemptyPartitionSetup {
-                topic: TOPIC_B,
-                payload: PAYLOAD,
-            },
-        )
+        let part_b = nonempty_local_partition(&broker, dir.path(), NonemptyPartitionSetup {
+            topic: TOPIC_B,
+            payload: PAYLOAD,
+        })
         .await;
 
         let request = wide_partition_fetch_request();
@@ -908,23 +891,15 @@ mod tests {
             (broker_handle, dir, broker),
             crate::handlers::test_support::start_broker()
         );
-        let first = nonempty_local_partition(
-            &broker,
-            dir.path(),
-            NonemptyPartitionSetup {
-                topic: "budget-fitting-first",
-                payload: b"small",
-            },
-        )
+        let first = nonempty_local_partition(&broker, dir.path(), NonemptyPartitionSetup {
+            topic: "budget-fitting-first",
+            payload: b"small",
+        })
         .await;
-        let second = nonempty_local_partition(
-            &broker,
-            dir.path(),
-            NonemptyPartitionSetup {
-                topic: "budget-oversized-second",
-                payload: &[b'x'; 512],
-            },
-        )
+        let second = nonempty_local_partition(&broker, dir.path(), NonemptyPartitionSetup {
+            topic: "budget-oversized-second",
+            payload: &[b'x'; 512],
+        })
         .await;
         let request = wide_partition_fetch_request();
         let pending = || {
@@ -1123,16 +1098,11 @@ mod tests {
         let limit = log.log_end_offset();
         log.trim_to_offset(limit)
             .expect("trim the whole log away from under the fetch");
-        spawn_fixture_partition(
-            broker,
-            dir,
-            log,
-            StandalonePartitionSetup {
-                topic,
-                storage: StorageMode::Diskless,
-                ..Default::default()
-            },
-        )
+        spawn_fixture_partition(broker, dir, log, StandalonePartitionSetup {
+            topic,
+            storage: StorageMode::Diskless,
+            ..Default::default()
+        })
     }
 
     /// One encoded batch of a single record.
@@ -1343,15 +1313,11 @@ mod tests {
             }],
         });
 
-        let part = partition(
-            &broker,
-            dir.path(),
-            StandalonePartitionSetup {
-                topic: "cold",
-                storage: StorageMode::Diskless,
-                ..Default::default()
-            },
-        );
+        let part = partition(&broker, dir.path(), StandalonePartitionSetup {
+            topic: "cold",
+            storage: StorageMode::Diskless,
+            ..Default::default()
+        });
         let mut pending = super::PendingRead {
             topic_name: "cold".into(),
             topic_id: WireUuid(topic_id.into_bytes()),
@@ -1382,7 +1348,7 @@ mod tests {
         assert!(phases.remote_seconds() > 0.0);
         // The object-store trip is charged to exactly one phase: the local
         // phase belongs to `do_read`, which this call does not make.
-        assert!(phases.local_seconds() < 1e-9);
+        assert!(phases.local_seconds() < 1.0e-9);
 
         // A partition the local log answered never enters the fallback, so a
         // cluster with no cold tier sees an unchanged remote phase.
@@ -1391,7 +1357,7 @@ mod tests {
         let served = super::serve_from_cold_tier(&broker, &mut pending, &part, &local_only).await;
 
         assert!(served == 0);
-        assert!(local_only.remote_seconds() < 1e-9);
+        assert!(local_only.remote_seconds() < 1.0e-9);
         broker_handle.shutdown().await;
     }
 
@@ -1453,15 +1419,10 @@ mod tests {
         // Nothing will ever append, and the floor is unreachable: only the
         // error can end this wait before its 30-second deadline.
         let waits = super::arm_waits(&pending);
-        check_blocked_poll_completes(
-            &broker,
-            &mut pending,
-            waits,
-            BlockedPollSetup {
-                failure: "the error completes the long poll",
-                ..Default::default()
-            },
-        )
+        check_blocked_poll_completes(&broker, &mut pending, waits, BlockedPollSetup {
+            failure: "the error completes the long poll",
+            ..Default::default()
+        })
         .await;
 
         assert!(pending[0].out.error_code == crate::codes::OFFSET_OUT_OF_RANGE);
@@ -1500,15 +1461,10 @@ mod tests {
                 .install_replication_target(None, node_id + 1, 0)
                 .await;
         });
-        check_blocked_poll_completes(
-            &broker,
-            &mut pending,
-            waits,
-            BlockedPollSetup {
-                failure: "the leader change completes the long poll",
-                ..Default::default()
-            },
-        )
+        check_blocked_poll_completes(&broker, &mut pending, waits, BlockedPollSetup {
+            failure: "the leader change completes the long poll",
+            ..Default::default()
+        })
         .await;
         demote.await.expect("demote task");
 
@@ -1635,13 +1591,10 @@ mod tests {
         setup: BlockedPollSetup<'_>,
     ) {
         let phases = RequestPhases::default();
-        let mut state = state_for(
-            pending,
-            PollStateSetup {
-                minimum: setup.minimum,
-                wait: setup.wait,
-            },
-        );
+        let mut state = state_for(pending, PollStateSetup {
+            minimum: setup.minimum,
+            wait: setup.wait,
+        });
         tokio::time::timeout(
             std::time::Duration::from_secs(2),
             super::long_poll_then_reread(broker, pending, waits, &mut state, &phases),
@@ -1771,13 +1724,10 @@ mod tests {
         // What `execute_pending_reads` does in this order: arm the waiters,
         // read (the log is empty, so the read finds nothing), then park.
         let waits = super::arm_waits(&pending);
-        let mut state = state_for(
-            &pending,
-            PollStateSetup {
-                minimum: FetchMinimumBytes(1),
-                wait: FetchWaitMillis(60_000),
-            },
-        );
+        let mut state = state_for(&pending, PollStateSetup {
+            minimum: FetchMinimumBytes(1),
+            wait: FetchWaitMillis(60_000),
+        });
 
         // The race the arming closes: the append lands between the read and
         // the park.

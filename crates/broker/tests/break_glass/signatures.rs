@@ -5,17 +5,18 @@
 //! verify, and one the broker accepts and keeps — and the case pins all three
 //! against a broker booted with `delete_topic` in that list.
 
-use assert2::{assert, check};
-use krabka_broker::codes;
-
-use crate::{
-    cluster::boot_with_signed_actions,
-    principals::{ALICE, BOB, CAROL},
-    proposals::{
-        ACTION_DELETE_TOPIC, approval_signing_bytes, approve, approve_signed, approve_with, open,
-        stored,
+use {
+    crate::{
+        cluster::boot_with_signed_actions,
+        principals::{ALICE, BOB, CAROL},
+        proposals::{
+            ACTION_DELETE_TOPIC, approval_signing_bytes, approve, approve_signed, approve_with,
+            open, stored,
+        },
+        topics::delete_topic,
     },
-    topics::delete_topic,
+    assert2::{assert, check},
+    krabka_broker::codes,
 };
 
 /// An action in `break_glass.signed_actions` takes a detached operator

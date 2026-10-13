@@ -15,13 +15,14 @@
 //! `NOT_LEADER_OR_FOLLOWER (6)`, and an invalid voter key is
 //! `INVALID_REQUEST (42)`.
 
-use krabka_protocol::owned::{
-    remove_raft_voter_request::RemoveRaftVoterRequest,
-    remove_raft_voter_response::RemoveRaftVoterResponse,
+use {
+    crate::{codes, handlers::raft_voter::respond},
+    krabka_protocol::owned::{
+        remove_raft_voter_request::RemoveRaftVoterRequest,
+        remove_raft_voter_response::RemoveRaftVoterResponse,
+    },
+    krabka_raft::{reconfig::RemoveVoter, voter_requests},
 };
-use krabka_raft::{reconfig::RemoveVoter, voter_requests};
-
-use crate::{codes, handlers::raft_voter::respond};
 
 crate::handlers::raft_voter::leader_handler!(
     (broker, version, req_bytes, ctx),
@@ -68,12 +69,12 @@ crate::handlers::raft_voter::leader_handler!(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_protocol::{owned::remove_raft_voter_response, primitives::uuid::Uuid as ProtoUuid};
-
-    use crate::test_support::{DenyAll, round_trip_response};
+    use {
+        crate::test_support::{DenyAll, round_trip_response},
+        assert2::assert,
+        krabka_protocol::{owned::remove_raft_voter_response, primitives::uuid::Uuid as ProtoUuid},
+        std::sync::Arc,
+    };
 
     fn request(voter_id: i32) -> RemoveRaftVoterRequest {
         RemoveRaftVoterRequest {
@@ -90,8 +91,10 @@ mod tests {
         RemoveRaftVoterResponse
     );
 
-    use super::*;
-    use crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx};
+    use {
+        super::*,
+        crate::test_support::{start_broker_with_authorizer as start_broker, test_ctx},
+    };
 
     /// Decode and encode round trip at the minimum and maximum versions.
     #[test]

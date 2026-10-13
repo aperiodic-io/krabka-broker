@@ -8,26 +8,26 @@
 //! preserve, and the `BrokerConfig` that restarts a broker on an existing log
 //! directory.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_broker::{BootstrapMode, BrokerConfig};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    ERR_NONE,
-    support::{
-        client::{connect as connect_client, create_topic as create_support_topic},
-        offsets::{offset_commit_partition, offset_commit_topic},
-        streams::{
-            ElectionReadiness, boot as boot_streams,
-            finalize_streams_version as finalize_streams_version_request,
+use {
+    crate::{
+        ERR_NONE,
+        support::{
+            client::{connect as connect_client, create_topic as create_support_topic},
+            offsets::{offset_commit_partition, offset_commit_topic},
+            streams::{
+                ElectionReadiness, boot as boot_streams,
+                finalize_streams_version as finalize_streams_version_request,
+            },
         },
     },
+    assert2::assert,
+    krabka_broker::{BootstrapMode, BrokerConfig},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::sync::Arc,
 };
 
 pub(crate) async fn boot() -> (krabka_broker::BrokerHandle, String, tempfile::TempDir) {
@@ -68,14 +68,12 @@ pub(crate) async fn commit_offset_as_member(
             group_id: group_id.into(),
             generation_id_or_member_epoch: member_epoch,
             member_id: member_id.into(),
-            topics: vec![offset_commit_topic(
-                topic,
-                topic_id,
-                vec![OffsetCommitRequestPartition {
+            topics: vec![offset_commit_topic(topic, topic_id, vec![
+                OffsetCommitRequestPartition {
                     committed_leader_epoch: 0,
                     ..offset_commit_partition(partition, offset, Some(String::new()))
-                }],
-            )],
+                },
+            ])],
             ..Default::default()
         })
         .await

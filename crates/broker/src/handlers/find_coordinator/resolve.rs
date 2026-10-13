@@ -6,10 +6,11 @@
 //! unavailable partition, and the parser for the share-coordinator's composite
 //! key.
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use krabka_protocol::owned::find_coordinator_response::Coordinator;
-
-use crate::{broker::Broker, codes, host_port::parse_advertised_host_port, txn::bootstrap::TOPIC};
+use {
+    crate::{broker::Broker, codes, host_port::parse_advertised_host_port, txn::bootstrap::TOPIC},
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    krabka_protocol::owned::find_coordinator_response::Coordinator,
+};
 
 /// What a coordinator lookup resolves against: one metadata image, the brokers
 /// that are fenced or dead in it, and the listener the request arrived on.
@@ -99,9 +100,7 @@ pub(super) fn resolve_partition_coordinator(
 // is skipped: `resolve_partition_coordinator` and the handler above it stay in
 // the sweep, because every other branch they take is wire-visible.
 #[cfg_attr(test, mutants::skip)]
-fn wire_node_id(leader: krabka_metadata::NodeId) -> i32 {
-    i32::try_from(leader.0).unwrap_or(-1)
-}
+fn wire_node_id(leader: krabka_metadata::NodeId) -> i32 { i32::try_from(leader.0).unwrap_or(-1) }
 
 pub(super) fn unavailable_coordinator(key: String) -> Coordinator {
     super::response::no_node_row(key, codes::COORDINATOR_NOT_AVAILABLE)
@@ -130,9 +129,7 @@ pub(super) fn parse_share_key(key: &str) -> Option<(&str, uuid::Uuid, i32)> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     const TOPIC_ID: &str = "BQUFBQUFBQUFBQUFBQUFBQ";
 

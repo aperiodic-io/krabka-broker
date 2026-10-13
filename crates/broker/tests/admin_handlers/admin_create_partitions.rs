@@ -2,18 +2,19 @@
 //! with broker-chosen placement and with an explicit `assignments` list, and
 //! the `INVALID_REPLICA_ASSIGNMENT` path that must add no partition at all.
 
-use assert2::assert;
-use krabka_protocol::owned::create_partitions_request::{
-    CreatePartitionsRequest, CreatePartitionsTopic,
-};
-
-use crate::{
-    admin_harness::{build_client, create_topic_helper},
-    support::{
-        registered_cluster, start_n_node_client,
-        topics::{
-            ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, create_topic_request,
+use {
+    crate::{
+        admin_harness::{build_client, create_topic_helper},
+        support::{
+            registered_cluster, start_n_node_client,
+            topics::{
+                ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, create_topic_request,
+            },
         },
+    },
+    assert2::assert,
+    krabka_protocol::owned::create_partitions_request::{
+        CreatePartitionsRequest, CreatePartitionsTopic,
     },
 };
 

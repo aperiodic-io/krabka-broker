@@ -43,9 +43,7 @@
 //! ## Programmatic report aggregation
 //!
 //! ```no_run
-//! use std::path::Path;
-//!
-//! use krabka_bench_driver::report;
+//! use {krabka_bench_driver::report, std::path::Path};
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let markdown = report::render_markdown(Path::new("runs"), true)?;

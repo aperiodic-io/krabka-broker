@@ -28,15 +28,16 @@
 //! per-connection principal and the peer `SocketAddr` for the group `Read` and
 //! per-topic `Read` ACL gates.
 
-use std::collections::{HashMap, HashSet};
-
 #[cfg(test)]
 use krabka_protocol::owned::share_fetch_request::{AcknowledgementBatch, FetchTopic};
-use krabka_protocol::owned::{
-    share_fetch_request::{FetchPartition, ShareFetchRequest},
-    share_fetch_response::{LeaderIdAndEpoch, ShareFetchResponse},
+use {
+    krabka_protocol::owned::{
+        share_fetch_request::{FetchPartition, ShareFetchRequest},
+        share_fetch_response::{LeaderIdAndEpoch, ShareFetchResponse},
+    },
+    krabka_units::convert::ByteSizeExt as _,
+    std::collections::{HashMap, HashSet},
 };
-use krabka_units::convert::ByteSizeExt as _;
 
 mod acknowledge;
 mod acquire;
@@ -115,18 +116,20 @@ pub(crate) use self::{
     leader_hint::{current_leader, names_the_leader},
     request::{ShareRequestIdentity, resolve_share_identity, share_request_identity},
 };
-use self::{
-    acquire::{AcquireContext, acquire_records},
-    pending::PendingPartition,
-    records::AcquireMode,
-    request::has_acknowledgements,
-    resolve::{RowContext, resolve_row},
-    response::{group_responses, success_response},
-};
-use crate::{
-    codes,
-    handlers::ErrorResponse as _,
-    share_partition::session::{FetchPartitions, ResponseRow},
+use {
+    self::{
+        acquire::{AcquireContext, acquire_records},
+        pending::PendingPartition,
+        records::AcquireMode,
+        request::has_acknowledgements,
+        resolve::{RowContext, resolve_row},
+        response::{group_responses, success_response},
+    },
+    crate::{
+        codes,
+        handlers::ErrorResponse as _,
+        share_partition::session::{FetchPartitions, ResponseRow},
+    },
 };
 
 /// The longest member id that Kafka accepts: a human-readable UUID.
@@ -360,9 +363,7 @@ context_handler! {
 
 #[cfg(test)]
 mod rotation_tests {
-    use assert2::assert;
-
-    use super::rotate_round_robin;
+    use {super::rotate_round_robin, assert2::assert};
 
     #[test]
     fn partitions_rotate_left_by_the_session_epoch() {

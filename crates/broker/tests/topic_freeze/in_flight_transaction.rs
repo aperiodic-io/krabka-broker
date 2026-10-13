@@ -7,25 +7,25 @@
 //! offset and stops every `read_committed` consumer of a topic the freeze was
 //! meant to keep readable.
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_broker::codes;
-use krabka_client_core::Client;
-use krabka_client_producer::Producer;
-use krabka_protocol::{
-    krabka::freeze::PATTERN_TYPE_LITERAL,
-    owned::list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
-};
-
-use crate::{
-    control_plane::freeze_scope,
-    support::{
-        self,
-        producer::{ProducerRecordSetup, producer_record},
+use {
+    crate::{
+        control_plane::freeze_scope,
+        support::{
+            self,
+            producer::{ProducerRecordSetup, producer_record},
+        },
+        wire::{CONTROL, accepted, create_topic, refused},
     },
-    wire::{CONTROL, accepted, create_topic, refused},
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_broker::codes,
+    krabka_client_core::Client,
+    krabka_client_producer::Producer,
+    krabka_protocol::{
+        krabka::freeze::PATTERN_TYPE_LITERAL,
+        owned::list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
+    },
+    std::time::{Duration, Instant},
 };
 
 /// The `read_committed` end of one partition.

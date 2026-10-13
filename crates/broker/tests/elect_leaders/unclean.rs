@@ -5,22 +5,23 @@
 //! The scenario forges the dead ISR with an injected `PartitionRecord` rather
 //! than by stopping brokers, so the raft quorum stays intact throughout.
 
-use assert2::assert;
-use krabka_metadata::{MetadataRecord, PartitionRecord};
-
-use crate::{
-    cluster_lock,
-    kafka_wire::ElectionExchangeSetup,
-    support::{
-        admin::{ElectionKind, ElectionSetup},
-        registered_cluster, shutdown_cluster,
-        topics::AssignedTopicSetup,
+use {
+    crate::{
+        cluster_lock,
+        kafka_wire::ElectionExchangeSetup,
+        support::{
+            admin::{ElectionKind, ElectionSetup},
+            registered_cluster, shutdown_cluster,
+            topics::AssignedTopicSetup,
+        },
+        wait::{
+            wait_partition_exists, wait_partition_isr_contains, wait_partition_isr_only,
+            wait_partition_leader, wait_partition_record_known,
+        },
+        wire::{CLIENT_ID, create_topic_plaintext, drive_elect_leaders},
     },
-    wait::{
-        wait_partition_exists, wait_partition_isr_contains, wait_partition_isr_only,
-        wait_partition_leader, wait_partition_record_known,
-    },
-    wire::{CLIENT_ID, create_topic_plaintext, drive_elect_leaders},
+    assert2::assert,
+    krabka_metadata::{MetadataRecord, PartitionRecord},
 };
 
 /// A 3-broker PLAINTEXT cluster with an rf=2 topic where `replicas = [1, 2]`.
@@ -66,13 +67,10 @@ async fn unclean_election_via_wire_picks_alive_replica() {
     let h1 = &cluster[1].0;
 
     // Create rf=2 topic. Replicas=[1,2]; broker 1 is preferred.
-    create_topic_plaintext(
-        addr,
-        AssignedTopicSetup {
-            name: ("foo-unclean").into(),
-            replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
-        },
-    )
+    create_topic_plaintext(addr, AssignedTopicSetup {
+        name: ("foo-unclean").into(),
+        replicas: vec![krabka_metadata::NodeId(1), krabka_metadata::NodeId(2)],
+    })
     .await;
     wait_partition_exists(h0, "foo-unclean", 0).await;
     wait_partition_exists(h1, "foo-unclean", 0).await;
@@ -120,13 +118,10 @@ async fn unclean_election_via_wire_picks_alive_replica() {
         kind: ElectionKind::Unclean,
         ..Default::default()
     };
-    let result = drive_elect_leaders(
-        addr,
-        ElectionExchangeSetup {
-            client_id: CLIENT_ID,
-            election: election_setup,
-        },
-    )
+    let result = drive_elect_leaders(addr, ElectionExchangeSetup {
+        client_id: CLIENT_ID,
+        election: election_setup,
+    })
     .await;
     assert!(
         result == [(0, 0)],

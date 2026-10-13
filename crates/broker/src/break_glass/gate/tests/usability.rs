@@ -4,13 +4,14 @@
 //! principals rather than rows, and an action named in `signed_actions` needs a
 //! signature on every approval it holds.
 
-use assert2::{assert, check};
-use krabka_metadata::{BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord};
-
-use super::{NOW_MS, approval, config, image_of, proposal, signed_approval};
-use crate::{
-    break_glass::gate::{BreakGlassDenial, DenialReason, authorize},
-    config::BreakGlassConfig,
+use {
+    super::{NOW_MS, approval, config, image_of, proposal, signed_approval},
+    crate::{
+        break_glass::gate::{BreakGlassDenial, DenialReason, authorize},
+        config::BreakGlassConfig,
+    },
+    assert2::{assert, check},
+    krabka_metadata::{BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord},
 };
 
 #[test]

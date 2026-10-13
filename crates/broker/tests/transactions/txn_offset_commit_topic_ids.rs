@@ -8,15 +8,15 @@
 //! `unstable.api.versions.enable`, advertises `TxnOffsetCommit` 0-6, so the
 //! producer commits by topic id alone. By default it advertises 4.3.1's 0-5.
 
-use std::collections::BTreeMap;
-
-use assert2::assert;
-use krabka_client_admin::AdminClient;
-use krabka_client_producer::{ConsumerGroupMetadata, ProducerError};
-
-use crate::{
-    support::producer::transactional_producer,
-    txn_harness::{boot_single_trunk, create_topic},
+use {
+    crate::{
+        support::producer::transactional_producer,
+        txn_harness::{boot_single_trunk, create_topic},
+    },
+    assert2::assert,
+    krabka_client_admin::AdminClient,
+    krabka_client_producer::{ConsumerGroupMetadata, ProducerError},
+    std::collections::BTreeMap,
 };
 
 /// `GROUP_ID_NOT_FOUND`. Kafka's `validateTransactionalOffsetCommit` answers

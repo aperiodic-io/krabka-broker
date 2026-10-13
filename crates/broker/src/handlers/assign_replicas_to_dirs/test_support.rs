@@ -4,12 +4,13 @@
 //! single-broker harness are each used by more than one of the test modules
 //! under this module, so they live in one file instead of once per module.
 
-use krabka_protocol::owned::{
-    assign_replicas_to_dirs_request::AssignReplicasToDirsRequest,
-    assign_replicas_to_dirs_response::AssignReplicasToDirsResponse,
+use {
+    crate::{broker::Broker, error::BrokerError, handlers::assign_replicas_to_dirs::handle},
+    krabka_protocol::owned::{
+        assign_replicas_to_dirs_request::AssignReplicasToDirsRequest,
+        assign_replicas_to_dirs_response::AssignReplicasToDirsResponse,
+    },
 };
-
-use crate::{broker::Broker, error::BrokerError, handlers::assign_replicas_to_dirs::handle};
 
 pub(super) const VERSION: i16 = 0;
 

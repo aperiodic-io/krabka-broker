@@ -225,14 +225,14 @@ impl ControllerLivenessState {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        heartbeat::controller_state::{BrokerControlState, ReplicatedRegistration, TestClock},
-        test_support::expired_broker_fixture,
+    use {
+        super::*,
+        crate::{
+            heartbeat::controller_state::{BrokerControlState, ReplicatedRegistration, TestClock},
+            test_support::expired_broker_fixture,
+        },
+        assert2::assert,
+        std::time::Duration,
     };
 
     /// krabka-io/krabka-broker#825: a controller that takes over, a restarted
@@ -579,26 +579,20 @@ mod tests {
         clock.advance(Duration::from_millis(11));
         // A second caller in term 3 does not refresh the window.
         liveness
-            .seed_term(
-                Some(3),
-                [
-                    ReplicatedRegistration::unfenced(1),
-                    ReplicatedRegistration::unfenced(2),
-                ],
-            )
+            .seed_term(Some(3), [
+                ReplicatedRegistration::unfenced(1),
+                ReplicatedRegistration::unfenced(2),
+            ])
             .await;
         assert!(liveness.tick().await == vec![LivenessTransition::AliveToDead(1)]);
         assert!(liveness.state(2).await == None);
 
         // Term 4 seeds again.
         liveness
-            .seed_term(
-                Some(4),
-                [
-                    ReplicatedRegistration::unfenced(1),
-                    ReplicatedRegistration::unfenced(2),
-                ],
-            )
+            .seed_term(Some(4), [
+                ReplicatedRegistration::unfenced(1),
+                ReplicatedRegistration::unfenced(2),
+            ])
             .await;
         assert!(liveness.alive_snapshot().await == [1, 2].into_iter().collect());
     }

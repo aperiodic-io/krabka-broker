@@ -1,8 +1,6 @@
 //! TCP listener, per-connection task, and Kafka framing helpers.
 
-use krabka_protocol::api_key::ApiKey;
-
-use crate::handlers::ApiKeyCode;
+use {crate::handlers::ApiKeyCode, krabka_protocol::api_key::ApiKey};
 
 pub(crate) mod auth;
 /// Outbound inter-broker client, with TLS and SASL. It is public so peer

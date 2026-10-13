@@ -5,15 +5,15 @@
 //! boundaries without decoding a single record, so the walk lives in one place
 //! and takes a visitor.
 
-use std::ops::ControlFlow;
-
-use krabka_ids::Offset;
-use krabka_protocol::records::{HEADER_LEN, RecordBatchHeader};
-use krabka_units::prelude::ByteSizeExt;
-use zerocopy::FromBytes;
-
-use super::Segment;
-use crate::{config::DEFAULT_TIMESTAMP_SCAN_WINDOW, error::LogError};
+use {
+    super::Segment,
+    crate::{config::DEFAULT_TIMESTAMP_SCAN_WINDOW, error::LogError},
+    krabka_ids::Offset,
+    krabka_protocol::records::{HEADER_LEN, RecordBatchHeader},
+    krabka_units::prelude::ByteSizeExt,
+    std::ops::ControlFlow,
+    zerocopy::FromBytes,
+};
 
 /// The fields of one v2 batch header that an activation walk reads.
 #[derive(Debug, Clone, Copy)]
@@ -113,18 +113,18 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::ControlFlow;
-
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        config::DEFAULT_INDEX_INTERVAL,
-        segment::test_support::{
-            DENSE_INDEX, FIRST_HEADER_WALK_BATCH, RecordCount, RecordTimestamp,
-            SECOND_HEADER_WALK_BATCH, SampleBatchSetup, SeededSegmentSetup, sample_batch,
-            seeded_fixture,
+    use {
+        super::*,
+        crate::{
+            config::DEFAULT_INDEX_INTERVAL,
+            segment::test_support::{
+                DENSE_INDEX, FIRST_HEADER_WALK_BATCH, RecordCount, RecordTimestamp,
+                SECOND_HEADER_WALK_BATCH, SampleBatchSetup, SeededSegmentSetup, sample_batch,
+                seeded_fixture,
+            },
         },
+        std::ops::ControlFlow,
+        tempfile::tempdir,
     };
 
     #[test]
@@ -273,8 +273,7 @@ mod tests {
 
     #[test]
     fn sparse_reads_handle_split_headers_large_batches_and_torn_tails() {
-        use bytes::Bytes;
-        use krabka_units::prelude::bytes;
+        use {bytes::Bytes, krabka_units::prelude::bytes};
 
         let dir = tempdir().unwrap();
         let mut seg = Segment::create(dir.path(), Offset(10)).unwrap();

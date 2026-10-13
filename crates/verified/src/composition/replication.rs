@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    FetchWatermarks, ReplicaFetchFacts, ReplicaFetchMutation, advance_high_watermark,
-    fetch_visibility, local_append_coordinates, replica_fetch_mutation, truncation_frontier,
+use {
+    super::{
+        FetchWatermarks, ReplicaFetchFacts, ReplicaFetchMutation, advance_high_watermark,
+        fetch_visibility, local_append_coordinates, replica_fetch_mutation, truncation_frontier,
+    },
+    creusot_std::prelude::*,
 };
 
 /// A fenced/error replica response leaves the log end and HWM unchanged.

@@ -32,17 +32,18 @@
 //! case for a broker that serves recent data. A cold-cache comparison would
 //! need root to drop the caches, and it is not portable in CI.
 
-use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom},
-    path::PathBuf,
+use {
+    criterion::{Criterion, black_box, criterion_group, criterion_main},
+    krabka_log::{Log, LogConfig, Offset},
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _, kibibytes, mebibytes},
+    memmap2::Mmap,
+    std::{
+        fs::{File, OpenOptions},
+        io::{Read, Seek, SeekFrom},
+        path::PathBuf,
+    },
+    tempfile::TempDir,
 };
-
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use krabka_log::{Log, LogConfig, Offset};
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _, kibibytes, mebibytes};
-use memmap2::Mmap;
-use tempfile::TempDir;
 
 /// One Kafka-default fetch chunk.
 const READ_LEN: ByteSize = mebibytes(1);

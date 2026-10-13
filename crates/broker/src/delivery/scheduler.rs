@@ -17,23 +17,23 @@
 //! I/O. A partition whose topic delivers immediately leaves the heap on the
 //! sweep that finds it and reports no metric series.
 
-use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, HashMap, HashSet},
-    sync::{Arc, atomic::Ordering},
-    time::Duration,
-};
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::NodeId;
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio_util::sync::CancellationToken;
-use tracing::debug;
-
-use crate::{
-    delivery::{DeliveryWaker, config::DeliveryConfig, metrics::DeliveryMetrics},
-    partition_registry::PartitionRegistry,
-    time_util,
+use {
+    crate::{
+        delivery::{DeliveryWaker, config::DeliveryConfig, metrics::DeliveryMetrics},
+        partition_registry::PartitionRegistry,
+        time_util,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::NodeId,
+    krabka_units::{Time, convert::TimeExt as _},
+    std::{
+        cmp::Reverse,
+        collections::{BinaryHeap, HashMap, HashSet},
+        sync::{Arc, atomic::Ordering},
+        time::Duration,
+    },
+    tokio_util::sync::CancellationToken,
+    tracing::debug,
 };
 
 /// Names this cadence loop in the error a failed timer registration logs.
@@ -57,9 +57,7 @@ struct DeadlineHeap {
 
 impl DeadlineHeap {
     /// The deadline recorded for `key`, or `None` when nothing waits on it.
-    fn deadline(&self, key: &PartitionKey) -> Option<i64> {
-        self.deadlines.get(key).copied()
-    }
+    fn deadline(&self, key: &PartitionKey) -> Option<i64> { self.deadlines.get(key).copied() }
 
     /// Record that `key`'s first waiting batch becomes visible at `deadline_ms`.
     fn set(&mut self, key: PartitionKey, deadline_ms: i64) {
@@ -71,9 +69,7 @@ impl DeadlineHeap {
     }
 
     /// Drop `key`, because nothing waits on it any more.
-    fn forget(&mut self, key: &PartitionKey) {
-        self.deadlines.remove(key);
-    }
+    fn forget(&mut self, key: &PartitionKey) { self.deadlines.remove(key); }
 
     /// Drop every partition that is not in `live`, because this broker no
     /// longer leads it or the registry no longer holds it.

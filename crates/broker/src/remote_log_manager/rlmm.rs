@@ -1,11 +1,11 @@
 //! Bridges the blocking [`RemoteLogMetadataManager`] mutation SPI onto the
 //! Tokio blocking pool, so no metadata write runs on a runtime worker thread.
 
-use std::sync::Arc;
-
-use krabka_remote_storage::RemoteLogMetadataManager;
-
-use crate::{blocking::spawn_blocking, time_util::now_ms};
+use {
+    crate::{blocking::spawn_blocking, time_util::now_ms},
+    krabka_remote_storage::RemoteLogMetadataManager,
+    std::sync::Arc,
+};
 
 /// Run one blocking [`RemoteLogMetadataManager`] mutation on the blocking
 /// pool. The topic-backed manager's synchronous SPI methods bridge to a
@@ -58,10 +58,11 @@ pub(super) async fn update_segment(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    use super::*;
-    use crate::remote_log_manager::test_support as fixtures;
+    use {
+        super::*,
+        crate::remote_log_manager::test_support as fixtures,
+        std::sync::atomic::{AtomicBool, Ordering},
+    };
 
     #[tokio::test]
     async fn rlmm_mutate_runs_op_and_propagates_error() {

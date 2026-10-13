@@ -23,10 +23,11 @@
 //! coordinator lookup, is not sent again (`filterCreatableTopics`). It is
 //! answered 3 among the invalid names.
 
-use krabka_log::topic_name::validate_topic_name;
-use krabka_protocol::owned::metadata_response::MetadataResponseTopic;
-
-use crate::{broker::Broker, codes, handlers::RequestContext, topic_creator::ForwardedIdentity};
+use {
+    crate::{broker::Broker, codes, handlers::RequestContext, topic_creator::ForwardedIdentity},
+    krabka_log::topic_name::validate_topic_name,
+    krabka_protocol::owned::metadata_response::MetadataResponseTopic,
+};
 
 /// The rows for `names`, the missing topics that the principal may describe
 /// and, when `auto_create` is set, may create. With `auto_create` set this

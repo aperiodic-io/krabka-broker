@@ -1,53 +1,55 @@
 //! The production [`Default`] constructor: the value the broker takes for
 //! every knob an operator does not set.
 
-use std::{collections::HashMap, net::SocketAddr, path::PathBuf};
-
-use krabka_compression::RecordDecompressionPolicy;
-use krabka_log::LogConfig;
-use krabka_raft::{
-    BootstrapMode, ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity,
-    MetadataRaftFetchMax, NodeId,
-};
-use krabka_units::{bytes, hours, kibibytes, mebibytes, millis, minutes, secs};
-
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    clean_shutdown::UNPROVEN,
-    client_metrics::config::INTERVAL_MS_DEFAULT,
-    config::{
-        BreakGlassConfig, BrokerConfig, DEFAULT_AUDIT_CHECKPOINT_EVERY,
-        DEFAULT_AUDIT_CHECKPOINT_EVERY_N, DEFAULT_AUDIT_SPOOL_DIR, DEFAULT_AUDIT_SPOOL_MAX,
-        DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N, DEFAULT_AUDIT_TOPIC, DEFAULT_BROKER_ID,
-        DEFAULT_CONTROLLER_ELECTION_TIMEOUT, DEFAULT_CONTROLLER_HEARTBEAT_INTERVAL,
-        DEFAULT_DELEGATION_TOKEN_EXPIRY_CHECK_INTERVAL, DEFAULT_DELEGATION_TOKEN_MAX_LIFETIME,
-        DEFAULT_DELEGATION_TOKEN_RENEW_PERIOD, DEFAULT_DISKLESS_WAL_FLUSH_INTERVAL,
-        DEFAULT_DISKLESS_WAL_FLUSH_MAX_SIZE, DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE,
-        DEFAULT_DISKLESS_WAL_INDEX_PROJECTION_TIMEOUT, DEFAULT_DISKLESS_WAL_LOCAL_REPLICA_COUNT,
-        DEFAULT_DISKLESS_WAL_TRIM_SAFETY_LAG, DEFAULT_HEARTBEAT_INTERVAL,
-        DEFAULT_HEARTBEAT_TIMEOUT, DEFAULT_JWKS_MIN_ON_DEMAND_PAUSE, DEFAULT_JWKS_REFRESH_INTERVAL,
-        DEFAULT_LEADER_IMBALANCE_CHECK_INTERVAL, DEFAULT_LOG_FILTER,
-        DEFAULT_MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS,
-        DEFAULT_METADATA_MAX_BYTES_BETWEEN_SNAPSHOTS, DEFAULT_METADATA_MAX_SNAPSHOT_INTERVAL,
-        DEFAULT_METADATA_SNAPSHOT_FETCH_MAX, DEFAULT_METADATA_SNAPSHOT_INTERVAL_RECORDS,
-        DEFAULT_OBSERVER_LAG_BOUND, DEFAULT_QUOTA_WINDOW, DEFAULT_REMOTE_COPIER_THREADS,
-        DEFAULT_REMOTE_COPY_TIMEOUT, DEFAULT_REMOTE_EXPIRATION_THREADS,
-        DEFAULT_REMOTE_INDEX_CACHE_SIZE, DEFAULT_REMOTE_LOG_MANAGER_INTERVAL,
-        DEFAULT_REMOTE_READER_MAX_PENDING_TASKS, DEFAULT_REMOTE_READER_THREADS,
-        DEFAULT_REPLICA_LAG_TIME_MAX, DEFAULT_TLS_RELOAD_INTERVAL,
-        DEFAULT_TXN_ABORT_CLEANUP_INTERVAL, DEFAULT_TXN_ID_EXPIRATION,
-        DEFAULT_TXN_ID_EXPIRATION_CLEANUP_INTERVAL, FreezeConfig, KafkaRlmmConfig, NodeRole,
-        PlainCredentials, ReplicationRuntimeConfig, RlmmKind, StaticConfigOrigins,
-        feature_flags::default_feature_flags, shared_epoch_ms,
+use {
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        clean_shutdown::UNPROVEN,
+        client_metrics::config::INTERVAL_MS_DEFAULT,
+        config::{
+            BreakGlassConfig, BrokerConfig, DEFAULT_AUDIT_CHECKPOINT_EVERY,
+            DEFAULT_AUDIT_CHECKPOINT_EVERY_N, DEFAULT_AUDIT_SPOOL_DIR, DEFAULT_AUDIT_SPOOL_MAX,
+            DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N, DEFAULT_AUDIT_TOPIC, DEFAULT_BROKER_ID,
+            DEFAULT_CONTROLLER_ELECTION_TIMEOUT, DEFAULT_CONTROLLER_HEARTBEAT_INTERVAL,
+            DEFAULT_DELEGATION_TOKEN_EXPIRY_CHECK_INTERVAL, DEFAULT_DELEGATION_TOKEN_MAX_LIFETIME,
+            DEFAULT_DELEGATION_TOKEN_RENEW_PERIOD, DEFAULT_DISKLESS_WAL_FLUSH_INTERVAL,
+            DEFAULT_DISKLESS_WAL_FLUSH_MAX_SIZE, DEFAULT_DISKLESS_WAL_HOT_TAIL_MAX_SIZE,
+            DEFAULT_DISKLESS_WAL_INDEX_PROJECTION_TIMEOUT,
+            DEFAULT_DISKLESS_WAL_LOCAL_REPLICA_COUNT, DEFAULT_DISKLESS_WAL_TRIM_SAFETY_LAG,
+            DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_TIMEOUT,
+            DEFAULT_JWKS_MIN_ON_DEMAND_PAUSE, DEFAULT_JWKS_REFRESH_INTERVAL,
+            DEFAULT_LEADER_IMBALANCE_CHECK_INTERVAL, DEFAULT_LOG_FILTER,
+            DEFAULT_MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS,
+            DEFAULT_METADATA_MAX_BYTES_BETWEEN_SNAPSHOTS, DEFAULT_METADATA_MAX_SNAPSHOT_INTERVAL,
+            DEFAULT_METADATA_SNAPSHOT_FETCH_MAX, DEFAULT_METADATA_SNAPSHOT_INTERVAL_RECORDS,
+            DEFAULT_OBSERVER_LAG_BOUND, DEFAULT_QUOTA_WINDOW, DEFAULT_REMOTE_COPIER_THREADS,
+            DEFAULT_REMOTE_COPY_TIMEOUT, DEFAULT_REMOTE_EXPIRATION_THREADS,
+            DEFAULT_REMOTE_INDEX_CACHE_SIZE, DEFAULT_REMOTE_LOG_MANAGER_INTERVAL,
+            DEFAULT_REMOTE_READER_MAX_PENDING_TASKS, DEFAULT_REMOTE_READER_THREADS,
+            DEFAULT_REPLICA_LAG_TIME_MAX, DEFAULT_TLS_RELOAD_INTERVAL,
+            DEFAULT_TXN_ABORT_CLEANUP_INTERVAL, DEFAULT_TXN_ID_EXPIRATION,
+            DEFAULT_TXN_ID_EXPIRATION_CLEANUP_INTERVAL, FreezeConfig, KafkaRlmmConfig, NodeRole,
+            PlainCredentials, ReplicationRuntimeConfig, RlmmKind, StaticConfigOrigins,
+            feature_flags::default_feature_flags, shared_epoch_ms,
+        },
+        coordinator::unified::{
+            config::NextGenConfig, share::config::ShareGroupConfig,
+            streams::config::StreamsGroupConfig,
+        },
+        network::auth::SslPrincipalMapper,
+        operator_keys::OperatorKeys,
+        replica_selector::ReplicaSelectorKind,
+        share_coordinator::config::ShareCoordinatorConfig,
+        topic_policy::TopicPolicy,
     },
-    coordinator::unified::{
-        config::NextGenConfig, share::config::ShareGroupConfig, streams::config::StreamsGroupConfig,
+    krabka_compression::RecordDecompressionPolicy,
+    krabka_log::LogConfig,
+    krabka_raft::{
+        BootstrapMode, ControllerFetchMissLimit, MetadataRaftCommandQueueCapacity,
+        MetadataRaftFetchMax, NodeId,
     },
-    network::auth::SslPrincipalMapper,
-    operator_keys::OperatorKeys,
-    replica_selector::ReplicaSelectorKind,
-    share_coordinator::config::ShareCoordinatorConfig,
-    topic_policy::TopicPolicy,
+    krabka_units::{bytes, hours, kibibytes, mebibytes, millis, minutes, secs},
+    std::{collections::HashMap, net::SocketAddr, path::PathBuf},
 };
 
 impl Default for BrokerConfig {
@@ -323,10 +325,11 @@ impl Default for BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{bytes, gibibytes};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_units::{bytes, gibibytes},
+    };
 
     #[test]
     fn operational_policy_defaults_match_existing_behavior() {

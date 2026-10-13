@@ -1,12 +1,11 @@
 #[cfg(creusot)]
-use creusot_std::prelude::*;
-
-#[cfg(creusot)]
 use crate::reconfiguration::{
     CurrentVoterSet, ReconfigurationLeadership, TargetMembership, TargetVoter, VoterChangeKind,
     VoterChangeRequest, VoterReconfigurationPlan, admitted_plan, may_reconfigure,
     voter_reconfiguration_rejection,
 };
+#[cfg(creusot)]
+use creusot_std::prelude::*;
 
 open_logic! {
 /// Logical admission includes both the captured membership and the requested plan.

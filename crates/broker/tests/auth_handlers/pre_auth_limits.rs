@@ -15,37 +15,37 @@
 //! - `SaslServerAuthenticator` answers that first `ApiVersions` without the
 //!   KIP-1242 routing check, which only `KafkaApis` runs.
 
-use std::{io, net::SocketAddr, time::Duration};
-
-use assert2::{assert, check};
-use bytes::{BufMut, BytesMut};
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        api_versions_request, api_versions_response, metadata_request, metadata_response,
-        sasl_authenticate_request, sasl_authenticate_response, sasl_handshake_request,
-        sasl_handshake_response,
-    },
-};
-use krabka_security::SaslMechanism;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
-
-use crate::{
-    harness::{admin_plain_password, round_trip, wrong_scram_password},
-    support::{
-        client::http_get,
-        discovery::{api_versions_request_for, topic_metadata_request},
-        sasl::sasl_temp_config,
-        topics::metadata_topic,
-        wire::{
-            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-            SocketExchangeSetup, WireFrameSetup, request_frame as support_request_frame,
+use {
+    crate::{
+        harness::{admin_plain_password, round_trip, wrong_scram_password},
+        support::{
+            client::http_get,
+            discovery::{api_versions_request_for, topic_metadata_request},
+            sasl::sasl_temp_config,
+            topics::metadata_topic,
+            wire::{
+                CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+                SocketExchangeSetup, WireFrameSetup, request_frame as support_request_frame,
+            },
         },
+    },
+    assert2::{assert, check},
+    bytes::{BufMut, BytesMut},
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            api_versions_request, api_versions_response, metadata_request, metadata_response,
+            sasl_authenticate_request, sasl_authenticate_response, sasl_handshake_request,
+            sasl_handshake_response,
+        },
+    },
+    krabka_security::SaslMechanism,
+    std::{io, net::SocketAddr, time::Duration},
+    tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
     },
 };
 
@@ -193,9 +193,7 @@ async fn plain_login(stream: &mut TcpStream, password: &str) -> Result<(), io::E
     Ok(())
 }
 
-async fn scrape_metrics(addr: SocketAddr) -> String {
-    http_get(addr, "/metrics", false).await
-}
+async fn scrape_metrics(addr: SocketAddr) -> String { http_get(addr, "/metrics", false).await }
 
 /// A size prefix over `sasl.server.max.receive.size` fails the authentication
 /// before the frame is read. The peer gets no answer, since Kafka builds none

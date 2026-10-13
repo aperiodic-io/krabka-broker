@@ -1,10 +1,11 @@
 //! Canonical loopback SASL listener fixtures for integration tests.
 
-use std::{net::SocketAddr, path::PathBuf};
-
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tempfile::TempDir;
+use {
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::{net::SocketAddr, path::PathBuf},
+    tempfile::TempDir,
+};
 
 #[derive(Clone, Copy)]
 pub struct ScramMechanismCode(pub i8);
@@ -31,9 +32,7 @@ impl ScramAlgorithm {
 pub struct ScramIterations(pub i32);
 
 impl Default for ScramIterations {
-    fn default() -> Self {
-        Self(4096)
-    }
+    fn default() -> Self { Self(4096) }
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -153,9 +152,7 @@ pub fn start_sasl_plaintext_with_acl_users(
 pub struct HashIterations(pub u32);
 
 impl Default for HashIterations {
-    fn default() -> Self {
-        Self(4096)
-    }
+    fn default() -> Self { Self(4096) }
 }
 
 #[derive(krabka_macros::FieldDefaults)]

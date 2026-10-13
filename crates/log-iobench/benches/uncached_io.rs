@@ -45,21 +45,22 @@
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::{
-        fs::File,
-        io::{IoSlice, IoSliceMut, Write as _},
-        num::NonZeroU64,
-        os::unix::fs::FileExt as _,
-        path::{Path, PathBuf},
+    use {
+        criterion::{BatchSize, Criterion, black_box, criterion_group},
+        krabka_units::prelude::{ByteSize, ByteSizeExt as _, kibibytes, mebibytes},
+        rustix::{
+            fs::{Advice, AtFlags, CWD, Mode, OFlags, StatxFlags},
+            io::ReadWriteFlags,
+        },
+        std::{
+            fs::File,
+            io::{IoSlice, IoSliceMut, Write as _},
+            num::NonZeroU64,
+            os::unix::fs::FileExt as _,
+            path::{Path, PathBuf},
+        },
+        tempfile::TempDir,
     };
-
-    use criterion::{BatchSize, Criterion, black_box, criterion_group};
-    use krabka_units::prelude::{ByteSize, ByteSizeExt as _, kibibytes, mebibytes};
-    use rustix::{
-        fs::{Advice, AtFlags, CWD, Mode, OFlags, StatxFlags},
-        io::ReadWriteFlags,
-    };
-    use tempfile::TempDir;
 
     /// The two read and write sizes `mmap_read` uses: one Kafka-default fetch
     /// chunk, and a small scattered read.
@@ -107,13 +108,9 @@ mod linux {
             buf
         }
 
-        fn as_slice(&self) -> &[u8] {
-            &self.raw[self.start..self.start + self.len]
-        }
+        fn as_slice(&self) -> &[u8] { &self.raw[self.start..self.start + self.len] }
 
-        fn as_mut_slice(&mut self) -> &mut [u8] {
-            &mut self.raw[self.start..self.start + self.len]
-        }
+        fn as_mut_slice(&mut self) -> &mut [u8] { &mut self.raw[self.start..self.start + self.len] }
     }
 
     krabka_macros::splitmix64_step!(noise_step);
@@ -260,9 +257,7 @@ mod linux {
     }
 
     impl Walk {
-        fn new(len: u64) -> Self {
-            Self { next: 0, len }
-        }
+        fn new(len: u64) -> Self { Self { next: 0, len } }
 
         fn step(&mut self) -> u64 {
             let at = self.next;

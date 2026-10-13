@@ -48,9 +48,7 @@ pub(crate) struct Point {
 }
 
 impl Point {
-    pub(crate) fn new(elapsed: Duration, value: f64) -> Self {
-        Self { elapsed, value }
-    }
+    pub(crate) fn new(elapsed: Duration, value: f64) -> Self { Self { elapsed, value } }
 }
 
 /// What a series is allowed to do.
@@ -146,9 +144,7 @@ pub(crate) enum Verdict {
 
 impl Verdict {
     /// Whether this verdict fails the soak.
-    pub(crate) fn is_failure(&self) -> bool {
-        !matches!(self, Self::Level { .. })
-    }
+    pub(crate) fn is_failure(&self) -> bool { !matches!(self, Self::Level { .. }) }
 }
 
 impl fmt::Display for Verdict {
@@ -197,9 +193,7 @@ impl fmt::Display for Verdict {
 /// Counts here are in the thousands at most, so the conversion is exact. A run
 /// that somehow took more than `u32::MAX` samples would have arithmetic
 /// problems well before this one.
-fn count(n: usize) -> f64 {
-    f64::from(u32::try_from(n).unwrap_or(u32::MAX))
-}
+fn count(n: usize) -> f64 { f64::from(u32::try_from(n).unwrap_or(u32::MAX)) }
 
 /// The least-squares slope of `points`, in value per second.
 ///
@@ -292,15 +286,14 @@ pub(crate) fn judge_all(series: &[(Series, Bound)]) -> Vec<Verdict> {
 }
 
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     /// Equal to within a hair, so a comparison against a small exact integer
     /// is written without a Clippy suppression.
-    fn near(a: f64, b: f64) -> bool {
-        (a - b).abs() < 1e-9
-    }
+    fn near(a: f64, b: f64) -> bool { (a - b).abs() < 1.0e-9 }
 
     /// A bound loose enough that only the shape under test can fail it.
     const BOUND: Bound = Bound {

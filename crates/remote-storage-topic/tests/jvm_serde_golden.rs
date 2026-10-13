@@ -22,19 +22,20 @@
 //!   segmentLeaderEpochs = {0->0, 1->50}
 //!   customMetadata (with-custom case) = [1,2,3,4]
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Write as _,
+use {
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{
+        CustomMetadata, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+        RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, RemotePartitionDeleteMetadata,
+        RemotePartitionDeleteState, TopicIdPartition,
+    },
+    krabka_remote_storage_topic::MetadataEvent,
+    std::{
+        collections::{BTreeMap, HashMap},
+        fmt::Write as _,
+    },
+    uuid::Uuid,
 };
-
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{
-    CustomMetadata, RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
-    RemoteLogSegmentState, RemotePartitionDeleteMetadata, RemotePartitionDeleteState,
-    TopicIdPartition,
-};
-use krabka_remote_storage_topic::MetadataEvent;
-use uuid::Uuid;
 
 /// Load and hex-decode one named golden vector from the committed fixture.
 fn golden(name: &str) -> Vec<u8> {

@@ -2,24 +2,22 @@
 //! image, a real on-disk partition, a way to force a replica state, and the
 //! `MetadataSource` the ISR code reads its image and leader from.
 
-use std::time::{Duration, Instant};
-
-use krabka_ids::LeaderEpoch;
-use krabka_log::Offset;
-use krabka_metadata::{
-    BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
+use {
+    crate::{
+        partition::Partition,
+        replica_state::FollowerStats,
+        test_support::{FakeMetadataSource, PartitionEpoch, broker_registration},
+    },
+    krabka_ids::LeaderEpoch,
+    krabka_log::Offset,
+    krabka_metadata::{
+        BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
+    },
+    krabka_raft::NodeId,
+    std::time::{Duration, Instant},
 };
-use krabka_raft::NodeId;
 
-use crate::{
-    partition::Partition,
-    replica_state::FollowerStats,
-    test_support::{FakeMetadataSource, PartitionEpoch, broker_registration},
-};
-
-pub(super) fn reg(id: NodeId) -> MetadataRecord {
-    reg_at(id, &format!("b{id}"), 9092)
-}
+pub(super) fn reg(id: NodeId) -> MetadataRecord { reg_at(id, &format!("b{id}"), 9092) }
 
 /// The registration of broker `id`, with epoch `id`, that advertises
 /// `host:port`.
@@ -75,20 +73,17 @@ pub(super) async fn set_replica_state(part: &Partition, setup: IsrSetup<'_>) {
     st.install_isr(isr, replicas, leader, now);
     st.current_leader_epoch = leader_epoch;
     for &(follower, last_caught_up_age) in stale_followers {
-        st.per_follower.insert(
-            follower,
-            FollowerStats {
-                leo: Offset(0),
-                last_fetch: None,
-                last_fetch_leader_leo: Offset(-1),
-                last_caught_up: Some(
-                    now.checked_sub(last_caught_up_age)
-                        .expect("test caught-up age is representable"),
-                ),
-                broker_epoch: None,
-                fetched_since_isr_exit: false,
-            },
-        );
+        st.per_follower.insert(follower, FollowerStats {
+            leo: Offset(0),
+            last_fetch: None,
+            last_fetch_leader_leo: Offset(-1),
+            last_caught_up: Some(
+                now.checked_sub(last_caught_up_age)
+                    .expect("test caught-up age is representable"),
+            ),
+            broker_epoch: None,
+            fetched_since_isr_exit: false,
+        });
     }
 }
 

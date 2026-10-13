@@ -4,10 +4,11 @@
 //! to a `TopicRecord` under the KIP-516 strictness rules. The `Err` carries
 //! the wire error code to report for the offending topic or partition.
 
-use krabka_metadata::{MetadataImage, TopicRecord};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-use crate::codes;
+use {
+    crate::codes,
+    krabka_metadata::{MetadataImage, TopicRecord},
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+};
 
 /// Resolves a requested topic to its record.
 ///
@@ -35,11 +36,10 @@ pub(crate) fn resolve<'a>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::MetadataRecord;
-
-    use super::*;
-    use crate::test_support::single_partition_topic;
+    use {
+        super::*, crate::test_support::single_partition_topic, assert2::assert,
+        krabka_metadata::MetadataRecord,
+    };
 
     fn image_with(name: &str, id: uuid::Uuid) -> MetadataImage {
         let mut img = MetadataImage::new(uuid::Uuid::nil());

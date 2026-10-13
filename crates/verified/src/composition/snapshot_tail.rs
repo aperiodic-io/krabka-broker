@@ -1,16 +1,17 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::control_truncation::physical_batch_sequence_valid;
 #[cfg(creusot)]
 use super::control_truncation::whole_batch_frontier;
-use super::{
-    ProducerDecision, ProducerReloadRange, ProducerSnapshotEntryFacts,
-    producer_snapshot_entry_valid, producer_snapshot_replay_start,
-    rebuilt_data_window_bounds_retry, whole_batch_truncation_bounds_controls,
-};
 #[cfg(creusot)]
 use crate::producer_snapshot::{retained_producer_row, snapshot_sequence_matches};
+use {
+    super::{
+        ProducerDecision, ProducerReloadRange, ProducerSnapshotEntryFacts,
+        producer_snapshot_entry_valid, producer_snapshot_replay_start,
+        rebuilt_data_window_bounds_retry, whole_batch_truncation_bounds_controls,
+    },
+    creusot_std::prelude::*,
+};
 
 type LoadedData = Option<(i64, Option<ProducerSnapshotEntryFacts>)>;
 // Cursor, seed present, replayed source indices, window start, decision, witness.

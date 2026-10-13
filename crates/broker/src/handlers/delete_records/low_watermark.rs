@@ -13,14 +13,14 @@
 //! Without the wait a client is told its records are gone while a follower
 //! still holds them, and a leader change serves them again.
 
-use std::time::Duration;
-
-use krabka_log::Offset;
-use krabka_protocol::owned::delete_records_response::DeleteRecordsTopicResult;
-
-use super::response::{error_partition_result, partition_result};
-use crate::{
-    broker::Broker, codes, handlers::offline_replicas::live_brokers, partition::Partition,
+use {
+    super::response::{error_partition_result, partition_result},
+    crate::{
+        broker::Broker, codes, handlers::offline_replicas::live_brokers, partition::Partition,
+    },
+    krabka_log::Offset,
+    krabka_protocol::owned::delete_records_response::DeleteRecordsTopicResult,
+    std::time::Duration,
 };
 
 /// How often a waiting request reads the followers' progress again. A

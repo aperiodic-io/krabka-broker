@@ -6,18 +6,19 @@
 //! The segment resolution carries the defensive fallback that keeps a read
 //! answerable when the epoch-indexed lookup in the `RLMM` misses.
 
-use bytes::Bytes;
-use krabka_ids::LeaderEpoch;
-use krabka_protocol::records::{HEADER_LEN, RecordBatch, RecordBatchHeader};
-use krabka_remote_storage::{
-    IndexType, LogOffset, RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError,
-    TopicIdPartition, end_position_for, first_batch_at_or_after, parse_offset_index,
-    position_for_relative_offset,
+use {
+    super::RemoteReader,
+    bytes::Bytes,
+    krabka_ids::LeaderEpoch,
+    krabka_protocol::records::{HEADER_LEN, RecordBatch, RecordBatchHeader},
+    krabka_remote_storage::{
+        IndexType, LogOffset, RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError,
+        TopicIdPartition, end_position_for, first_batch_at_or_after, parse_offset_index,
+        position_for_relative_offset,
+    },
+    krabka_verified::remote_read_relative_offset,
+    zerocopy::FromBytes as _,
 };
-use krabka_verified::remote_read_relative_offset;
-use zerocopy::FromBytes as _;
-
-use super::RemoteReader;
 
 impl RemoteReader {
     /// Finds the finished segment in the RLMM that covers
@@ -222,9 +223,7 @@ const LOG_OVERHEAD: usize = 12;
 
 /// [`LOG_OVERHEAD`] as a byte position: how far a read must reach to hold a
 /// batch's length field.
-fn field_len() -> u32 {
-    u32::try_from(LOG_OVERHEAD).unwrap_or(u32::MAX)
-}
+fn field_len() -> u32 { u32::try_from(LOG_OVERHEAD).unwrap_or(u32::MAX) }
 
 /// The whole length of the batch that `bytes` starts with, once `bytes` holds
 /// its length field. `None` when it does not, or when the length is too small
@@ -294,18 +293,19 @@ fn relative_offset(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_remote_storage::RemoteLogSegmentMetadata;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        remote_log_manager::test_support::local_backends,
-        remote_reader::test_support::{
-            caching_sparse_remote_segment_reader, empty_reader, not_ready_reader,
-            sparse_fixture_batch_bytes, sparse_fixture_second_batch_len,
-            sparse_remote_segment_reader, tp,
+    use {
+        super::*,
+        crate::{
+            remote_log_manager::test_support::local_backends,
+            remote_reader::test_support::{
+                caching_sparse_remote_segment_reader, empty_reader, not_ready_reader,
+                sparse_fixture_batch_bytes, sparse_fixture_second_batch_len,
+                sparse_remote_segment_reader, tp,
+            },
         },
+        assert2::{assert, check},
+        krabka_remote_storage::RemoteLogSegmentMetadata,
+        uuid::Uuid,
     };
 
     // Kafka's `RemoteLogManager.read` returns the segment's own bytes from the

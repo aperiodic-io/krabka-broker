@@ -1,24 +1,22 @@
 //! Withdrawing one replica's ELR membership: what moves, what does not, and
 //! what the published value looks like afterwards.
 
-use std::collections::BTreeMap;
-
-use assert2::assert;
-use krabka_metadata::{
-    LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionElrRecord, PartitionRecord,
-    TopicConfigRecord, TopicRecord,
+use {
+    super::withdraw_elr_membership,
+    crate::{
+        config_keys::MIN_INSYNC_REPLICAS,
+        elr::state::{PartitionElr, TopicElr},
+        test_support::finalize_elr_version,
+    },
+    assert2::assert,
+    krabka_metadata::{
+        LeaderEpoch, MetadataImage, MetadataRecord, NodeId, PartitionElrRecord, PartitionRecord,
+        TopicConfigRecord, TopicRecord,
+    },
+    std::collections::BTreeMap,
 };
 
-use super::withdraw_elr_membership;
-use crate::{
-    config_keys::MIN_INSYNC_REPLICAS,
-    elr::state::{PartitionElr, TopicElr},
-    test_support::finalize_elr_version,
-};
-
-fn nodes(ids: &[u64]) -> Vec<NodeId> {
-    ids.iter().copied().map(NodeId).collect()
-}
+fn nodes(ids: &[u64]) -> Vec<NodeId> { ids.iter().copied().map(NodeId).collect() }
 
 /// A topic with `partitions` partitions and the ELR value `elr`.
 fn topic_records(name: &str, partitions: i32, elr: &str) -> Vec<MetadataRecord> {

@@ -1,15 +1,15 @@
 //! Opens committed partitions and installs their initial leadership.
 
-use std::path::PathBuf;
-
-use krabka_raft::NodeId;
-
-use crate::{
-    broker::Broker,
-    handlers::create_topics::{INITIAL_LEADER_EPOCH, InitialLeadership},
-    partition::PartitionRuntimeConfig,
-    replicator_supervisor::{MaterializePartitionConfig, materialize_partition},
-    wal::{ControllerSequencer, OffsetSequencer},
+use {
+    crate::{
+        broker::Broker,
+        handlers::create_topics::{INITIAL_LEADER_EPOCH, InitialLeadership},
+        partition::PartitionRuntimeConfig,
+        replicator_supervisor::{MaterializePartitionConfig, materialize_partition},
+        wal::{ControllerSequencer, OffsetSequencer},
+    },
+    krabka_raft::NodeId,
+    std::path::PathBuf,
 };
 
 /// Only assigned replicas open a local partition.

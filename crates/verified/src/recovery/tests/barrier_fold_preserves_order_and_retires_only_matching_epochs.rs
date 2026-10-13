@@ -2,8 +2,10 @@ use super::*;
 
 #[test]
 fn barrier_fold_preserves_order_and_retires_only_matching_epochs() {
-    use BarrierRecoveryFoldAction::{ClearPending, KeepPending, RemoveCut, SetPending, UpsertCut};
-    use BarrierRecoveryRecordKind::{Cut, InjectionStart};
+    use {
+        BarrierRecoveryFoldAction::{ClearPending, KeepPending, RemoveCut, SetPending, UpsertCut},
+        BarrierRecoveryRecordKind::{Cut, InjectionStart},
+    };
 
     assert2::check!(
         barrier_recovery_fold_action(InjectionStart, true, 7, None, false) == SetPending

@@ -6,8 +6,10 @@
 //! of the hash chain is preserved. The replay ticker drains the spool back to
 //! the sink and leaves spool mode only when the spool is empty.
 
-use super::writer::AuditWriter;
-use crate::sink::{AuditError, AuditRecord};
+use {
+    super::writer::AuditWriter,
+    crate::sink::{AuditError, AuditRecord},
+};
 
 impl AuditWriter {
     /// Write to the sink, or to the spool.
@@ -126,26 +128,26 @@ impl AuditWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::check;
-    use krabka_units::prelude::{ByteSizeExt as _, TimeExt as _, bytes};
-
-    use super::*;
-    use crate::{
-        NodeId,
-        chain::{ChainState, GENESIS_HEAD},
-        event::AuditEventClass,
-        log::{
-            AuditLog, AuditMode,
-            test_support::{
-                FailableSink, REPLAY_EVERY, ROOMY_CAP, await_until, emit_lifecycle,
-                failed_sink_stats, finish_writer, healthy_sink_stats, life, params,
-                params_with_clock, product, record_sequences, spawn_writer, test_signer,
+    use {
+        super::*,
+        crate::{
+            NodeId,
+            chain::{ChainState, GENESIS_HEAD},
+            event::AuditEventClass,
+            log::{
+                AuditLog, AuditMode,
+                test_support::{
+                    FailableSink, REPLAY_EVERY, ROOMY_CAP, await_until, emit_lifecycle,
+                    failed_sink_stats, finish_writer, healthy_sink_stats, life, params,
+                    params_with_clock, product, record_sequences, spawn_writer, test_signer,
+                },
             },
+            spool::Spool,
+            stats::AuditStats,
         },
-        spool::Spool,
-        stats::AuditStats,
+        assert2::check,
+        krabka_units::prelude::{ByteSizeExt as _, TimeExt as _, bytes},
+        std::sync::Arc,
     };
 
     struct FailingSpoolFixture {

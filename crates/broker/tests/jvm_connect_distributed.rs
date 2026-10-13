@@ -41,19 +41,19 @@
 mod jvm_acceptance;
 mod support;
 
-use std::{
-    io::{Read as _, Write as _},
-    net::TcpStream,
-    process::Command,
-    time::Duration,
-};
-
-use assert2::assert;
-use jvm_acceptance::broker0_advertised;
-
-use crate::{
-    jvm_acceptance::{create_console_topic_at, describe_console_topic_configs},
-    support::{docker_logs, remove_container},
+use {
+    crate::{
+        jvm_acceptance::{create_console_topic_at, describe_console_topic_configs},
+        support::{docker_logs, remove_container},
+    },
+    assert2::assert,
+    jvm_acceptance::broker0_advertised,
+    std::{
+        io::{Read as _, Write as _},
+        net::TcpStream,
+        process::Command,
+        time::Duration,
+    },
 };
 
 /// The Apache Kafka image the worker runs from. Its tarball is the whole
@@ -99,9 +99,7 @@ struct ConnectWorker {
 }
 
 impl Drop for ConnectWorker {
-    fn drop(&mut self) {
-        remove_container(&self.container);
-    }
+    fn drop(&mut self) { remove_container(&self.container); }
 }
 
 impl ConnectWorker {
@@ -173,9 +171,7 @@ impl ConnectWorker {
     /// because the worker's own log is where a refused `CreateTopics`, a
     /// `listOffsets` that never answered or a plugin that was not found is
     /// written down.
-    fn logs(&self) -> String {
-        docker_logs(&self.container)
-    }
+    fn logs(&self) -> String { docker_logs(&self.container) }
 
     /// One file inside the container, or `None` if it is not there yet. The
     /// sink file does not exist until the sink task's first flush.
@@ -352,9 +348,7 @@ fn describe_topic_configs(bootstrap: &str, topic: &str) -> String {
 }
 
 /// Create a one-partition topic through the JVM `kafka-topics` tool.
-fn create_topic(bootstrap: &str, topic: &str) {
-    create_console_topic_at(bootstrap, topic);
-}
+fn create_topic(bootstrap: &str, topic: &str) { create_console_topic_at(bootstrap, topic); }
 
 /// A distributed Connect worker boots against krabka, runs a `FileStream`
 /// source and sink over one topic, and the file survives the round trip.

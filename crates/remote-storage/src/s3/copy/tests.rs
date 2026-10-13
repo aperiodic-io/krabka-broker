@@ -1,31 +1,31 @@
-use std::{io::Write, path::PathBuf, sync::Arc};
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_object_store::{ObjectOps, ObjectStoreError};
-use krabka_units::prelude::{ByteSizeExt as _, kibibytes, mebibytes};
-use object_store::{memory::InMemory, path::Path as ObjectPath};
-use tempfile::TempDir;
-
-use super::object_entry;
-use crate::{
-    error::RemoteStorageError,
-    metadata::RemoteLogSegmentMetadata,
-    s3::{
-        S3RemoteStorage,
-        test_support::{
-            SeededCopySetup, StampedMetadataSetup, WORM_KEY_ID, WormAccess, memory_worm_archive,
-            rsm, sample_data, sample_metadata, seeded_blocking, stamped_metadata, worm_epoch,
-            worm_rsm, write_file,
+use {
+    super::object_entry,
+    crate::{
+        error::RemoteStorageError,
+        metadata::RemoteLogSegmentMetadata,
+        s3::{
+            S3RemoteStorage,
+            test_support::{
+                SeededCopySetup, StampedMetadataSetup, WORM_KEY_ID, WormAccess,
+                memory_worm_archive, rsm, sample_data, sample_metadata, seeded_blocking,
+                stamped_metadata, worm_epoch, worm_rsm, write_file,
+            },
+        },
+        storage_manager::{IndexType, LogSegmentData, RemoteStorageManager},
+        test_support::TransactionIndex,
+        worm::{
+            ChainHead, MANIFEST_FORMAT_VERSION, MANIFEST_SUFFIX, ManifestSeq, ObjectEntry,
+            SegmentIdentity, SegmentManifest, Sha256Digest, WormChainRecord, WormError,
+            manifest_head, verify_manifest_signature,
         },
     },
-    storage_manager::{IndexType, LogSegmentData, RemoteStorageManager},
-    test_support::TransactionIndex,
-    worm::{
-        ChainHead, MANIFEST_FORMAT_VERSION, MANIFEST_SUFFIX, ManifestSeq, ObjectEntry,
-        SegmentIdentity, SegmentManifest, Sha256Digest, WormChainRecord, WormError, manifest_head,
-        verify_manifest_signature,
-    },
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_object_store::{ObjectOps, ObjectStoreError},
+    krabka_units::prelude::{ByteSizeExt as _, kibibytes, mebibytes},
+    object_store::{memory::InMemory, path::Path as ObjectPath},
+    std::{io::Write, path::PathBuf, sync::Arc},
+    tempfile::TempDir,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -25,22 +25,23 @@
 //! A `uuid` is sixteen raw bytes with no length prefix, arrays are compact, and
 //! each element struct as well as the message carries a tagged-field trailer.
 
-use bytes::{Buf, BufMut, BytesMut};
-use krabka_protocol::{
-    ProtocolError,
-    primitives::{array, fixed, uuid::Uuid},
-};
-
-use crate::{
-    coordinator::unified::persistence::{
-        flex::{
-            array_value_codec, get_assigned_topics, get_compact_array, get_i32_array, get_uuid,
-            put_assigned_topics, put_compact_array, put_i32_array, put_tagged_fields, put_uuid,
-            read_tagged, value_codec,
+use {
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{
+                array_value_codec, get_assigned_topics, get_compact_array, get_i32_array, get_uuid,
+                put_assigned_topics, put_compact_array, put_i32_array, put_tagged_fields, put_uuid,
+                read_tagged, value_codec,
+            },
+            get_i32,
         },
-        get_i32,
+        error::BrokerError,
     },
-    error::BrokerError,
+    bytes::{Buf, BufMut, BytesMut},
+    krabka_protocol::{
+        ProtocolError,
+        primitives::{array, fixed, uuid::Uuid},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,10 +226,7 @@ fn get_nullable_i32_array(buf: &mut &[u8]) -> Result<Option<Vec<i32>>, ProtocolE
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::test_support::wire_bytes;
+    use {super::*, crate::coordinator::unified::test_support::wire_bytes, assert2::assert};
 
     #[test]
     fn target_assignment_member_bytes_match_kafka_schema() {

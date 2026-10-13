@@ -1,9 +1,10 @@
 //! `krabka-audit`: offline audit-log tools.
 
-use std::{path::PathBuf, process::ExitCode};
-
-use clap::{Parser, Subcommand};
-use krabka_audit::{TrustedKeys, verify_partition_dir};
+use {
+    clap::{Parser, Subcommand},
+    krabka_audit::{TrustedKeys, verify_partition_dir},
+    std::{path::PathBuf, process::ExitCode},
+};
 
 #[derive(Parser)]
 #[command(name = "krabka-audit", about = "Krabka audit-log tools (FedRAMP MLA)")]

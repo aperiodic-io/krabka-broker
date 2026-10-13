@@ -40,20 +40,21 @@
 //! producer, and `current_txn_start_offset` is `-1` when the producer has no
 //! open transaction.
 
-use krabka_log::topic_name::validate_topic_name;
-use krabka_metadata::AclOperation;
-use krabka_protocol::owned::{
-    describe_producers_request::{DescribeProducersRequest, TopicRequest},
-    describe_producers_response::{
-        DescribeProducersResponse, PartitionResponse, ProducerState, TopicResponse,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        error::BrokerError,
+        handlers::{RequestContext, allowed_topics},
     },
-};
-
-use crate::{
-    broker::Broker,
-    codes,
-    error::BrokerError,
-    handlers::{RequestContext, allowed_topics},
+    krabka_log::topic_name::validate_topic_name,
+    krabka_metadata::AclOperation,
+    krabka_protocol::owned::{
+        describe_producers_request::{DescribeProducersRequest, TopicRequest},
+        describe_producers_response::{
+            DescribeProducersResponse, PartitionResponse, ProducerState, TopicResponse,
+        },
+    },
 };
 
 pub(crate) fn handle(
@@ -239,21 +240,21 @@ fn producer_state(producer: krabka_log::ActiveProducer) -> ProducerState {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_metadata::NodeId;
-    use krabka_protocol::owned::describe_producers_request::TopicRequest;
-
-    use super::*;
-    use crate::{
-        authorizer::{AllowAllAuthorizer, Authorizer},
-        broker::Broker,
-        handlers::RequestContext,
-        partition::Partition,
-        test_support::{DenyAll, KafkaErrorCode, peer, principal},
-        txn::marker::{MarkerType, build_marker_batch},
+    use {
+        super::*,
+        crate::{
+            authorizer::{AllowAllAuthorizer, Authorizer},
+            broker::Broker,
+            handlers::RequestContext,
+            partition::Partition,
+            test_support::{DenyAll, KafkaErrorCode, peer, principal},
+            txn::marker::{MarkerType, build_marker_batch},
+        },
+        assert2::assert,
+        bytes::Bytes,
+        krabka_metadata::NodeId,
+        krabka_protocol::owned::describe_producers_request::TopicRequest,
+        std::sync::Arc,
     };
 
     const VERSION: i16 = 0;
@@ -656,35 +657,26 @@ mod tests {
         let local = broker.config.node_id;
         let remote = krabka_metadata::NodeId(local.0 + 1);
 
-        let leads = seed_partition(
-            &broker,
-            HostedProducerPartitionSetup {
-                topic: "leads",
-                leader: local,
-                replicas: vec![local],
-            },
-        )
+        let leads = seed_partition(&broker, HostedProducerPartitionSetup {
+            topic: "leads",
+            leader: local,
+            replicas: vec![local],
+        })
         .await
         .expect("hosted leader");
-        let follows = seed_partition(
-            &broker,
-            HostedProducerPartitionSetup {
-                topic: "follows",
-                leader: remote,
-                replicas: vec![remote, local],
-            },
-        )
+        let follows = seed_partition(&broker, HostedProducerPartitionSetup {
+            topic: "follows",
+            leader: remote,
+            replicas: vec![remote, local],
+        })
         .await
         .expect("hosted follower");
         assert!(
-            seed_partition(
-                &broker,
-                HostedProducerPartitionSetup {
-                    topic: "moved",
-                    leader: remote,
-                    replicas: vec![remote]
-                }
-            )
+            seed_partition(&broker, HostedProducerPartitionSetup {
+                topic: "moved",
+                leader: remote,
+                replicas: vec![remote]
+            })
             .await
             .is_none()
         );
@@ -766,36 +758,30 @@ mod tests {
             topics: vec![
                 topic(
                     "leads",
-                    partition_row(
-                        codes::NONE,
-                        vec![producer_row(ExpectedProducerSetup {
-                            producer_id: krabka_ids::ProducerId(10),
-                            last_sequence: BatchSequence(2),
-                            ..Default::default()
-                        })],
-                    ),
+                    partition_row(codes::NONE, vec![producer_row(ExpectedProducerSetup {
+                        producer_id: krabka_ids::ProducerId(10),
+                        last_sequence: BatchSequence(2),
+                        ..Default::default()
+                    })]),
                 ),
                 topic(
                     "follows",
-                    partition_row(
-                        codes::NONE,
-                        vec![
-                            producer_row(ExpectedProducerSetup {
-                                producer_id: krabka_ids::ProducerId(20),
-                                producer_epoch: ReportedProducerEpoch(3),
-                                last_sequence: BatchSequence(1),
-                                last_timestamp: BatchTimestamp(3_000),
-                                coordinator_epoch: ProducerCoordinatorEpoch(9),
-                                ..Default::default()
-                            }),
-                            producer_row(ExpectedProducerSetup {
-                                producer_id: krabka_ids::ProducerId(21),
-                                last_timestamp: BatchTimestamp(4_000),
-                                current_txn_start_offset: krabka_log::Offset(3),
-                                ..Default::default()
-                            }),
-                        ],
-                    ),
+                    partition_row(codes::NONE, vec![
+                        producer_row(ExpectedProducerSetup {
+                            producer_id: krabka_ids::ProducerId(20),
+                            producer_epoch: ReportedProducerEpoch(3),
+                            last_sequence: BatchSequence(1),
+                            last_timestamp: BatchTimestamp(3_000),
+                            coordinator_epoch: ProducerCoordinatorEpoch(9),
+                            ..Default::default()
+                        }),
+                        producer_row(ExpectedProducerSetup {
+                            producer_id: krabka_ids::ProducerId(21),
+                            last_timestamp: BatchTimestamp(4_000),
+                            current_txn_start_offset: krabka_log::Offset(3),
+                            ..Default::default()
+                        }),
+                    ]),
                 ),
                 topic(
                     "moved",

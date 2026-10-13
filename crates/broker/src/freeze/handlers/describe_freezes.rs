@@ -18,18 +18,19 @@
 //! an attestation and not a proof, and this response is what tells the two
 //! apart.
 
-use krabka_metadata::{MetadataImage, TopicFreezeRecord};
-use krabka_protocol::{
-    krabka::freeze::{
-        DescribeTopicFreezesRequest, DescribeTopicFreezesResponse, DescribedTopicFreeze,
+use {
+    crate::{
+        codes,
+        freeze::handlers::{FreezeFilter, cluster_describe_denied, pattern_type_filter},
+        handlers::{acl_wire::pattern_type_to_wire, encode_response},
     },
-    primitives::uuid::Uuid as ProtocolUuid,
-};
-
-use crate::{
-    codes,
-    freeze::handlers::{FreezeFilter, cluster_describe_denied, pattern_type_filter},
-    handlers::{acl_wire::pattern_type_to_wire, encode_response},
+    krabka_metadata::{MetadataImage, TopicFreezeRecord},
+    krabka_protocol::{
+        krabka::freeze::{
+            DescribeTopicFreezesRequest, DescribeTopicFreezesResponse, DescribedTopicFreeze,
+        },
+        primitives::uuid::Uuid as ProtocolUuid,
+    },
 };
 
 wire_handler!(
@@ -110,14 +111,15 @@ fn described(entry: &TopicFreezeRecord) -> DescribedTopicFreeze {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{MetadataRecord, PatternType};
-    use krabka_protocol::krabka::freeze::{
-        PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED,
+    use {
+        super::*,
+        assert2::check,
+        krabka_metadata::{MetadataRecord, PatternType},
+        krabka_protocol::krabka::freeze::{
+            PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PATTERN_TYPE_PREFIXED,
+        },
+        uuid::Uuid,
     };
-    use uuid::Uuid;
-
-    use super::*;
 
     const PROPOSAL: Uuid = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
 
@@ -231,15 +233,10 @@ mod tests {
                     ("tenant-a.", PATTERN_TYPE_PREFIXED),
                 ],
             ),
-            (
-                "a pattern type alone",
-                None,
-                PATTERN_TYPE_PREFIXED,
-                vec![
-                    ("orders", PATTERN_TYPE_PREFIXED),
-                    ("tenant-a.", PATTERN_TYPE_PREFIXED),
-                ],
-            ),
+            ("a pattern type alone", None, PATTERN_TYPE_PREFIXED, vec![
+                ("orders", PATTERN_TYPE_PREFIXED),
+                ("tenant-a.", PATTERN_TYPE_PREFIXED),
+            ]),
             (
                 "a scope alone reads both pattern types of that scope",
                 Some("orders"),

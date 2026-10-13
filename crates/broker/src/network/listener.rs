@@ -1,7 +1,5 @@
 //! Per-listener SASL resolution helper.
-use krabka_security::SaslMechanism;
-
-use crate::config::ListenerSpec;
+use {crate::config::ListenerSpec, krabka_security::SaslMechanism};
 
 /// Returns the SASL mechanisms enabled for `spec`.
 ///
@@ -18,11 +16,7 @@ pub(crate) fn resolve_sasl_mechanisms_for_listener<'a>(
 
 #[cfg(test)]
 mod per_listener_config_tests {
-    use assert2::assert;
-    use krabka_security::ListenerProtocol;
-
-    use super::*;
-    use crate::SslPrincipalMapper;
+    use {super::*, crate::SslPrincipalMapper, assert2::assert, krabka_security::ListenerProtocol};
 
     fn test_listener_spec(
         protocol: ListenerProtocol,

@@ -5,23 +5,23 @@
 //! same transactional batch and the same control marker are what several
 //! submodules assert on.
 
-use std::{fs::File, io::Write as _, time::SystemTime};
-
-use bytes::Bytes;
-use krabka_ids::{LeaderEpoch, Offset, ProducerId};
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-use krabka_units::prelude::{ByteSize, bytes, gibibytes};
-use tempfile::tempdir;
-
-use super::{BARRIER_CONTROL_TYPE, CompactionContext, Log, VerbatimBatch};
-use crate::{
-    CleanupPolicy,
-    config::LogConfig,
-    producer_snapshot::{ProducerSnapshotEntry, list},
-    stamp_index::{StampEntry, StampIndex},
-    stamp_source::MonotonicStampSource,
-    test_support::{numbered_record, segmented_log, single_record_batch},
-    txn_index::AbortedTxn,
+use {
+    super::{BARRIER_CONTROL_TYPE, CompactionContext, Log, VerbatimBatch},
+    crate::{
+        CleanupPolicy,
+        config::LogConfig,
+        producer_snapshot::{ProducerSnapshotEntry, list},
+        stamp_index::{StampEntry, StampIndex},
+        stamp_source::MonotonicStampSource,
+        test_support::{numbered_record, segmented_log, single_record_batch},
+        txn_index::AbortedTxn,
+    },
+    bytes::Bytes,
+    krabka_ids::{LeaderEpoch, Offset, ProducerId},
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    krabka_units::prelude::{ByteSize, bytes, gibibytes},
+    std::{fs::File, io::Write as _, time::SystemTime},
+    tempfile::tempdir,
 };
 
 /// A read budget larger than anything these tests write, so the byte
@@ -53,9 +53,7 @@ pub fn append_samples(log: &mut Log, batches: usize, records_per_batch: i32) {
     }
 }
 
-pub fn test_log() -> (tempfile::TempDir, Log) {
-    configured_test_log(LogConfig::default())
-}
+pub fn test_log() -> (tempfile::TempDir, Log) { configured_test_log(LogConfig::default()) }
 
 pub fn configured_test_log(config: LogConfig) -> (tempfile::TempDir, Log) {
     let dir = tempdir().unwrap();
@@ -172,9 +170,7 @@ pub fn compacting_segments() -> LogConfig {
     }
 }
 
-pub fn compact_test_log() -> (tempfile::TempDir, Log) {
-    configured_test_log(compacting_segments())
-}
+pub fn compact_test_log() -> (tempfile::TempDir, Log) { configured_test_log(compacting_segments()) }
 
 /// Change the roll and compaction grouping cap without changing other options.
 pub fn set_segment_size(log: &mut Log, size: ByteSize) {
@@ -203,21 +199,16 @@ pub fn write_with_budget(file: &File, buf: &[u8], remaining: &mut usize) -> std:
 }
 
 /// A log under `dir` opened with [`tiny_segments`].
-pub fn rolling_test_log(dir: &std::path::Path) -> Log {
-    Log::open(dir, tiny_segments()).unwrap()
-}
+pub fn rolling_test_log(dir: &std::path::Path) -> Log { Log::open(dir, tiny_segments()).unwrap() }
 
 /// A log configured the way Kafka's `message.timestamp.type=LogAppendTime`
 /// configures one, with everything else at its default.
 pub fn log_append_time_log() -> (tempfile::TempDir, Log) {
     let dir = tempdir().unwrap();
-    let log = Log::open(
-        dir.path(),
-        LogConfig {
-            message_timestamp_type: krabka_protocol::records::TimestampType::LogAppendTime,
-            ..LogConfig::default()
-        },
-    )
+    let log = Log::open(dir.path(), LogConfig {
+        message_timestamp_type: krabka_protocol::records::TimestampType::LogAppendTime,
+        ..LogConfig::default()
+    })
     .unwrap();
     (dir, log)
 }
@@ -454,13 +445,10 @@ pub fn compaction_ctx() -> CompactionContext {
 /// mirrors the `remote_log_manager` test helper and stays local to this
 /// module.
 pub fn rolled_log(dir: &std::path::Path, extra: &LogConfig) -> Log {
-    let mut log = Log::open(
-        dir,
-        LogConfig {
-            segment_size: bytes(200),
-            ..extra.clone()
-        },
-    )
+    let mut log = Log::open(dir, LogConfig {
+        segment_size: bytes(200),
+        ..extra.clone()
+    })
     .unwrap();
     for _ in 0..16 {
         let mut b = sample_batch(2);

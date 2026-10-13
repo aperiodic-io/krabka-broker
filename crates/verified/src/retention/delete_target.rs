@@ -1,8 +1,6 @@
-use creusot_std::prelude::*;
-
-use super::RemoteRetentionSegment;
 #[cfg(creusot)]
 use super::{remote_prefix_charge, remote_retention_model};
+use {super::RemoteRetentionSegment, creusot_std::prelude::*};
 
 /// Count the oldest finished remote segments that Kafka's remote retention
 /// deletes.

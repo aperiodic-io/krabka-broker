@@ -4,16 +4,18 @@
 //! The tests that cover which stored entries apply at all live beside those
 //! predicates in [`super::matching`].
 
-use krabka_metadata::{AclOperation, MetadataRecord, PatternType};
-use krabka_security::Principal;
-
-use super::*;
-use crate::{
-    authorize_topics,
-    simple::test_support::{
-        AclSetup, AliceAuthorizer, QuerySetup, acl_image, addr, alice, check_resource_type_access,
-        check_topic_access, img, no_super, one_super, req, topic_acl,
+use {
+    super::*,
+    crate::{
+        authorize_topics,
+        simple::test_support::{
+            AclSetup, AliceAuthorizer, QuerySetup, acl_image, addr, alice,
+            check_resource_type_access, check_topic_access, img, no_super, one_super, req,
+            topic_acl,
+        },
     },
+    krabka_metadata::{AclOperation, MetadataRecord, PatternType},
+    krabka_security::Principal,
 };
 
 fn prefixed_topic_write_allowed_when(denial: AclSetup) {
@@ -176,14 +178,10 @@ fn multi_super_user_all_bypass() {
     let actual = [&admin, &ops, &alice].map(|principal| {
         auth.authorize(
             &img,
-            &req(
-                principal,
-                &h,
-                QuerySetup {
-                    op: AclOperation::Write,
-                    ..Default::default()
-                },
-            ),
+            &req(principal, &h, QuerySetup {
+                op: AclOperation::Write,
+                ..Default::default()
+            }),
         )
     });
     // alice is not a super-user and the image has no matching ACL,
@@ -208,9 +206,10 @@ fn simple_acl_authorizer_is_configured() {
 /// ALLOW-not-covered-by-DENY grant for `operation` on any resource of
 /// `resource_type`", without naming one resource up front.
 mod authorize_by_resource_type {
-    use krabka_metadata::{AclOperation, MetadataRecord, PatternType, ResourceType};
-
-    use super::*;
+    use {
+        super::*,
+        krabka_metadata::{AclOperation, MetadataRecord, PatternType, ResourceType},
+    };
 
     #[test]
     fn no_acls_at_all_denies() {

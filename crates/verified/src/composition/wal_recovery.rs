@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::control_truncation::physical_batch_sequence_valid;
-use super::{
-    DeleteRecordsTrimApplication, FetchWatermarks, delete_records_trim_application,
-    fetch_visibility, in_half_open_window, truncation_batch_retained, truncation_frontier,
-    wal_checkpoint_range_valid,
+use {
+    super::{
+        DeleteRecordsTrimApplication, FetchWatermarks, delete_records_trim_application,
+        fetch_visibility, in_half_open_window, truncation_batch_retained, truncation_frontier,
+        wal_checkpoint_range_valid,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Recovery admission is complete for whole-batch ends, permits interior

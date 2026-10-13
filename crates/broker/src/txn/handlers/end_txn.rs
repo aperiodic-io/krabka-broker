@@ -24,19 +24,20 @@
 //! Request fields: `transactional_id`, `producer_id`, `producer_epoch`, `committed`.
 //! Response fields: `throttle_time_ms`, `error_code`.
 
-use krabka_log::ProducerId;
-use krabka_protocol::owned::{end_txn_request::EndTxnRequest, end_txn_response::EndTxnResponse};
-
-use crate::{
-    api_catalog::UnstableApiVersions,
-    broker::Broker,
-    error::BrokerError,
-    handlers::RequestContext,
-    txn::{
-        decision::{CompletionDecision, decide_end_txn_completion},
-        util::now_millis,
-        version::{TxnVersion, resolve_txn_version},
+use {
+    crate::{
+        api_catalog::UnstableApiVersions,
+        broker::Broker,
+        error::BrokerError,
+        handlers::RequestContext,
+        txn::{
+            decision::{CompletionDecision, decide_end_txn_completion},
+            util::now_millis,
+            version::{TxnVersion, resolve_txn_version},
+        },
     },
+    krabka_log::ProducerId,
+    krabka_protocol::owned::{end_txn_request::EndTxnRequest, end_txn_response::EndTxnResponse},
 };
 
 mod marker_rpc;

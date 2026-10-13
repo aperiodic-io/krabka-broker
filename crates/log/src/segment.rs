@@ -1,15 +1,16 @@
 //! A single segment: the `.log`, `.index`, and `.timeindex` files that share
 //! a base offset.
 
-use std::{
-    fs::File,
-    path::{Path, PathBuf},
-    sync::Arc,
+use {
+    bytes::Bytes,
+    krabka_ids::Offset,
+    krabka_units::prelude::{ByteSize, ByteSizeExt},
+    std::{
+        fs::File,
+        path::{Path, PathBuf},
+        sync::Arc,
+    },
 };
-
-use bytes::Bytes;
-use krabka_ids::Offset;
-use krabka_units::prelude::{ByteSize, ByteSizeExt};
 
 mod activation;
 mod append;
@@ -165,9 +166,7 @@ impl RawSegmentRead {
 
     /// `true` when no batch bytes were returned.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.bytes.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.bytes.is_empty() }
 }
 
 /// What an activation walk found in one segment.
@@ -186,9 +185,7 @@ pub(crate) struct ActivationScan {
 impl Segment {
     /// Absolute offset of the first record this segment can hold.
     #[must_use]
-    pub fn base_offset(&self) -> Offset {
-        self.base_offset
-    }
+    pub fn base_offset(&self) -> Offset { self.base_offset }
 
     /// Path to this segment's `.txnindex` file (may not exist yet).
     #[must_use]
@@ -213,9 +210,7 @@ impl Segment {
     /// Highest absolute offset (inclusive) of any batch appended to this
     /// segment. Returns `base_offset - 1` for an empty segment.
     #[must_use]
-    pub fn last_offset(&self) -> Offset {
-        self.last_offset
-    }
+    pub fn last_offset(&self) -> Offset { self.last_offset }
 
     /// Current `.log` file size.
     ///
@@ -224,9 +219,7 @@ impl Segment {
     /// where the value becomes a magnitude that the roll and retention
     /// policies compare.
     #[must_use]
-    pub fn size(&self) -> ByteSize {
-        ByteSize::from_bytes(self.log_size)
-    }
+    pub fn size(&self) -> ByteSize { ByteSize::from_bytes(self.log_size) }
 
     /// Whether the offset index or the time index is full under a
     /// `segment.index.bytes` of `segment_index_size`, Kafka's
@@ -260,9 +253,7 @@ impl Segment {
     /// timestamp. See [`Segment::last_modified`] for Kafka's fallback for
     /// both cases.
     #[must_use]
-    pub fn max_timestamp(&self) -> i64 {
-        self.max_timestamp
-    }
+    pub fn max_timestamp(&self) -> i64 { self.max_timestamp }
 
     /// The `.log` file's last-modified time, as Kafka's `LogSegment.
     /// lastModified` reads it. Time retention falls back to this when the
@@ -280,9 +271,7 @@ impl Segment {
     /// `true` once [`Segment::seal`] has sealed the segment. Sealed segments
     /// reject appends.
     #[must_use]
-    pub fn is_sealed(&self) -> bool {
-        self.sealed
-    }
+    pub fn is_sealed(&self) -> bool { self.sealed }
 
     /// Directory that holds this segment's `.log`, `.index`, and `.timeindex`
     /// files. The compactor uses it to read the `.log` file directly and to
@@ -290,7 +279,5 @@ impl Segment {
     /// `last_offset`, which is stale for sealed segments loaded through
     /// the log's no-scan loader.
     #[must_use]
-    pub fn dir(&self) -> &Path {
-        &self.dir
-    }
+    pub fn dir(&self) -> &Path { &self.dir }
 }

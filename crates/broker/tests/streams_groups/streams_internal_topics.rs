@@ -6,17 +6,17 @@
 //! heartbeat and must wait for the `MISSING_INTERNAL_TOPICS` status to clear as
 //! well as for the active task to land.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_protocol::owned::common::streams_group_heartbeat_request::topic_info::TopicInfo;
-
-use crate::{
-    streams_harness::{
-        active_partitions_for, boot, connect, create_topic, finalize_streams_version, first_join,
-        follow_up, status_codes, topology,
+use {
+    crate::{
+        streams_harness::{
+            active_partitions_for, boot, connect, create_topic, finalize_streams_version,
+            first_join, follow_up, status_codes, topology,
+        },
+        support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch, request_active_tasks},
     },
-    support::streams::{StreamsFollowUpSetup, StreamsMemberEpoch, request_active_tasks},
+    assert2::assert,
+    krabka_protocol::owned::common::streams_group_heartbeat_request::topic_info::TopicInfo,
+    std::time::Duration,
 };
 
 /// A stateful subtopology, that is, one with a state-changelog topic, drives

@@ -2,34 +2,34 @@
 //! `kraft.version` control operation, and the control-record bookkeeping that
 //! tracks it from append through truncation to commitment.
 
-use std::sync::Arc;
-
-use krabka_ids::Offset;
-use krabka_metadata::{MetadataRecord, VoterSet, VotersRecord};
-use krabka_protocol::{
-    owned::k_raft_version_record::KRaftVersionRecord as WireKRaftVersionRecord,
-    records::{RecordBatch, metadata::control::ControlRecord},
-};
-use krabka_verified::reconfiguration::{
-    CurrentVoterSet, ReconfigurationLeadership, TargetMembership, TargetVoter, VoterChangeKind,
-    VoterChangeRequest, VoterReconfigurationDecision, voter_reconfiguration_decision,
-};
-use tokio::sync::oneshot;
-
-use super::{
-    Engine, KraftController, PendingReconfig,
-    control_state::{voter_set_to_wire, voter_supports_version},
-    offsets::{hwm_reaches_waiter, leader_alone_is_majority, validate_append_result},
-    records::{decode_control_record, start_of_epoch_batch, typed_control_batch},
-};
-use crate::{
-    NodeId,
-    error::RaftError,
-    kraft::{
-        role::Role,
-        types::{Epoch, ReplicaKey},
+use {
+    super::{
+        Engine, KraftController, PendingReconfig,
+        control_state::{voter_set_to_wire, voter_supports_version},
+        offsets::{hwm_reaches_waiter, leader_alone_is_majority, validate_append_result},
+        records::{decode_control_record, start_of_epoch_batch, typed_control_batch},
     },
-    reconfig::{ReconfigOutcome, VoterChange},
+    crate::{
+        NodeId,
+        error::RaftError,
+        kraft::{
+            role::Role,
+            types::{Epoch, ReplicaKey},
+        },
+        reconfig::{ReconfigOutcome, VoterChange},
+    },
+    krabka_ids::Offset,
+    krabka_metadata::{MetadataRecord, VoterSet, VotersRecord},
+    krabka_protocol::{
+        owned::k_raft_version_record::KRaftVersionRecord as WireKRaftVersionRecord,
+        records::{RecordBatch, metadata::control::ControlRecord},
+    },
+    krabka_verified::reconfiguration::{
+        CurrentVoterSet, ReconfigurationLeadership, TargetMembership, TargetVoter, VoterChangeKind,
+        VoterChangeRequest, VoterReconfigurationDecision, voter_reconfiguration_decision,
+    },
+    std::sync::Arc,
+    tokio::sync::oneshot,
 };
 
 /// Classify the request's voter key against the committed voter set, with a
@@ -508,13 +508,14 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{KRaftVersionRange, Voter, VoterSet};
-    use krabka_verified::reconfiguration::TargetMembership;
-    use uuid::Uuid;
-
-    use super::target_membership;
-    use crate::NodeId;
+    use {
+        super::target_membership,
+        crate::NodeId,
+        assert2::assert,
+        krabka_metadata::{KRaftVersionRange, Voter, VoterSet},
+        krabka_verified::reconfiguration::TargetMembership,
+        uuid::Uuid,
+    };
 
     fn voter(id: u64, directory_id: Uuid) -> Voter {
         Voter {

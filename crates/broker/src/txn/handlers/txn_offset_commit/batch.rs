@@ -11,22 +11,23 @@
 //! epoch, and the commit is answered only once the high watermark covers it
 //! (see [`crate::coordinator::unified::offsets_log::append_as_leader`]).
 
-use krabka_metadata::NodeId;
-use krabka_protocol::{
-    owned::txn_offset_commit_request::TxnOffsetCommitRequest,
-    records::{Attributes, Record, RecordBatch},
-};
-
-use crate::{
-    codes,
-    coordinator::{
-        persistence::OffsetCommitValue,
-        unified::offsets_log::{LeaderAppend, append_as_leader},
+use {
+    crate::{
+        codes,
+        coordinator::{
+            persistence::OffsetCommitValue,
+            unified::offsets_log::{LeaderAppend, append_as_leader},
+        },
+        error::BrokerError,
+        metadata_source::MetadataSource,
+        partition::ProducerAppendCheck,
+        partition_registry::PartitionRegistry,
     },
-    error::BrokerError,
-    metadata_source::MetadataSource,
-    partition::ProducerAppendCheck,
-    partition_registry::PartitionRegistry,
+    krabka_metadata::NodeId,
+    krabka_protocol::{
+        owned::txn_offset_commit_request::TxnOffsetCommitRequest,
+        records::{Attributes, Record, RecordBatch},
+    },
 };
 
 /// What one `TxnOffsetCommit` wrote to the log: the offsets-log position of
@@ -178,22 +179,22 @@ pub(super) fn append_error_code(error: &BrokerError) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, sync::Arc};
-
-    use assert2::{assert, check};
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{Log, Offset, ReadOutput};
-    use krabka_metadata::MetadataImage;
-
-    use super::*;
-    use crate::{
-        coordinator::{
-            bootstrap::{OFFSETS_PARTITION, OFFSETS_TOPIC},
-            test_support::offsets_partition_image,
+    use {
+        super::*,
+        crate::{
+            coordinator::{
+                bootstrap::{OFFSETS_PARTITION, OFFSETS_TOPIC},
+                test_support::offsets_partition_image,
+            },
+            partition::{Partition, ProducerAppendCheck},
+            test_support::{FakeMetadataSource, StandalonePartitionSetup, open_partition},
+            txn::handlers::txn_offset_commit::{test_support::request, verification::offset_batch},
         },
-        partition::{Partition, ProducerAppendCheck},
-        test_support::{FakeMetadataSource, StandalonePartitionSetup, open_partition},
-        txn::handlers::txn_offset_commit::{test_support::request, verification::offset_batch},
+        assert2::{assert, check},
+        krabka_ids::PartitionIndex,
+        krabka_log::{Log, Offset, ReadOutput},
+        krabka_metadata::MetadataImage,
+        std::{collections::HashSet, sync::Arc},
     };
 
     /// This broker.
@@ -212,9 +213,7 @@ mod tests {
     }
 
     /// Metadata in which this broker leads the offsets partition.
-    fn led_here() -> FakeMetadataSource {
-        offsets_led_by(NODE, 0)
-    }
+    fn led_here() -> FakeMetadataSource { offsets_led_by(NODE, 0) }
 
     fn offsets_registry() -> (tempfile::TempDir, Arc<PartitionRegistry>) {
         let dir = tempfile::TempDir::new().expect("tempdir");
@@ -222,14 +221,11 @@ mod tests {
         registry.insert(
             OFFSETS_TOPIC.into(),
             PartitionIndex(OFFSETS_PARTITION),
-            open_partition(
-                dir.path(),
-                StandalonePartitionSetup {
-                    topic: OFFSETS_TOPIC,
-                    partition: krabka_ids::PartitionIndex(OFFSETS_PARTITION),
-                    ..Default::default()
-                },
-            ),
+            open_partition(dir.path(), StandalonePartitionSetup {
+                topic: OFFSETS_TOPIC,
+                partition: krabka_ids::PartitionIndex(OFFSETS_PARTITION),
+                ..Default::default()
+            }),
         );
         (dir, registry)
     }

@@ -6,19 +6,16 @@
 //! part of the wire format: the numbering below is the JVM
 //! `RemoteLogSegmentState` ordinal.
 
-use bytes::Bytes;
-use krabka_protocol::primitives::uuid::Uuid as ProtoUuid;
-use krabka_remote_storage::{CustomMetadata, RemoteLogSegmentState};
+use {
+    crate::error::CodecError,
+    bytes::Bytes,
+    krabka_protocol::primitives::uuid::Uuid as ProtoUuid,
+    krabka_remote_storage::{CustomMetadata, RemoteLogSegmentState},
+};
 
-use crate::error::CodecError;
+pub(super) fn domain_uuid_to_proto(u: uuid::Uuid) -> ProtoUuid { ProtoUuid(*u.as_bytes()) }
 
-pub(super) fn domain_uuid_to_proto(u: uuid::Uuid) -> ProtoUuid {
-    ProtoUuid(*u.as_bytes())
-}
-
-pub(super) fn proto_uuid_to_domain(u: ProtoUuid) -> uuid::Uuid {
-    uuid::Uuid::from_bytes(u.0)
-}
+pub(super) fn proto_uuid_to_domain(u: ProtoUuid) -> uuid::Uuid { uuid::Uuid::from_bytes(u.0) }
 
 pub(super) fn segment_state_to_i8(s: RemoteLogSegmentState) -> i8 {
     match s {

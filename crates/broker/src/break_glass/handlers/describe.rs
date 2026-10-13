@@ -18,25 +18,26 @@
 //! refusal is different: a denied read of the break-glass surface is a signal
 //! an auditor should see, so this handler audits one.
 
-use krabka_audit::{AuditOutcome, PrivilegedPhase};
-use krabka_metadata::{BreakGlassProposalRecord, MetadataImage};
-use krabka_protocol::krabka::break_glass::{
-    BreakGlassApproval as WireApproval, DescribeBreakGlassRequest, DescribeBreakGlassResponse,
-    DescribedBreakGlassProposal,
-};
-use uuid::Uuid;
-
-use crate::{
-    break_glass::{
-        action_to_wire,
-        config::BreakGlassPolicy,
-        handlers::{
-            PrivilegedAudit, Refusal, UNKNOWN_ACTION, audit_privileged, cluster_describe_denied,
-            from_wire_uuid, to_wire_uuid,
+use {
+    crate::{
+        break_glass::{
+            action_to_wire,
+            config::BreakGlassPolicy,
+            handlers::{
+                PrivilegedAudit, Refusal, UNKNOWN_ACTION, audit_privileged,
+                cluster_describe_denied, from_wire_uuid, to_wire_uuid,
+            },
         },
+        codes,
+        handlers::encode_response,
     },
-    codes,
-    handlers::encode_response,
+    krabka_audit::{AuditOutcome, PrivilegedPhase},
+    krabka_metadata::{BreakGlassProposalRecord, MetadataImage},
+    krabka_protocol::krabka::break_glass::{
+        BreakGlassApproval as WireApproval, DescribeBreakGlassRequest, DescribeBreakGlassResponse,
+        DescribedBreakGlassProposal,
+    },
+    uuid::Uuid,
 };
 
 wire_handler!(
@@ -179,13 +180,14 @@ fn described(proposal: &BreakGlassProposalRecord) -> DescribedBreakGlassProposal
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::BreakGlassAction;
-
-    use super::*;
-    use crate::break_glass::{
-        ALL_ACTIONS, action_name,
-        gate::tests::{CREATED_MS, EXPIRES_MS, NOW_MS, image_of, proposal, signed_approval},
+    use {
+        super::*,
+        crate::break_glass::{
+            ALL_ACTIONS, action_name,
+            gate::tests::{CREATED_MS, EXPIRES_MS, NOW_MS, image_of, proposal, signed_approval},
+        },
+        assert2::{assert, check},
+        krabka_metadata::BreakGlassAction,
     };
 
     fn ids(described: &[DescribedBreakGlassProposal]) -> Vec<Uuid> {

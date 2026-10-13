@@ -13,22 +13,22 @@
 //! the parsers clap calls to build them, live in `value` and `timestamp`, and
 //! the cross-flag checks clap cannot express live in `validate`.
 
-use std::path::PathBuf;
-
-use clap::Args;
-use krabka_ids::ProducerId;
-use krabka_metadata::NodeId;
-use regex::Regex;
-use uuid::Uuid;
-
-use self::{
-    timestamp::parse_timestamp,
-    value::{
-        parse_cluster_id, parse_header_pattern, parse_node_id, parse_offset_bound,
-        parse_offset_range, parse_producer_id, parse_regex, parse_topic_name,
+use {
+    self::{
+        timestamp::parse_timestamp,
+        value::{
+            parse_cluster_id, parse_header_pattern, parse_node_id, parse_offset_bound,
+            parse_offset_range, parse_producer_id, parse_regex, parse_topic_name,
+        },
     },
+    crate::report::ReportFormat,
+    clap::Args,
+    krabka_ids::ProducerId,
+    krabka_metadata::NodeId,
+    regex::Regex,
+    std::path::PathBuf,
+    uuid::Uuid,
 };
-use crate::report::ReportFormat;
 
 mod timestamp;
 mod validate;

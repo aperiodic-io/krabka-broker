@@ -11,18 +11,18 @@
 //! prefix on every record, derived from `AbortedTxn.json`'s field order), so
 //! `kafka-dump-log --offsets-decoder` can dump it.
 
-use std::{fs::OpenOptions, io::Write, path::PathBuf};
-
-use krabka_ids::{Offset, ProducerId};
-use tracing::instrument;
-use zerocopy::{
-    BigEndian, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
-    byteorder::{I16, I64},
-};
-
-use crate::{
-    error::LogError,
-    index::{open_index, rewrite_retained_entries, rewrite_sidecar_file},
+use {
+    crate::{
+        error::LogError,
+        index::{open_index, rewrite_retained_entries, rewrite_sidecar_file},
+    },
+    krabka_ids::{Offset, ProducerId},
+    std::{fs::OpenOptions, io::Write, path::PathBuf},
+    tracing::instrument,
+    zerocopy::{
+        BigEndian, FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned,
+        byteorder::{I16, I64},
+    },
 };
 
 const ENTRY_BYTES: usize = 34;
@@ -177,9 +177,7 @@ impl TxnIndex {
     }
 
     #[must_use]
-    pub fn entries(&self) -> &[AbortedTxn] {
-        &self.entries
-    }
+    pub fn entries(&self) -> &[AbortedTxn] { &self.entries }
 
     fn entry_valid(entry: AbortedTxn) -> bool {
         krabka_verified::aborted_transaction_interval(
@@ -209,10 +207,11 @@ impl TxnIndex {
 #[cfg(test)]
 mod tests {
 
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::test_support::{AbortedTxnSetup, aborted_txn};
+    use {
+        super::*,
+        crate::test_support::{AbortedTxnSetup, aborted_txn},
+        tempfile::TempDir,
+    };
 
     fn populated_index(name: &str, entries: &[AbortedTxn]) -> (TempDir, PathBuf, TxnIndex) {
         let dir = TempDir::new().unwrap();
@@ -241,14 +240,11 @@ mod tests {
 
     /// One transaction covers offsets 10 through 20 for fetch-boundary checks.
     fn ranged_index(setup: RangedIndexSetup<'_>) -> (TempDir, PathBuf, TxnIndex) {
-        populated_index(
-            setup.name,
-            &[aborted_txn(AbortedTxnSetup {
-                producer: ProducerId(1),
-                bounds: Offset(10)..=Offset(20),
-                stable: Offset(21),
-            })],
-        )
+        populated_index(setup.name, &[aborted_txn(AbortedTxnSetup {
+            producer: ProducerId(1),
+            bounds: Offset(10)..=Offset(20),
+            stable: Offset(21),
+        })])
     }
 
     /// The two independently specified malformed entries are refused both at append and open.

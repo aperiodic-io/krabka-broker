@@ -6,45 +6,47 @@
 //! upserting it into the next-gen state and reconciling, so both flavours of
 //! `JoinGroup` live together here.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::{Duration, Instant},
-};
-
-use krabka_protocol::{
-    owned::{
-        consumer_protocol_subscription::ConsumerProtocolSubscription,
-        join_group_request::JoinGroupRequest,
+use {
+    super::{
+        ActorServices, FALLBACK_REBALANCE_TIMEOUT_MS, FALLBACK_SESSION_TIMEOUT_MS, JoinResult,
+        ParkedWaiters, chrono_now_ms,
+        heartbeat::{member_update_records, replace_static_member},
+        member_state::{MemberChange, after_member_update, update_subscription},
+        pending_records::PendingRecords,
+        persistence::{Recorder, flush_classic_metadata, flush_pending},
+        regex_resolution::{RegexResolution, apply_regex_result, maybe_update_regular_expressions},
+        waiters::{
+            complete_classic_rebalance, drain_followers_with, fence_replaced_classic_member,
+        },
     },
-    primitives::uuid::Uuid,
-};
-use krabka_verified::consumer_downgrade_epoch;
-use tokio::sync::oneshot;
-
-use super::{
-    ActorServices, FALLBACK_REBALANCE_TIMEOUT_MS, FALLBACK_SESSION_TIMEOUT_MS, JoinResult,
-    ParkedWaiters, chrono_now_ms,
-    heartbeat::{member_update_records, replace_static_member},
-    member_state::{MemberChange, after_member_update, update_subscription},
-    pending_records::PendingRecords,
-    persistence::{Recorder, flush_classic_metadata, flush_pending},
-    regex_resolution::{RegexResolution, apply_regex_result, maybe_update_regular_expressions},
-    waiters::{complete_classic_rebalance, drain_followers_with, fence_replaced_classic_member},
-};
-use crate::{
-    codes,
-    coordinator::unified::{
-        ClientIdentity, classic_ops,
-        classic_state::{ClassicGroup, GroupState as ClassicGroupState},
-        config::{ConsumerGroupMigrationPolicy, NextGenConfig},
-        consumer_state::GroupState as ConsumerState,
-        first_join_member_id,
-        group::{CoordinatorGroup, GroupKind},
-        migration,
-        reconciler::ReconcileInput,
-        regex_resolver::TopicRegexResolver,
+    crate::{
+        codes,
+        coordinator::unified::{
+            ClientIdentity, classic_ops,
+            classic_state::{ClassicGroup, GroupState as ClassicGroupState},
+            config::{ConsumerGroupMigrationPolicy, NextGenConfig},
+            consumer_state::GroupState as ConsumerState,
+            first_join_member_id,
+            group::{CoordinatorGroup, GroupKind},
+            migration,
+            reconciler::ReconcileInput,
+            regex_resolver::TopicRegexResolver,
+        },
+        error::BrokerError,
     },
-    error::BrokerError,
+    krabka_protocol::{
+        owned::{
+            consumer_protocol_subscription::ConsumerProtocolSubscription,
+            join_group_request::JoinGroupRequest,
+        },
+        primitives::uuid::Uuid,
+    },
+    krabka_verified::consumer_downgrade_epoch,
+    std::{
+        collections::{HashMap, HashSet},
+        time::{Duration, Instant},
+    },
+    tokio::sync::oneshot,
 };
 
 /// Kafka's `appendGroupMetadataErrorToResponseError`: the `JoinGroup` error
@@ -111,18 +113,14 @@ pub(super) async fn handle_classic_join_message(
     }
     if let Some(state) = group.as_classic_mut() {
         let previous = state.clone();
-        let outcome = classic_ops::handle_join(
-            state,
-            &mut request,
-            &classic_ops::JoinContext {
-                client_id,
-                client_host,
-                version,
-                initial_rebalance_delay: services.config.classic_initial_rebalance_delay,
-                max_size: services.config.classic_max_size,
-                now: Instant::now(),
-            },
-        );
+        let outcome = classic_ops::handle_join(state, &mut request, &classic_ops::JoinContext {
+            client_id,
+            client_host,
+            version,
+            initial_rebalance_delay: services.config.classic_initial_rebalance_delay,
+            max_size: services.config.classic_max_size,
+            now: Instant::now(),
+        });
         if let Some(fenced) = outcome.fenced_member.as_deref() {
             fence_replaced_classic_member(fenced, &mut parked.joiners, &mut parked.followers);
         }
@@ -172,20 +170,16 @@ pub(super) async fn handle_classic_join_message(
         return true;
     }
     if group.as_consumer().is_some() {
-        return classic_join_hosted(
-            group,
-            services,
-            HostedJoin {
-                request: &request,
-                version,
-                client: ClientIdentity {
-                    id: client_id,
-                    host: client_host,
-                },
-                regex_resolver,
-                reply,
+        return classic_join_hosted(group, services, HostedJoin {
+            request: &request,
+            version,
+            client: ClientIdentity {
+                id: client_id,
+                host: client_host,
             },
-        )
+            regex_resolver,
+            reply,
+        })
         .await
         .is_ok();
     }
@@ -439,26 +433,23 @@ async fn classic_join_hosted(
     let old_regex = before.and_then(|(_, regex)| regex);
     let rebalance_timeout = joined_rebalance_timeout(state, &member_id, req.rebalance_timeout_ms);
     let recorder = Recorder::start(state, &[&member_id]);
-    migration::upsert_classic_member(
-        state,
-        migration::ClassicMemberRegistration {
-            member_id: member_id.clone(),
-            subscription_topics: topics,
-            rack_id: subscription.rack_id.filter(|rack| !rack.is_empty()),
-            protocols: req
-                .protocols
-                .iter()
-                .map(|p| (p.name.clone(), p.metadata.clone()))
-                .collect(),
-            client_id: client.id.to_string(),
-            client_host: client.host.to_string(),
-            session_timeout: Duration::from_millis(
-                u64::try_from(req.session_timeout_ms.max(0)).unwrap_or(FALLBACK_SESSION_TIMEOUT_MS),
-            ),
-            rebalance_timeout,
-            instance_id: req.group_instance_id.clone(),
-        },
-    );
+    migration::upsert_classic_member(state, migration::ClassicMemberRegistration {
+        member_id: member_id.clone(),
+        subscription_topics: topics,
+        rack_id: subscription.rack_id.filter(|rack| !rack.is_empty()),
+        protocols: req
+            .protocols
+            .iter()
+            .map(|p| (p.name.clone(), p.metadata.clone()))
+            .collect(),
+        client_id: client.id.to_string(),
+        client_host: client.host.to_string(),
+        session_timeout: Duration::from_millis(
+            u64::try_from(req.session_timeout_ms.max(0)).unwrap_or(FALLBACK_SESSION_TIMEOUT_MS),
+        ),
+        rebalance_timeout,
+        instance_id: req.group_instance_id.clone(),
+    });
     let now_ms = chrono_now_ms();
     let regexes = RegexResolution::of(
         config,
@@ -637,25 +628,27 @@ async fn downgrade_joining(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::Bytes;
-    use krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        actor::{
-            GroupActorHandle, GroupActorMessage, GroupKindTag, SyncResult,
-            test_support::{
-                completing_classic_group, decode_assignment, last_classic_metadata,
-                make_coordinator, make_coordinator_with_config, make_coordinator_with_topic_config,
-                make_coordinator_with_topic_policy, marked_classic_handle, rpc, seed_and_upgrade,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            actor::{
+                GroupActorHandle, GroupActorMessage, GroupKindTag, SyncResult,
+                test_support::{
+                    completing_classic_group, decode_assignment, last_classic_metadata,
+                    make_coordinator, make_coordinator_with_config,
+                    make_coordinator_with_topic_config, make_coordinator_with_topic_policy,
+                    marked_classic_handle, rpc, seed_and_upgrade,
+                },
             },
+            classic_state::GroupState as ClassicGroupState,
+            config::{ConsumerGroupMigrationPolicy as Policy, NextGenConfig},
+            offsets_log::fake::InMemoryOffsetsLog,
+            persistence_next_gen::NextGenKey,
+            regex_resolver::{FixedRegexResolver, no_topic_regex_resolver},
         },
-        classic_state::GroupState as ClassicGroupState,
-        config::{ConsumerGroupMigrationPolicy as Policy, NextGenConfig},
-        offsets_log::fake::InMemoryOffsetsLog,
-        persistence_next_gen::NextGenKey,
-        regex_resolver::{FixedRegexResolver, no_topic_regex_resolver},
+        assert2::{assert, check},
+        bytes::Bytes,
+        krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
     };
 
     /// Kafka's `group.initial.rebalance.delay.ms = 0`: the first member of a
@@ -1212,18 +1205,15 @@ mod tests {
     /// A native consumer member `member_id` that joins subscribed to `t`, as
     /// the static member `instance_id` when one is given.
     async fn native_join(handle: &GroupActorHandle, member_id: &str, instance_id: Option<&str>) {
-        let joined = rpc::consumer_request(
-            handle,
-            ConsumerGroupHeartbeatRequest {
-                group_id: "g".into(),
-                member_id: member_id.into(),
-                member_epoch: 0,
-                instance_id: instance_id.map(Into::into),
-                subscribed_topic_names: Some(vec!["t".into()]),
-                rebalance_timeout_ms: 60_000,
-                ..Default::default()
-            },
-        )
+        let joined = rpc::consumer_request(handle, ConsumerGroupHeartbeatRequest {
+            group_id: "g".into(),
+            member_id: member_id.into(),
+            member_epoch: 0,
+            instance_id: instance_id.map(Into::into),
+            subscribed_topic_names: Some(vec!["t".into()]),
+            rebalance_timeout_ms: 60_000,
+            ..Default::default()
+        })
         .await;
         assert!(joined.error_code == codes::NONE);
     }
@@ -1348,15 +1338,11 @@ mod tests {
             ),
         ];
         for (label, max_size, protocol_type, protocol_name, want) in rows {
-            let (coord, _log) = make_coordinator_with_topic_config(
-                "t",
-                2,
-                NextGenConfig {
-                    migration_policy: Policy::Bidirectional,
-                    max_size,
-                    ..NextGenConfig::assigning_at_once()
-                },
-            );
+            let (coord, _log) = make_coordinator_with_topic_config("t", 2, NextGenConfig {
+                migration_policy: Policy::Bidirectional,
+                max_size,
+                ..NextGenConfig::assigning_at_once()
+            });
             let handle = coord.get_or_create_group("g", GroupKindTag::Consumer);
             native_join(&handle, "native", None).await;
             assert!(
@@ -1476,16 +1462,12 @@ mod tests {
     /// resolver.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_classic_join_refreshes_the_groups_stale_regular_expressions() {
-        let (coord, _log) = make_coordinator_with_topic_config(
-            "t",
-            2,
-            NextGenConfig {
-                migration_policy: Policy::Bidirectional,
-                regex_refresh_interval: Duration::ZERO,
-                regex_refresh_min_interval: Duration::ZERO,
-                ..NextGenConfig::assigning_at_once()
-            },
-        );
+        let (coord, _log) = make_coordinator_with_topic_config("t", 2, NextGenConfig {
+            migration_policy: Policy::Bidirectional,
+            regex_refresh_interval: Duration::ZERO,
+            regex_refresh_min_interval: Duration::ZERO,
+            ..NextGenConfig::assigning_at_once()
+        });
         let handle = coord.get_or_create_group("g", GroupKindTag::Consumer);
         let native_resolver = fixed_topic_resolver();
         let (tx, rx) = tokio::sync::oneshot::channel();

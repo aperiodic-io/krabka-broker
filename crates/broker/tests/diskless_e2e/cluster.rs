@@ -16,18 +16,18 @@
 //! is who it claims to be, so an anonymous follower is refused and a
 //! plaintext cluster would never form a quorum at all.
 
-use std::{net::SocketAddr, path::Path, time::Duration};
-
-use krabka_broker::{
-    BootstrapMode, Broker, BrokerConfig, BrokerHandle, KafkaRlmmConfig, NodeId,
-    RemoteStorageBackend, RlmmKind,
-};
-use krabka_security::ListenerProtocol;
-use tempfile::TempDir;
-
-use crate::{
-    CLIENT_PRINCIPAL, PASSWORD, TOPIC, VOTERS,
-    support::{self, ClusterBootstrapSetup, ClusterNodeSetup, NodeIndex},
+use {
+    crate::{
+        CLIENT_PRINCIPAL, PASSWORD, TOPIC, VOTERS,
+        support::{self, ClusterBootstrapSetup, ClusterNodeSetup, NodeIndex},
+    },
+    krabka_broker::{
+        BootstrapMode, Broker, BrokerConfig, BrokerHandle, KafkaRlmmConfig, NodeId,
+        RemoteStorageBackend, RlmmKind,
+    },
+    krabka_security::ListenerProtocol,
+    std::{net::SocketAddr, path::Path, time::Duration},
+    tempfile::TempDir,
 };
 
 /// Name of the one data-plane listener every broker binds. It carries both the

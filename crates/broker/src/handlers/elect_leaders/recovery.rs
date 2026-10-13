@@ -6,29 +6,30 @@
 //! append that elects one. This module spends the break-glass approval first,
 //! queues the job, and waits out the operator deadline for its outcome.
 
-use krabka_audit::PrivilegedPhase;
-use krabka_metadata::{BreakGlassAction, MetadataRecord};
-use krabka_protocol::owned::elect_leaders_response::PartitionResult;
-use krabka_units::convert::TimeExt as _;
-use tokio::sync::oneshot;
-use uuid::Uuid;
-
-use super::{
-    batch::ElectionBatch,
-    env::ElectionEnv,
-    unclean_gate::{consumed_proposal_id, unclean_target},
-};
-use crate::{
-    break_glass::{
-        gate,
-        handlers::audit::{GatedTransition, audit_transition, require_transition},
-        persistence::spend_before_local_action,
+use {
+    super::{
+        batch::ElectionBatch,
+        env::ElectionEnv,
+        unclean_gate::{consumed_proposal_id, unclean_target},
     },
-    broker::Broker,
-    codes,
-    config_keys::RecoveryStrategy,
-    handlers::submit_failure_code,
-    unclean_recovery::{RecoveryJob, RecoveryOutcome},
+    crate::{
+        break_glass::{
+            gate,
+            handlers::audit::{GatedTransition, audit_transition, require_transition},
+            persistence::spend_before_local_action,
+        },
+        broker::Broker,
+        codes,
+        config_keys::RecoveryStrategy,
+        handlers::submit_failure_code,
+        unclean_recovery::{RecoveryJob, RecoveryOutcome},
+    },
+    krabka_audit::PrivilegedPhase,
+    krabka_metadata::{BreakGlassAction, MetadataRecord},
+    krabka_protocol::owned::elect_leaders_response::PartitionResult,
+    krabka_units::convert::TimeExt as _,
+    tokio::sync::oneshot,
+    uuid::Uuid,
 };
 
 /// Hand one partition to the Unclean Recovery Manager and wait for its outcome.

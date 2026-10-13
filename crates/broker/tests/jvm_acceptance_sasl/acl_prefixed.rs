@@ -5,13 +5,14 @@
 //! from one grant -- an allowed topic and a denied one -- and so seeds two
 //! topics and runs two consumers, which no other ACL case does.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
-    create_console_topic, denied_console_consumer, docker_run_kafka_tool_with_image_and_mount,
-    nc_check_connectivity, plain_jaas, produce_console,
-    start_sasl_plaintext_broker_with_super_user, write_client_props, write_plain_props,
+use {
+    crate::jvm_acceptance::{
+        ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
+        create_console_topic, denied_console_consumer, docker_run_kafka_tool_with_image_and_mount,
+        nc_check_connectivity, plain_jaas, produce_console,
+        start_sasl_plaintext_broker_with_super_user, write_client_props, write_plain_props,
+    },
+    assert2::assert,
 };
 
 /// JVM acceptance: a prefixed topic ACL grants exactly the prefix.
@@ -36,10 +37,10 @@ async fn jvm_prefixed_topic_acl_works() {
     const TOPIC_DENIED: &str = "other-foo";
     const GROUP: &str = "cg-prefixed";
 
-    let (broker, _dir) = start_sasl_plaintext_broker_with_super_user(
-        ADMIN,
-        &[(ADMIN, ADMIN_PASS), (ALICE, ALICE_PASS)],
-    )
+    let (broker, _dir) = start_sasl_plaintext_broker_with_super_user(ADMIN, &[
+        (ADMIN, ADMIN_PASS),
+        (ALICE, ALICE_PASS),
+    ])
     .await;
     nc_check_connectivity();
 
@@ -53,47 +54,39 @@ async fn jvm_prefixed_topic_acl_works() {
 
     // Prefixed Read on `team-*` for alice. ACL implications grant Describe from
     // Read on the same topic resource.
-    docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-acls",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--add",
-            "--allow-principal",
-            "User:alice",
-            "--operation",
-            "Read",
-            "--resource-pattern-type",
-            "prefixed",
-            "--topic",
-            PREFIX,
-        ],
-    );
+    docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-acls",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--add",
+        "--allow-principal",
+        "User:alice",
+        "--operation",
+        "Read",
+        "--resource-pattern-type",
+        "prefixed",
+        "--topic",
+        PREFIX,
+    ]);
 
     // Literal Read on group `cg-prefixed`. ACL implications grant Describe from
     // Read on the same group resource.
-    docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-acls",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--add",
-            "--allow-principal",
-            "User:alice",
-            "--operation",
-            "Read",
-            "--group",
-            GROUP,
-        ],
-    );
+    docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-acls",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--add",
+        "--allow-principal",
+        "User:alice",
+        "--operation",
+        "Read",
+        "--group",
+        GROUP,
+    ]);
 
     // Seed one record into each topic as admin (super-user bypasses authorize).
     let admin_producer_props = write_client_props(&format!(
@@ -125,10 +118,8 @@ async fn jvm_prefixed_topic_acl_works() {
     let alice_props = write_plain_props(ALICE, ALICE_PASS);
     let alice_mount = alice_props.mount_str();
 
-    let consumer_out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &alice_mount,
-        &[
+    let consumer_out =
+        docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &alice_mount, &[
             "kafka-console-consumer",
             "--bootstrap-server",
             broker0_advertised(),
@@ -143,8 +134,7 @@ async fn jvm_prefixed_topic_acl_works() {
             "30000",
             "--consumer.config",
             "/client.properties",
-        ],
-    );
+        ]);
     let stdout = String::from_utf8_lossy(&consumer_out.stdout);
     let needle = format!("seed-{TOPIC_OK}");
     assert!(

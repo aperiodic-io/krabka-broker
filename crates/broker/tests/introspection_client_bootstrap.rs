@@ -15,8 +15,10 @@
 //! inside the client constructor, this test panics on startup, exactly as the
 //! broker binary did in the kind-oauth-introspection e2e job.
 
-use assert2::assert;
-use krabka_broker::{config::BrokerConfig, file_config::FileConfig};
+use {
+    assert2::assert,
+    krabka_broker::{config::BrokerConfig, file_config::FileConfig},
+};
 
 /// A self-contained CA cert. It does not depend on the security crate's
 /// fixtures, which live behind `#[cfg(test)]`-only paths.

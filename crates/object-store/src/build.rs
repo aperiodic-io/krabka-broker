@@ -1,17 +1,17 @@
 //! Construction of an `object_store::ObjectStore` handle from a config.
 
-use std::sync::Arc;
-
-use object_store::ObjectStore;
-#[cfg(not(target_family = "wasm"))]
-use object_store::{ClientOptions, RetryConfig};
-
-use super::{error::ObjectStoreError, object_store_api as object_store};
-use crate::config::ObjectStoreConfig;
 #[cfg(not(target_family = "wasm"))]
 use crate::config::{GcsConfig, S3Config};
 #[cfg(target_family = "wasm")]
 use crate::unavailable::unavailable;
+#[cfg(not(target_family = "wasm"))]
+use object_store::{ClientOptions, RetryConfig};
+use {
+    super::{error::ObjectStoreError, object_store_api as object_store},
+    crate::config::ObjectStoreConfig,
+    object_store::ObjectStore,
+    std::sync::Arc,
+};
 
 /// The retry budget `cfg` asks for.
 ///
@@ -154,13 +154,14 @@ pub(crate) fn build_gcs_store(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use object_store::ObjectStoreExt as _;
-
-    use super::{object_store, *};
-    use crate::{
-        config::{GcsConfig, ObjectStoreConfig, S3Config},
-        test_support::{http_listener, round_trip, s3_config},
+    use {
+        super::{object_store, *},
+        crate::{
+            config::{GcsConfig, ObjectStoreConfig, S3Config},
+            test_support::{http_listener, round_trip, s3_config},
+        },
+        assert2::{assert, check},
+        object_store::ObjectStoreExt as _,
     };
 
     #[test]

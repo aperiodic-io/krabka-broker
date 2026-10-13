@@ -9,12 +9,13 @@
 //! defaults they fall back to stay with the rest of the configuration
 //! defaults, in the parent module.
 
-use krabka_macros::RefinedNewtype;
-use refined_type::rule::{GreaterI32, GreaterU32, GreaterUsize};
-
-use super::{
-    DEFAULT_CONTROLLER_FETCH_MISS_LIMIT, DEFAULT_METADATA_RAFT_COMMAND_QUEUE_CAPACITY,
-    DEFAULT_METADATA_RAFT_FETCH_MAX,
+use {
+    super::{
+        DEFAULT_CONTROLLER_FETCH_MISS_LIMIT, DEFAULT_METADATA_RAFT_COMMAND_QUEUE_CAPACITY,
+        DEFAULT_METADATA_RAFT_FETCH_MAX,
+    },
+    krabka_macros::RefinedNewtype,
+    refined_type::rule::{GreaterI32, GreaterU32, GreaterUsize},
 };
 
 /// The number of consecutive fetch misses a controller tolerates.
@@ -60,10 +61,11 @@ pub struct MetadataRaftFetchMax(i32);
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes},
+    };
 
     #[test]
     fn raft_runtime_policy_defaults_and_validation() {

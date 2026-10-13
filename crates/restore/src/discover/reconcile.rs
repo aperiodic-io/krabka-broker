@@ -4,18 +4,21 @@
 //! because the rules for which disagreement is routine lag and which is a real
 //! inconsistency are stated once, here.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_remote_storage::{PartitionDump, RemoteLogSegmentMetadata, RemoteLogSegmentState};
-use krabka_remote_storage_topic::Snapshot;
-use krabka_verified::{RestoreReconcileDecision, RestoreSnapshotState};
-use uuid::Uuid;
+use {
+    krabka_remote_storage::{PartitionDump, RemoteLogSegmentMetadata, RemoteLogSegmentState},
+    krabka_remote_storage_topic::Snapshot,
+    krabka_verified::{RestoreReconcileDecision, RestoreSnapshotState},
+    std::collections::{HashMap, HashSet},
+    uuid::Uuid,
+};
 
 #[cfg(test)]
 mod tests;
 
-use super::{PartitionInventory, SegmentInventory};
-use crate::{args::RestoreArgs, error::RestoreError};
+use {
+    super::{PartitionInventory, SegmentInventory},
+    crate::{args::RestoreArgs, error::RestoreError},
+};
 
 /// Load the `--rlmm-snapshot` file, mapping an absent or corrupt file onto
 /// [`RestoreError::Io`]: the restore crate defines no dedicated snapshot-error

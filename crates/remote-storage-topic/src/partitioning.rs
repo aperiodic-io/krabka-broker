@@ -6,8 +6,7 @@
 //! which match the identity of `TopicIdPartition`. A topic rename therefore
 //! does not move the bucket.
 
-use krabka_remote_storage::TopicIdPartition;
-use krabka_verified::remote_metadata_partition;
+use {krabka_remote_storage::TopicIdPartition, krabka_verified::remote_metadata_partition};
 
 /// Pick the metadata-topic partition for `tp`, given the
 /// `partition_count` of `__remote_log_metadata`.
@@ -47,10 +46,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use uuid::Uuid;
-
-    use super::*;
+    use {super::*, assert2::assert, uuid::Uuid};
 
     fn tp(name: &str, partition: i32) -> TopicIdPartition {
         TopicIdPartition::new(
@@ -113,9 +109,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "partition_count must be positive")]
-    fn rejects_zero_partition_count() {
-        let _ = metadata_partition_for(&tp("t", 0), 0);
-    }
+    fn rejects_zero_partition_count() { let _ = metadata_partition_for(&tp("t", 0), 0); }
 
     #[test]
     fn metadata_partitions_for_dedupes_and_sorts() {

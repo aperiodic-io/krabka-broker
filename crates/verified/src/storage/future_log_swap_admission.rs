@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use super::LocalTruncationPlan;
+use {super::LocalTruncationPlan, creusot_std::prelude::*};
 
 /// Admit one batch at the expected logical frontier or beyond it, and compute its
 /// inclusive last offset and exclusive successor without signed overflow. A base
@@ -100,9 +98,7 @@ pub fn truncation_relative_offset(segment_base: i64, cut: i64) -> Option<u32> {
 /// last offset is below the exclusive cut.
 #[ensures(result == (batch_last@ < cut@))]
 #[must_use]
-pub const fn truncation_batch_retained(batch_last: i64, cut: i64) -> bool {
-    batch_last < cut
-}
+pub const fn truncation_batch_retained(batch_last: i64, cut: i64) -> bool { batch_last < cut }
 
 /// Clamp a dependent frontier to the new log end.
 #[ensures(result@ <= frontier@)]

@@ -5,22 +5,22 @@
 //! builds the refusal row for a trim no proposal covers. The trim itself, and
 //! the freeze check that answers ahead of this gate, stay in the module root.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{BreakGlassAction, MetadataRecord};
-use krabka_protocol::owned::delete_records_response::DeleteRecordsPartitionResult;
-use uuid::Uuid;
-
-use super::{TrimEnv, response::error_partition_result};
 pub(super) use crate::break_glass::gate::consumed_proposal_id;
-use crate::{
-    break_glass::{
-        gate::{self, BreakGlassDenial},
-        persistence::spend_before_local_action,
+use {
+    super::{TrimEnv, response::error_partition_result},
+    crate::{
+        break_glass::{
+            gate::{self, BreakGlassDenial},
+            persistence::spend_before_local_action,
+        },
+        broker::Broker,
+        codes,
+        handlers::partition_transition::audit_refusal,
     },
-    broker::Broker,
-    codes,
-    handlers::partition_transition::audit_refusal,
+    krabka_metadata::{BreakGlassAction, MetadataRecord},
+    krabka_protocol::owned::delete_records_response::DeleteRecordsPartitionResult,
+    std::collections::HashSet,
+    uuid::Uuid,
 };
 
 crate::handlers::partition_transition::authorizer! {
@@ -86,14 +86,15 @@ pub(super) use crate::handlers::partition_transition::partition_target as trim_t
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{BreakGlassAction, MetadataImage};
-
-    use super::authorize_trim;
-    use crate::{
-        break_glass::gate::tests::{approved_proposal, image_of},
-        config::BreakGlassConfig,
-        handlers::delete_records::test_support::gated_config,
+    use {
+        super::authorize_trim,
+        crate::{
+            break_glass::gate::tests::{approved_proposal, image_of},
+            config::BreakGlassConfig,
+            handlers::delete_records::test_support::gated_config,
+        },
+        assert2::check,
+        krabka_metadata::{BreakGlassAction, MetadataImage},
     };
 
     #[test]

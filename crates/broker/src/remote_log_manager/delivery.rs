@@ -2,13 +2,13 @@
 //! can fall back to file modification time, so they cannot authorize removing
 //! a scheduled batch. Read its stored header and apply the fetch deadline rule.
 
-use std::sync::Arc;
-
-use krabka_ids::Offset;
-use krabka_remote_storage::{RemoteLogSegmentMetadata, RemoteStorageManager};
-use krabka_units::Time;
-
-use crate::{blocking::spawn_blocking, remote_reader::segment_activation_frontier};
+use {
+    crate::{blocking::spawn_blocking, remote_reader::segment_activation_frontier},
+    krabka_ids::Offset,
+    krabka_remote_storage::{RemoteLogSegmentMetadata, RemoteStorageManager},
+    krabka_units::Time,
+    std::sync::Arc,
+};
 
 /// A failed or incomplete scan keeps the segment and everything behind it.
 /// Only candidates selected by retention are scanned; immediate topics never

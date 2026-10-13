@@ -23,9 +23,7 @@
 //! - `two_voters_append_via_linearizable`: 2 voters and stateless appenders.
 mod model;
 
-use krabka_ids::NodeId;
-use model::ConsensusModel;
-use stateright::Checker;
+use {krabka_ids::NodeId, model::ConsensusModel, stateright::Checker};
 
 /// Hard backstop on the explored, that is generated, states. It bounds memory
 /// even if `within_boundary` is looser than intended. It is set well above the

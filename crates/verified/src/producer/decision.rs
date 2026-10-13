@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
-use super::{ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, increment_sequence};
 #[cfg(creusot)]
 use super::{
     first_retained_duplicate, retained_duplicate_exists, retained_matches, sequence_decision,
+};
+use {
+    super::{ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, increment_sequence},
+    creusot_std::prelude::*,
 };
 
 /// Classify an incoming batch against a producer's tracked entry and the

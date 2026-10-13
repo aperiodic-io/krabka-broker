@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, producer_decision};
-use crate::transaction::{
-    InitProducerIdIdentityDecision, init_producer_id_identity_decision, next_producer_identity,
+use {
+    super::{ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, producer_decision},
+    crate::transaction::{
+        InitProducerIdIdentityDecision, init_producer_id_identity_decision, next_producer_identity,
+    },
+    creusot_std::prelude::*,
 };
 
 type RotationRetry = (

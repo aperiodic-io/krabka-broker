@@ -1,9 +1,10 @@
 //! The `[freeze]` runtime policy: how large the topic write-freeze registry
 //! may grow, and when a freeze record has to carry an operator signature.
 
-use krabka_units::Time;
-
-use crate::config::{DEFAULT_FREEZE_MAX_ENTRIES, DEFAULT_FREEZE_SIGNATURE_MAX_SKEW};
+use {
+    crate::config::{DEFAULT_FREEZE_MAX_ENTRIES, DEFAULT_FREEZE_SIGNATURE_MAX_SKEW},
+    krabka_units::Time,
+};
 
 /// Runtime `[freeze]` policy: the topic write-freeze registry's bounds and its
 /// signature requirement.

@@ -3,30 +3,31 @@
 //! `log_start_offset`, and the durability of a trim that lands where no segment
 //! name can record it.
 
-use assert2::{assert, check};
-use krabka_broker::{NodeId, codes};
-use krabka_protocol::{
-    owned::{
-        delete_records_response::DeleteRecordsPartitionResult,
-        fetch_request::{FetchPartition, FetchRequest},
-        fetch_response::PartitionData,
-        list_offsets_request::ListOffsetsRequest,
-        list_offsets_response::ListOffsetsPartitionResponse,
-    },
-    primitives::uuid::Uuid,
-};
-
-use crate::{
-    admin_harness::create_topic_helper,
-    support::{
-        self,
-        fetch::fetch_topic_row,
-        offsets::{
-            delete_records_partition, delete_records_request, delete_records_topic,
-            list_offset_partition, single_partition_list_offsets,
+use {
+    crate::{
+        admin_harness::create_topic_helper,
+        support::{
+            self,
+            fetch::fetch_topic_row,
+            offsets::{
+                delete_records_partition, delete_records_request, delete_records_topic,
+                list_offset_partition, single_partition_list_offsets,
+            },
+            records::record_count,
+            start_n_node_client,
         },
-        records::record_count,
-        start_n_node_client,
+    },
+    assert2::{assert, check},
+    krabka_broker::{NodeId, codes},
+    krabka_protocol::{
+        owned::{
+            delete_records_response::DeleteRecordsPartitionResult,
+            fetch_request::{FetchPartition, FetchRequest},
+            fetch_response::PartitionData,
+            list_offsets_request::ListOffsetsRequest,
+            list_offsets_response::ListOffsetsPartitionResponse,
+        },
+        primitives::uuid::Uuid,
     },
 };
 
@@ -188,10 +189,9 @@ async fn trim(
 ) -> DeleteRecordsPartitionResult {
     let mut resp = client
         .send(delete_records_request(
-            vec![delete_records_topic(
-                topic,
-                vec![delete_records_partition(0, offset)],
-            )],
+            vec![delete_records_topic(topic, vec![delete_records_partition(
+                0, offset,
+            )])],
             5_000,
         ))
         .await
@@ -265,16 +265,12 @@ async fn fetch_from(
             max_wait_ms: 0,
             min_bytes: 1,
             max_bytes: 1 << 20,
-            topics: vec![fetch_topic_row(
-                topic,
-                topic_id,
-                vec![FetchPartition {
-                    partition: 0,
-                    fetch_offset,
-                    partition_max_bytes: 1 << 20,
-                    ..Default::default()
-                }],
-            )],
+            topics: vec![fetch_topic_row(topic, topic_id, vec![FetchPartition {
+                partition: 0,
+                fetch_offset,
+                partition_max_bytes: 1 << 20,
+                ..Default::default()
+            }])],
             ..Default::default()
         })
         .await

@@ -1,22 +1,23 @@
 //! The requests every case sends, and the batch builder that makes a record
 //! batch of an exact wire length.
 
-use assert2::assert;
-use bytes::Bytes;
-use krabka_broker::{BrokerHandle, codes};
-use krabka_client_core::Client;
-use krabka_compression::CompressionType;
-use krabka_protocol::{
-    owned::produce_response::PartitionProduceResponse, primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-
-use crate::support::{
-    InProcess,
-    client::{BatchProduceSetup, produce_batch as client_produce_batch},
-    records::{batch_from_records, value_record},
-    start, topic_id_for,
-    topics::{CreateTopicSetup, configured_topic_request},
+use {
+    crate::support::{
+        InProcess,
+        client::{BatchProduceSetup, produce_batch as client_produce_batch},
+        records::{batch_from_records, value_record},
+        start, topic_id_for,
+        topics::{CreateTopicSetup, configured_topic_request},
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_broker::{BrokerHandle, codes},
+    krabka_client_core::Client,
+    krabka_compression::CompressionType,
+    krabka_protocol::{
+        owned::produce_response::PartitionProduceResponse, primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
+    },
 };
 
 /// Kafka's `max.message.bytes`, and its broker-wide default
@@ -144,15 +145,11 @@ pub(super) async fn produce_batch(
     topic_id: WireUuid,
     batch: RecordBatch,
 ) -> PartitionProduceResponse {
-    client_produce_batch(
-        client,
-        batch,
-        BatchProduceSetup {
-            topic,
-            topic_id,
-            ..Default::default()
-        },
-    )
+    client_produce_batch(client, batch, BatchProduceSetup {
+        topic,
+        topic_id,
+        ..Default::default()
+    })
     .await
 }
 

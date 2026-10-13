@@ -2,10 +2,12 @@
 //! counter, the freeze-registry gauge, and the proposal, refusal and bypass
 //! families that report on the two-person rule.
 
-use std::sync::Arc;
-
-use super::{
-    BreakGlassAction, BreakGlassActionLabel, BreakGlassState, BreakGlassStateLabel, BrokerMetrics,
+use {
+    super::{
+        BreakGlassAction, BreakGlassActionLabel, BreakGlassState, BreakGlassStateLabel,
+        BrokerMetrics,
+    },
+    std::sync::Arc,
 };
 
 impl BrokerMetrics {
@@ -62,10 +64,7 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::metrics::TopicLabel;
+    use {super::*, crate::metrics::TopicLabel, assert2::assert};
 
     #[test]
     fn topic_freeze_rejections_accumulate_per_topic() {

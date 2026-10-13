@@ -3,17 +3,18 @@
 //! and the observer `MetadataFetch` (1004) that streams a committed
 //! `__cluster_metadata` slice to a broker.
 
-use bytes::Bytes;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-
-use crate::{
-    DelegationTokenMutation, NodeId, SubmitChangeResult,
-    error::RaftError,
-    kraft::{Epoch, KraftController, ReplicaKey},
-    wire::{
-        KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse, KrabkaSubmitChangeRequest,
-        KrabkaSubmitChangeResponse, SUBMIT_CHANGE_UNCOMMITTED_TAIL,
+use {
+    crate::{
+        DelegationTokenMutation, NodeId, SubmitChangeResult,
+        error::RaftError,
+        kraft::{Epoch, KraftController, ReplicaKey},
+        wire::{
+            KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse, KrabkaSubmitChangeRequest,
+            KrabkaSubmitChangeResponse, SUBMIT_CHANGE_UNCOMMITTED_TAIL,
+        },
     },
+    bytes::Bytes,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
 };
 
 /// `KrabkaSubmitChangeResponse::error_code`: the change was applied.
@@ -204,23 +205,24 @@ pub(super) async fn dispatch_metadata_fetch(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::ApiKey;
-    use krabka_metadata::MetadataRecord;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        DelegationTokenMutation, NodeId,
-        server::{
-            dispatch::dispatch,
-            test_support::{single_voter_engine, test_engine_with_voters, wait_for_leader},
+    use {
+        super::*,
+        crate::{
+            DelegationTokenMutation, NodeId,
+            server::{
+                dispatch::dispatch,
+                test_support::{single_voter_engine, test_engine_with_voters, wait_for_leader},
+            },
+            test_support::single_partition_topic,
+            wire::{
+                API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
+                PRIVATE_UNSUPPORTED_VERSION, private_api_highest_version,
+            },
         },
-        test_support::single_partition_topic,
-        wire::{
-            API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
-            PRIVATE_UNSUPPORTED_VERSION, private_api_highest_version,
-        },
+        assert2::check,
+        krabka_ids::ApiKey,
+        krabka_metadata::MetadataRecord,
+        uuid::Uuid,
     };
 
     fn topic_record(name: &str) -> MetadataRecord {

@@ -2,17 +2,17 @@
 //! `DeleteSegmentStarted` to `DeleteSegmentFinished` lifecycle, and the
 //! partition-wide cascade that a `DeleteTopics` request starts.
 
-use std::sync::Arc;
-
-use krabka_remote_storage::{
-    RemoteLogMetadataManager, RemoteLogSegmentMetadata, RemoteLogSegmentState,
-    RemotePartitionDeleteMetadata, RemotePartitionDeleteState, RemoteStorageManager,
-    TopicIdPartition,
+use {
+    super::{archive::ArchiveMode, now_ms, rlmm::rlmm_mutate},
+    crate::blocking::spawn_blocking,
+    krabka_remote_storage::{
+        RemoteLogMetadataManager, RemoteLogSegmentMetadata, RemoteLogSegmentState,
+        RemotePartitionDeleteMetadata, RemotePartitionDeleteState, RemoteStorageManager,
+        TopicIdPartition,
+    },
+    std::sync::Arc,
+    tracing::{debug, warn},
 };
-use tracing::{debug, warn};
-
-use super::{archive::ArchiveMode, now_ms, rlmm::rlmm_mutate};
-use crate::blocking::spawn_blocking;
 
 /// KIP-405: cascade the
 /// [`DeletePartitionMarked` → `DeletePartitionStarted` →
@@ -206,12 +206,13 @@ pub(super) async fn delete_one_segment(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use fixtures::{copy_all_exports, copy_exports, local_backends};
-    use krabka_remote_storage::{InmemoryRemoteLogMetadataManager, LocalTieredStorage};
-
-    use super::*;
-    use crate::remote_log_manager::test_support as fixtures;
+    use {
+        super::*,
+        crate::remote_log_manager::test_support as fixtures,
+        assert2::{assert, check},
+        fixtures::{copy_all_exports, copy_exports, local_backends},
+        krabka_remote_storage::{InmemoryRemoteLogMetadataManager, LocalTieredStorage},
+    };
 
     fn dumped_delete_state(
         rlmm: &InmemoryRemoteLogMetadataManager,

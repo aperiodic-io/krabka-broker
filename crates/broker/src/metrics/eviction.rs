@@ -50,21 +50,21 @@
 //! `evict_group_series`, which gives group removal -- an event no image
 //! records -- its own one call to make.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
+use {
+    super::{BrokerMetrics, PartitionLabel, QuotaType, SchemaRejectionLabel, TopicLabel},
+    crate::{metrics::QuotaEntityLabel, schema_validation::RejectReason},
+    dashmap::DashSet,
+    krabka_metadata::{MetadataImage, NodeId},
+    prometheus_client::metrics::{counter::Counter, family::Family},
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+        time::Duration,
+    },
+    tokio::sync::watch,
+    tokio_util::sync::CancellationToken,
+    uuid::Uuid,
 };
-
-use dashmap::DashSet;
-use krabka_metadata::{MetadataImage, NodeId};
-use prometheus_client::metrics::{counter::Counter, family::Family};
-use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
-
-use super::{BrokerMetrics, PartitionLabel, QuotaType, SchemaRejectionLabel, TopicLabel};
-use crate::{metrics::QuotaEntityLabel, schema_validation::RejectReason};
 
 impl BrokerMetrics {
     pub(crate) fn track_topic_series(&self, label: &TopicLabel) {
@@ -355,16 +355,17 @@ pub(crate) fn spawn_metric_series_evictor(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::{
-        DeleteTopicRecord, LeaderEpoch, MetadataRecord, PartitionRecord, TopicRecord,
-    };
-
-    use super::*;
-    use crate::{
-        metadata_source::MetadataSource as _,
-        metrics::{ConsumerGroupLabel, ReplicaLagLabel},
-        test_support::FakeMetadataSource,
+    use {
+        super::*,
+        crate::{
+            metadata_source::MetadataSource as _,
+            metrics::{ConsumerGroupLabel, ReplicaLagLabel},
+            test_support::FakeMetadataSource,
+        },
+        assert2::{assert, check},
+        krabka_metadata::{
+            DeleteTopicRecord, LeaderEpoch, MetadataRecord, PartitionRecord, TopicRecord,
+        },
     };
 
     const TOPIC: &str = "orders";

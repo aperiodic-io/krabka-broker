@@ -7,18 +7,18 @@
 //! failure runs into, are what this module holds; the lookup behind it is in
 //! `cache`.
 
-use std::collections::HashMap;
-
-use apache_avro::reader::datum::{GenericDatumReader, GenericDatumReaderBuilder};
-use krabka_schema_serde::{
-    error::SchemaSerdeError,
-    format::validate::{validate_body, validate_protobuf_with_references},
-    subject::{Role, SchemaKind, SubjectStrategy as _, TopicNameStrategy},
-    wire,
+use {
+    super::{SchemaValidator, reject::RejectReason},
+    crate::{metrics::BrokerMetrics, schema_validation::ValidationMode},
+    apache_avro::reader::datum::{GenericDatumReader, GenericDatumReaderBuilder},
+    krabka_schema_serde::{
+        error::SchemaSerdeError,
+        format::validate::{validate_body, validate_protobuf_with_references},
+        subject::{Role, SchemaKind, SubjectStrategy as _, TopicNameStrategy},
+        wire,
+    },
+    std::collections::HashMap,
 };
-
-use super::{SchemaValidator, reject::RejectReason};
-use crate::{metrics::BrokerMetrics, schema_validation::ValidationMode};
 
 impl SchemaValidator {
     /// Check one record field.
@@ -218,13 +218,14 @@ impl jsonschema::Retrieve for CachedJsonSchemas {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
-
-    use super::*;
-    use crate::schema_validation::validator::test_support::{
-        KNOWN_ID, configured_validator, framed, no_metrics, registry, response_endpoint,
-        status_registry, validator, value_check,
+    use {
+        super::*,
+        crate::schema_validation::validator::test_support::{
+            KNOWN_ID, configured_validator, framed, no_metrics, registry, response_endpoint,
+            status_registry, validator, value_check,
+        },
+        assert2::{assert, check},
+        wiremock::{Mock, MockServer, ResponseTemplate, matchers::method},
     };
 
     async fn bound_subject_validator() -> (MockServer, SchemaValidator, Vec<u8>) {

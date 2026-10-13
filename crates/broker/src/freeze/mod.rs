@@ -31,9 +31,7 @@ pub(crate) mod handlers;
 pub(crate) mod resolve;
 pub(crate) mod signing;
 
-use krabka_metadata::PatternType;
-
-use crate::internal_topics::INTERNAL_TOPIC_PREFIX;
+use {crate::internal_topics::INTERNAL_TOPIC_PREFIX, krabka_metadata::PatternType};
 
 /// The name a scope's pattern type takes in an operator-facing string.
 ///
@@ -79,10 +77,7 @@ pub(crate) fn scope_covers_internal_topic(pattern_type: PatternType, scope: &str
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::internal_topics::INTERNAL_TOPICS;
+    use {super::*, crate::internal_topics::INTERNAL_TOPICS, assert2::check};
 
     #[test]
     fn a_pattern_type_names_itself_as_kafka_acls_spell_it() {

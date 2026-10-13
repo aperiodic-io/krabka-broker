@@ -26,17 +26,18 @@
 //! arguments transposed. A distinct newtype for each id makes the compiler
 //! reject that mix-up.
 
-use core::{fmt, str::FromStr};
-
-use base64::{
-    Engine as _,
-    alphabet::URL_SAFE,
-    engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
+use {
+    base64::{
+        Engine as _,
+        alphabet::URL_SAFE,
+        engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
+    },
+    core::{fmt, str::FromStr},
+    derive_more::{From, Into},
+    serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _},
+    thiserror::Error,
+    uuid::Uuid,
 };
-use derive_more::{From, Into};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
-use thiserror::Error;
-use uuid::Uuid;
 
 /// The longest input, in UTF-16 code units, that Kafka tries to decode.
 const MAX_ENCODED_LEN: usize = 24;
@@ -73,9 +74,7 @@ impl ClusterId {
     /// form never starts with `-`, which a command-line parser would read as
     /// an option.
     #[must_use]
-    pub fn random() -> Self {
-        Self(random_uuid())
-    }
+    pub fn random() -> Self { Self(random_uuid()) }
 
     /// Parses a command-line value: the Kafka form, or the hyphenated form.
     ///
@@ -118,9 +117,7 @@ impl DirectoryId {
     /// Returns `true` for one of the 100 lowest ids, which Kafka reserves as
     /// directory ids (Kafka's `DirectoryId.reserved`).
     #[must_use]
-    pub fn is_reserved(self) -> bool {
-        is_reserved_directory_id(self.0)
-    }
+    pub fn is_reserved(self) -> bool { is_reserved_directory_id(self.0) }
 
     /// Parses a command-line value: the Kafka form, or the hyphenated form.
     ///
@@ -139,14 +136,10 @@ impl DirectoryId {
 /// [`ClusterId::random`] uses it. So does the broker for a new topic id, which
 /// Kafka's `ReplicationControlManager.createTopic` draws the same way.
 #[must_use]
-pub fn random_uuid() -> Uuid {
-    first_accepted(|id| is_reserved(id) || starts_with_dash(id))
-}
+pub fn random_uuid() -> Uuid { first_accepted(|id| is_reserved(id) || starts_with_dash(id)) }
 
 /// Kafka's `Uuid.RESERVED`: the zero id and the id with value one.
-fn is_reserved(id: Uuid) -> bool {
-    id.as_u128() <= 1
-}
+fn is_reserved(id: Uuid) -> bool { id.as_u128() <= 1 }
 
 /// Kafka's `DirectoryId.reserved`: the most significant half is zero, and the
 /// least significant half, as a signed integer, is below 100.
@@ -157,9 +150,7 @@ fn is_reserved_directory_id(id: Uuid) -> bool {
 
 /// Returns `true` when the first base64url character is `-`, which stands for
 /// the six-bit value 62.
-fn starts_with_dash(id: Uuid) -> bool {
-    id.as_bytes()[0] >> 2 == 62
-}
+fn starts_with_dash(id: Uuid) -> bool { id.as_bytes()[0] >> 2 == 62 }
 
 /// Draws version 4 ids until one is not rejected.
 fn first_accepted(rejected: impl Fn(Uuid) -> bool) -> Uuid {
@@ -172,9 +163,7 @@ fn first_accepted(rejected: impl Fn(Uuid) -> bool) -> Uuid {
 }
 
 /// Kafka's `Uuid.toString`: unpadded base64url of the 16 bytes.
-fn encode(id: Uuid) -> String {
-    KAFKA_BASE64.encode(id.as_bytes())
-}
+fn encode(id: Uuid) -> String { KAFKA_BASE64.encode(id.as_bytes()) }
 
 /// Kafka's `Uuid.fromString`.
 ///
@@ -320,9 +309,7 @@ pub enum KafkaUuidError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// Every accepted input renders as the string that
     /// `org.apache.kafka.common.Uuid` in `kafka-clients-4.3.1.jar` prints for

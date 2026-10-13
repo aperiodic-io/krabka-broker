@@ -2,8 +2,10 @@
 //! `CreateDelegationToken` call mints, and whether the requester may mint for
 //! that principal.
 
-use krabka_protocol::owned::create_delegation_token_request::CreateDelegationTokenRequest;
-use krabka_security::KafkaPrincipal;
+use {
+    krabka_protocol::owned::create_delegation_token_request::CreateDelegationTokenRequest,
+    krabka_security::KafkaPrincipal,
+};
 
 /// The owner of the token this request mints, or `None` when Kafka cannot
 /// build one.

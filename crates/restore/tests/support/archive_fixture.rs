@@ -1,13 +1,15 @@
 //! Copy one sealed real log segment into a KIP-405 test archive.
 
-use bytes::Bytes;
-use krabka_ids::LeaderEpoch;
-use krabka_log::SegmentExport;
-use krabka_remote_storage::{
-    RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentState,
-    RemoteStorageManager, TopicIdPartition,
+use {
+    bytes::Bytes,
+    krabka_ids::LeaderEpoch,
+    krabka_log::SegmentExport,
+    krabka_remote_storage::{
+        RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+        RemoteLogSegmentState, RemoteStorageManager, TopicIdPartition,
+    },
+    uuid::Uuid,
 };
-use uuid::Uuid;
 
 krabka_macros::export_segment_data_fixture!(export_segment_data);
 

@@ -7,9 +7,10 @@
 //! that the leader node is not known and falls back to a full `Metadata`
 //! round-trip, which is exactly the round-trip KIP-951 removes.
 
-use krabka_protocol::owned::produce_response::{NodeEndpoint, TopicProduceResponse};
-
-use crate::handlers::leader_endpoints;
+use {
+    crate::handlers::leader_endpoints,
+    krabka_protocol::owned::produce_response::{NodeEndpoint, TopicProduceResponse},
+};
 
 /// The endpoint of every node named by a `CurrentLeader` hint in `topics`, one
 /// entry per node id and ordered by it.

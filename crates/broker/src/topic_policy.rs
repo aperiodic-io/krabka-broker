@@ -37,9 +37,7 @@
 //! (`authorizer::opa`'s private `wire` module) rather than here. Nothing
 //! needs it yet.
 
-use std::collections::BTreeMap;
-
-use crate::config_keys;
+use {crate::config_keys, std::collections::BTreeMap};
 
 /// The `[topic_policy]` rule set. Every field defaults to "no rule", so
 /// [`TopicPolicy::default`] accepts every topic and every config change.
@@ -61,9 +59,7 @@ pub struct TopicPolicy {
 impl TopicPolicy {
     /// Whether no rule is declared, in which case [`check`] is a no-op.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self == &Self::default()
-    }
+    pub fn is_empty(&self) -> bool { self == &Self::default() }
 }
 
 /// Check one topic against the policy. `Err` carries the reason, which the
@@ -138,10 +134,7 @@ pub fn check(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::test_support::config_map as configs;
+    use {super::*, crate::test_support::config_map as configs, assert2::check};
 
     fn policy() -> TopicPolicy {
         TopicPolicy {

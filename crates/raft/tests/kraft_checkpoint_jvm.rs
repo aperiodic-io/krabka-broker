@@ -13,18 +13,19 @@
 //! cargo test -p krabka-raft --test kraft_checkpoint_jvm -- --ignored --nocapture
 //! ```
 
-use std::process::Command;
-
-use assert2::check;
-use krabka_ids::Offset;
-use krabka_metadata::{
-    BreakGlassAction, BreakGlassProposalRecord, BrokerConfigRecord, BrokerRegistrationRecord,
-    FeatureLevelRecord, MetadataImage, MetadataRecord, NodeId, PartitionOffsetAdvanceRecord,
-    PatternType, TopicConfigRecord, TopicFreezeRecord,
+use {
+    assert2::check,
+    krabka_ids::Offset,
+    krabka_metadata::{
+        BreakGlassAction, BreakGlassProposalRecord, BrokerConfigRecord, BrokerRegistrationRecord,
+        FeatureLevelRecord, MetadataImage, MetadataRecord, NodeId, PartitionOffsetAdvanceRecord,
+        PatternType, TopicConfigRecord, TopicFreezeRecord,
+    },
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_raft::{kraft::KraftLog, serialize_metadata_snapshot},
+    std::process::Command,
+    uuid::Uuid,
 };
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_raft::{kraft::KraftLog, serialize_metadata_snapshot};
-use uuid::Uuid;
 
 krabka_macros::jvm_checkpoint_dump_fixture!(dump_checkpoint);
 

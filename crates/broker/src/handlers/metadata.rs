@@ -42,34 +42,35 @@
 //! with `LEADER_NOT_AVAILABLE`, or, when the leader is registered without the
 //! listener, `LISTENER_NOT_FOUND` from version 6 on.
 
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    owned::{
-        metadata_request::MetadataRequest,
-        metadata_response::{
-            MetadataResponse, MetadataResponseBroker, MetadataResponsePartition,
-            MetadataResponseTopic,
+use {
+    crate::{
+        authorizer::{
+            AuthorizationRequest, AuthorizationResult, authorize_topics, authorize_topics_logged,
         },
-    },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    authorizer::{
-        AuthorizationRequest, AuthorizationResult, authorize_topics, authorize_topics_logged,
-    },
-    broker::Broker,
-    codes,
-    handlers::{
-        RequestContext,
-        acl_wire::CLUSTER_RESOURCE_NAME,
-        authorized_operations::authorized_operations_bits,
-        offline_replicas::{
-            LeaderEndpointError, NO_LEADER_ID, PartitionAvailability, leader_endpoint_error,
-            listener_endpoint, partition_availability,
+        broker::Broker,
+        codes,
+        handlers::{
+            RequestContext,
+            acl_wire::CLUSTER_RESOURCE_NAME,
+            authorized_operations::authorized_operations_bits,
+            offline_replicas::{
+                LeaderEndpointError, NO_LEADER_ID, PartitionAvailability, leader_endpoint_error,
+                listener_endpoint, partition_availability,
+            },
         },
+        internal_topics::is_internal_topic,
     },
-    internal_topics::is_internal_topic,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        owned::{
+            metadata_request::MetadataRequest,
+            metadata_response::{
+                MetadataResponse, MetadataResponseBroker, MetadataResponsePartition,
+                MetadataResponseTopic,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 mod missing_topics;
@@ -656,10 +657,7 @@ pub(crate) fn pick_endpoint_host_port(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::test_support::broker_registration;
+    use {super::*, crate::test_support::broker_registration, assert2::assert};
 
     fn endpoint(name: &str, host: &str, port: u16) -> krabka_metadata::BrokerEndpoint {
         krabka_metadata::BrokerEndpoint {

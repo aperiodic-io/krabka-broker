@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    local_append_coordinates, local_recovery_batch_step, produce_durability_frontier,
-    reserve_offsets, timestamp_scan_next, wal_reservation_frontier,
+use {
+    super::{
+        local_append_coordinates, local_recovery_batch_step, produce_durability_frontier,
+        reserve_offsets, timestamp_scan_next, wal_reservation_frontier,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Actual outputs of the five paths over the same decoded batch.

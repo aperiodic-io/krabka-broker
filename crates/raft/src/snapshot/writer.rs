@@ -5,24 +5,26 @@
 //! `V1Voters` and `V1KRaftVersion` travel as KIP-853 control records rather
 //! than as KIP-631 metadata values are all decided here.
 
-use bytes::{BufMut, Bytes, BytesMut};
-use krabka_metadata::{MetadataImage, MetadataRecord, to_kraft_values};
-use krabka_protocol::{
-    owned::{
-        k_raft_version_record::KRaftVersionRecord as WireKRaftVersionRecord,
-        snapshot_footer_record::SnapshotFooterRecord, snapshot_header_record::SnapshotHeaderRecord,
+use {
+    super::{
+        SNAPSHOT_DATA_BASE_OFFSET, SNAPSHOT_HEADER_BASE_OFFSET, SNAPSHOT_KRAFT_VERSION_BASE_OFFSET,
+        SNAPSHOT_VOTERS_BASE_OFFSET, SnapshotControlState, voters::voter_set_to_wire,
     },
-    records::{
-        Record, RecordBatch,
-        metadata::control::{ControlRecord, encode_typed_control_batch},
+    crate::error::RaftError,
+    bytes::{BufMut, Bytes, BytesMut},
+    krabka_metadata::{MetadataImage, MetadataRecord, to_kraft_values},
+    krabka_protocol::{
+        owned::{
+            k_raft_version_record::KRaftVersionRecord as WireKRaftVersionRecord,
+            snapshot_footer_record::SnapshotFooterRecord,
+            snapshot_header_record::SnapshotHeaderRecord,
+        },
+        records::{
+            Record, RecordBatch,
+            metadata::control::{ControlRecord, encode_typed_control_batch},
+        },
     },
 };
-
-use super::{
-    SNAPSHOT_DATA_BASE_OFFSET, SNAPSHOT_HEADER_BASE_OFFSET, SNAPSHOT_KRAFT_VERSION_BASE_OFFSET,
-    SNAPSHOT_VOTERS_BASE_OFFSET, SnapshotControlState, voters::voter_set_to_wire,
-};
-use crate::error::RaftError;
 
 /// Identifies a snapshot by the log position it covers: `end_offset` is
 /// the offset of the last record contained in the snapshot, and `epoch`
@@ -188,12 +190,10 @@ impl SnapshotWriter {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::NodeId;
-    use krabka_protocol::owned::voters_record::VotersRecord as WireVotersRecord;
-    use uuid::Uuid;
-
-    use super::*;
+    use {
+        super::*, assert2::check, krabka_metadata::NodeId,
+        krabka_protocol::owned::voters_record::VotersRecord as WireVotersRecord, uuid::Uuid,
+    };
 
     krabka_macros::snapshot_topic_fixture!(append_snapshot_topic);
 
@@ -228,14 +228,11 @@ mod tests {
         let bytes = SnapshotWriter::serialize(&image, timestamp).unwrap();
         let mut cur: &[u8] = &bytes;
 
-        check_header(
-            &mut cur,
-            SnapshotHeaderRecord {
-                version: 0,
-                last_contained_log_timestamp: timestamp,
-                unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
-            },
-        );
+        check_header(&mut cur, SnapshotHeaderRecord {
+            version: 0,
+            last_contained_log_timestamp: timestamp,
+            unknown_tagged_fields: krabka_protocol::UnknownTaggedFields(vec![]),
+        });
 
         let kraft_version = RecordBatch::decode(&mut cur).expect("kraft.version batch");
         check!(
@@ -300,14 +297,11 @@ mod tests {
         let bytes = SnapshotWriter::serialize(&image, 99).unwrap();
         let mut cur: &[u8] = &bytes;
 
-        check_header(
-            &mut cur,
-            SnapshotHeaderRecord {
-                version: 0,
-                last_contained_log_timestamp: 99,
-                ..Default::default()
-            },
-        );
+        check_header(&mut cur, SnapshotHeaderRecord {
+            version: 0,
+            last_contained_log_timestamp: 99,
+            ..Default::default()
+        });
 
         let kraft_version = RecordBatch::decode(&mut cur).expect("kraft.version batch");
         check!(
@@ -339,9 +333,10 @@ mod tests {
     /// image of the same records would list the feature levels last, by name.
     #[test]
     fn the_bootstrap_checkpoint_keeps_the_records_in_their_order() {
-        use krabka_metadata::{FeatureLevelRecord, Voter, VoterEndpoint};
-
-        use crate::snapshot::{SnapshotContents, SnapshotReader};
+        use {
+            crate::snapshot::{SnapshotContents, SnapshotReader},
+            krabka_metadata::{FeatureLevelRecord, Voter, VoterEndpoint},
+        };
 
         let feature = |name: &str, level: i16| {
             MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
@@ -401,11 +396,13 @@ mod tests {
     /// also for the krabka-only state. One row for each krabka-only record.
     #[test]
     fn writer_emits_only_kafka_metadata_record_types() {
-        use krabka_metadata::{
-            BreakGlassAction, BreakGlassProposalRecord, FeatureLevelRecord,
-            PartitionOffsetAdvanceRecord, PatternType, TopicFreezeRecord,
+        use {
+            krabka_metadata::{
+                BreakGlassAction, BreakGlassProposalRecord, FeatureLevelRecord,
+                PartitionOffsetAdvanceRecord, PatternType, TopicFreezeRecord,
+            },
+            krabka_protocol::records::metadata::KraftMetadataRecord,
         };
-        use krabka_protocol::records::metadata::KraftMetadataRecord;
 
         let rows: [(&str, MetadataRecord); 4] = [
             (

@@ -20,13 +20,13 @@
 //! completion make a duplicate or late sweep on a moved partition a safe
 //! no-op.
 
-use std::sync::Arc;
-
-use tracing::{debug, info};
-
-use crate::{
-    metadata_source::MetadataSource,
-    txn::{coordinator::TxnCoordinator, util::now_millis, version::resolve_txn_version},
+use {
+    crate::{
+        metadata_source::MetadataSource,
+        txn::{coordinator::TxnCoordinator, util::now_millis, version::resolve_txn_version},
+    },
+    std::sync::Arc,
+    tracing::{debug, info},
 };
 
 super::util::reaper_task! {

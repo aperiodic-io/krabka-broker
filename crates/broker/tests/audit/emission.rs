@@ -7,33 +7,34 @@
 //! drives the request over a plain client and then reads the record back off
 //! the topic, because fetch visibility can lag the durable write.
 
-use krabka_broker::coordinator::AUDIT_TOPIC;
-use krabka_protocol::{
-    owned::{
-        alter_client_quotas_request::{
-            AlterClientQuotasRequest, EntityData, EntryData, OpData as QuotaOp,
-        },
-        alter_configs_request::{AlterConfigsRequest, AlterConfigsResource, AlterableConfig},
-        alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
-        create_partitions_request::{CreatePartitionsRequest, CreatePartitionsTopic},
-        delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
-        incremental_alter_configs_request::{
-            AlterConfigsResource as IncrementalResource, AlterableConfig as IncrementalConfig,
-            IncrementalAlterConfigsRequest,
-        },
-        metadata_request::MetadataRequest,
+use {
+    crate::support::{
+        self, OperatorKeysSetup, OperatorSaslSetup,
+        discovery::named_topic_metadata,
+        offsets::{delete_records_partition, delete_records_request, delete_records_topic},
+        produce::{SinglePartitionProduceSetup, send_batch},
+        records::{batch_from_records, value_record},
+        sasl::{ScramAlgorithm, ScramUpsertionSetup, scram_upsertion},
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
     },
-    records::RecordBatch,
-};
-
-use crate::support::{
-    self, OperatorKeysSetup, OperatorSaslSetup,
-    discovery::named_topic_metadata,
-    offsets::{delete_records_partition, delete_records_request, delete_records_topic},
-    produce::{SinglePartitionProduceSetup, send_batch},
-    records::{batch_from_records, value_record},
-    sasl::{ScramAlgorithm, ScramUpsertionSetup, scram_upsertion},
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    krabka_broker::coordinator::AUDIT_TOPIC,
+    krabka_protocol::{
+        owned::{
+            alter_client_quotas_request::{
+                AlterClientQuotasRequest, EntityData, EntryData, OpData as QuotaOp,
+            },
+            alter_configs_request::{AlterConfigsRequest, AlterConfigsResource, AlterableConfig},
+            alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
+            create_partitions_request::{CreatePartitionsRequest, CreatePartitionsTopic},
+            delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
+            incremental_alter_configs_request::{
+                AlterConfigsResource as IncrementalResource, AlterableConfig as IncrementalConfig,
+                IncrementalAlterConfigsRequest,
+            },
+            metadata_request::MetadataRequest,
+        },
+        records::RecordBatch,
+    },
 };
 
 /// The KIP-133 `resource_type` discriminant for a topic.
@@ -55,15 +56,11 @@ async fn produce_one(
             Some(bytes::Bytes::from_static(b"audited-record")),
         )])
     };
-    let resp = send_batch(
-        &p.client,
-        batch,
-        SinglePartitionProduceSetup {
-            topic: (topic).into(),
-            topic_id,
-            ..Default::default()
-        },
-    )
+    let resp = send_batch(&p.client, batch, SinglePartitionProduceSetup {
+        topic: (topic).into(),
+        topic_id,
+        ..Default::default()
+    })
     .await;
     assert2::check!(resp.responses[0].partition_responses[0].error_code == 0);
 }
@@ -89,10 +86,9 @@ async fn trim_twice(p: &support::InProcess, topic: &str) {
     }
 
     let request = delete_records_request(
-        vec![delete_records_topic(
-            topic,
-            vec![delete_records_partition(0, 2)],
-        )],
+        vec![delete_records_topic(topic, vec![delete_records_partition(
+            0, 2,
+        )])],
         5_000,
     );
     for what in ["DeleteRecords", "DeleteRecords (retry)"] {
@@ -406,17 +402,15 @@ async fn every_admin_mutation_is_audited() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sasl_plain_logins_are_audited_either_way() {
     let dir = tempfile::TempDir::new().expect("tempdir");
-    let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl(
-        &dir.path().join("data"),
-        OperatorSaslSetup {
+    let (broker, bootstrap, _config) =
+        support::start_with_operator_keys_sasl(&dir.path().join("data"), OperatorSaslSetup {
             trust: OperatorKeysSetup {
                 keys: &[],
                 approvers: &[],
             },
             users: &[("alice", "alice-secret")],
-        },
-    )
-    .await;
+        })
+        .await;
     broker.wait_until_partition_present(AUDIT_TOPIC, 0).await;
 
     let client = support::sasl_client(&bootstrap, "alice", "alice-secret").await;

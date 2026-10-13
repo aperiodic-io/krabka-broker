@@ -199,9 +199,7 @@ fn first_of_each(names: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     fn push_node(
         name: &str,

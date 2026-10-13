@@ -77,14 +77,14 @@ pub(crate) fn retry_until(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        process::{Command, Stdio},
-        time::{Duration, Instant},
+    use {
+        super::{retry_until, wait_bounded},
+        assert2::assert,
+        std::{
+            process::{Command, Stdio},
+            time::{Duration, Instant},
+        },
     };
-
-    use assert2::assert;
-
-    use super::{retry_until, wait_bounded};
 
     /// Spawn a shell that runs `script`, with its output discarded.
     fn spawn(script: &str) -> std::process::Child {

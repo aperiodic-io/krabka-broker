@@ -6,17 +6,17 @@
 //! broker-wide log-dir registry, so those three helpers and the blocking-pool
 //! wrapper that ties them together live in one module.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-
-use arc_swap::ArcSwap;
-use krabka_log::Log;
-
-use crate::{
-    blocking::spawn_blocking, error::BrokerError, log_dir_status::LogDirRegistry,
-    replica_state::ReplicaState,
+use {
+    crate::{
+        blocking::spawn_blocking, error::BrokerError, log_dir_status::LogDirRegistry,
+        replica_state::ReplicaState,
+    },
+    arc_swap::ArcSwap,
+    krabka_log::Log,
+    std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
 };
 
 /// The log and the owning directory's storage-failure registry.
@@ -125,11 +125,12 @@ pub(super) async fn maintain_log(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{error::BrokerError, log_dir_status::LogDirRegistry};
+    use {
+        super::*,
+        crate::{error::BrokerError, log_dir_status::LogDirRegistry},
+        assert2::{assert, check},
+        tempfile::tempdir,
+    };
 
     fn storage_fixture() -> (
         tempfile::TempDir,

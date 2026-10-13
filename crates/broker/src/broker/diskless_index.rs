@@ -3,25 +3,25 @@
 //! it but targets a different topic and hands off to the flusher, so it is a
 //! module of its own.
 
-use std::sync::{Arc, atomic::AtomicBool};
-
-use krabka_remote_storage_topic::MetadataEventLog;
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-use tokio_util::sync::CancellationToken;
-
 #[cfg(test)]
 use crate::diskless::index_log::test_support::PacedReplayLog;
-use crate::{
-    broker::rlmm::{KafkaSwapKickoff, metadata_log_config, rlmm_bootstrap_backoff},
-    config::KafkaRlmmConfig,
-    diskless::{
-        flusher::{FlushConfig, FlusherContext, FlusherExit, run},
-        index_log::{DISKLESS_WAL_INDEX_TOPIC, DisklessIndexLog},
-        wal_index::WalIndexCache,
+use {
+    crate::{
+        broker::rlmm::{KafkaSwapKickoff, metadata_log_config, rlmm_bootstrap_backoff},
+        config::KafkaRlmmConfig,
+        diskless::{
+            flusher::{FlushConfig, FlusherContext, FlusherExit, run},
+            index_log::{DISKLESS_WAL_INDEX_TOPIC, DisklessIndexLog},
+            wal_index::WalIndexCache,
+        },
+        error::BrokerError,
+        metrics::BrokerMetrics,
+        partition_registry::PartitionRegistry,
     },
-    error::BrokerError,
-    metrics::BrokerMetrics,
-    partition_registry::PartitionRegistry,
+    krabka_remote_storage_topic::MetadataEventLog,
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::sync::{Arc, atomic::AtomicBool},
+    tokio_util::sync::CancellationToken,
 };
 
 /// Opens the index event log for one bootstrap attempt.
@@ -187,17 +187,19 @@ async fn bootstrap_from_source(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        broker::rlmm::test_kickoff as kickoff_with_config,
-        config::KafkaRlmmConfig,
-        diskless::{
-            flusher::FlushConfig, index_log::test_support::ReplayPace, wal_index::WalFlushRecord,
+    use {
+        super::*,
+        crate::{
+            broker::rlmm::test_kickoff as kickoff_with_config,
+            config::KafkaRlmmConfig,
+            diskless::{
+                flusher::FlushConfig, index_log::test_support::ReplayPace,
+                wal_index::WalFlushRecord,
+            },
+            metrics::BrokerMetrics,
         },
-        metrics::BrokerMetrics,
+        assert2::assert,
+        tempfile::tempdir,
     };
 
     fn test_startup(ready: Arc<AtomicBool>) -> DisklessFlusherStartup {

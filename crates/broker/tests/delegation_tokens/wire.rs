@@ -8,24 +8,25 @@
 //! that matters here: each returns the still-open `TcpStream`, so a caller can
 //! send admin RPCs on the session it just authenticated.
 
-use std::{io, net::SocketAddr};
-
-use base64::Engine;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::owned::{
-    api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
-    sasl_handshake_request::SaslHandshakeRequest, sasl_handshake_response::SaslHandshakeResponse,
-};
-use krabka_security::SaslMechanism;
-use tokio::net::TcpStream;
-
-use crate::{
-    kafka_wire::{
-        self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup, SaslAuthenticateSetup,
-        exchange,
+use {
+    crate::{
+        kafka_wire::{
+            self, ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup,
+            SaslAuthenticateSetup, exchange,
+        },
+        rpc::send_create_delegation_token,
+        support::wire::CorrelationId as WireCorrelationId,
     },
-    rpc::send_create_delegation_token,
-    support::wire::CorrelationId as WireCorrelationId,
+    base64::Engine,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::owned::{
+        api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+        sasl_handshake_request::SaslHandshakeRequest,
+        sasl_handshake_response::SaslHandshakeResponse,
+    },
+    krabka_security::SaslMechanism,
+    std::{io, net::SocketAddr},
+    tokio::net::TcpStream,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -52,14 +53,11 @@ pub(crate) async fn sasl_plain_authenticate(
     user: &str,
     password: &[u8],
 ) -> io::Result<TcpStream> {
-    kafka_wire::sasl_plain_authenticate(
-        addr,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            user,
-            password: (password).to_vec(),
-        },
-    )
+    kafka_wire::sasl_plain_authenticate(addr, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        user,
+        password: (password).to_vec(),
+    })
     .await
 }
 
@@ -163,15 +161,15 @@ impl TokenScramClient {
         }
     }
 
-    fn client_first(&self) -> Vec<u8> {
-        format!("n,,{}", self.client_first_bare).into_bytes()
-    }
+    fn client_first(&self) -> Vec<u8> { format!("n,,{}", self.client_first_bare).into_bytes() }
 
     fn client_final(&self, server_first: &[u8]) -> Result<Vec<u8>, io::Error> {
-        use base64::{Engine, engine::general_purpose::STANDARD as B64};
-        use pbkdf2::{
-            hmac::{Hmac, KeyInit, Mac},
-            sha2::{Digest, Sha256},
+        use {
+            base64::{Engine, engine::general_purpose::STANDARD as B64},
+            pbkdf2::{
+                hmac::{Hmac, KeyInit, Mac},
+                sha2::{Digest, Sha256},
+            },
         };
 
         let hmac = |key: &[u8], data: &[u8]| {

@@ -4,19 +4,19 @@
 //! submit. They live in one module so no submodule owns a helper its siblings
 //! also need.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_ids::{LeaderEpoch, NodeId, PartitionIndex};
-
-use crate::{
-    broker::BrokerHandle,
-    log_dir::partition_dir,
-    partition::Partition,
-    test_support::{
-        FakeMetadataSource, StandalonePartitionSetup, single_partition_topic,
-        spawn_standalone_partition,
+use {
+    crate::{
+        broker::BrokerHandle,
+        log_dir::partition_dir,
+        partition::Partition,
+        test_support::{
+            FakeMetadataSource, StandalonePartitionSetup, single_partition_topic,
+            spawn_standalone_partition,
+        },
     },
+    assert2::assert,
+    krabka_ids::{LeaderEpoch, NodeId, PartitionIndex},
+    std::sync::Arc,
 };
 
 /// A metadata source over `image`, with `leader` as the controller leader and
@@ -62,15 +62,11 @@ pub(super) fn local_partition_with_records(
     std::fs::create_dir_all(&part_dir).expect("create partition dir");
     let log = krabka_log::Log::open(&part_dir, krabka_log::LogConfig::default())
         .expect("open partition log");
-    let part = spawn_standalone_partition(
-        log_dir,
-        log,
-        StandalonePartitionSetup {
-            topic,
-            partition,
-            ..Default::default()
-        },
-    );
+    let part = spawn_standalone_partition(log_dir, log, StandalonePartitionSetup {
+        topic,
+        partition,
+        ..Default::default()
+    });
     if !values.is_empty() {
         let mut batch = krabka_protocol::records::RecordBatch {
             last_offset_delta: i32::try_from(values.len() - 1).expect("record count fits"),

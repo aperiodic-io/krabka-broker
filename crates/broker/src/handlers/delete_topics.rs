@@ -32,22 +32,22 @@
 //! the remote-tier snapshot and cascade in `tiering`, and the audit record in
 //! `audit`.
 
-use std::time::Duration;
-
-use krabka_protocol::owned::{
-    delete_topics_request::{self, DeleteTopicsRequest},
-    delete_topics_response::DeleteTopicsResponse,
-};
-use krabka_raft::RaftError;
-
-use crate::{
-    codes,
-    handlers::{
-        encode_response,
-        forward_to_controller::{
-            forward_if_not_controller, guarded_operation_on_source, is_active_controller,
+use {
+    crate::{
+        codes,
+        handlers::{
+            encode_response,
+            forward_to_controller::{
+                forward_if_not_controller, guarded_operation_on_source, is_active_controller,
+            },
         },
     },
+    krabka_protocol::owned::{
+        delete_topics_request::{self, DeleteTopicsRequest},
+        delete_topics_response::DeleteTopicsResponse,
+    },
+    krabka_raft::RaftError,
+    std::time::Duration,
 };
 
 mod audit;

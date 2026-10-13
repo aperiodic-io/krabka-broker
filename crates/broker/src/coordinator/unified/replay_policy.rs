@@ -56,9 +56,7 @@ pub(crate) enum GroupLookup {
     Create,
 }
 
-fn illegal_state(message: String) -> BrokerError {
-    BrokerError::Startup(message)
-}
+fn illegal_state(message: String) -> BrokerError { BrokerError::Startup(message) }
 
 /// Kafka's `getOrMaybeCreatePersistedConsumerGroup`,
 /// `getOrMaybeCreatePersistedShareGroup` and

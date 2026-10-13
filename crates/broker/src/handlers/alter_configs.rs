@@ -36,23 +36,25 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::resource::process_resource;
-use crate::{
-    broker::Broker,
-    codes::{INVALID_CONFIG, INVALID_REQUEST},
-    config_keys::{
-        MIN_INSYNC_REPLICAS, broker_dynamic::BrokerConfigContext,
-        is_controller_managed_topic_config,
-    },
-    handlers::{
-        RequestContext, audit_resource, config_resource_refusal, decode_request,
-        describe_configs::{
-            RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
-            RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+use {
+    self::resource::process_resource,
+    crate::{
+        broker::Broker,
+        codes::{INVALID_CONFIG, INVALID_REQUEST},
+        config_keys::{
+            MIN_INSYNC_REPLICAS, broker_dynamic::BrokerConfigContext,
+            is_controller_managed_topic_config,
         },
-        encode_response,
-        forward_to_controller::{controller_listener_dispatch, to_active_controller},
-        response_encoding::{ErrorRow as _, ResourceErrorRow},
+        handlers::{
+            RequestContext, audit_resource, config_resource_refusal, decode_request,
+            describe_configs::{
+                RESOURCE_TYPE_BROKER, RESOURCE_TYPE_BROKER_LOGGER, RESOURCE_TYPE_CLIENT_METRICS,
+                RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
+            },
+            encode_response,
+            forward_to_controller::{controller_listener_dispatch, to_active_controller},
+            response_encoding::{ErrorRow as _, ResourceErrorRow},
+        },
     },
 };
 
@@ -62,25 +64,17 @@ pub(super) trait ResourceErrorRequestResource {
 }
 
 impl ResourceErrorRequestResource for AlterConfigsResource {
-    fn resource_type(&self) -> i8 {
-        self.resource_type
-    }
+    fn resource_type(&self) -> i8 { self.resource_type }
 
-    fn resource_name(&self) -> &str {
-        &self.resource_name
-    }
+    fn resource_name(&self) -> &str { &self.resource_name }
 }
 
 impl ResourceErrorRequestResource
     for krabka_protocol::owned::incremental_alter_configs_request::AlterConfigsResource
 {
-    fn resource_type(&self) -> i8 {
-        self.resource_type
-    }
+    fn resource_type(&self) -> i8 { self.resource_type }
 
-    fn resource_name(&self) -> &str {
-        &self.resource_name
-    }
+    fn resource_name(&self) -> &str { &self.resource_name }
 }
 
 pub(super) fn empty_resource_response<Resource, Row>(resource: &Resource) -> Row
@@ -202,15 +196,12 @@ fn preprocess_resource(
         if resource.resource_type != RESOURCE_TYPE_BROKER {
             return Ok(());
         }
-        broker_configs::preprocess_broker_resource(
-            resource,
-            BrokerConfigContext {
-                image: &image,
-                serving: broker.config.node_id,
-                log_dirs: &broker.config.broker_log_dirs(),
-                unstable: broker.config.features.unstable_api_versions,
-            },
-        )
+        broker_configs::preprocess_broker_resource(resource, BrokerConfigContext {
+            image: &image,
+            serving: broker.config.node_id,
+            log_dirs: &broker.config.broker_log_dirs(),
+            unstable: broker.config.features.unstable_api_versions,
+        })
     });
     let (code, message) = result.err()?;
     let (code, message) = if shape.is_err() {

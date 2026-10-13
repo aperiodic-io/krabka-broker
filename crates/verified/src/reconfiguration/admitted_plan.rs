@@ -1,11 +1,10 @@
 #[cfg(creusot)]
-use creusot_std::prelude::*;
-
-#[cfg(creusot)]
 use super::{
     CurrentVoterSet, ReconfigurationLeadership, TargetMembership, TargetVoter, VoterChangeKind,
     VoterChangeRequest, VoterReconfigurationDecision, VoterReconfigurationPlan,
 };
+#[cfg(creusot)]
+use creusot_std::prelude::*;
 
 open_logic! {
 /// KIP-853's one-change-at-a-time rule: only a leader whose epoch is

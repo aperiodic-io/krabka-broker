@@ -2,12 +2,13 @@
 //! [`super::replay::replay_records`] advances, and the transactional records
 //! it holds back until a commit marker arrives.
 
-use assert2::check;
-use krabka_protocol::records::RecordBatch;
-
-use super::replay::replay_records;
-use crate::coordinator::{
-    persistence::OffsetCommitValue, test_support::temp_log, unified::actor::test_support::rpc,
+use {
+    super::replay::replay_records,
+    crate::coordinator::{
+        persistence::OffsetCommitValue, test_support::temp_log, unified::actor::test_support::rpc,
+    },
+    assert2::check,
+    krabka_protocol::records::RecordBatch,
 };
 
 fn append_record(log: &mut krabka_log::Log, record: krabka_protocol::records::Record) {
@@ -74,10 +75,11 @@ async fn replay_records_walks_all_batches() {
 
 #[test]
 fn replay_applies_only_committed_transactional_offsets() {
-    use krabka_log::{Offset, ProducerId};
-    use krabka_protocol::records::Attributes;
-
-    use crate::txn::marker::{MarkerType, build_marker_batch};
+    use {
+        crate::txn::marker::{MarkerType, build_marker_batch},
+        krabka_log::{Offset, ProducerId},
+        krabka_protocol::records::Attributes,
+    };
 
     let coordinator = super::test_support::bare_coordinator();
     let record = super::test_support::commit_record;
@@ -125,10 +127,11 @@ fn replay_applies_only_committed_transactional_offsets() {
 /// `require_stable` `OffsetFetch` for exactly those keys.
 #[tokio::test]
 async fn replay_carries_an_open_transactions_offsets_forward_as_pending() {
-    use krabka_log::Offset;
-    use krabka_protocol::records::{Attributes, Record};
-
-    use super::{replay::finalize, test_support::bare_coordinator};
+    use {
+        super::{replay::finalize, test_support::bare_coordinator},
+        krabka_log::Offset,
+        krabka_protocol::records::{Attributes, Record},
+    };
 
     let coordinator = bare_coordinator();
     let (_dir, mut log) = temp_log();
@@ -187,13 +190,14 @@ async fn replay_carries_an_open_transactions_offsets_forward_as_pending() {
 /// capacity, deterministically.
 #[tokio::test]
 async fn replay_seeds_every_open_transaction_past_the_actor_mailbox() {
-    use std::collections::{HashMap, HashSet};
-
-    use super::{
-        replay::{PendingTxnKeys, Replayed, finalize},
-        test_support::bare_coordinator_with_mailbox,
+    use {
+        super::{
+            replay::{PendingTxnKeys, Replayed, finalize},
+            test_support::bare_coordinator_with_mailbox,
+        },
+        crate::coordinator::unified::GroupSeed,
+        std::collections::{HashMap, HashSet},
     };
-    use crate::coordinator::unified::GroupSeed;
 
     const MAILBOX: usize = 2;
     const PRODUCERS: i64 = 8;
@@ -208,13 +212,10 @@ async fn replay_seeds_every_open_transaction_past_the_actor_mailbox() {
 
     let mut by_producer: HashMap<i64, PendingTxnKeys> = HashMap::new();
     for producer_id in 0..PRODUCERS {
-        by_producer.insert(
-            producer_id,
-            PendingTxnKeys {
-                written_at: producer_id,
-                keys: HashSet::from([("t".to_string(), i32::try_from(producer_id).unwrap())]),
-            },
-        );
+        by_producer.insert(producer_id, PendingTxnKeys {
+            written_at: producer_id,
+            keys: HashSet::from([("t".to_string(), i32::try_from(producer_id).unwrap())]),
+        });
     }
     let replayed = Replayed {
         pending_txn: HashMap::from([("g".to_string(), by_producer)]),
@@ -237,9 +238,7 @@ async fn replay_seeds_every_open_transaction_past_the_actor_mailbox() {
 /// what `GroupMetadataManager.loadGroupsAndOffsets` does.
 #[test]
 fn replay_honours_offset_and_group_tombstones() {
-    use krabka_protocol::records::Record;
-
-    use crate::coordinator::persistence::GroupMetadataValue;
+    use {crate::coordinator::persistence::GroupMetadataValue, krabka_protocol::records::Record};
 
     let coordinator = super::test_support::bare_coordinator();
     let commit = super::test_support::commit_record;
@@ -307,10 +306,10 @@ fn replay_honours_offset_and_group_tombstones() {
 /// the operator already reaped back on `ListGroups` after every restart.
 #[tokio::test]
 async fn a_fully_reaped_group_does_not_come_back_after_replay() {
-    use krabka_protocol::records::Record;
-
-    use super::replay::finalize;
-    use crate::coordinator::persistence::GroupMetadataValue;
+    use {
+        super::replay::finalize, crate::coordinator::persistence::GroupMetadataValue,
+        krabka_protocol::records::Record,
+    };
 
     let coordinator = super::test_support::bare_coordinator();
     let tombstone = |key: bytes::Bytes| Record {
@@ -343,10 +342,10 @@ async fn a_fully_reaped_group_does_not_come_back_after_replay() {
 /// written for a per-commit expiry, carries none.
 #[tokio::test]
 async fn replay_keeps_the_committed_topic_id() {
-    use krabka_log::Offset;
-    use krabka_protocol::records::Record;
-
-    use crate::coordinator::unified::classic_state::OffsetEntry;
+    use {
+        crate::coordinator::unified::classic_state::OffsetEntry, krabka_log::Offset,
+        krabka_protocol::records::Record,
+    };
 
     let coord = super::test_support::bare_coordinator();
     let topic_id = uuid::Uuid::from_u128(0xABCD);

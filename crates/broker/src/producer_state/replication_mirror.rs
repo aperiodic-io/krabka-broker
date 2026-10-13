@@ -11,12 +11,13 @@
 //! marker fenced could be accepted, and an empty tracker accepts any first
 //! sequence, not only 0.
 
-use assert2::assert;
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-
-use super::Decision;
-use crate::txn::marker::{MarkerType, build_marker_batch};
+use {
+    super::Decision,
+    crate::txn::marker::{MarkerType, build_marker_batch},
+    assert2::assert,
+    krabka_ids::PartitionIndex,
+    krabka_log::ProducerId,
+};
 
 const TOPIC: &str = "orders";
 const PARTITION: PartitionIndex = PartitionIndex(0);

@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::spec::{copy_admitted, reference_valid};
-use super::{WalCopyBatch, WalCopyObservation};
-use crate::{
-    composition::covering_copy_preserves_logical_fetch,
-    wal::{WalFetchAdmission, wal_fetch_admission},
+use {
+    super::{WalCopyBatch, WalCopyObservation},
+    crate::{
+        composition::covering_copy_preserves_logical_fetch,
+        wal::{WalFetchAdmission, wal_fetch_admission},
+    },
+    creusot_std::prelude::*,
 };
 
 /// Derive a vote from authenticated epoch admission and a durably completed

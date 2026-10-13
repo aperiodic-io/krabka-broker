@@ -8,19 +8,20 @@
 //! metadata probe fails, the caller can fall back to the first broker pod by
 //! name-sort for backwards-compatible smoke runs.
 
-use anyhow::{Context, Result, anyhow};
-use k8s_openapi::api::core::v1::Pod;
-use krabka_client_core::{
-    Client as KafkaClient, ClientFrameMax, ConnectionDispatchQueueCapacity,
-    security::ClientSecurity,
+use {
+    crate::scenario::Stack,
+    anyhow::{Context, Result, anyhow},
+    k8s_openapi::api::core::v1::Pod,
+    krabka_client_core::{
+        Client as KafkaClient, ClientFrameMax, ConnectionDispatchQueueCapacity,
+        security::ClientSecurity,
+    },
+    krabka_protocol::owned::metadata_response::MetadataResponse,
+    kube::{
+        Client as KubeClient,
+        api::{Api, DeleteParams, ListParams},
+    },
 };
-use krabka_protocol::owned::metadata_response::MetadataResponse;
-use kube::{
-    Client as KubeClient,
-    api::{Api, DeleteParams, ListParams},
-};
-
-use crate::scenario::Stack;
 
 /// Discovers an in-cluster Kubernetes client, which uses the in-pod
 /// `serviceAccount` token. Outside the cluster, which is useful for
@@ -145,11 +146,12 @@ fn choose_target_pod(names: &[String], stack: Stack, leader_id: Option<i32>) -> 
 
 #[cfg(test)]
 mod tests {
-    use krabka_protocol::owned::metadata_response::{
-        MetadataResponse, MetadataResponsePartition, MetadataResponseTopic,
+    use {
+        super::*,
+        krabka_protocol::owned::metadata_response::{
+            MetadataResponse, MetadataResponsePartition, MetadataResponseTopic,
+        },
     };
-
-    use super::*;
 
     #[test]
     fn partition0_leader_is_read_from_metadata() {

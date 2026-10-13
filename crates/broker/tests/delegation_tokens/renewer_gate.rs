@@ -6,20 +6,21 @@
 //! included. A super user that mints a token for another owner and
 //! must manage it afterwards lists itself as a renewer.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    create_delegation_token_request::{CreatableRenewers, CreateDelegationTokenRequest},
-    expire_delegation_token_request::ExpireDelegationTokenRequest,
-    renew_delegation_token_request::RenewDelegationTokenRequest,
-};
-
-use crate::{
-    DELEGATION_TOKEN_OWNER_MISMATCH,
-    cluster::{start_admin_alice, wait_for_token, wait_for_token_gone},
-    rpc::{
-        send_create_delegation_token, send_expire_delegation_token, send_renew_delegation_token,
+use {
+    crate::{
+        DELEGATION_TOKEN_OWNER_MISMATCH,
+        cluster::{start_admin_alice, wait_for_token, wait_for_token_gone},
+        rpc::{
+            send_create_delegation_token, send_expire_delegation_token, send_renew_delegation_token,
+        },
+        wire::admin_plain,
     },
-    wire::admin_plain,
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        create_delegation_token_request::{CreatableRenewers, CreateDelegationTokenRequest},
+        expire_delegation_token_request::ExpireDelegationTokenRequest,
+        renew_delegation_token_request::RenewDelegationTokenRequest,
+    },
 };
 
 /// Super user `admin` mints two tokens owned by `alice`: one without
@@ -35,14 +36,11 @@ async fn super_user_renews_and_expires_only_as_a_listed_renewer() {
         let mut hmacs = Vec::new();
         for (correlation_id, renewers) in [
             (100, vec![]),
-            (
-                101,
-                vec![CreatableRenewers {
-                    principal_type: "User".to_string(),
-                    principal_name: "admin".to_string(),
-                    ..Default::default()
-                }],
-            ),
+            (101, vec![CreatableRenewers {
+                principal_type: "User".to_string(),
+                principal_name: "admin".to_string(),
+                ..Default::default()
+            }]),
         ] {
             let create_resp = send_create_delegation_token(
                 &mut admin,
@@ -75,60 +73,48 @@ async fn super_user_renews_and_expires_only_as_a_listed_renewer() {
         let (listed_id, listed_hmac, listed) = hmacs.remove(0);
 
         // Not a renewer: both refused with 63, and the token is untouched.
-        let renew_resp = send_renew_delegation_token(
-            &mut admin,
-            200,
-            &RenewDelegationTokenRequest {
+        let renew_resp =
+            send_renew_delegation_token(&mut admin, 200, &RenewDelegationTokenRequest {
                 hmac: unlisted_hmac.clone(),
                 renew_period_ms: -1,
                 ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| format!("RenewDelegationToken(admin, not a renewer): {e}"))?;
+            })
+            .await
+            .map_err(|e| format!("RenewDelegationToken(admin, not a renewer): {e}"))?;
         check!(renew_resp.error_code == DELEGATION_TOKEN_OWNER_MISMATCH);
-        let expire_resp = send_expire_delegation_token(
-            &mut admin,
-            201,
-            &ExpireDelegationTokenRequest {
+        let expire_resp =
+            send_expire_delegation_token(&mut admin, 201, &ExpireDelegationTokenRequest {
                 hmac: unlisted_hmac,
                 expiry_time_period_ms: -1,
                 ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| format!("ExpireDelegationToken(admin, not a renewer): {e}"))?;
+            })
+            .await
+            .map_err(|e| format!("ExpireDelegationToken(admin, not a renewer): {e}"))?;
         check!(expire_resp.error_code == DELEGATION_TOKEN_OWNER_MISMATCH);
         let untouched = wait_for_token(&handle, &unlisted_id).await;
         check!(untouched.expiry_timestamp_ms == unlisted.expiry_timestamp_ms);
 
         // A listed renewer: Renew succeeds within the max timestamp, and
         // Expire with a negative period deletes the token.
-        let renew_resp = send_renew_delegation_token(
-            &mut admin,
-            300,
-            &RenewDelegationTokenRequest {
+        let renew_resp =
+            send_renew_delegation_token(&mut admin, 300, &RenewDelegationTokenRequest {
                 hmac: listed_hmac.clone(),
                 renew_period_ms: -1,
                 ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| format!("RenewDelegationToken(admin, renewer): {e}"))?;
+            })
+            .await
+            .map_err(|e| format!("RenewDelegationToken(admin, renewer): {e}"))?;
         check!(renew_resp.error_code == 0);
         check!(renew_resp.expiry_timestamp_ms >= listed.expiry_timestamp_ms);
         check!(renew_resp.expiry_timestamp_ms <= listed.max_timestamp_ms);
-        let expire_resp = send_expire_delegation_token(
-            &mut admin,
-            301,
-            &ExpireDelegationTokenRequest {
+        let expire_resp =
+            send_expire_delegation_token(&mut admin, 301, &ExpireDelegationTokenRequest {
                 hmac: listed_hmac,
                 expiry_time_period_ms: -1,
                 ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| format!("ExpireDelegationToken(admin, renewer): {e}"))?;
+            })
+            .await
+            .map_err(|e| format!("ExpireDelegationToken(admin, renewer): {e}"))?;
         check!(expire_resp.error_code == 0);
 
         drop(admin);

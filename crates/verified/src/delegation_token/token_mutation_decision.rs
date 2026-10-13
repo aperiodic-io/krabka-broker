@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    ScramCredentialSource, TokenApi, TokenApiAdmission, TokenMutationDecision, TokenMutationFacts,
-    TokenMutationKind, TokenMutationState,
+use {
+    super::{
+        ScramCredentialSource, TokenApi, TokenApiAdmission, TokenMutationDecision,
+        TokenMutationFacts, TokenMutationKind, TokenMutationState,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Classify the credential for SCRAM round 1.

@@ -6,22 +6,23 @@
 //! over SASL because the two-person rule needs three distinct principals, and
 //! every connection on a plaintext listener is the same anonymous one.
 
-use assert2::{assert, check};
-use krabka_broker::codes;
-use krabka_client_core::Client;
-use krabka_protocol::{
-    krabka::{
-        break_glass::{ApproveBreakGlassRequest, ProposeBreakGlassRequest},
-        freeze::PATTERN_TYPE_LITERAL,
+use {
+    crate::{
+        control_plane::{cluster_id, freeze_scope, set_freeze, wait_for_registry_len},
+        signing::{SignedFreeze, signed_request},
+        support::{self, OperatorKeysSetup, OperatorSaslSetup},
+        wire::{CONTROL, accepted, create_topic, now_ms, refused},
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    control_plane::{cluster_id, freeze_scope, set_freeze, wait_for_registry_len},
-    signing::{SignedFreeze, signed_request},
-    support::{self, OperatorKeysSetup, OperatorSaslSetup},
-    wire::{CONTROL, accepted, create_topic, now_ms, refused},
+    assert2::{assert, check},
+    krabka_broker::codes,
+    krabka_client_core::Client,
+    krabka_protocol::{
+        krabka::{
+            break_glass::{ApproveBreakGlassRequest, ProposeBreakGlassRequest},
+            freeze::PATTERN_TYPE_LITERAL,
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 /// The `ThawTopicFreeze` break-glass action, on the wire.
@@ -77,17 +78,15 @@ async fn a_thaw_restores_writes() {
     let keys = tempfile::tempdir().expect("tempdir");
     let logs = tempfile::tempdir().expect("tempdir");
     let key = support::mint_operator_key(keys.path(), "alice-yubi", "User:alice");
-    let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl(
-        logs.path(),
-        OperatorSaslSetup {
+    let (broker, bootstrap, _config) =
+        support::start_with_operator_keys_sasl(logs.path(), OperatorSaslSetup {
             trust: OperatorKeysSetup { keys: &[&key], approvers: // The proposer has to be in the set as well: a proposer outside it
         // would turn a rule about three people into a rule about two people
         // and a stranger. Alice still may not approve her own proposal.
         &["User:alice", "User:bob", "User:carol"] },
             users: &[("alice", "pw"), ("bob", "pw"), ("carol", "pw")],
-        },
-    )
-    .await;
+        })
+        .await;
     let alice = support::sasl_client(&bootstrap, "alice", "pw").await;
     let frozen = create_topic(&broker, &alice, "orders").await;
     let control = create_topic(&broker, &alice, CONTROL).await;

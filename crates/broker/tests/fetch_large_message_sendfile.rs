@@ -16,26 +16,29 @@
 //! `fetch_response_drain_total` assertion can, and it is the one that fails if
 //! a regression quietly routes every plaintext fetch onto the copy path.
 
-use assert2::assert;
-
-use crate::support::{
-    client::create_topic,
-    fetch::{
-        FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-        SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+use {
+    crate::support::{
+        client::create_topic,
+        fetch::{
+            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+        },
+        produce::{SinglePartitionProduceSetup, send_batch},
+        records::value_record,
     },
-    produce::{SinglePartitionProduceSetup, send_batch},
-    records::value_record,
+    assert2::assert,
 };
 mod support;
 
-use bytes::Bytes;
-use krabka_broker::metrics::{BrokerMetrics, FetchDrainPath, FetchDrainPathLabel};
-use krabka_protocol::{
-    owned::fetch_request::FetchRequest,
-    records::{Record, RecordBatch},
+use {
+    bytes::Bytes,
+    krabka_broker::metrics::{BrokerMetrics, FetchDrainPath, FetchDrainPathLabel},
+    krabka_protocol::{
+        owned::fetch_request::FetchRequest,
+        records::{Record, RecordBatch},
+    },
+    support::topic_id_for,
 };
-use support::topic_id_for;
 
 /// Build `n` records whose values are distinct, large, and content-addressed
 /// by index. Any misplaced byte is then detectable.
@@ -118,15 +121,11 @@ async fn large_message_fetch_round_trips_byte_exact() {
     // the Linux plaintext fetch goes zero-copy.
     let (batch, expected) = large_records(64, 2 * 1024);
 
-    let prod = send_batch(
-        &p.client,
-        batch,
-        SinglePartitionProduceSetup {
-            topic: ("big").into(),
-            topic_id: tid,
-            ..Default::default()
-        },
-    )
+    let prod = send_batch(&p.client, batch, SinglePartitionProduceSetup {
+        topic: ("big").into(),
+        topic_id: tid,
+        ..Default::default()
+    })
     .await;
     assert!(prod.responses[0].partition_responses[0].error_code == 0);
 

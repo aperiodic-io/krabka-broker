@@ -7,39 +7,41 @@
 //! finalizing `streams.version`, and driving one describe round trip over the
 //! wire encoding -- live here for the same reason.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::owned::{
-    common::streams_group_describe_response::{
-        key_value::KeyValue, task_ids::TaskIds, topic_info::TopicInfo,
-    },
-    streams_group_describe_request::StreamsGroupDescribeRequest,
-    streams_group_describe_response::{
-        self as response_mod, DescribedGroup, StreamsGroupDescribeResponse, Subtopology, Topology,
-    },
-};
-use krabka_security::Principal;
-
-use super::handle;
-use crate::{
-    authorizer::Authorizer,
-    broker::{Broker, BrokerHandle},
-    codes::GROUP_ID_NOT_FOUND,
-    coordinator::unified::{
-        StreamsGroupSeed,
-        streams::{
-            actor::{StreamsDescribeMember, StreamsGroupActorMessage},
-            persistence::{StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue},
+use {
+    super::handle,
+    crate::{
+        authorizer::Authorizer,
+        broker::{Broker, BrokerHandle},
+        codes::GROUP_ID_NOT_FOUND,
+        coordinator::unified::{
+            StreamsGroupSeed,
+            streams::{
+                actor::{StreamsDescribeMember, StreamsGroupActorMessage},
+                persistence::{StoredSubtopology, StoredTopicInfo, StreamsGroupTopologyValue},
+            },
+        },
+        handlers::{
+            streams_group_heartbeat::handle as heartbeat_handle,
+            test_support::single_replica_partition,
+        },
+        test_support::{
+            controller_peer_allowed, dispatch_wire, peer, principal, request_context,
+            start_group_broker_with,
         },
     },
-    handlers::{
-        streams_group_heartbeat::handle as heartbeat_handle, test_support::single_replica_partition,
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::owned::{
+        common::streams_group_describe_response::{
+            key_value::KeyValue, task_ids::TaskIds, topic_info::TopicInfo,
+        },
+        streams_group_describe_request::StreamsGroupDescribeRequest,
+        streams_group_describe_response::{
+            self as response_mod, DescribedGroup, StreamsGroupDescribeResponse, Subtopology,
+            Topology,
+        },
     },
-    test_support::{
-        controller_peer_allowed, dispatch_wire, peer, principal, request_context,
-        start_group_broker_with,
-    },
+    krabka_security::Principal,
+    std::{collections::BTreeMap, sync::Arc},
 };
 
 fn request(group_ids: &[&str]) -> StreamsGroupDescribeRequest {

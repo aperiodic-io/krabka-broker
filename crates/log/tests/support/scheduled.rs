@@ -1,5 +1,7 @@
-use bytes::Bytes;
-use krabka_protocol::records::{Record, RecordBatch};
+use {
+    bytes::Bytes,
+    krabka_protocol::records::{Record, RecordBatch},
+};
 
 /// A two-record batch whose activation time is `ts`.
 pub fn batch_at(ts: i64) -> RecordBatch {

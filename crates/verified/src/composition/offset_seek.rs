@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::offset_index::offset_archive_valid;
-use super::{first_timestamp_index, validated_index_bounds_lookup};
+use {
+    super::{first_timestamp_index, validated_index_bounds_lookup},
+    creusot_std::prelude::*,
+};
 
 open_logic! {
 fn offset_seek_input_valid(

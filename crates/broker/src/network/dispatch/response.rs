@@ -6,22 +6,23 @@
 //! alongside the bytes, and the connection loop enforces it by muting the
 //! connection *after* the response is written, which is what KIP-219 asks for.
 
-use bytes::{BufMut, Bytes, BytesMut};
-use krabka_protocol::api_key::ApiKey;
-use krabka_units::{Time, convert::TimeExt};
-
-use crate::{
-    broker::Broker,
-    error::BrokerError,
-    handlers::{ApiKeyCode, ApiVersion, CorrelationId},
-    metrics::{QuotaCharge, QuotaType},
-    network::{
-        auth::ConnectionAuth,
-        codec::{self, KafkaCodec},
-        request::ParsedRequest,
-        response_header_len, response_header_v1,
+use {
+    crate::{
+        broker::Broker,
+        error::BrokerError,
+        handlers::{ApiKeyCode, ApiVersion, CorrelationId},
+        metrics::{QuotaCharge, QuotaType},
+        network::{
+            auth::ConnectionAuth,
+            codec::{self, KafkaCodec},
+            request::ParsedRequest,
+            response_header_len, response_header_v1,
+        },
+        quota::{QuotaDelay, consume_request_quota, throttle_time_ms},
     },
-    quota::{QuotaDelay, consume_request_quota, throttle_time_ms},
+    bytes::{BufMut, Bytes, BytesMut},
+    krabka_protocol::api_key::ApiKey,
+    krabka_units::{Time, convert::TimeExt},
 };
 
 /// A framed response together with the KIP-219 window the connection must
@@ -507,10 +508,7 @@ fn patch_leading_throttle(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::network::dispatch::API_VERSIONS_KEY;
+    use {super::*, crate::network::dispatch::API_VERSIONS_KEY, assert2::assert};
 
     #[test]
     fn encode_response_apiversions_uses_v0_header() {

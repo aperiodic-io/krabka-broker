@@ -4,17 +4,18 @@
 //! array appear in all four decoders, so they live here rather than once per
 //! record kind.
 
-pub(super) use krabka_protocol::{
-    ProtocolError,
-    primitives::{
-        array::{get_array_len, put_array_len},
-        fixed::{get_i8, get_i16, get_i32, get_i64, put_i8, put_i16, put_i32, put_i64},
-        string_bytes::get_string_owned,
+pub(super) use {
+    super::RECORD_VERSION,
+    crate::{coordinator::unified::persistence::put_string, error::BrokerError},
+    krabka_protocol::{
+        ProtocolError,
+        primitives::{
+            array::{get_array_len, put_array_len},
+            fixed::{get_i8, get_i16, get_i32, get_i64, put_i8, put_i16, put_i32, put_i64},
+            string_bytes::get_string_owned,
+        },
     },
 };
-
-pub(super) use super::RECORD_VERSION;
-pub(super) use crate::{coordinator::unified::persistence::put_string, error::BrokerError};
 
 /// Read and check the leading record version.
 pub(super) fn expect_version(cur: &mut &[u8]) -> Result<(), ProtocolError> {
@@ -49,12 +50,13 @@ pub(super) fn decode_vec<T>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use crate::barrier::persistence::{
-        RecordKey, decode_cut, decode_group, decode_injection_start, decode_key, encode_cut,
-        encode_group, encode_injection_start, encode_key,
-        test_support::{sample_cut, sample_group, sample_injection_start},
+    use {
+        crate::barrier::persistence::{
+            RecordKey, decode_cut, decode_group, decode_injection_start, decode_key, encode_cut,
+            encode_group, encode_injection_start, encode_key,
+            test_support::{sample_cut, sample_group, sample_injection_start},
+        },
+        assert2::assert,
     };
 
     #[test]

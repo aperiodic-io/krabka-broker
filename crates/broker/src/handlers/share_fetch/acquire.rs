@@ -6,35 +6,35 @@
 //! [`AcquisitionState`](crate::share_partition::state::AcquisitionState) locks,
 //! the request-wide record budget, and the retry pass behind the long poll.
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-use krabka_log::{LogError, Offset};
-use krabka_protocol::{owned::share_fetch_response::PartitionData, records::RecordsPayload};
-
-use super::{
-    acknowledge::{AckApplication, apply_acknowledgements},
-    long_poll::{LongPollOutcome, arm_waits, long_poll},
-    pending::PendingPartition,
-    records::{
-        AcquireMode, AcquireRequest, acquire_read_records, merge_batches,
-        pending_activation_ranges, read_budget, unreadable_batch_ranges,
+use {
+    super::{
+        acknowledge::{AckApplication, apply_acknowledgements},
+        long_poll::{LongPollOutcome, arm_waits, long_poll},
+        pending::PendingPartition,
+        records::{
+            AcquireMode, AcquireRequest, acquire_read_records, merge_batches,
+            pending_activation_ranges, read_budget, unreadable_batch_ranges,
+        },
+        tiered::TieredSource,
     },
-    tiered::TieredSource,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    diskless::read::DisklessReadHandle,
-    error::BrokerError,
-    partition::Partition,
-    share_partition::{
-        group_settings::GroupShareSettings,
-        manager::{SharePartitionLeaderManager, persistence::fences_the_partition},
-        source::diskless_logical_start,
-        state::AcquisitionState,
+    crate::{
+        broker::Broker,
+        codes,
+        diskless::read::DisklessReadHandle,
+        error::BrokerError,
+        partition::Partition,
+        share_partition::{
+            group_settings::GroupShareSettings,
+            manager::{SharePartitionLeaderManager, persistence::fences_the_partition},
+            source::diskless_logical_start,
+            state::AcquisitionState,
+        },
+    },
+    krabka_log::{LogError, Offset},
+    krabka_protocol::{owned::share_fetch_response::PartitionData, records::RecordsPayload},
+    std::{
+        sync::Arc,
+        time::{Duration, Instant},
     },
 };
 
@@ -642,11 +642,13 @@ fn fail_partition(p: &mut PendingPartition, has_acks: bool, code: i16) {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::{
-        delivery::test_support::DeliveryPartitionSetup, share_partition::state::AcquisitionState,
+    use {
+        super::*,
+        crate::{
+            delivery::test_support::DeliveryPartitionSetup,
+            share_partition::state::AcquisitionState,
+        },
+        assert2::{assert, check},
     };
 
     #[test]
@@ -671,8 +673,10 @@ mod tests {
     /// A transactional batch at offsets 0-2 from producer 1000, its end marker
     /// at offset 3, and a plain record at offset 4.
     fn transaction_then_record(commit: bool) -> Vec<krabka_protocol::records::RecordBatch> {
-        use bytes::Bytes;
-        use krabka_protocol::records::{Attributes, Record, RecordBatch};
+        use {
+            bytes::Bytes,
+            krabka_protocol::records::{Attributes, Record, RecordBatch},
+        };
 
         let transactional = Attributes::default().with_transactional(true);
         let value = |v: &'static [u8]| Record {
@@ -716,11 +720,11 @@ mod tests {
     /// fills whole materialization windows with offsets it archives.
     #[tokio::test]
     async fn the_window_grows_past_offsets_that_are_all_archived() {
-        use std::sync::Arc;
-
-        use qubit_clock::{FixedWallClock, WallClock};
-
-        use crate::delivery::test_support::{NOW_MS, partition_with_batches, wall_at};
+        use {
+            crate::delivery::test_support::{NOW_MS, partition_with_batches, wall_at},
+            qubit_clock::{FixedWallClock, WallClock},
+            std::sync::Arc,
+        };
 
         // (commit, read_committed, max_inflight, acquired)
         let cases = [
@@ -734,16 +738,12 @@ mod tests {
         let mut expected = Vec::new();
         for (commit, read_committed, max_inflight, acquired) in cases {
             let dir = tempfile::tempdir().expect("a log root");
-            let partition = partition_with_batches(
-                &dir,
-                &clock,
-                DeliveryPartitionSetup {
-                    topic: "txn",
-                    batches: transaction_then_record(commit),
-                    leader: krabka_ids::NodeId(0),
-                    ..Default::default()
-                },
-            );
+            let partition = partition_with_batches(&dir, &clock, DeliveryPartitionSetup {
+                topic: "txn",
+                batches: transaction_then_record(commit),
+                leader: krabka_ids::NodeId(0),
+                ..Default::default()
+            });
             let mut state = AcquisitionState::new(Offset(0));
 
             grow_readable_window(

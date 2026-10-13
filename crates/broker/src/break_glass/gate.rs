@@ -4,15 +4,16 @@
 //! the metadata record that spends it. Every gated handler goes through this
 //! one function, so one set of rules decides what an approval authorizes.
 
-use krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord, MetadataImage, MetadataRecord};
-use uuid::Uuid;
-
-use self::{denial::nearer_reason, selection::covers, usability::unusable_because};
 pub(crate) use self::{
     denial::{BreakGlassDenial, DenialReason},
     usability::distinct_approvers,
 };
-use crate::{break_glass::config::BreakGlassPolicy, config::BreakGlassConfig};
+use {
+    self::{denial::nearer_reason, selection::covers, usability::unusable_because},
+    crate::{break_glass::config::BreakGlassPolicy, config::BreakGlassConfig},
+    krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord, MetadataImage, MetadataRecord},
+    uuid::Uuid,
+};
 
 mod denial;
 mod selection;

@@ -70,9 +70,7 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::arguments;
+    use {super::arguments, assert2::assert};
 
     #[test]
     fn parses_the_projection_and_optional_debug_flag() {

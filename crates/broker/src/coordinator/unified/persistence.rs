@@ -22,21 +22,22 @@
 //! coordinator, of every family, declares `"flexibleVersions": "none"`, so
 //! keys use the helpers here.
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use krabka_log::Offset;
-use krabka_protocol::primitives::{fixed, string_bytes};
-
-use crate::{
-    coordinator::unified::{
-        classic_state::OffsetEntry,
-        persistence_next_gen::{
-            AssignedTopicPartitions, NextGenKey, encode_key as encode_next_gen_key,
-            parse_key as parse_next_gen_key,
+use {
+    crate::{
+        coordinator::unified::{
+            classic_state::OffsetEntry,
+            persistence_next_gen::{
+                AssignedTopicPartitions, NextGenKey, encode_key as encode_next_gen_key,
+                parse_key as parse_next_gen_key,
+            },
+            share::persistence::{ShareGroupKey, encode_share_key, parse_share_key},
+            streams::persistence::{StreamsGroupKey, encode_streams_key, parse_streams_key},
         },
-        share::persistence::{ShareGroupKey, encode_share_key, parse_share_key},
-        streams::persistence::{StreamsGroupKey, encode_streams_key, parse_streams_key},
+        error::BrokerError,
     },
-    error::BrokerError,
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    krabka_log::Offset,
+    krabka_protocol::primitives::{fixed, string_bytes},
 };
 
 pub(crate) mod flex;
@@ -46,9 +47,17 @@ pub(crate) mod flex;
 /// and the reference it takes its state by: a `&mut` state lets the cache operation also
 /// apply what the appended records mean to the live actor state.
 macro_rules! flush_pending_records {
-    ($state:ident: $state_type:ty, $pending:ident: $pending_type:ty;
-        $log:ident, $coordinator:ident, $now:ident;
-        group $group:expr; encode $encode:expr; cache $cache:expr;
+    (
+        $state:ident :
+        $state_type:ty,
+        $pending:ident :
+        $pending_type:ty;
+        $log:ident,
+        $coordinator:ident,
+        $now:ident; group
+        $group:expr; encode
+        $encode:expr; cache
+        $cache:expr;
     ) => {
         pub(super) async fn flush_pending(
             $state: $state_type,
@@ -515,17 +524,11 @@ impl GroupMetadataValue {
 
 // ── primitives (non-flexible Kafka encoding) ───────────────────────────────
 
-pub(crate) fn get_i16(buf: &mut &[u8]) -> Result<i16, BrokerError> {
-    Ok(fixed::get_i16(buf)?)
-}
+pub(crate) fn get_i16(buf: &mut &[u8]) -> Result<i16, BrokerError> { Ok(fixed::get_i16(buf)?) }
 
-pub(crate) fn get_i32(buf: &mut &[u8]) -> Result<i32, BrokerError> {
-    Ok(fixed::get_i32(buf)?)
-}
+pub(crate) fn get_i32(buf: &mut &[u8]) -> Result<i32, BrokerError> { Ok(fixed::get_i32(buf)?) }
 
-pub(crate) fn get_i64(buf: &mut &[u8]) -> Result<i64, BrokerError> {
-    Ok(fixed::get_i64(buf)?)
-}
+pub(crate) fn get_i64(buf: &mut &[u8]) -> Result<i64, BrokerError> { Ok(fixed::get_i64(buf)?) }
 
 pub(crate) fn get_string(buf: &mut &[u8]) -> Result<String, BrokerError> {
     Ok(string_bytes::get_string_owned(buf)?)
@@ -601,9 +604,7 @@ pub(crate) fn put_nullable_string<B: BufMut>(
     }
 }
 
-pub(crate) fn put_bytes<B: BufMut>(buf: &mut B, b: &Bytes) {
-    string_bytes::put_bytes(buf, b);
-}
+pub(crate) fn put_bytes<B: BufMut>(buf: &mut B, b: &Bytes) { string_bytes::put_bytes(buf, b); }
 
 #[cfg(test)]
 macro_rules! key_string_boundaries {
@@ -687,10 +688,7 @@ pub(super) fn sorted_assigned_partitions(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::test_support::wire_bytes;
+    use {super::*, crate::coordinator::unified::test_support::wire_bytes, assert2::assert};
 
     const TOPIC_ID: uuid::Uuid = uuid::Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
 
@@ -774,27 +772,18 @@ mod tests {
             ..Default::default()
         };
         let cases = [
-            (
-                0,
-                OffsetCommitValue {
-                    leader_epoch: -1,
-                    ..value(None, None)
-                },
-            ),
-            (
-                1,
-                OffsetCommitValue {
-                    leader_epoch: -1,
-                    ..value(Some(9_999_999), None)
-                },
-            ),
-            (
-                2,
-                OffsetCommitValue {
-                    leader_epoch: -1,
-                    ..value(None, None)
-                },
-            ),
+            (0, OffsetCommitValue {
+                leader_epoch: -1,
+                ..value(None, None)
+            }),
+            (1, OffsetCommitValue {
+                leader_epoch: -1,
+                ..value(Some(9_999_999), None)
+            }),
+            (2, OffsetCommitValue {
+                leader_epoch: -1,
+                ..value(None, None)
+            }),
             (3, value(None, None)),
             (4, value(None, Some(TOPIC_ID))),
         ];
@@ -895,26 +884,23 @@ mod tests {
         {
             let decoded = GroupMetadataValue::decode_value(&encode_at(version)).unwrap();
             decoded_rows.push((version, decoded));
-            expected_rows.push((
-                version,
-                GroupMetadataValue {
-                    protocol_type: "consumer".into(),
-                    generation: 5,
-                    protocol_name: Some("range".into()),
-                    leader: Some("m1".into()),
-                    current_state_timestamp_ms,
-                    members: vec![MemberMetadata {
-                        member_id: "m1".into(),
-                        group_instance_id: group_instance_id.map(str::to_string),
-                        client_id: "c".into(),
-                        client_host: "h".into(),
-                        rebalance_timeout_ms,
-                        session_timeout_ms: 30_000,
-                        subscription: Bytes::from_static(b"sub"),
-                        assignment: Bytes::from_static(b"asn"),
-                    }],
-                },
-            ));
+            expected_rows.push((version, GroupMetadataValue {
+                protocol_type: "consumer".into(),
+                generation: 5,
+                protocol_name: Some("range".into()),
+                leader: Some("m1".into()),
+                current_state_timestamp_ms,
+                members: vec![MemberMetadata {
+                    member_id: "m1".into(),
+                    group_instance_id: group_instance_id.map(str::to_string),
+                    client_id: "c".into(),
+                    client_host: "h".into(),
+                    rebalance_timeout_ms,
+                    session_timeout_ms: 30_000,
+                    subscription: Bytes::from_static(b"sub"),
+                    assignment: Bytes::from_static(b"asn"),
+                }],
+            }));
         }
         assert!(decoded_rows == expected_rows);
         // The hand-built version 3 is what the broker itself writes.

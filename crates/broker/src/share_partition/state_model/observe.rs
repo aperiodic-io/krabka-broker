@@ -6,9 +6,10 @@
 //! functions, so the one place that depends on the internal batch
 //! representation is this file.
 
-use krabka_log::Offset;
-
-use crate::share_partition::state::{AcquisitionState, RecordState};
+use {
+    crate::share_partition::state::{AcquisitionState, RecordState},
+    krabka_log::Offset,
+};
 
 /// Delivery state of `off`, if it currently lies in a batch.
 pub(super) fn offset_state(sm: &AcquisitionState, off: Offset) -> Option<RecordState> {

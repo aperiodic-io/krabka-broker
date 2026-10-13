@@ -3,9 +3,7 @@
 //! The fingerprint ignores the order of the configured list and the repeats in
 //! it, and it changes when the membership changes.
 
-use assert2::check;
-
-use crate::operator_keys::approver_set_fingerprint;
+use {crate::operator_keys::approver_set_fingerprint, assert2::check};
 
 #[test]
 fn approver_set_fingerprint_ignores_order_and_tracks_membership() {

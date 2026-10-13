@@ -50,9 +50,7 @@ pub(super) fn hash_map_order<'a>(keys: impl IntoIterator<Item = &'a str>) -> Vec
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn java_string_hash_matches_the_jvm() {
@@ -95,10 +93,10 @@ mod tests {
                     "eligible.leader.replicas.version",
                 ],
             ),
-            (
-                &["share.version", "group.version"],
-                &["group.version", "share.version"],
-            ),
+            (&["share.version", "group.version"], &[
+                "group.version",
+                "share.version",
+            ]),
             (
                 // Both land in bucket 7, which keeps first-insertion order.
                 &["metadata.version", "share.version", "metadata.version"],

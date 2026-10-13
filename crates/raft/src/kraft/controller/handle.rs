@@ -2,22 +2,22 @@
 //! engine's published `watch` channels directly, and the command-sending
 //! methods that round-trip a request through the engine task.
 
-use std::sync::Arc;
-
-use krabka_metadata::MetadataImage;
-use krabka_units::prelude::ByteSize;
-use tokio::sync::{oneshot, watch};
-
-use super::KraftController;
-use crate::{
-    DelegationTokenMutation, SubmitChangeResult,
-    error::RaftError,
-    kraft::{
-        event::Event,
-        transport::{Command, Inbound, MetadataFetchSlice, QuorumStateSnapshot},
-        types::{NodeId, ReplicaKey},
+use {
+    super::KraftController,
+    crate::{
+        DelegationTokenMutation, SubmitChangeResult,
+        error::RaftError,
+        kraft::{
+            event::Event,
+            transport::{Command, Inbound, MetadataFetchSlice, QuorumStateSnapshot},
+            types::{NodeId, ReplicaKey},
+        },
+        reconfig::{ReconfigOutcome, VoterChange},
     },
-    reconfig::{ReconfigOutcome, VoterChange},
+    krabka_metadata::MetadataImage,
+    krabka_units::prelude::ByteSize,
+    std::sync::Arc,
+    tokio::sync::{oneshot, watch},
 };
 
 impl KraftController {
@@ -44,15 +44,11 @@ impl KraftController {
     /// create-time stamped on every batch the leader appends. `Engine::now`
     /// is monotonic from this process's own start, and a snapshot header
     /// timestamp has to mean the same instant on every node that reads it.
-    pub(crate) fn wall_clock_ms() -> i64 {
-        krabka_log::epoch_ms(std::time::SystemTime::now())
-    }
+    pub(crate) fn wall_clock_ms() -> i64 { krabka_log::epoch_ms(std::time::SystemTime::now()) }
 
     /// The node id this controller runs as.
     #[must_use]
-    pub fn node_id(&self) -> NodeId {
-        self.me
-    }
+    pub fn node_id(&self) -> NodeId { self.me }
 
     /// Probe a proposed voter through the controller's configured TLS/SASL
     /// dialer rather than opening an unauthenticated plaintext connection.
@@ -68,15 +64,11 @@ impl KraftController {
 
     /// A snapshot of the latest applied [`MetadataImage`].
     #[must_use]
-    pub fn current_image(&self) -> Arc<MetadataImage> {
-        self.image_rx.borrow().clone()
-    }
+    pub fn current_image(&self) -> Arc<MetadataImage> { self.image_rx.borrow().clone() }
 
     /// Watch the published [`MetadataImage`].
     #[must_use]
-    pub fn watch_image(&self) -> watch::Receiver<Arc<MetadataImage>> {
-        self.image_rx.clone()
-    }
+    pub fn watch_image(&self) -> watch::Receiver<Arc<MetadataImage>> { self.image_rx.clone() }
 
     /// Watch the fault that stopped the engine: `None` while it runs, and
     /// the reason once it stops over a fault Kafka halts the process over.
@@ -84,23 +76,17 @@ impl KraftController {
     /// directory that fails (KIP-858), or a controller activation that
     /// failed.
     #[must_use]
-    pub fn watch_fault(&self) -> watch::Receiver<Option<String>> {
-        self.fault_rx.clone()
-    }
+    pub fn watch_fault(&self) -> watch::Receiver<Option<String>> { self.fault_rx.clone() }
 
     /// Watch the current leader id.
     #[must_use]
-    pub fn watch_leader(&self) -> watch::Receiver<Option<NodeId>> {
-        self.leader_rx.clone()
-    }
+    pub fn watch_leader(&self) -> watch::Receiver<Option<NodeId>> { self.leader_rx.clone() }
 
     /// A synchronous snapshot of consensus state (the handle's `quorum_state()`
     /// reads this without an mpsc round-trip — the engine republishes it on
     /// every event). Cheap `watch` borrow + clone.
     #[must_use]
-    pub fn quorum_snapshot(&self) -> QuorumStateSnapshot {
-        self.quorum_rx.borrow().clone()
-    }
+    pub fn quorum_snapshot(&self) -> QuorumStateSnapshot { self.quorum_rx.borrow().clone() }
 
     /// Submit a metadata change. On the leader, appends the batch at the current
     /// leader epoch and returns once it is committed (HWM ≥ the appended end

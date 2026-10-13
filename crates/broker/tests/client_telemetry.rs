@@ -29,26 +29,29 @@
 //! KIP-714 RPCs only behind a configured receiver and the client negotiates
 //! every request against what the broker advertised.
 
-use assert2::{assert, check};
-
-use crate::support::{
-    client::connect_owned,
-    configs::{ClientMetricsSubscriptionSetup, client_metrics_subscription},
-    discovery::api_versions_request_for,
+use {
+    crate::support::{
+        client::connect_owned,
+        configs::{ClientMetricsSubscriptionSetup, client_metrics_subscription},
+        discovery::api_versions_request_for,
+    },
+    assert2::{assert, check},
 };
 mod support;
 
-use krabka_protocol::{
-    owned::{
-        get_telemetry_subscriptions_request::GetTelemetrySubscriptionsRequest,
-        get_telemetry_subscriptions_response::GetTelemetrySubscriptionsResponse,
-        incremental_alter_configs_response::IncrementalAlterConfigsResponse,
-        push_telemetry_request::PushTelemetryRequest,
-        push_telemetry_response::PushTelemetryResponse,
+use {
+    krabka_protocol::{
+        owned::{
+            get_telemetry_subscriptions_request::GetTelemetrySubscriptionsRequest,
+            get_telemetry_subscriptions_response::GetTelemetrySubscriptionsResponse,
+            incremental_alter_configs_response::IncrementalAlterConfigsResponse,
+            push_telemetry_request::PushTelemetryRequest,
+            push_telemetry_response::PushTelemetryResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
+    support::start_n_node_with,
 };
-use support::start_n_node_with;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -135,11 +138,13 @@ async fn configure_match_all_subscription(
 /// Builds a minimal valid OTLP `MetricsData` payload. It is uncompressed, so
 /// `compression_type=0`.
 fn sample_otlp_metrics() -> bytes::Bytes {
-    use opentelemetry_proto::tonic::metrics::v1::{
-        Gauge, Metric, MetricsData, NumberDataPoint, ResourceMetrics, ScopeMetrics, metric::Data,
-        number_data_point::Value,
+    use {
+        opentelemetry_proto::tonic::metrics::v1::{
+            Gauge, Metric, MetricsData, NumberDataPoint, ResourceMetrics, ScopeMetrics,
+            metric::Data, number_data_point::Value,
+        },
+        prost::Message,
     };
-    use prost::Message;
     let dp = NumberDataPoint {
         value: Some(Value::AsInt(7)),
         ..Default::default()

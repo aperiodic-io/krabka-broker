@@ -6,14 +6,17 @@
 //! outside the range with Kafka's top-level error. `validate_only` runs every
 //! check and persists nothing.
 
-use assert2::assert;
-
-use crate::support::{configs::feature_update, discovery::api_versions_request_for};
+use {
+    crate::support::{configs::feature_update, discovery::api_versions_request_for},
+    assert2::assert,
+};
 mod support;
 
-use krabka_format::LATEST_PRODUCTION_METADATA_VERSION;
-use krabka_metadata::metadata_version::METADATA_VERSION_MAX;
-use krabka_protocol::owned::update_features_request::UpdateFeaturesRequest;
+use {
+    krabka_format::LATEST_PRODUCTION_METADATA_VERSION,
+    krabka_metadata::metadata_version::METADATA_VERSION_MAX,
+    krabka_protocol::owned::update_features_request::UpdateFeaturesRequest,
+};
 
 fn metadata_version_update(level: i16) -> UpdateFeaturesRequest {
     UpdateFeaturesRequest {

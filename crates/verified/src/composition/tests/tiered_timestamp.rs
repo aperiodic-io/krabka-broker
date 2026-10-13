@@ -1,5 +1,4 @@
-use super::*;
-use crate::list_offsets::ListOffsetsSelectionDecision;
+use {super::*, crate::list_offsets::ListOffsetsSelectionDecision};
 
 proptest! {
     #[test]

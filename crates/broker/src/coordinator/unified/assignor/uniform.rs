@@ -33,22 +33,20 @@
 //! member's subscribed topics or outside the partition range is dropped, and
 //! a partition that two members claim stays with the first of them.
 
-use std::{cmp::Ordering, collections::HashMap};
-
-use krabka_protocol::primitives::uuid::Uuid;
-use krabka_verified::uniform_assignor::{
-    SubscriberLoad, homogeneous_member_quotas, select_least_loaded, uniform_quota_split,
+use {
+    super::{Assignment, Assignor, GroupSpec, SubscriptionType, TopicMetadata},
+    krabka_protocol::primitives::uuid::Uuid,
+    krabka_verified::uniform_assignor::{
+        SubscriberLoad, homogeneous_member_quotas, select_least_loaded, uniform_quota_split,
+    },
+    std::{cmp::Ordering, collections::HashMap},
 };
-
-use super::{Assignment, Assignor, GroupSpec, SubscriptionType, TopicMetadata};
 
 #[derive(Debug)]
 pub struct UniformAssignor;
 
 impl Assignor for UniformAssignor {
-    fn name(&self) -> &'static str {
-        "uniform"
-    }
+    fn name(&self) -> &'static str { "uniform" }
 
     fn assign(&self, group: &GroupSpec, topics: &TopicMetadata) -> Assignment {
         let mut spec = Spec::new(group, topics);
@@ -431,9 +429,7 @@ struct Balancer {
     next_most_loaded_member: Option<usize>,
 }
 
-fn level(size: usize) -> i64 {
-    i64::try_from(size).expect("partition counts fit i64")
-}
+fn level(size: usize) -> i64 { i64::try_from(size).expect("partition counts fit i64") }
 
 impl Balancer {
     /// `MemberAssignmentBalancer.initialize`.

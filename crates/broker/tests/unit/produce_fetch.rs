@@ -4,23 +4,24 @@
 //! `ListOffsets` reports the ends of an empty partition. All three run against
 //! the same in-process broker.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::list_offsets_request::ListOffsetsRequest;
-
 /// Builds one `RecordBatch` that carries `n` empty records with sequential
 /// offset deltas.
 use crate::support::records::empty_record_batch as one_record_batch;
-use crate::{
-    harness::{create_topic, topic_id_for},
-    support,
-    support::{
-        fetch::{
-            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, check_record_count,
-            single_partition_fetch,
+use {
+    crate::{
+        harness::{create_topic, topic_id_for},
+        support::{
+            self,
+            fetch::{
+                FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, check_record_count,
+                single_partition_fetch,
+            },
+            offsets::{list_offset_partition, single_partition_list_offsets},
+            produce::{SinglePartitionProduceSetup, batch_request},
         },
-        offsets::{list_offset_partition, single_partition_list_offsets},
-        produce::{SinglePartitionProduceSetup, batch_request},
     },
+    assert2::{assert, check},
+    krabka_protocol::owned::list_offsets_request::ListOffsetsRequest,
 };
 
 #[tokio::test]
@@ -30,14 +31,11 @@ async fn produce_assigns_base_offsets() {
     let topic_id = topic_id_for(&p.client, "prod").await;
 
     // First produce: 3 records → base 0.
-    let req = batch_request(
-        one_record_batch(3),
-        SinglePartitionProduceSetup {
-            topic: ("prod").into(),
-            topic_id,
-            ..Default::default()
-        },
-    );
+    let req = batch_request(one_record_batch(3), SinglePartitionProduceSetup {
+        topic: ("prod").into(),
+        topic_id,
+        ..Default::default()
+    });
     let resp = p.client.send(req).await.expect("Produce 1");
     assert!(resp.responses.len() == 1);
     assert!(resp.responses[0].partition_responses.len() == 1);
@@ -45,14 +43,11 @@ async fn produce_assigns_base_offsets() {
     check!(resp.responses[0].partition_responses[0].base_offset == 0);
 
     // Second produce: 2 records → base 3.
-    let req2 = batch_request(
-        one_record_batch(2),
-        SinglePartitionProduceSetup {
-            topic: ("prod").into(),
-            topic_id,
-            ..Default::default()
-        },
-    );
+    let req2 = batch_request(one_record_batch(2), SinglePartitionProduceSetup {
+        topic: ("prod").into(),
+        topic_id,
+        ..Default::default()
+    });
     let resp2 = p.client.send(req2).await.expect("Produce 2");
     assert!(resp2.responses[0].partition_responses[0].error_code == 0);
     assert!(resp2.responses[0].partition_responses[0].base_offset == 3);
@@ -67,13 +62,10 @@ async fn produce_assigns_base_offsets() {
 #[tokio::test]
 async fn produce_without_a_topic_id_returns_unknown_topic_id() {
     let p = support::start().await;
-    let req = batch_request(
-        one_record_batch(1),
-        SinglePartitionProduceSetup {
-            topic: ("nope").into(),
-            ..Default::default()
-        },
-    );
+    let req = batch_request(one_record_batch(1), SinglePartitionProduceSetup {
+        topic: ("nope").into(),
+        ..Default::default()
+    });
     let resp = p.client.send(req).await.expect("Produce unknown");
     assert!(resp.responses[0].partition_responses[0].error_code == 100);
     p.broker.shutdown().await;
@@ -85,14 +77,11 @@ async fn produce_then_fetch_round_trip() {
     create_topic(&p, "round", 1).await;
     let topic_id = topic_id_for(&p.client, "round").await;
 
-    let prod = batch_request(
-        one_record_batch(3),
-        SinglePartitionProduceSetup {
-            topic: ("round").into(),
-            topic_id,
-            ..Default::default()
-        },
-    );
+    let prod = batch_request(one_record_batch(3), SinglePartitionProduceSetup {
+        topic: ("round").into(),
+        topic_id,
+        ..Default::default()
+    });
     let presp = p.client.send(prod).await.expect("Produce");
     assert!(presp.responses[0].partition_responses[0].error_code == 0);
 

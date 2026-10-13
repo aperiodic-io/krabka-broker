@@ -6,11 +6,11 @@
 //! costs one image lookup each rather than a hundred rebuilds of the same
 //! state.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{MetadataImage, NodeId};
-
-use crate::{broker::Broker, handlers::RequestContext, leader_election::ElectionType};
+use {
+    crate::{broker::Broker, handlers::RequestContext, leader_election::ElectionType},
+    krabka_metadata::{MetadataImage, NodeId},
+    std::collections::HashSet,
+};
 
 /// Everything one partition's election reads, and nothing it writes.
 ///

@@ -5,12 +5,12 @@
 //! Every field is a sorted `Vec` rather than a map, because stateright hashes
 //! and compares each state, so the representation has to be canonical.
 
-use std::collections::BTreeMap;
-
-use krabka_log::Offset;
-
-use crate::coordinator::unified::actor::reconciliation_model_support::{
-    group_projection, member_projection, model_actions,
+use {
+    crate::coordinator::unified::actor::reconciliation_model_support::{
+        group_projection, member_projection, model_actions,
+    },
+    krabka_log::Offset,
+    std::collections::BTreeMap,
 };
 
 member_projection! { pub(super) struct MemberProj {

@@ -4,9 +4,11 @@
 //! signature, whose length the type system cannot pin. Both share the hex
 //! codec in this file, and `ChainHead` uses it too.
 
-use hex::FromHex as _;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use sha2::{Digest, Sha256};
+use {
+    hex::FromHex as _,
+    serde::{Deserialize, Deserializer, Serialize, Serializer, de},
+    sha2::{Digest, Sha256},
+};
 
 /// `SHA-256` digest of one archived object's body.
 ///
@@ -38,9 +40,7 @@ pub struct Sha256Digest(
 impl Sha256Digest {
     /// Digest of `bytes`.
     #[must_use]
-    pub fn of(bytes: &[u8]) -> Self {
-        Self(Sha256::digest(bytes).into())
-    }
+    pub fn of(bytes: &[u8]) -> Self { Self(Sha256::digest(bytes).into()) }
 }
 
 /// Variable-length bytes that serialise as a lowercase hex string.
@@ -92,10 +92,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::worm::manifest::ChainHead;
+    use {super::*, crate::worm::manifest::ChainHead, assert2::check};
 
     #[test]
     fn hex_newtypes_reject_bad_input_without_panicking() {

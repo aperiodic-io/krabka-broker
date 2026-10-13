@@ -6,18 +6,18 @@
 //! between them is the point of this model, and a divergence between the two
 //! is what a failure reports.
 
-use std::cmp::Ordering;
-
-use krabka_log::Offset;
-
-use super::{
-    MAX_OFFSET, TOPIC,
-    projection::rebuild_group,
-    state::{CgcState, EpochKind, committed_map, member},
-};
-use crate::{
-    codes::{STALE_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
-    coordinator::unified::actor::CommitFence,
+use {
+    super::{
+        MAX_OFFSET, TOPIC,
+        projection::rebuild_group,
+        state::{CgcState, EpochKind, committed_map, member},
+    },
+    crate::{
+        codes::{STALE_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
+        coordinator::unified::actor::CommitFence,
+    },
+    krabka_log::Offset,
+    std::cmp::Ordering,
 };
 
 /// INDEPENDENT oracle for the `OffsetCommit` fence: the expected decision for a
@@ -70,13 +70,10 @@ pub(super) fn do_commit(last: &CgcState, id: &str, part: i32, kind: EpochKind) -
         (Some(e), EpochKind::Forward) => e + 1,
         (None, _) => 0,
     };
-    let real = g.validate_offset_commit(
-        id,
-        None,
-        epoch,
-        CommitFence::Offset { api_version: 9 },
-        &[(TOPIC, part)],
-    );
+    let real =
+        g.validate_offset_commit(id, None, epoch, CommitFence::Offset { api_version: 9 }, &[
+            (TOPIC, part),
+        ]);
     let oracle = oracle_commit(last, id, part, epoch);
     assert2::assert!(
         (real) == (oracle),

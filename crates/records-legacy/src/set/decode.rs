@@ -6,15 +6,16 @@
 //! decompression policy is applied, and where the KIP-32 relative inner
 //! offsets of a v1 wrapper are rewritten back to absolute ones.
 
-use bytes::Buf;
-use krabka_compression::{CompressionType, RecordDecompressionPolicy};
-use krabka_ids::Offset;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-
-use super::ParsedRecord;
-use crate::{
-    error::LegacyRecordsError,
-    message::{Magic, Message, compression_from_attrs},
+use {
+    super::ParsedRecord,
+    crate::{
+        error::LegacyRecordsError,
+        message::{Magic, Message, compression_from_attrs},
+    },
+    bytes::Buf,
+    krabka_compression::{CompressionType, RecordDecompressionPolicy},
+    krabka_ids::Offset,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
 };
 
 /// The length of a wire slice as a byte count.
@@ -144,17 +145,18 @@ fn decode_into(
 
 #[cfg(test)]
 mod tests {
-    use bytes::{BufMut, Bytes, BytesMut};
-    use krabka_compression::CompressionError;
-    use krabka_units::prelude::{bytes, kibibytes};
-
-    use super::*;
-    use crate::{
-        message::attrs_with_compression,
-        set::{
-            encode_compressed_message_set, encode_flat_message_set,
-            test_support::{compressed_bytes, decode_bytes, sample_records_v1},
+    use {
+        super::*,
+        crate::{
+            message::attrs_with_compression,
+            set::{
+                encode_compressed_message_set, encode_flat_message_set,
+                test_support::{compressed_bytes, decode_bytes, sample_records_v1},
+            },
         },
+        bytes::{BufMut, Bytes, BytesMut},
+        krabka_compression::CompressionError,
+        krabka_units::prelude::{bytes, kibibytes},
     };
 
     fn v1_wrapper(inner_offsets: &[i64], wrapper_offset: i64) -> BytesMut {
@@ -325,13 +327,10 @@ mod tests {
     #[test]
     fn entry_negative_message_size_rejected() {
         let err = entry_error(-1, &[0u8; 4]); // keep region >= 12 bytes
-        assert2::assert!(matches!(
-            err,
-            LegacyRecordsError::NegativeLength {
-                label: "message_size",
-                len: -1
-            }
-        ));
+        assert2::assert!(matches!(err, LegacyRecordsError::NegativeLength {
+            label: "message_size",
+            len: -1
+        }));
     }
 
     #[test]

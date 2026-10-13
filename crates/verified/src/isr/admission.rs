@@ -1,7 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    AlterPartitionFacts, CaughtUpCredit, IsrAdmission, IsrMemberFacts, IsrMemberRole, ProposedIsr,
+use {
+    super::{
+        AlterPartitionFacts, CaughtUpCredit, IsrAdmission, IsrMemberFacts, IsrMemberRole,
+        ProposedIsr,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Kafka's `ReplicationControlManager.validateAlterPartitionData`, check for

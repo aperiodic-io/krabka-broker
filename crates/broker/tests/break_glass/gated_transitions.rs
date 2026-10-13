@@ -6,20 +6,21 @@
 //! other three answer a question about the partition's own state once the gate
 //! opens, and that change of answer is the proof it opened.
 
-use assert2::check;
-use krabka_broker::codes;
-use krabka_client_core::Client;
-use krabka_metadata::BreakGlassAction as GatedAction;
-
-use crate::{
-    cluster::{Cluster, boot},
-    principals::ALICE,
-    proposals::{
-        ACTION_CANCEL_REASSIGNMENT, ACTION_DELETE_RECORDS, ACTION_DELETE_TOPIC,
-        ACTION_UNCLEAN_ELECT_LEADERS, ACTION_UNREGISTER_BROKER, approved_proposal, stored,
+use {
+    crate::{
+        cluster::{Cluster, boot},
+        principals::ALICE,
+        proposals::{
+            ACTION_CANCEL_REASSIGNMENT, ACTION_DELETE_RECORDS, ACTION_DELETE_TOPIC,
+            ACTION_UNCLEAN_ELECT_LEADERS, ACTION_UNREGISTER_BROKER, approved_proposal, stored,
+        },
+        topics::create_topic,
+        transitions::{Transition, refusals},
     },
-    topics::create_topic,
-    transitions::{Transition, refusals},
+    assert2::check,
+    krabka_broker::codes,
+    krabka_client_core::Client,
+    krabka_metadata::BreakGlassAction as GatedAction,
 };
 
 /// One row of the gated-transition table.

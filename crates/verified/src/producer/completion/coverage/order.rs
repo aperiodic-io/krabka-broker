@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use super::completion_offset;
+use {super::completion_offset, creusot_std::prelude::*};
 
 open_logic! {
 pub fn insertion_source(count: Int, position: Int, ordinal: Int) -> Int {

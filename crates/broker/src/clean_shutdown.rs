@@ -46,10 +46,11 @@
 //! the start after that one finds nothing and is unclean, which is the truth.
 //! Kafka deletes the same file while `LogManager` loads the log dir.
 
-use std::{io::Write, path::Path};
-
-use krabka_metadata::{MetadataImage, NodeId};
-use serde::{Deserialize, Serialize};
+use {
+    krabka_metadata::{MetadataImage, NodeId},
+    serde::{Deserialize, Serialize},
+    std::{io::Write, path::Path},
+};
 
 /// The file name. Kafka's `CleanShutdownFileHandler.CLEAN_SHUTDOWN_FILE_NAME`
 /// is `.kafka_cleanshutdown`; only krabka reads this file, so the name differs.

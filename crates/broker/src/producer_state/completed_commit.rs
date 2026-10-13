@@ -1,8 +1,9 @@
-use assert2::assert;
-use krabka_ids::PartitionIndex;
-
-use super::{Decision, ProducerState, RetainedBatch, SequenceContext};
-use crate::{broker::spawn_partition, log_dir_status::LogDirRegistry};
+use {
+    super::{Decision, ProducerState, RetainedBatch, SequenceContext},
+    crate::{broker::spawn_partition, log_dir_status::LogDirRegistry},
+    assert2::assert,
+    krabka_ids::PartitionIndex,
+};
 
 #[tokio::test]
 async fn late_completions_merge_retries_without_regressing_the_latest_batch() {
@@ -120,12 +121,12 @@ async fn all_completion_orders_keep_the_same_five_physical_batches() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn completions_after_real_markers_preserve_closed_state_and_restart_decisions() {
-    use std::sync::Arc;
-
-    use krabka_log::{Log, LogConfig, ProducerId};
-    use krabka_protocol::records::{Attributes, Record, RecordBatch};
-
-    use crate::txn::marker::{MarkerType, build_marker_batch};
+    use {
+        crate::txn::marker::{MarkerType, build_marker_batch},
+        krabka_log::{Log, LogConfig, ProducerId},
+        krabka_protocol::records::{Attributes, Record, RecordBatch},
+        std::sync::Arc,
+    };
 
     for epoch in [3, 4] {
         for marker in [MarkerType::Commit, MarkerType::Abort] {

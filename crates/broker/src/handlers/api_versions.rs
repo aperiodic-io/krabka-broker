@@ -30,11 +30,15 @@
 //! `requestHelper.sendResponseMaybeThrottle`. Its dispatch entry is
 //! `RequestQuotaPolicy::SelfAccounted` for that reason.
 
-use bytes::Bytes;
-use futures_util::future::BoxFuture;
-use krabka_protocol::{
-    Decode,
-    owned::{api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse},
+use {
+    bytes::Bytes,
+    futures_util::future::BoxFuture,
+    krabka_protocol::{
+        Decode,
+        owned::{
+            api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+        },
+    },
 };
 
 mod feature_keys;
@@ -43,17 +47,18 @@ mod feature_keys;
 mod tests;
 
 pub(crate) use krabka_raft::is_valid_client_info;
-
-use self::feature_keys::{finalized_feature_keys, supported_feature_keys};
-use crate::{
-    api_catalog::{UnstableApiVersions, supported_apis},
-    broker::Broker,
-    cluster_id::matches,
-    codes,
-    error::BrokerError,
-    handlers::{RequestContext, decode_request, encode_response},
-    metrics::QuotaType,
-    quota::throttle_time_ms,
+use {
+    self::feature_keys::{finalized_feature_keys, supported_feature_keys},
+    crate::{
+        api_catalog::{UnstableApiVersions, supported_apis},
+        broker::Broker,
+        cluster_id::matches,
+        codes,
+        error::BrokerError,
+        handlers::{RequestContext, decode_request, encode_response},
+        metrics::QuotaType,
+        quota::throttle_time_ms,
+    },
 };
 
 /// First `ApiVersions` request version that carries the KIP-511

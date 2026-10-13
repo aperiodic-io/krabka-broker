@@ -1,17 +1,17 @@
 //! Tests for the krabka-private registration table: that every private api
 //! key reaches its own adapter, and that none of them is advertised.
 
-use std::collections::BTreeSet;
-
-use assert2::{assert, check};
-
-use super::*;
-use crate::{
-    api_catalog::dispatched_apis,
-    handlers::{
-        self,
-        registry::{DispatchKind, RequestQuotaPolicy, build_registry},
+use {
+    super::*,
+    crate::{
+        api_catalog::dispatched_apis,
+        handlers::{
+            self,
+            registry::{DispatchKind, RequestQuotaPolicy, build_registry},
+        },
     },
+    assert2::{assert, check},
+    std::collections::BTreeSet,
 };
 
 /// Every krabka-private api key, the adapter that dispatch must reach, and

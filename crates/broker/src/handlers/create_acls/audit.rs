@@ -6,14 +6,15 @@
 //! join over the request, the results, and the submitted records. That join is
 //! worth its own file.
 
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::owned::{
-    create_acls_request::CreateAclsRequest, create_acls_response::AclCreationResult,
-};
-
-use crate::{
-    codes,
-    handlers::{RequestContext, audit_admin_success, audit_resource},
+use {
+    crate::{
+        codes,
+        handlers::{RequestContext, audit_admin_success, audit_resource},
+    },
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::owned::{
+        create_acls_request::CreateAclsRequest, create_acls_response::AclCreationResult,
+    },
 };
 
 pub(super) fn created_acl_resources(
@@ -40,12 +41,13 @@ pub(super) fn audit_created_acls(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::handlers::create_acls::{
-        response::{acl_error_result, acl_success_result},
-        test_support::{OPERATION_READ, OPERATION_WRITE, creation, request, validate},
+    use {
+        super::*,
+        crate::handlers::create_acls::{
+            response::{acl_error_result, acl_success_result},
+            test_support::{OPERATION_READ, OPERATION_WRITE, creation, request, validate},
+        },
+        assert2::assert,
     };
 
     #[test]

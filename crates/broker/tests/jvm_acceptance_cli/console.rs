@@ -4,12 +4,13 @@
 //! The group-driven console runs live in `console_groups`, so a failure here
 //! points at the produce and fetch path and not at the coordinator.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    KAFKA_IMAGE, assert_console_values, broker0_advertised, consume_console_partition,
-    create_console_topic, docker_run_kafka_tool, nc_check_connectivity, produce_console_checked,
-    start_console_broker, start_host_broker,
+use {
+    crate::jvm_acceptance::{
+        KAFKA_IMAGE, assert_console_values, broker0_advertised, consume_console_partition,
+        create_console_topic, docker_run_kafka_tool, nc_check_connectivity,
+        produce_console_checked, start_console_broker, start_host_broker,
+    },
+    assert2::assert,
 };
 
 // `flavor = "multi_thread"` is essential here. The test bodies make

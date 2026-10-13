@@ -20,18 +20,18 @@
 //! [`INVALID_SESSION_ID`](crate::fetch_session::INVALID_SESSION_ID) means the
 //! leader granted none and every request stays full.
 
-use std::collections::BTreeMap;
-
-use krabka_protocol::{
-    owned::fetch_request::{FetchPartition, FetchTopic, ForgottenTopic},
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    codes,
-    fetch_session::{
-        FetchSessionEpoch, FetchSessionId, INITIAL_EPOCH, INVALID_SESSION_ID, next_epoch,
+use {
+    crate::{
+        codes,
+        fetch_session::{
+            FetchSessionEpoch, FetchSessionId, INITIAL_EPOCH, INVALID_SESSION_ID, next_epoch,
+        },
     },
+    krabka_protocol::{
+        owned::fetch_request::{FetchPartition, FetchTopic, ForgottenTopic},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::collections::BTreeMap,
 };
 
 /// The identity a session row is keyed by. `topic_id` is the KIP-516 identity
@@ -59,9 +59,7 @@ impl Ord for SessionKey {
 }
 
 impl PartialOrd for SessionKey {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) }
 }
 
 /// What one round wants sent, before the session decides what actually is.
@@ -92,9 +90,7 @@ pub(super) struct FollowerFetchSession {
 
 impl FollowerFetchSession {
     /// Whether the next request will be a full one.
-    pub(super) fn is_full(&self) -> bool {
-        self.next_epoch == INITIAL_EPOCH
-    }
+    pub(super) fn is_full(&self) -> bool { self.next_epoch == INITIAL_EPOCH }
 
     /// Forgets the session and everything the leader was believed to hold, so
     /// the next request opens a new session and names every partition.

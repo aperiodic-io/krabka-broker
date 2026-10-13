@@ -1,10 +1,12 @@
 //! `init` with an OTLP configuration. It installs the process's one global
 //! subscriber, so it runs in a test binary of its own.
 
-use krabka_telemetry::{OtlpConfig, OtlpProtocol};
-use krabka_units::prelude::{millis, secs};
-use opentelemetry::trace::TraceContextExt as _;
-use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+use {
+    krabka_telemetry::{OtlpConfig, OtlpProtocol},
+    krabka_units::prelude::{millis, secs},
+    opentelemetry::trace::TraceContextExt as _,
+    tracing_opentelemetry::OpenTelemetrySpanExt as _,
+};
 
 /// A loopback address nothing listens on: the exporters connect lazily, so
 /// the batches they cannot send are dropped and nothing blocks.

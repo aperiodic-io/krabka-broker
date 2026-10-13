@@ -6,15 +6,17 @@
 //! record only when they mean to. The child modules cover target matching, the
 //! checks that make a proposal usable, and the refusal the gate reports.
 
-use assert2::{assert, check};
-use krabka_metadata::{
-    BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, MetadataImage, MetadataRecord,
+use {
+    super::{authorize, is_gated},
+    crate::{config::BreakGlassConfig, time_util::now_ms},
+    assert2::{assert, check},
+    krabka_metadata::{
+        BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, MetadataImage,
+        MetadataRecord,
+    },
+    krabka_units::minutes,
+    uuid::Uuid,
 };
-use krabka_units::minutes;
-use uuid::Uuid;
-
-use super::{authorize, is_gated};
-use crate::{config::BreakGlassConfig, time_util::now_ms};
 
 pub(crate) const CREATED_MS: i64 = 1_770_000_000_000;
 pub(crate) const EXPIRES_MS: i64 = 1_770_000_180_000;

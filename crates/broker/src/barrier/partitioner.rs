@@ -17,9 +17,7 @@ pub(crate) fn partition_for_group(group: &str, num_partitions: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     // The vectors come from the canonical JVM
     // `Utils.abs(Utils.murmur2(s.getBytes(UTF_8))) % 50` implementation.

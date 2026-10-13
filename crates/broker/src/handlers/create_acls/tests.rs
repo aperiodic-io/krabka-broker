@@ -5,27 +5,27 @@
 //! stamps every creation, the positional interleaving of accepted and rejected
 //! creations, and the absence of a principal or resource-name length limit.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_metadata::{
-    AclEntry, AclOperation, FeatureLevelRecord, MetadataRecord, PatternType, PermissionType,
-    ResourceType,
-};
-use krabka_protocol::owned::create_acls_response::{AclCreationResult, CreateAclsResponse};
-
-use super::handle;
-use crate::{
-    broker::{Broker, BrokerHandle},
-    codes,
-    handlers::create_acls::test_support::{
-        OPERATION_READ, OPERATION_WRITE, VERSION, all_acls, configured_authorizer, creation,
-        request, test_context,
+use {
+    super::handle,
+    crate::{
+        broker::{Broker, BrokerHandle},
+        codes,
+        handlers::create_acls::test_support::{
+            OPERATION_READ, OPERATION_WRITE, VERSION, all_acls, configured_authorizer, creation,
+            request, test_context,
+        },
+        test_support::{
+            AllowAclSetup, DenyAll, allow_acl, start_broker_no_audit_with,
+            start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+        },
     },
-    test_support::{
-        AllowAclSetup, DenyAll, allow_acl, start_broker_no_audit_with,
-        start_broker_with_authorizer_no_audit as start_broker, test_ctx,
+    assert2::{assert, check},
+    krabka_metadata::{
+        AclEntry, AclOperation, FeatureLevelRecord, MetadataRecord, PatternType, PermissionType,
+        ResourceType,
     },
+    krabka_protocol::owned::create_acls_response::{AclCreationResult, CreateAclsResponse},
+    std::sync::Arc,
 };
 
 /// The row Kafka's `AclApis.handleCreateAcls` sends for a committed

@@ -7,12 +7,13 @@
 //! epoch-monotonicity check that every transition runs against the rebuilt
 //! group lives here too, because it reads the same two representations.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use super::state::{MemberProj, ReconState};
-use crate::coordinator::unified::{
-    actor::reconciliation_model_support::{assert_member_epochs, model_epoch_assertion},
-    consumer_state::GroupState,
+use {
+    super::state::{MemberProj, ReconState},
+    crate::coordinator::unified::{
+        actor::reconciliation_model_support::{assert_member_epochs, model_epoch_assertion},
+        consumer_state::GroupState,
+    },
+    std::collections::{BTreeMap, BTreeSet},
 };
 
 crate::coordinator::unified::actor::reconciliation_model_support::rebuild_model_group! {

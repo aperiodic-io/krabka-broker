@@ -82,15 +82,17 @@
 //! ## Filesystem-backed remote tier
 //!
 //! ```no_run
-//! use std::{collections::BTreeMap, path::PathBuf};
-//!
-//! use bytes::Bytes;
-//! use krabka_ids::LeaderEpoch;
-//! use krabka_remote_storage::{
-//!     IndexType, LocalTieredStorage, LogSegmentData, RemoteLogSegmentDetails, RemoteLogSegmentId,
-//!     RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageManager, TopicIdPartition,
+//! use {
+//!     bytes::Bytes,
+//!     krabka_ids::LeaderEpoch,
+//!     krabka_remote_storage::{
+//!         IndexType, LocalTieredStorage, LogSegmentData, RemoteLogSegmentDetails,
+//!         RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentState,
+//!         RemoteStorageManager, TopicIdPartition,
+//!     },
+//!     std::{collections::BTreeMap, path::PathBuf},
+//!     uuid::Uuid,
 //! };
-//! use uuid::Uuid;
 //!
 //! # fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let storage = LocalTieredStorage::new(PathBuf::from("/var/lib/krabka-remote"));
@@ -148,45 +150,47 @@ mod worm;
 #[cfg(test)]
 mod test_support;
 
-pub use dump::{PartitionDump, RlmmCacheDump};
-pub use error::RemoteStorageError;
-pub use index::{
-    AbortedTxnIndexEntry, BytePosition, LogOffset, OffsetIndexEntry, RelativeOffset,
-    TimeIndexEntry, TimestampMs, corrupt_log, end_position_for, first_batch_at_or_after,
-    first_record_at_or_after_timestamp, parse_offset_index, parse_time_index, parse_txn_index,
-    position_for_relative_offset, relative_offset_floor_for_timestamp, txn_overlaps,
-};
-pub use index_cache::{
-    DEFAULT_INDEX_CACHE_TOTAL_SIZE_BYTES, IndexCacheOutcome, IndexCacheStats,
-    REMOTE_INDEX_CACHE_DIR, RemoteIndexCache,
-};
-pub use inmemory::InmemoryRemoteLogMetadataManager;
-pub use krabka_object_store::{
-    DEFAULT_MULTIPART_CHUNK_SIZE, DEFAULT_MULTIPART_THRESHOLD, GcsConfig, ObjectStoreConfig,
-    S3Config,
-};
-pub use local::LocalTieredStorage;
-pub use metadata::{
-    CustomMetadata, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
-    RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, RemotePartitionDeleteMetadata,
-    RemotePartitionDeleteState, TopicIdPartition,
-};
-pub use metadata_manager::RemoteLogMetadataManager;
-pub use s3::S3RemoteStorage;
-pub use storage_manager::{
-    IndexType, LOG_FILE_SUFFIX, LogSegmentData, PartitionDirName, RemoteStorageManager,
-    SegmentFileName, decode_kafka_uuid, kafka_uuid, parse_partition_dir_name,
-    parse_segment_file_name, partition_dir_name, segment_file_name,
-};
-pub use worm::{
-    ArchiveVerifyReport, AuthenticatedArchive, ChainHead, ChainStamp, EpochId, EpochSpan, HexBytes,
-    MANIFEST_BODY_DOMAIN, MANIFEST_DOMAIN, MANIFEST_FORMAT_VERSION, MANIFEST_SUFFIX,
-    MAX_MANIFEST_BYTES, ManifestBody, ManifestSeq, ManifestSignature, ObjectEntry,
-    ObjectProtectionReport, OffsetGap, PartitionVerifyReport, SealedManifest, SegmentIdentity,
-    SegmentManifest, Sha256Digest, TrustedManifestKeys, VerifyBreak, VerifyDepth, VerifyRequest,
-    WORM_CHAIN_RECORD_VERSION, WormArchiver, WormChainRecord, WormConfig, WormError,
-    authenticate_archive, canonical_manifest_bytes, manifest_head, manifest_signing_bytes,
-    next_chain_stamp, verify_archive, verify_manifest_signature,
+pub use {
+    dump::{PartitionDump, RlmmCacheDump},
+    error::RemoteStorageError,
+    index::{
+        AbortedTxnIndexEntry, BytePosition, LogOffset, OffsetIndexEntry, RelativeOffset,
+        TimeIndexEntry, TimestampMs, corrupt_log, end_position_for, first_batch_at_or_after,
+        first_record_at_or_after_timestamp, parse_offset_index, parse_time_index, parse_txn_index,
+        position_for_relative_offset, relative_offset_floor_for_timestamp, txn_overlaps,
+    },
+    index_cache::{
+        DEFAULT_INDEX_CACHE_TOTAL_SIZE_BYTES, IndexCacheOutcome, IndexCacheStats,
+        REMOTE_INDEX_CACHE_DIR, RemoteIndexCache,
+    },
+    inmemory::InmemoryRemoteLogMetadataManager,
+    krabka_object_store::{
+        DEFAULT_MULTIPART_CHUNK_SIZE, DEFAULT_MULTIPART_THRESHOLD, GcsConfig, ObjectStoreConfig,
+        S3Config,
+    },
+    local::LocalTieredStorage,
+    metadata::{
+        CustomMetadata, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+        RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, RemotePartitionDeleteMetadata,
+        RemotePartitionDeleteState, TopicIdPartition,
+    },
+    metadata_manager::RemoteLogMetadataManager,
+    s3::S3RemoteStorage,
+    storage_manager::{
+        IndexType, LOG_FILE_SUFFIX, LogSegmentData, PartitionDirName, RemoteStorageManager,
+        SegmentFileName, decode_kafka_uuid, kafka_uuid, parse_partition_dir_name,
+        parse_segment_file_name, partition_dir_name, segment_file_name,
+    },
+    worm::{
+        ArchiveVerifyReport, AuthenticatedArchive, ChainHead, ChainStamp, EpochId, EpochSpan,
+        HexBytes, MANIFEST_BODY_DOMAIN, MANIFEST_DOMAIN, MANIFEST_FORMAT_VERSION, MANIFEST_SUFFIX,
+        MAX_MANIFEST_BYTES, ManifestBody, ManifestSeq, ManifestSignature, ObjectEntry,
+        ObjectProtectionReport, OffsetGap, PartitionVerifyReport, SealedManifest, SegmentIdentity,
+        SegmentManifest, Sha256Digest, TrustedManifestKeys, VerifyBreak, VerifyDepth,
+        VerifyRequest, WORM_CHAIN_RECORD_VERSION, WormArchiver, WormChainRecord, WormConfig,
+        WormError, authenticate_archive, canonical_manifest_bytes, manifest_head,
+        manifest_signing_bytes, next_chain_stamp, verify_archive, verify_manifest_signature,
+    },
 };
 
 #[cfg(test)]

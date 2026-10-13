@@ -46,9 +46,7 @@ pub(crate) fn parse_describe(stdout: &str) -> Configs {
 }
 
 /// Whether a line is the quota path's one-line summary.
-fn is_quota_line(line: &str) -> bool {
-    line.starts_with("Quota configs for ")
-}
+fn is_quota_line(line: &str) -> bool { line.starts_with("Quota configs for ") }
 
 /// The entity a quota line named, as the tool spelled it.
 ///
@@ -73,9 +71,7 @@ pub(crate) fn quota_entities(stdout: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn the_resource_path_yields_its_keys_without_the_provenance() {

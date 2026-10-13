@@ -1,8 +1,9 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{ProducerDecision, epoch_handoff_survives_delayed_completions, recovered_window_row};
-use crate::transaction::InitProducerIdIdentityDecision;
+use {
+    super::{ProducerDecision, epoch_handoff_survives_delayed_completions, recovered_window_row},
+    crate::transaction::InitProducerIdIdentityDecision,
+    assert2::assert,
+    proptest::prelude::*,
+};
 
 #[test]
 fn delayed_callbacks_cannot_replace_coordinates_with_a_same_sequence_alias() {

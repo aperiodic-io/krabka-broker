@@ -5,17 +5,17 @@
 //! of these functions when the boundary arrives: the rebalance deadline, an
 //! early completion, a member removal, or the leader's `SyncGroup`.
 
-use std::{collections::HashMap, time::Instant};
-
-use tokio::sync::oneshot;
-
-use super::{JoinResult, ParkedWaiters, SyncResult};
-use crate::{
-    codes,
-    coordinator::unified::{
-        classic_ops,
-        classic_state::{ClassicGroup as ClassicState, GroupState as ClassicGroupState},
+use {
+    super::{JoinResult, ParkedWaiters, SyncResult},
+    crate::{
+        codes,
+        coordinator::unified::{
+            classic_ops,
+            classic_state::{ClassicGroup as ClassicState, GroupState as ClassicGroupState},
+        },
     },
+    std::{collections::HashMap, time::Instant},
+    tokio::sync::oneshot,
 };
 
 /// Runs Kafka's `completeClassicGroupJoin` and resolves every parked joiner.
@@ -210,12 +210,12 @@ pub(super) fn drain_parked_followers(
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
-
-    use assert2::{assert, check};
-    use bytes::Bytes;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        bytes::Bytes,
+        std::time::{Duration, Instant},
+    };
 
     #[test]
     fn inconsistent_classic_completion_clears_deadline() {

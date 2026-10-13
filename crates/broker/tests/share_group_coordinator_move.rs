@@ -9,20 +9,20 @@
 //! them, and it answered every member's next heartbeat with
 //! `GROUP_ID_NOT_FOUND`, which a share consumer cannot recover from.
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use krabka_broker::{BrokerConfig, BrokerHandle};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    share_group_heartbeat_request::ShareGroupHeartbeatRequest,
-    share_group_heartbeat_response::ShareGroupHeartbeatResponse,
-};
-use tempfile::TempDir;
-
-use crate::support::{
-    client::connect_owned, discovery::coordinator_lookup_request, share::crash_follower,
-    shutdown_cluster,
+use {
+    crate::support::{
+        client::connect_owned, discovery::coordinator_lookup_request, share::crash_follower,
+        shutdown_cluster,
+    },
+    assert2::{assert, check},
+    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+        share_group_heartbeat_response::ShareGroupHeartbeatResponse,
+    },
+    std::time::{Duration, Instant},
+    tempfile::TempDir,
 };
 
 mod support;
@@ -63,11 +63,9 @@ async fn coordinator_of(client: &Client, excluded: Option<u64>) -> u64 {
     let deadline = Instant::now() + SETTLE;
     loop {
         let found = client
-            .send(coordinator_lookup_request(
-                GROUP,
-                KEY_TYPE_GROUP,
-                vec![GROUP.into()],
-            ))
+            .send(coordinator_lookup_request(GROUP, KEY_TYPE_GROUP, vec![
+                GROUP.into(),
+            ]))
             .await
             .expect("FindCoordinator");
         if let [row] = found.coordinators.as_slice()

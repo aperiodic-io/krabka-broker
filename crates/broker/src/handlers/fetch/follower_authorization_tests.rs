@@ -16,32 +16,32 @@
 //! that never fetches, so the high watermark stays at 0 until a fetch as node
 //! 2 moves it.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_log::Offset;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    owned::{
-        fetch_request::{FetchRequest, FetchTopic},
-        fetch_response::{FetchResponse, PartitionData},
+use {
+    super::FIRST_TOPIC_ID_VERSION,
+    crate::{
+        authorizer::AuthorizationResult,
+        broker::BrokerHandle,
+        codes,
+        handlers::{
+            acl_wire::CLUSTER_RESOURCE_NAME,
+            test_support::{ReplicatedTopicSetup, default_records_batch, seed_partition_replicas},
+        },
+        partition::Partition,
+        test_support::{append_partition_batch, start_broker_no_audit_with},
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::{RecordBatch, RecordsPayload},
-};
-
-use super::FIRST_TOPIC_ID_VERSION;
-use crate::{
-    authorizer::AuthorizationResult,
-    broker::BrokerHandle,
-    codes,
-    handlers::{
-        acl_wire::CLUSTER_RESOURCE_NAME,
-        test_support::{ReplicatedTopicSetup, default_records_batch, seed_partition_replicas},
+    assert2::assert,
+    bytes::Bytes,
+    krabka_log::Offset,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        owned::{
+            fetch_request::{FetchRequest, FetchTopic},
+            fetch_response::{FetchResponse, PartitionData},
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::{RecordBatch, RecordsPayload},
     },
-    partition::Partition,
-    test_support::{append_partition_batch, start_broker_no_audit_with},
+    std::sync::Arc,
 };
 
 /// The node id of the follower that the fetches claim to be. The broker under
@@ -176,14 +176,11 @@ async fn replicated_partition(
     topic: &str,
     topic_id: uuid::Uuid,
 ) -> (Arc<Partition>, RecordBatch) {
-    seed_partition_replicas(
-        broker,
-        ReplicatedTopicSetup {
-            topic,
-            topic_id,
-            ..Default::default()
-        },
-    )
+    seed_partition_replicas(broker, ReplicatedTopicSetup {
+        topic,
+        topic_id,
+        ..Default::default()
+    })
     .await;
 
     let shared = broker.broker_arc_for_test();
@@ -247,15 +244,11 @@ async fn fetch(
     caller: Caller,
     request: &FetchRequest,
 ) -> FetchResponse {
-    super::test_support::fetch_wire(
-        broker,
-        request,
-        super::test_support::FetchWireSetup {
-            version: krabka_ids::ApiVersion(version.0),
-            user: caller.name(),
-            client_id: "fetch-client",
-        },
-    )
+    super::test_support::fetch_wire(broker, request, super::test_support::FetchWireSetup {
+        version: krabka_ids::ApiVersion(version.0),
+        user: caller.name(),
+        client_id: "fetch-client",
+    })
     .await
 }
 
@@ -278,9 +271,7 @@ fn refused(error_code: KafkaErrorCode) -> PartitionData {
 }
 
 /// The record set of a row that carries nothing, as a client decodes it.
-fn no_records() -> RecordsPayload {
-    RecordsPayload::Legacy(Bytes::new())
-}
+fn no_records() -> RecordsPayload { RecordsPayload::Legacy(Bytes::new()) }
 
 fn expected(case: Case, label: String, topic: (&str, WireUuid), batch: RecordBatch) -> Outcome {
     let (from_start, from_log_end, high_watermark) = match case.expect {

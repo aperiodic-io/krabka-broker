@@ -1,7 +1,4 @@
-use assert2::assert;
-use object_store::path::Path;
-
-use super::*;
+use {super::*, assert2::assert, object_store::path::Path};
 
 #[tokio::test]
 async fn mock_seam_compiles_and_returns() {

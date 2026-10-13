@@ -42,20 +42,20 @@
 //! target.
 
 #[cfg(not(target_family = "wasm"))]
-use std::net::SocketAddr;
-use std::sync::{
-    Arc, OnceLock,
-    atomic::{AtomicBool, Ordering},
-};
-
+use crate::http_server::spawn;
 #[cfg(not(target_family = "wasm"))]
 use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 #[cfg(not(target_family = "wasm"))]
-use tokio_util::sync::CancellationToken;
-
+use std::net::SocketAddr;
 #[cfg(not(target_family = "wasm"))]
-use crate::http_server::spawn;
-use crate::metadata_source::MetadataSource;
+use tokio_util::sync::CancellationToken;
+use {
+    crate::metadata_source::MetadataSource,
+    std::sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 #[cfg(test)]
 mod tests;
@@ -80,12 +80,9 @@ pub trait MetadataProgress: Send + Sync {
 pub fn metadata_progress(source: Arc<dyn MetadataSource>) -> Arc<dyn MetadataProgress> {
     struct SourceProgress(Arc<dyn MetadataSource>);
     impl MetadataProgress for SourceProgress {
-        fn node_metadata_offset(&self) -> i64 {
-            self.0.current_metadata_offset()
-        }
-        fn quorum_committed_offset(&self) -> i64 {
-            self.0.quorum_committed_offset()
-        }
+        fn node_metadata_offset(&self) -> i64 { self.0.current_metadata_offset() }
+
+        fn quorum_committed_offset(&self) -> i64 { self.0.quorum_committed_offset() }
     }
     Arc::new(SourceProgress(source))
 }
@@ -184,9 +181,7 @@ impl HealthState {
     }
 
     /// Called when controlled shutdown begins draining leadership.
-    pub fn mark_shutting_down(&self) {
-        self.inner.shutting_down.store(true, Ordering::Release);
-    }
+    pub fn mark_shutting_down(&self) { self.inner.shutting_down.store(true, Ordering::Release); }
 
     /// Called once the log dirs have been scanned and every recovered
     /// partition has its writer.
@@ -296,9 +291,7 @@ pub async fn serve(
 /// and deliberately consults none of the readiness conditions: see the module
 /// documentation for why a recovering broker must not be killed.
 #[cfg(not(target_family = "wasm"))]
-async fn healthz() -> impl IntoResponse {
-    (StatusCode::OK, "ok\n")
-}
+async fn healthz() -> impl IntoResponse { (StatusCode::OK, "ok\n") }
 
 /// Readiness. 200 once every condition holds; otherwise 503 whose body names
 /// the first condition that does not.

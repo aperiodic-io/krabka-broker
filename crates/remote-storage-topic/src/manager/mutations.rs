@@ -1,13 +1,13 @@
 //! Completion of local mutations by the single cache consumer.
 
-use std::collections::HashMap;
-
-use bytes::Bytes;
-use krabka_remote_storage::{RemoteStorageError, TopicIdPartition};
-use tokio::sync::{Mutex, oneshot};
-
-use super::{TopicBasedRemoteLogMetadataManager, assignment::ReadGate};
-use crate::{error::MetadataLogError, partitioning::metadata_partition_for};
+use {
+    super::{TopicBasedRemoteLogMetadataManager, assignment::ReadGate},
+    crate::{error::MetadataLogError, partitioning::metadata_partition_for},
+    bytes::Bytes,
+    krabka_remote_storage::{RemoteStorageError, TopicIdPartition},
+    std::collections::HashMap,
+    tokio::sync::{Mutex, oneshot},
+};
 
 type MutationReply = oneshot::Sender<Result<(), RemoteStorageError>>;
 pub(super) type MutationWaiters = Mutex<HashMap<(i32, i64), MutationReply>>;

@@ -8,26 +8,27 @@
 //! error. The `TOPIC_AUTHORIZATION_FAILED` rows of `KafkaApis` are built here
 //! as well, so every row shape of the response lives in one place.
 
-use futures_util::future::join_all;
-use krabka_protocol::{
-    owned::{
-        describe_share_group_offsets_request::DescribeShareGroupOffsetsRequestTopic,
-        describe_share_group_offsets_response::{
-            DescribeShareGroupOffsetsResponsePartition, DescribeShareGroupOffsetsResponseTopic,
+use {
+    super::end_offsets::{
+        EndOffset, LatestOffsets, TopicPartition, UNKNOWN_SERVER_ERROR_MESSAGE, lookup_error,
+    },
+    crate::{
+        codes,
+        error::BrokerError,
+        share_coordinator::{
+            coordinator::{ShareStateSummary, UNINITIALIZED_START_OFFSET},
+            persister_client::SharePersister,
         },
     },
-    primitives::uuid::Uuid,
-};
-
-use super::end_offsets::{
-    EndOffset, LatestOffsets, TopicPartition, UNKNOWN_SERVER_ERROR_MESSAGE, lookup_error,
-};
-use crate::{
-    codes,
-    error::BrokerError,
-    share_coordinator::{
-        coordinator::{ShareStateSummary, UNINITIALIZED_START_OFFSET},
-        persister_client::SharePersister,
+    futures_util::future::join_all,
+    krabka_protocol::{
+        owned::{
+            describe_share_group_offsets_request::DescribeShareGroupOffsetsRequestTopic,
+            describe_share_group_offsets_response::{
+                DescribeShareGroupOffsetsResponsePartition, DescribeShareGroupOffsetsResponseTopic,
+            },
+        },
+        primitives::uuid::Uuid,
     },
 };
 
@@ -341,13 +342,13 @@ fn partition_row(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use assert2::assert;
-    use krabka_log::Offset;
-    use krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_log::Offset,
+        krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord},
+        std::collections::HashMap,
+    };
 
     const ORDERS: uuid::Uuid = uuid::Uuid::from_u128(0xD5C0);
     const AUDIT: uuid::Uuid = uuid::Uuid::from_u128(0xA0D1);
@@ -505,18 +506,16 @@ mod tests {
                 vec![topic("orders", &[0])],
                 vec![((ORDERS, 0), Some((1, 4, Offset(21), 10)))],
                 vec![],
-                Ok(vec![row(
-                    "orders",
-                    ORDERS,
-                    vec![DescribeShareGroupOffsetsResponsePartition {
+                Ok(vec![row("orders", ORDERS, vec![
+                    DescribeShareGroupOffsetsResponsePartition {
                         partition_index: 0,
                         error_code: codes::NETWORK_EXCEPTION,
                         error_message: Some(
                             "The server disconnected before a response was received.".into(),
                         ),
                         ..Default::default()
-                    }],
-                )]),
+                    },
+                ])]),
             ),
             (
                 "an unknown topic has no data, after the known topics",

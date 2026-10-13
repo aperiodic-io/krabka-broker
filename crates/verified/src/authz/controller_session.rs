@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{RequestAuthState, request_auth_admission};
+use {
+    super::{RequestAuthState, request_auth_admission},
+    creusot_std::prelude::*,
+};
 
 /// Controller connections currently require reconnecting to reauthenticate.
 /// Expiry therefore fails the authentication phase before any API dispatch.

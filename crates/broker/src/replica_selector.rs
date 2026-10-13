@@ -113,9 +113,7 @@ impl ReplicaSelectorKind {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// A follower in the ISR that has fetched to offset 100 and caught up a
     /// moment ago; the cases below change the fields they are about.

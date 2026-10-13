@@ -1,15 +1,15 @@
 //! The three differential cases.
 
-use std::{collections::BTreeSet, path::PathBuf};
-
-use assert2::assert;
-use krabka_protocol::owned::api_versions_response::ApiVersion;
-
-use crate::{
-    divergence::DivergenceReport,
-    oracle::{ORACLE_IMAGE, OracleBroker, krabka_api_versions, start_krabka},
-    parse::{advertised, parse_single_broker},
-    support::{JvmListeners, manifest_dir},
+use {
+    crate::{
+        divergence::DivergenceReport,
+        oracle::{ORACLE_IMAGE, OracleBroker, krabka_api_versions, start_krabka},
+        parse::{advertised, parse_single_broker},
+        support::{JvmListeners, manifest_dir},
+    },
+    assert2::assert,
+    krabka_protocol::owned::api_versions_response::ApiVersion,
+    std::{collections::BTreeSet, path::PathBuf},
 };
 
 /// Where the checked-in report lives.
@@ -60,9 +60,7 @@ fn kafka_advertised_table() -> (OracleBroker, Vec<ApiVersion>) {
 }
 
 /// The API keys one advertised table names.
-fn key_set(apis: &[ApiVersion]) -> BTreeSet<i16> {
-    apis.iter().map(|api| api.api_key).collect()
-}
+fn key_set(apis: &[ApiVersion]) -> BTreeSet<i16> { apis.iter().map(|api| api.api_key).collect() }
 
 /// Read krabka's advertised table the way a client does: through the JVM tool.
 async fn krabka_advertised_table() -> Vec<ApiVersion> {

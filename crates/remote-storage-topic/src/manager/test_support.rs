@@ -5,19 +5,19 @@
 //! parts several of them need. One module for the harness keeps a change to a
 //! fixture in one place.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{RemoteLogMetadataManager, RemoteStorageError, TopicIdPartition};
-use tokio::runtime::Handle;
-use uuid::Uuid;
-
-use super::TopicBasedRemoteLogMetadataManager;
-use crate::{
-    error::MetadataLogError,
-    log::{InProcessMetadataEventLog, MetadataEventLog},
-    partitioning::metadata_partition_for,
+use {
+    super::TopicBasedRemoteLogMetadataManager,
+    crate::{
+        error::MetadataLogError,
+        log::{InProcessMetadataEventLog, MetadataEventLog},
+        partitioning::metadata_partition_for,
+    },
+    assert2::assert,
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{RemoteLogMetadataManager, RemoteStorageError, TopicIdPartition},
+    std::sync::Arc,
+    tokio::runtime::Handle,
+    uuid::Uuid,
 };
 
 /// Test double that delegates to an inner [`InProcessMetadataEventLog`]
@@ -36,6 +36,7 @@ impl HwmFlakyLog {
             fail_hwm: std::sync::atomic::AtomicBool::new(false),
         })
     }
+
     pub fn set_fail_hwm(&self, fail: bool) {
         self.fail_hwm
             .store(fail, std::sync::atomic::Ordering::SeqCst);
@@ -63,9 +64,7 @@ pub fn snapshot_test_dir(label: &str) -> std::path::PathBuf {
     ))
 }
 
-pub fn tp() -> TopicIdPartition {
-    TopicIdPartition::new(Uuid::from_u128(1), "orders", 0)
-}
+pub fn tp() -> TopicIdPartition { TopicIdPartition::new(Uuid::from_u128(1), "orders", 0) }
 
 krabka_macros::remote_segment_fixtures!(started, finish, krabka_remote_storage, next_offset);
 

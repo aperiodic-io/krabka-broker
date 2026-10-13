@@ -4,33 +4,33 @@
 //! preamble, the response shape for a row the metadata image does not know,
 //! and the metadata a successful alter leaves behind.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_metadata::{
-    BrokerRegistrationRecord, LeaderEpoch, MetadataRecord, PartitionRecord, TopicFreezeRecord,
-    TopicRecord,
-};
-use krabka_raft::NodeId;
-use uuid::Uuid;
-
-use super::*;
-use crate::{
-    broker::Broker,
-    codes::{POLICY_VIOLATION, UNKNOWN_TOPIC_OR_PARTITION},
-    config_keys::MIN_INSYNC_REPLICAS,
-    elr::state::test_records,
-    handlers::{
-        alter_partition_reassignments::test_support::{
-            ReassignmentRequestSetup, ReassignmentTarget, ReplicationFactorPolicy, request,
-            test_context,
+use {
+    super::*,
+    crate::{
+        broker::Broker,
+        codes::{POLICY_VIOLATION, UNKNOWN_TOPIC_OR_PARTITION},
+        config_keys::MIN_INSYNC_REPLICAS,
+        elr::state::test_records,
+        handlers::{
+            alter_partition_reassignments::test_support::{
+                ReassignmentRequestSetup, ReassignmentTarget, ReplicationFactorPolicy, request,
+                test_context,
+            },
+            test_support::{ReplicatedPartitionSetup, replicated_partition},
         },
-        test_support::{ReplicatedPartitionSetup, replicated_partition},
+        test_support::{
+            DenyAll, FreezeSetup, broker_registration, finalize_elr_version_on,
+            start_broker_with_authorizer as start_broker, test_ctx,
+        },
     },
-    test_support::{
-        DenyAll, FreezeSetup, broker_registration, finalize_elr_version_on,
-        start_broker_with_authorizer as start_broker, test_ctx,
+    assert2::{assert, check},
+    krabka_metadata::{
+        BrokerRegistrationRecord, LeaderEpoch, MetadataRecord, PartitionRecord, TopicFreezeRecord,
+        TopicRecord,
     },
+    krabka_raft::NodeId,
+    std::sync::Arc,
+    uuid::Uuid,
 };
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

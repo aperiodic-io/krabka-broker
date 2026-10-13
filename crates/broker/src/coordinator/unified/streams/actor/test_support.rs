@@ -1,23 +1,24 @@
 //! Coordinator fixtures and typed mailbox requests for streams actor tests.
 
-use std::sync::Arc;
-
-use krabka_ids::PartitionIndex;
-use krabka_protocol::owned::{
-    common::streams_group_heartbeat_response::{status::Status, task_ids::TaskIds},
-    streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-};
-
-use super::{
-    StreamsDescribeView, StreamsGroupActorHandle, StreamsGroupActorMessage, StreamsHeartbeatResult,
-};
-use crate::{
-    codes::NONE,
-    coordinator::unified::test_support::{
-        GroupCoordinator, InMemoryOffsetsLog, MemberEpoch, MetadataProvider, NextGenConfig,
-        ReconcileInput, ShareGroupConfig, StreamsGroupConfig,
+use {
+    super::{
+        StreamsDescribeView, StreamsGroupActorHandle, StreamsGroupActorMessage,
+        StreamsHeartbeatResult,
     },
-    task_util::ask,
+    crate::{
+        codes::NONE,
+        coordinator::unified::test_support::{
+            GroupCoordinator, InMemoryOffsetsLog, MemberEpoch, MetadataProvider, NextGenConfig,
+            ReconcileInput, ShareGroupConfig, StreamsGroupConfig,
+        },
+        task_util::ask,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_protocol::owned::{
+        common::streams_group_heartbeat_response::{status::Status, task_ids::TaskIds},
+        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+    },
+    std::sync::Arc,
 };
 
 pub(super) fn undelayed() -> StreamsGroupConfig {
@@ -32,9 +33,7 @@ pub(super) fn undelayed() -> StreamsGroupConfig {
 struct EmptyMetadata;
 
 impl MetadataProvider for EmptyMetadata {
-    fn snapshot(&self) -> ReconcileInput {
-        ReconcileInput::default()
-    }
+    fn snapshot(&self) -> ReconcileInput { ReconcileInput::default() }
 }
 
 /// A coordinator with no connected metadata source, retaining the supplied log ownership.

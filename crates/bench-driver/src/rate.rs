@@ -1,8 +1,10 @@
 //! Token-bucket pacer for `FixedRate` scenarios. `saturate` mode never
 //! calls this. It only `await`s the producer's natural backpressure.
 
-use krabka_units::prelude::*;
-use tokio::time::{Instant, interval_at};
+use {
+    krabka_units::prelude::*,
+    tokio::time::{Instant, interval_at},
+};
 
 /// The slowest rate the pacer runs at. A scenario that asks for less, or for
 /// nothing at all, clamps to this rate and does not sleep for an unbounded
@@ -35,16 +37,12 @@ impl Pacer {
     }
 
     /// Sleeps until the next token is available.
-    pub async fn await_token(&mut self) {
-        self.inner.tick().await;
-    }
+    pub async fn await_token(&mut self) { self.inner.tick().await; }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[tokio::test(start_paused = true)]
     async fn pacer_spaces_ticks() {

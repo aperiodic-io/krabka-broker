@@ -14,21 +14,21 @@
 
 mod support;
 
-use std::{io, path::PathBuf, sync::Arc};
-
-use assert2::assert;
-use krabka_broker::Broker;
-use krabka_security::{ClientAuthMode, TlsConfig};
-use tokio::net::TcpStream;
-use tokio_rustls::{
-    TlsConnector,
-    rustls::{
-        ClientConfig,
-        pki_types::{CertificateDer, ServerName, pem::PemObject as _},
+use {
+    crate::support::tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
+    assert2::assert,
+    krabka_broker::Broker,
+    krabka_security::{ClientAuthMode, TlsConfig},
+    std::{io, path::PathBuf, sync::Arc},
+    tokio::net::TcpStream,
+    tokio_rustls::{
+        TlsConnector,
+        rustls::{
+            ClientConfig,
+            pki_types::{CertificateDer, ServerName, pem::PemObject as _},
+        },
     },
 };
-
-use crate::support::tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config};
 
 const DEV_CERT_A: &str = include_str!("fixtures/security/dev_cert.pem");
 const DEV_KEY_A: &str = include_str!("fixtures/security/dev_key.pem");
@@ -184,15 +184,12 @@ fn cert_fixture() -> (
     let cert_path = write(pem_dir.path(), "cert.pem", DEV_CERT_A);
     let key_path = write(pem_dir.path(), "key.pem", DEV_KEY_A);
 
-    let cfg = ssl_config(
-        log_dir.path().to_path_buf(),
-        TlsConfig {
-            cert_chain_path: cert_path.clone(),
-            private_key_path: key_path.clone(),
-            trust_roots_path: None,
-            client_ca_path: None,
-            client_auth: ClientAuthMode::Disabled,
-        },
-    );
+    let cfg = ssl_config(log_dir.path().to_path_buf(), TlsConfig {
+        cert_chain_path: cert_path.clone(),
+        private_key_path: key_path.clone(),
+        trust_roots_path: None,
+        client_ca_path: None,
+        client_auth: ClientAuthMode::Disabled,
+    });
     (log_dir, pem_dir, cert_path, key_path, cfg)
 }

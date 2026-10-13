@@ -7,9 +7,10 @@
 //! into a terminal state on a consumer's word, and so the only place the
 //! delivery-complete accounting grows outside an internal archive.
 
-use krabka_log::Offset;
-
-use super::{AckType, AcquisitionState, RecordState, clamp_i32, dlq::DlqCause, window::give_back};
+use {
+    super::{AckType, AcquisitionState, RecordState, clamp_i32, dlq::DlqCause, window::give_back},
+    krabka_log::Offset,
+};
 
 impl AcquisitionState {
     /// Acknowledges the offset range `[first, last]` that `member` acquired
@@ -79,12 +80,13 @@ impl AcquisitionState {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::share_partition::state::{
-        AcquiredRange,
-        test_support::{LOCK, acquired_state, t0},
+    use {
+        super::*,
+        crate::share_partition::state::{
+            AcquiredRange,
+            test_support::{LOCK, acquired_state, t0},
+        },
+        assert2::assert,
     };
 
     #[test]

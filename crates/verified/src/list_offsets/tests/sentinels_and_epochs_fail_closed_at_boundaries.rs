@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn sentinels_and_epochs_fail_closed_at_boundaries() {

@@ -8,27 +8,27 @@
 //! partition log rather than to the delivery state machine, so they live
 //! apart from `state_machine`.
 
-use std::sync::{Arc, atomic::Ordering};
-
-use bytes::Bytes;
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_protocol::records::{Record, RecordBatch};
-use tokio::sync::Mutex;
-use tracing::warn;
-
-use super::{ShareCoordinator, ShareErrorCode, ShareStateError, Term, message};
-use crate::{
-    codes,
-    error::BrokerError,
-    partition::{Partition, ProduceBatchError},
-    share_coordinator::{
-        bootstrap,
-        persistence::{ShareStateKey, encode_state_key},
-        pruning::redundant_offset,
-        state::SharePartitionState,
+use {
+    super::{ShareCoordinator, ShareErrorCode, ShareStateError, Term, message},
+    crate::{
+        codes,
+        error::BrokerError,
+        partition::{Partition, ProduceBatchError},
+        share_coordinator::{
+            bootstrap,
+            persistence::{ShareStateKey, encode_state_key},
+            pruning::redundant_offset,
+            state::SharePartitionState,
+        },
     },
+    bytes::Bytes,
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_protocol::records::{Record, RecordBatch},
+    std::sync::{Arc, atomic::Ordering},
+    tokio::sync::Mutex,
+    tracing::warn,
 };
 
 #[cfg(test)]

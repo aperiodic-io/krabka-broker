@@ -18,14 +18,14 @@
 //! silence is longer than any quota window, so the burst it is handed back is
 //! one it would have refilled to anyway.
 
-use std::sync::Arc;
-
-use krabka_units::{Time, convert::TimeExt as _, minutes};
-use tokio_util::sync::CancellationToken;
-use tracing::debug;
-
-use super::buckets::QuotaBuckets;
-use crate::metrics::{BrokerMetrics, QuotaType};
+use {
+    super::buckets::QuotaBuckets,
+    crate::metrics::{BrokerMetrics, QuotaType},
+    krabka_units::{Time, convert::TimeExt as _, minutes},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
+    tracing::debug,
+};
 
 /// How long a bucket may go untouched before the sweep drops it. Kafka's
 /// `ClientQuotaManager.InactiveSensorExpirationTimeSeconds`.

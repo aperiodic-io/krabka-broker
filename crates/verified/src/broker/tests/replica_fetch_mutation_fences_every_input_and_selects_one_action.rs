@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn replica_fetch_mutation_fences_every_input_and_selects_one_action() {
@@ -116,13 +114,10 @@ fn preferred_rebalance_admits_only_capped_preferred_elections() {
         ),
         (
             "the preferred replica fell out of the ISR",
-            std::vec![
-                PREFERRED_BACK,
-                PreferredLeaderChange {
-                    leader_in_isr: false,
-                    ..PREFERRED_BACK
-                },
-            ],
+            std::vec![PREFERRED_BACK, PreferredLeaderChange {
+                leader_in_isr: false,
+                ..PREFERRED_BACK
+            },],
             1000,
             false,
         ),

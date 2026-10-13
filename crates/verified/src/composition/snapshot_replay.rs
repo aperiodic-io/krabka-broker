@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    ProducerReloadRange, producer_snapshot_latest_index, producer_snapshot_replay_start,
-    truncation_frontier,
+use {
+    super::{
+        ProducerReloadRange, producer_snapshot_latest_index, producer_snapshot_replay_start,
+        truncation_frontier,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Truncation selects exactly a newest surviving snapshot and constructs the

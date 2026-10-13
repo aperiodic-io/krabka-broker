@@ -5,11 +5,13 @@
 //! service can parse and validate its profiling settings without building a
 //! router or binding a port.
 
-use clap::Args;
-use krabka_macros::RefinedNewtype;
-use krabka_units::{Time, parse, per_sec, secs};
-use refined_type::rule::GreaterI32;
-use thiserror::Error;
+use {
+    clap::Args,
+    krabka_macros::RefinedNewtype,
+    krabka_units::{Time, parse, per_sec, secs},
+    refined_type::rule::GreaterI32,
+    thiserror::Error,
+};
 
 /// Profiling configuration or admin-server failure.
 #[derive(Debug, Error)]
@@ -92,11 +94,12 @@ impl ProfilingConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use clap::Parser;
-    use krabka_units::{Frequency, convert::FrequencyExt as _};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        clap::Parser,
+        krabka_units::{Frequency, convert::FrequencyExt as _},
+    };
 
     #[derive(Debug, Parser)]
     struct TestCli {

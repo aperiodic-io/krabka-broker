@@ -1,15 +1,15 @@
 //! `BrokerRegistration` (`api_key=62`). KIP-631/KIP-903 broker registration.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{BrokerEndpoint, BrokerRegistrationRecord, MetadataRecord, NodeId};
-use krabka_protocol::owned::{
-    broker_registration_request::{BrokerRegistrationRequest, Listener},
-    broker_registration_response::BrokerRegistrationResponse,
+use {
+    crate::{broker::Broker, clean_shutdown::restart_was_clean, codes},
+    krabka_metadata::{BrokerEndpoint, BrokerRegistrationRecord, MetadataRecord, NodeId},
+    krabka_protocol::owned::{
+        broker_registration_request::{BrokerRegistrationRequest, Listener},
+        broker_registration_response::BrokerRegistrationResponse,
+    },
+    krabka_raft::RaftError,
+    std::collections::HashSet,
 };
-use krabka_raft::RaftError;
-
-use crate::{broker::Broker, clean_shutdown::restart_was_clean, codes};
 
 context_handler! {
     BrokerRegistrationRequest => BrokerRegistrationResponse,
@@ -284,9 +284,7 @@ fn validate_log_dirs(
 
 /// Kafka's `DirectoryId.reserved`: the first hundred ids, which include
 /// `MIGRATING`, `UNASSIGNED` and `LOST`.
-fn reserved_directory_id(id: uuid::Uuid) -> bool {
-    id.as_u128() < 100
-}
+fn reserved_directory_id(id: uuid::Uuid) -> bool { id.as_u128() < 100 }
 
 /// Kafka's feature checks in `ClusterControlManager.registerBroker`, in its
 /// order.
@@ -342,10 +340,10 @@ fn response(error_code: i16, broker_epoch: i64) -> BrokerRegistrationResponse {
 
 #[cfg(test)]
 mod tests {
-    use krabka_protocol::owned::broker_registration_request::Feature;
-
-    use super::*;
-    use crate::test_support::broker_registration;
+    use {
+        super::*, crate::test_support::broker_registration,
+        krabka_protocol::owned::broker_registration_request::Feature,
+    };
 
     #[test]
     fn listener_validation_rejects_duplicates_and_unknown_protocol() {
@@ -515,27 +513,27 @@ mod tests {
 /// self-registration, which is a different route to the same records.
 #[cfg(test)]
 mod wire_tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{
-        BrokerRegistrationRecord, LeaderEpoch, NodeId, PartitionRecord, TopicConfigRecord,
-        TopicRecord,
-    };
-
-    use super::*;
-    use crate::{
-        clean_shutdown::UNPROVEN,
-        config_keys::MIN_INSYNC_REPLICAS,
-        elr::{
-            TopicElr,
-            state::{PartitionElr, test_records},
+    use {
+        super::*,
+        crate::{
+            clean_shutdown::UNPROVEN,
+            config_keys::MIN_INSYNC_REPLICAS,
+            elr::{
+                TopicElr,
+                state::{PartitionElr, test_records},
+            },
+            handlers::forward_to_controller::is_active_controller,
+            test_support::{
+                dispatch_wire, end_heartbeat_session, finalized_broker_features, peer,
+                start_broker_with_authorizer,
+            },
         },
-        handlers::forward_to_controller::is_active_controller,
-        test_support::{
-            dispatch_wire, end_heartbeat_session, finalized_broker_features, peer,
-            start_broker_with_authorizer,
+        assert2::assert,
+        krabka_metadata::{
+            BrokerRegistrationRecord, LeaderEpoch, NodeId, PartitionRecord, TopicConfigRecord,
+            TopicRecord,
         },
+        std::sync::Arc,
     };
 
     const TOPIC: &str = "orders";
@@ -557,9 +555,7 @@ mod wire_tests {
         Unproven,
     }
 
-    fn nodes(ids: &[u64]) -> Vec<NodeId> {
-        ids.iter().copied().map(NodeId).collect()
-    }
+    fn nodes(ids: &[u64]) -> Vec<NodeId> { ids.iter().copied().map(NodeId).collect() }
 
     /// Node 2 registered, and one partition of `TOPIC` holding `isr` under
     /// `min_isr`, published with `elr`.
@@ -770,9 +766,7 @@ mod wire_tests {
     /// membership to withdraw, and yet the next eligibility is derived from
     /// `old_isr`, which still names node 2 -- so whether node 2 stays in that
     /// ISR is the whole of the difference between the two branches.
-    fn healthy_isr_seed() -> Vec<MetadataRecord> {
-        seed_records(&[1, 2, 3], "3", None)
-    }
+    fn healthy_isr_seed() -> Vec<MetadataRecord> { seed_records(&[1, 2, 3], "3", None) }
 
     /// A restart that cannot prove itself clean loses its ISR seat as well as
     /// its eligibility, and the batch that takes the seat away does not hand

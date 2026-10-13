@@ -9,19 +9,20 @@
 //! [`cluster_action_allowed`] once for that, and this module then partitions
 //! the requested keys into refused rows and still-to-resolve keys.
 
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::find_coordinator_response::Coordinator;
-use krabka_verified::broker::{FindCoordinatorAdmission, find_coordinator_admission};
-
-use super::{
-    KEY_TYPE_GROUP, KEY_TYPE_SHARE, KEY_TYPE_TRANSACTION, resolve::parse_share_key,
-    response::no_node_row,
-};
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
-    broker::Broker,
-    codes,
-    handlers::{RequestContext, acl_wire::CLUSTER_RESOURCE_NAME},
+use {
+    super::{
+        KEY_TYPE_GROUP, KEY_TYPE_SHARE, KEY_TYPE_TRANSACTION, resolve::parse_share_key,
+        response::no_node_row,
+    },
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+        broker::Broker,
+        codes,
+        handlers::{RequestContext, acl_wire::CLUSTER_RESOURCE_NAME},
+    },
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::find_coordinator_response::Coordinator,
+    krabka_verified::broker::{FindCoordinatorAdmission, find_coordinator_admission},
 };
 
 pub(super) enum KeySlot {
@@ -36,16 +37,17 @@ pub(super) fn cluster_action_allowed(
     image: &krabka_metadata::MetadataImage,
     context: &RequestContext<'_>,
 ) -> bool {
-    broker.config.authorizer.authorize(
-        image,
-        &AuthorizationRequest {
+    broker
+        .config
+        .authorizer
+        .authorize(image, &AuthorizationRequest {
             principal: context.principal,
             host: context.peer,
             resource_type: ResourceType::Cluster,
             resource_name: CLUSTER_RESOURCE_NAME,
             operation: AclOperation::ClusterAction,
-        },
-    ) == AuthorizationResult::Allow
+        })
+        == AuthorizationResult::Allow
 }
 
 /// Authorize and validate a single `FindCoordinator` key.
@@ -73,16 +75,13 @@ fn key_admission(
         }
         _ => return find_coordinator_admission(api_version, key_type, false, false),
     };
-    let acl_allowed = authorizer.authorize(
-        image,
-        &AuthorizationRequest {
-            principal,
-            host,
-            resource_type,
-            resource_name: key,
-            operation,
-        },
-    ) == AuthorizationResult::Allow;
+    let acl_allowed = authorizer.authorize(image, &AuthorizationRequest {
+        principal,
+        host,
+        resource_type,
+        resource_name: key,
+        operation,
+    }) == AuthorizationResult::Allow;
     find_coordinator_admission(api_version, key_type, acl_allowed, true)
 }
 
@@ -125,12 +124,13 @@ pub(super) fn authorize_keys(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        authorizer::SimpleAclAuthorizer,
-        test_support::{peer, principal},
+    use {
+        super::*,
+        crate::{
+            authorizer::SimpleAclAuthorizer,
+            test_support::{peer, principal},
+        },
+        assert2::assert,
     };
 
     const SHARE_KEY: &str = "share-group:AAAAAAAAAAAAAAAAAAAAAA:0";
@@ -139,9 +139,7 @@ mod tests {
         SimpleAclAuthorizer::new(std::collections::HashSet::new())
     }
 
-    fn anon() -> krabka_security::Principal {
-        principal("ANONYMOUS")
-    }
+    fn anon() -> krabka_security::Principal { principal("ANONYMOUS") }
 
     /// (version, key type, key, expected admission) under an authorizer that
     /// denies everything. The SHARE rows never consult the authorizer: the

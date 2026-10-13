@@ -1,11 +1,12 @@
 //! `cli_main!`: see the crate documentation.
 
-use moxy::{
-    ast::ParseError,
-    token::{TokenStream, TokenTree},
+use {
+    crate::meta::required_tokens,
+    moxy::{
+        ast::ParseError,
+        token::{TokenStream, TokenTree},
+    },
 };
-
-use crate::meta::required_tokens;
 
 /// Splits `tokens` at its first top-level comma into the crate path and the
 /// `#[tokio::main(...)]` arguments. A comma inside a group belongs to the
@@ -47,11 +48,12 @@ pub(crate) fn expand(tokens: TokenStream) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use moxy::token::TokenStream;
-
-    use super::{expand, split};
-    use crate::meta::compact;
+    use {
+        super::{expand, split},
+        crate::meta::compact,
+        assert2::assert,
+        moxy::token::TokenStream,
+    };
 
     /// `tokens` parsed, split, and each side printed without whitespace.
     fn split_text(tokens: &str) -> (String, String) {

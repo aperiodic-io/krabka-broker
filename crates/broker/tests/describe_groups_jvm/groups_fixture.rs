@@ -4,9 +4,7 @@
 //! String fields are written verbatim and byte fields as hex plus a UTF-8-lossy
 //! rendering, so a fixture is both diffable and readable by a person.
 
-use std::path::PathBuf;
-
-use crate::support::manifest_dir;
+use {crate::support::manifest_dir, std::path::PathBuf};
 
 fn fixtures_dir() -> PathBuf {
     manifest_dir()

@@ -1,16 +1,15 @@
 //! Ordered rollover flushes that own file handles instead of the log mutex.
 
 #[cfg(not(target_os = "wasi"))]
+use crate::{
+    io::{IoTarget, LogIo},
+    producer_snapshot::PreparedSnapshot,
+};
+#[cfg(not(target_os = "wasi"))]
 use std::{collections::VecDeque, fs::File};
 use std::{
     io,
     sync::{Arc, Condvar, Mutex},
-};
-
-#[cfg(not(target_os = "wasi"))]
-use crate::{
-    io::{IoTarget, LogIo},
-    producer_snapshot::PreparedSnapshot,
 };
 
 #[cfg(not(target_os = "wasi"))]
@@ -71,9 +70,7 @@ pub(super) struct Flusher {
 }
 
 impl Flusher {
-    pub fn check(&self) -> io::Result<()> {
-        self.shared.state.lock().unwrap().result()
-    }
+    pub fn check(&self) -> io::Result<()> { self.shared.state.lock().unwrap().result() }
 
     pub fn finish(&self) -> io::Result<()> {
         let mut state = self.shared.state.lock().unwrap();

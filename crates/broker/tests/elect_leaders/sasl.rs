@@ -5,12 +5,13 @@
 //! authorizer to deny, so its listener is `SASL_PLAINTEXT` rather than the
 //! PLAINTEXT one the election tests use.
 
-use std::net::SocketAddr;
-
 pub use crate::kafka_wire::create_configured_topic_sasl as create_topic_sasl_plain;
-use crate::{
-    kafka_wire::{self, PlainAuthenticationSetup},
-    support::admin::{ElectionSetup, election_partition_errors, election_request},
+use {
+    crate::{
+        kafka_wire::{self, PlainAuthenticationSetup},
+        support::admin::{ElectionSetup, election_partition_errors, election_request},
+    },
+    std::net::SocketAddr,
 };
 
 /// Drives `ElectLeaders` over a SASL/PLAIN authenticated connection.

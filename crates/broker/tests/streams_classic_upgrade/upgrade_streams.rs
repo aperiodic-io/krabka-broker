@@ -5,14 +5,13 @@
 //! already owns, so the topology builder and the bounded convergence loop are
 //! kept here apart from the classic-side `JoinGroup` drivers.
 
-use krabka_protocol::owned::streams_group_heartbeat_request::Topology;
-
 pub use crate::support::streams::first_join;
-use crate::support::streams::topology as build_topology;
+use {
+    crate::support::streams::topology as build_topology,
+    krabka_protocol::owned::streams_group_heartbeat_request::Topology,
+};
 
-pub fn topology(source_topic: &str) -> Topology {
-    build_topology(source_topic, vec![])
-}
+pub fn topology(source_topic: &str) -> Topology { build_topology(source_topic, vec![]) }
 
 /// Drive a single streams member to convergence (at least `want_active`
 /// active-task partitions). Returns `(member_id, last_response)`.

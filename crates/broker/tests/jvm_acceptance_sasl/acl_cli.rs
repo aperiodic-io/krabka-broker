@@ -6,15 +6,17 @@
 //! separate from the files that check what those bindings then permit or
 //! deny on the data plane.
 
-use assert2::{assert, check};
-
-use crate::{
-    jvm_acceptance::{
-        ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
-        docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity, plain_client_properties,
-        start_sasl_plaintext_broker_with_super_user, write_plain_props,
+use {
+    crate::{
+        jvm_acceptance::{
+            ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, broker0_advertised,
+            docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity,
+            plain_client_properties, start_sasl_plaintext_broker_with_super_user,
+            write_plain_props,
+        },
+        oracle::secured_sides,
     },
-    oracle::secured_sides,
+    assert2::{assert, check},
 };
 
 /// JVM acceptance: `kafka-acls.sh` end-to-end provision flow.
@@ -40,40 +42,32 @@ async fn jvm_kafka_acls_provision_via_cli() {
     let mount = admin_props.mount_str();
 
     // 1. --add.
-    docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &mount,
-        &[
-            "kafka-acls",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--add",
-            "--allow-principal",
-            "User:alice",
-            "--operation",
-            "Read",
-            "--topic",
-            "foo",
-        ],
-    );
+    docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &mount, &[
+        "kafka-acls",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--add",
+        "--allow-principal",
+        "User:alice",
+        "--operation",
+        "Read",
+        "--topic",
+        "foo",
+    ]);
 
     // 2. --list --topic foo. Expect a line containing alice + READ + ALLOW.
-    let list_out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &mount,
-        &[
-            "kafka-acls",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--list",
-            "--topic",
-            "foo",
-        ],
-    );
+    let list_out = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &mount, &[
+        "kafka-acls",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--list",
+        "--topic",
+        "foo",
+    ]);
     let listed = String::from_utf8_lossy(&list_out.stdout);
     check!(
         listed.contains("User:alice"),
@@ -89,40 +83,32 @@ async fn jvm_kafka_acls_provision_via_cli() {
     );
 
     // 3. --remove --force. Then re-list and assert alice is no longer present.
-    docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &mount,
-        &[
-            "kafka-acls",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--remove",
-            "--force",
-            "--allow-principal",
-            "User:alice",
-            "--operation",
-            "Read",
-            "--topic",
-            "foo",
-        ],
-    );
+    docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &mount, &[
+        "kafka-acls",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--remove",
+        "--force",
+        "--allow-principal",
+        "User:alice",
+        "--operation",
+        "Read",
+        "--topic",
+        "foo",
+    ]);
 
-    let list_out2 = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &mount,
-        &[
-            "kafka-acls",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-            "--list",
-            "--topic",
-            "foo",
-        ],
-    );
+    let list_out2 = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &mount, &[
+        "kafka-acls",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+        "--list",
+        "--topic",
+        "foo",
+    ]);
     let listed2 = String::from_utf8_lossy(&list_out2.stdout);
     assert!(
         !listed2.contains("User:alice"),
@@ -153,11 +139,12 @@ async fn jvm_kafka_acls_provision_via_cli() {
 // principal filter would answer every case with every case's bindings, and the
 // set comparison would fail on the second one.
 
-use std::collections::BTreeSet;
-
-use crate::{
-    acl_output::{AclBinding, parse_acls},
-    oracle::{CliRun, Oracle, Side, ToolFile},
+use {
+    crate::{
+        acl_output::{AclBinding, parse_acls},
+        oracle::{CliRun, Oracle, Side, ToolFile},
+    },
+    std::collections::BTreeSet,
 };
 
 /// The topic every shorthand is scoped to.
@@ -352,18 +339,15 @@ async fn acl_shorthands_expand_as_apache_kafka_expands_them() {
     // Kafka first. Every expectation below is a claim about somebody else's
     // client, and this is where a wrong one is reported as such.
     let oracle = tokio::task::spawn_blocking(|| {
-        Oracle::start_with_env(
-            "acls",
-            &[
-                "KAFKA_AUTHORIZER_CLASS_NAME=org.apache.kafka.metadata.authorizer.StandardAuthorizer",
-                // The tool runs inside the container over the plaintext
-                // listener, so it arrives as `ANONYMOUS`. Naming it a super
-                // user is what lets it administer ACLs; it changes nothing
-                // about the bindings it then creates.
-                "KAFKA_SUPER_USERS=User:ANONYMOUS",
-                "KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND=false",
-            ],
-        )
+        Oracle::start_with_env("acls", &[
+            "KAFKA_AUTHORIZER_CLASS_NAME=org.apache.kafka.metadata.authorizer.StandardAuthorizer",
+            // The tool runs inside the container over the plaintext
+            // listener, so it arrives as `ANONYMOUS`. Naming it a super
+            // user is what lets it administer ACLs; it changes nothing
+            // about the bindings it then creates.
+            "KAFKA_SUPER_USERS=User:ANONYMOUS",
+            "KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND=false",
+        ])
     })
     .await
     .expect("oracle boot");

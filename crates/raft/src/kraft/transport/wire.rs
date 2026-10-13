@@ -47,14 +47,15 @@ pub use self::{
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::Bytes;
-
-    use super::{
-        PeerRequest, PeerResponse,
-        codec::{FETCH_VERSION, METADATA_TOPIC_ID},
+    use {
+        super::{
+            PeerRequest, PeerResponse,
+            codec::{FETCH_VERSION, METADATA_TOPIC_ID},
+        },
+        crate::kraft::types::NodeId,
+        assert2::assert,
+        bytes::Bytes,
     };
-    use crate::kraft::types::NodeId;
 
     #[test]
     fn fetch_wire_carries_metadata_topic_id() {

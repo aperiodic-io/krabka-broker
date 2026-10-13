@@ -4,14 +4,15 @@
 //! Field-for-field construction is the contract with the JVM `AdminClient`, so
 //! it sits apart from the code that decides which error code a row gets.
 
-use krabka_protocol::{
-    owned::delete_topics_response::{DeletableTopicResult, DeleteTopicsResponse},
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::codes::{
-    INVALID_REQUEST, THROTTLING_QUOTA_EXCEEDED, TOPIC_AUTHORIZATION_FAILED, UNKNOWN_TOPIC_ID,
-    UNKNOWN_TOPIC_OR_PARTITION,
+use {
+    crate::codes::{
+        INVALID_REQUEST, THROTTLING_QUOTA_EXCEEDED, TOPIC_AUTHORIZATION_FAILED, UNKNOWN_TOPIC_ID,
+        UNKNOWN_TOPIC_OR_PARTITION,
+    },
+    krabka_protocol::{
+        owned::delete_topics_response::{DeletableTopicResult, DeleteTopicsResponse},
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 /// Kafka's `Errors.TOPIC_AUTHORIZATION_FAILED.message()`.
@@ -162,10 +163,7 @@ pub(super) fn delete_topics_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::codes;
+    use {super::*, crate::codes, assert2::assert};
 
     #[test]
     fn response_helpers_preserve_topic_identity_error_and_throttle_fields() {

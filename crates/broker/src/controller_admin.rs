@@ -1,24 +1,25 @@
 //! KIP-919 Admin RPC routing for the controller listener.
 
-use std::sync::{Arc, OnceLock, Weak};
-
-use bytes::Bytes;
-use krabka_raft::{
-    ControllerAdminRequest, ControllerAdminResponse, ControllerAdminRouteFuture,
-    ControllerAdminRouter, ControllerApiVersion, RaftError, controller_api_version as api_version,
-};
-
-use crate::{
-    api_catalog::is_disabled_version,
-    authorizer::{AuthorizationRequest, AuthorizationResult},
-    broker::Broker,
-    envelope::{self, EnvelopeError, ForwardedRequest},
-    error::BrokerError,
-    handlers::{
-        ApiKeyCode, ApiVersion, CorrelationId, DispatchKind, RequestContext,
-        acl_wire::CLUSTER_RESOURCE_NAME,
+use {
+    crate::{
+        api_catalog::is_disabled_version,
+        authorizer::{AuthorizationRequest, AuthorizationResult},
+        broker::Broker,
+        envelope::{self, EnvelopeError, ForwardedRequest},
+        error::BrokerError,
+        handlers::{
+            ApiKeyCode, ApiVersion, CorrelationId, DispatchKind, RequestContext,
+            acl_wire::CLUSTER_RESOURCE_NAME,
+        },
+        network::auth::ConnectionAuth,
     },
-    network::auth::ConnectionAuth,
+    bytes::Bytes,
+    krabka_raft::{
+        ControllerAdminRequest, ControllerAdminResponse, ControllerAdminRouteFuture,
+        ControllerAdminRouter, ControllerApiVersion, RaftError,
+        controller_api_version as api_version,
+    },
+    std::sync::{Arc, OnceLock, Weak},
 };
 
 /// `Envelope`'s api key. KIP-590 forwarding is the one controller-listener API
@@ -127,9 +128,7 @@ impl BrokerControllerAdminRouter {
 }
 
 impl ControllerAdminRouter for BrokerControllerAdminRouter {
-    fn api_versions(&self) -> &[ControllerApiVersion] {
-        SUPPORTED_APIS
-    }
+    fn api_versions(&self) -> &[ControllerApiVersion] { SUPPORTED_APIS }
 
     fn route(&self, request: ControllerAdminRequest) -> ControllerAdminRouteFuture<'_> {
         Box::pin(async move {
@@ -167,20 +166,17 @@ impl ControllerAdminRouter for BrokerControllerAdminRouter {
                 }));
             }
 
-            let body = invoke_registered_handler(
-                &broker,
-                Invocation {
-                    api_key: request.api_key,
-                    api_version: request.api_version,
-                    correlation_id: request.correlation_id,
-                    body: &request.body,
-                    client_id: request.client_id.as_deref(),
-                    peer: &request.peer,
-                    principal: &principal,
-                    authenticated_via_token: request.authenticated_via_token,
-                    forwarded: false,
-                },
-            )
+            let body = invoke_registered_handler(&broker, Invocation {
+                api_key: request.api_key,
+                api_version: request.api_version,
+                correlation_id: request.correlation_id,
+                body: &request.body,
+                client_id: request.client_id.as_deref(),
+                peer: &request.peer,
+                principal: &principal,
+                authenticated_via_token: request.authenticated_via_token,
+                forwarded: false,
+            })
             .await
             .map_err(|error| RaftError::ControllerAdmin(error.to_string()))?;
 
@@ -312,31 +308,28 @@ async fn serve_envelope(
             client_host,
             token_authenticated,
         }) => {
-            let body = invoke_registered_handler(
-                broker,
-                Invocation {
-                    api_key: forwarded.api_key,
-                    api_version: forwarded.api_version,
-                    correlation_id: forwarded.correlation_id,
-                    body: &forwarded.body,
-                    client_id: forwarded.client_id.as_deref(),
-                    // The *client's* address, not this connection's: the peer
-                    // here is the forwarding broker, and authorizing or
-                    // auditing the embedded request against that address both
-                    // denies clients a host ACL allows and allows clients it
-                    // denies. `EnvelopeUtils` builds its inner
-                    // `RequestContext` from `client_host_address` for exactly
-                    // this reason.
-                    peer: &client_host,
-                    principal: &principal,
-                    // The *client's* flag, out of `request_principal`, not the
-                    // forwarding hop's: KIP-48 forbids a token-authenticated
-                    // caller from minting or renewing another token, and that
-                    // rule has to follow the identity it belongs to.
-                    authenticated_via_token: token_authenticated,
-                    forwarded: true,
-                },
-            )
+            let body = invoke_registered_handler(broker, Invocation {
+                api_key: forwarded.api_key,
+                api_version: forwarded.api_version,
+                correlation_id: forwarded.correlation_id,
+                body: &forwarded.body,
+                client_id: forwarded.client_id.as_deref(),
+                // The *client's* address, not this connection's: the peer
+                // here is the forwarding broker, and authorizing or
+                // auditing the embedded request against that address both
+                // denies clients a host ACL allows and allows clients it
+                // denies. `EnvelopeUtils` builds its inner
+                // `RequestContext` from `client_host_address` for exactly
+                // this reason.
+                peer: &client_host,
+                principal: &principal,
+                // The *client's* flag, out of `request_principal`, not the
+                // forwarding hop's: KIP-48 forbids a token-authenticated
+                // caller from minting or renewing another token, and that
+                // rule has to follow the identity it belongs to.
+                authenticated_via_token: token_authenticated,
+                forwarded: true,
+            })
             .await
             .map_err(|error| RaftError::ControllerAdmin(error.to_string()))?;
             tracing::debug!(
@@ -387,16 +380,16 @@ fn unwrap_envelope(
     // `ClusterAction` on the cluster resource may speak for another identity.
     let image = broker.controller.current_image();
     if AuthorizationResult::Deny
-        == broker.config.authorizer.authorize(
-            image.as_ref(),
-            &AuthorizationRequest {
+        == broker
+            .config
+            .authorizer
+            .authorize(image.as_ref(), &AuthorizationRequest {
                 principal: outer,
                 host: &request.peer,
                 resource_type: krabka_metadata::ResourceType::Cluster,
                 resource_name: CLUSTER_RESOURCE_NAME,
                 operation: krabka_metadata::AclOperation::ClusterAction,
-            },
-        )
+            })
     {
         return Err(EnvelopeError::ClusterAuthorizationFailed);
     }
@@ -450,13 +443,10 @@ fn unwrap_envelope(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use assert2::check;
-    use bytes::Bytes;
-
-    use super::*;
-    use crate::test_support::start_controller;
+    use {
+        super::*, crate::test_support::start_controller, assert2::check, bytes::Bytes,
+        std::collections::BTreeSet,
+    };
 
     /// The Kafka 4.x controller-listener set, as a live
     /// `mirror.gcr.io/apache/kafka:4.3.1` controller advertises it (the same

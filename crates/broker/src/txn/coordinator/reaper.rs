@@ -6,23 +6,23 @@
 //! phases against the in-memory state map, the `__transaction_state` log, the
 //! partition leaders, and the producer-id allocator.
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use krabka_log::ProducerId;
-use krabka_verified::transaction::TransactionReaperCompletionDecision as CompletionDecision;
-use tracing::{info, warn};
-
-use super::{
-    TxnCoordinator,
-    completion::{apply_completion, completion_decision},
-};
-use crate::txn::{
-    handlers::end_txn::{completion_producer_identity, prepare_server_abort_identities},
-    marker::MarkerType,
-    state::{TxnEntry, TxnState},
-    two_pc::{NO_TIMEOUT_MS, should_abort_idle_txn},
-    version::TxnVersion,
+use {
+    super::{
+        TxnCoordinator,
+        completion::{apply_completion, completion_decision},
+    },
+    crate::txn::{
+        handlers::end_txn::{completion_producer_identity, prepare_server_abort_identities},
+        marker::MarkerType,
+        state::{TxnEntry, TxnState},
+        two_pc::{NO_TIMEOUT_MS, should_abort_idle_txn},
+        version::TxnVersion,
+    },
+    async_trait::async_trait,
+    krabka_log::ProducerId,
+    krabka_verified::transaction::TransactionReaperCompletionDecision as CompletionDecision,
+    std::sync::Arc,
+    tracing::{info, warn},
 };
 
 #[cfg(test)]

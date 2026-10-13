@@ -1,7 +1,6 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::{count_ge, count_ge_prefix, hwm_member_at, lemma_hwm_member_maximal};
+use creusot_std::prelude::*;
 
 open_logic! {
 /// The current watermark and follower acknowledgements fit within the log.

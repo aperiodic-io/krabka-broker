@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use crate::{
-    raft::{control_history_frontier, frontier_reaches},
-    storage::{truncation_batch_retained, truncation_frontier},
+use {
+    crate::{
+        raft::{control_history_frontier, frontier_reaches},
+        storage::{truncation_batch_retained, truncation_frontier},
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

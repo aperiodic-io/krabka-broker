@@ -5,14 +5,14 @@
 //! master delegation-token key, because the token-fallback authentication
 //! path needs SCRAM even though the human users authenticate with PLAIN.
 
-use std::net::SocketAddr;
-
-use krabka_broker::{Broker, BrokerHandle};
-use krabka_security::SaslMechanism;
-use tempfile::TempDir;
-
-use crate::support::sasl::{
-    delegation_token_defaults, sasl_temp_config, start_broker as start_sasl_broker,
+use {
+    crate::support::sasl::{
+        delegation_token_defaults, sasl_temp_config, start_broker as start_sasl_broker,
+    },
+    krabka_broker::{Broker, BrokerHandle},
+    krabka_security::SaslMechanism,
+    std::net::SocketAddr,
+    tempfile::TempDir,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

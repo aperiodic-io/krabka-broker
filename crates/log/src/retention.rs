@@ -1,18 +1,18 @@
 //! Retention that `Log::tick` applies. These are free functions, so tests can
 //! check the policy apart from `Log`'s mutable state.
 
-use std::{
-    path::Path,
-    time::{Duration, SystemTime},
-};
-
-use krabka_ids::Offset;
-use tracing::instrument;
-
-use crate::{
-    error::LogError,
-    io::{IoTarget, LogIo},
-    name,
+use {
+    crate::{
+        error::LogError,
+        io::{IoTarget, LogIo},
+        name,
+    },
+    krabka_ids::Offset,
+    std::{
+        path::Path,
+        time::{Duration, SystemTime},
+    },
+    tracing::instrument,
 };
 
 /// Suffix a segment file wears between the moment retention claims it and the
@@ -155,11 +155,7 @@ pub(crate) fn remove_optional(io: &dyn LogIo, path: &Path) -> Result<(), LogErro
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::io::FileIo;
+    use {super::*, crate::io::FileIo, assert2::check, tempfile::tempdir};
 
     fn segment_files(
         base: Offset,

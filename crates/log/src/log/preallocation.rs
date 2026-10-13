@@ -7,25 +7,25 @@
 //! log asked for, and on Linux through the blocks a real file holds, which
 //! says the kernel did it.
 
-use std::{
-    fs::File,
-    path::Path,
-    sync::{Arc, Mutex},
-};
-
-use krabka_ids::Offset;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes};
-
-use super::{
-    Log,
-    test_support::{
-        NO_LIMIT, append_samples, assert_log_end_offset, configured_test_log, sample_batch,
+use {
+    super::{
+        Log,
+        test_support::{
+            NO_LIMIT, append_samples, assert_log_end_offset, configured_test_log, sample_batch,
+        },
     },
-};
-use crate::{
-    config::{LogConfig, SegmentAllocation},
-    io::{DirectFile, LogIo},
-    name,
+    crate::{
+        config::{LogConfig, SegmentAllocation},
+        io::{DirectFile, LogIo},
+        name,
+    },
+    krabka_ids::Offset,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _, mebibytes},
+    std::{
+        fs::File,
+        path::Path,
+        sync::{Arc, Mutex},
+    },
 };
 
 /// One reservation or release a [`Recorder`] saw.
@@ -185,13 +185,10 @@ fn a_truncated_segment_takes_its_reservation_again() {
     let requests = io.requests.lock().unwrap().clone();
     assert2::assert!(
         requests
-            == [
-                whole(),
-                Request::Reserve {
-                    offset: kept,
-                    len: SEGMENT.bytes_u64() - kept,
-                },
-            ]
+            == [whole(), Request::Reserve {
+                offset: kept,
+                len: SEGMENT.bytes_u64() - kept,
+            },]
     );
 }
 

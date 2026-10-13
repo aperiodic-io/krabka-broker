@@ -27,24 +27,27 @@
 //! nothing else; `confluentinc/cp-kafka:7.5.0` predates KIP-932 and hides the
 //! first two. Krabka has a share coordinator, so it follows the 4.x answer.
 
-use assert2::{assert, check};
-
-use crate::support::{
-    client::connect_owned,
-    discovery::topic_metadata_request,
-    topics::{ConfiguredTopicSetup, creatable_topic},
+use {
+    crate::support::{
+        client::connect_owned,
+        discovery::topic_metadata_request,
+        topics::{ConfiguredTopicSetup, creatable_topic},
+    },
+    assert2::{assert, check},
 };
 mod support;
 
-use krabka_broker::{Broker, BrokerConfig};
-use krabka_protocol::{
-    owned::{
-        create_topics_request::CreateTopicsRequest,
-        describe_topic_partitions_request::DescribeTopicPartitionsRequest,
-        describe_topic_partitions_response::DescribeTopicPartitionsResponseTopic,
-        metadata_response::MetadataResponseTopic,
+use {
+    krabka_broker::{Broker, BrokerConfig},
+    krabka_protocol::{
+        owned::{
+            create_topics_request::CreateTopicsRequest,
+            describe_topic_partitions_request::DescribeTopicPartitionsRequest,
+            describe_topic_partitions_response::DescribeTopicPartitionsResponseTopic,
+            metadata_response::MetadataResponseTopic,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
 };
 
 /// Kafka's error code for a topic that already exists.

@@ -5,34 +5,34 @@
 //! the log tail that snapshot does not cover, so a reopened log reaches
 //! exactly the state the append path would have left.
 
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    fs,
-    path::Path,
-};
-
-use krabka_ids::{Offset, ProducerId};
-use krabka_protocol::records::RecordBatch;
-use krabka_verified::{ProducerReloadRange, increment_sequence};
-use tracing::instrument;
-
-use super::{
-    Log,
-    control::{
-        ControlBatchKind, batch_control_marker_coordinator_epoch, control_batch_kind,
-        transaction_marker_flags,
+use {
+    super::{
+        Log,
+        control::{
+            ControlBatchKind, batch_control_marker_coordinator_epoch, control_batch_kind,
+            transaction_marker_flags,
+        },
     },
-};
-use crate::{
-    config::LogConfig,
-    error::LogError,
-    io::FileIo,
-    leader_epoch_checkpoint::LeaderEpochCheckpoint,
-    log_start_offset_checkpoint, name,
-    producer_snapshot::{self, NUM_BATCHES_TO_RETAIN, ProducerSnapshotEntry},
-    recovery::{deleted_orphan_recover, swap_orphan_recover},
-    segment::Segment,
-    txn_index::TxnIndex,
+    crate::{
+        config::LogConfig,
+        error::LogError,
+        io::FileIo,
+        leader_epoch_checkpoint::LeaderEpochCheckpoint,
+        log_start_offset_checkpoint, name,
+        producer_snapshot::{self, NUM_BATCHES_TO_RETAIN, ProducerSnapshotEntry},
+        recovery::{deleted_orphan_recover, swap_orphan_recover},
+        segment::Segment,
+        txn_index::TxnIndex,
+    },
+    krabka_ids::{Offset, ProducerId},
+    krabka_protocol::records::RecordBatch,
+    krabka_verified::{ProducerReloadRange, increment_sequence},
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap},
+        fs,
+        path::Path,
+    },
+    tracing::instrument,
 };
 
 impl Log {

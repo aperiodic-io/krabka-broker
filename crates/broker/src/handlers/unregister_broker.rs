@@ -58,25 +58,26 @@
 //! builds live in `gate`, the ISR departures in `leave`, and the
 //! wrong-controller refusal in `wire`.
 
-use krabka_audit::PrivilegedPhase;
-use krabka_metadata::{BreakGlassAction, NodeId};
-use krabka_protocol::owned::{
-    unregister_broker_request::{self, UnregisterBrokerRequest},
-    unregister_broker_response::UnregisterBrokerResponse,
-};
-
-use self::{
-    gate::{broker_target, consumed_proposal_id, unregister_records, with_leaves},
-    wire::not_controller_refusal,
-};
-use crate::{
-    break_glass::handlers::audit::{GatedTransition, audit_transition, require_transition},
-    codes,
-    controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
-    handlers::{
-        ErrorResponse as _, cluster_alter_denied, forward_to_controller::to_active_controller,
+use {
+    self::{
+        gate::{broker_target, consumed_proposal_id, unregister_records, with_leaves},
+        wire::not_controller_refusal,
     },
-    time_util::now_ms,
+    crate::{
+        break_glass::handlers::audit::{GatedTransition, audit_transition, require_transition},
+        codes,
+        controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
+        handlers::{
+            ErrorResponse as _, cluster_alter_denied, forward_to_controller::to_active_controller,
+        },
+        time_util::now_ms,
+    },
+    krabka_audit::PrivilegedPhase,
+    krabka_metadata::{BreakGlassAction, NodeId},
+    krabka_protocol::owned::{
+        unregister_broker_request::{self, UnregisterBrokerRequest},
+        unregister_broker_response::UnregisterBrokerResponse,
+    },
 };
 
 mod gate;

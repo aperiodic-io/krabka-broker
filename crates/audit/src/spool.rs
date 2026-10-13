@@ -19,28 +19,28 @@
 //! and `audit.replay-poison` the `u64` offset and one frame. Every offset and
 //! byte count here is into the frames, after the header.
 
-use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
-    num::NonZeroU64,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
-
-use krabka_units::{
-    fmt::Human as _,
-    prelude::{ByteSize, ByteSizeExt as _},
-};
-use krabka_verified::{
-    audit::{AuditLosses, settle_loss_batch},
-    spool_append_decision,
-};
-
-use self::codec::{HEADER_LEN, decode_record, encode_frame, file_header, strip_file_header};
-use crate::{
-    event::AuditEventClass,
-    ids::{MaxSpoolBytes, RecordCount, SpoolBytes},
-    sink::{AuditError, AuditRecord},
+use {
+    self::codec::{HEADER_LEN, decode_record, encode_frame, file_header, strip_file_header},
+    crate::{
+        event::AuditEventClass,
+        ids::{MaxSpoolBytes, RecordCount, SpoolBytes},
+        sink::{AuditError, AuditRecord},
+    },
+    krabka_units::{
+        fmt::Human as _,
+        prelude::{ByteSize, ByteSizeExt as _},
+    },
+    krabka_verified::{
+        audit::{AuditLosses, settle_loss_batch},
+        spool_append_decision,
+    },
+    std::{
+        fs::{File, OpenOptions},
+        io::{Read, Seek, SeekFrom, Write},
+        num::NonZeroU64,
+        path::{Path, PathBuf},
+        sync::{Arc, Mutex},
+    },
 };
 
 mod codec;
@@ -250,9 +250,7 @@ fn loss_marker_batch(record: &AuditRecord) -> Option<AuditLosses> {
     })
 }
 
-fn io<E: std::fmt::Display>(e: E) -> AuditError {
-    AuditError::Io(e.to_string())
-}
+fn io<E: std::fmt::Display>(e: E) -> AuditError { AuditError::Io(e.to_string()) }
 
 fn persist_loss_state(path: &Path, state: AuditLosses) -> Result<(), AuditError> {
     let mut bytes = [0_u8; LOSS_STATE_LEN];
@@ -420,24 +418,16 @@ impl Spool {
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.count.0 == 0
-    }
+    pub fn is_empty(&self) -> bool { self.count.0 == 0 }
 
     #[must_use]
-    pub fn count(&self) -> RecordCount {
-        self.count
-    }
+    pub fn count(&self) -> RecordCount { self.count }
 
-    pub(crate) fn pending_losses(&self) -> Arc<PendingLosses> {
-        Arc::clone(&self.pending_losses)
-    }
+    pub(crate) fn pending_losses(&self) -> Arc<PendingLosses> { Arc::clone(&self.pending_losses) }
 
     /// How many bytes the spool currently holds.
     #[must_use]
-    pub fn size(&self) -> ByteSize {
-        ByteSize::from_bytes(self.bytes.0)
-    }
+    pub fn size(&self) -> ByteSize { ByteSize::from_bytes(self.bytes.0) }
 
     /// Whether [`Spool::open`] found a torn tail frame and cut it off.
     ///
@@ -446,9 +436,7 @@ impl Spool {
     /// whether it had to -- healing a spool that was intact would mean
     /// discarding good bytes, so the two cases are worth telling apart.
     #[must_use]
-    pub fn recovered_torn_tail(&self) -> bool {
-        self.recovered_torn_tail
-    }
+    pub fn recovered_torn_tail(&self) -> bool { self.recovered_torn_tail }
 
     /// Append a record to the spool.
     ///
@@ -498,9 +486,7 @@ impl Spool {
         self.clear_replay_poison()
     }
 
-    pub(crate) fn abort_replay(&self) -> Result<(), AuditError> {
-        self.clear_replay_poison()
-    }
+    pub(crate) fn abort_replay(&self) -> Result<(), AuditError> { self.clear_replay_poison() }
 
     fn clear_replay_poison(&self) -> Result<(), AuditError> {
         let path = self.path.with_file_name(REPLAY_POISON_FILE);
@@ -708,9 +694,7 @@ impl Spool {
 }
 
 /// [`HEADER_LEN`] as a file offset.
-fn header_len_u64() -> u64 {
-    u64::try_from(HEADER_LEN).expect("a six-byte header fits u64")
-}
+fn header_len_u64() -> u64 { u64::try_from(HEADER_LEN).expect("a six-byte header fits u64") }
 
 // cargo-mutants: I/O-only wrapper with no in-process signal (fsyncs directory entry).
 #[cfg(unix)]
@@ -738,21 +722,22 @@ fn sync_parent(path: &Path) -> Result<(), AuditError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::ByteSize;
-
-    use super::*;
-    use crate::{
-        chain::{GENESIS_HEAD, chain_hash},
-        event::{
-            AuditEndpoint, AuditEvent, AuditEventClass, AuditOutcome, AuditPrincipal,
-            PrivilegedPhase,
+    use {
+        super::*,
+        crate::{
+            chain::{GENESIS_HEAD, chain_hash},
+            event::{
+                AuditEndpoint, AuditEvent, AuditEventClass, AuditOutcome, AuditPrincipal,
+                PrivilegedPhase,
+            },
+            ocsf::ProductInfo,
+            spool::test_support::{
+                ROOMY_CAP, chained_record, check_empty_file, reopen_after_losses, seeded_spool,
+                spool_with_losses,
+            },
         },
-        ocsf::ProductInfo,
-        spool::test_support::{
-            ROOMY_CAP, chained_record, check_empty_file, reopen_after_losses, seeded_spool,
-            spool_with_losses,
-        },
+        assert2::check,
+        krabka_units::prelude::ByteSize,
     };
 
     #[test]

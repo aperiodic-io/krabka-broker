@@ -7,21 +7,21 @@
 //! bytes of the archived topic ids -- a long enough argument to keep the
 //! metadata claim in a file of its own.
 
-use std::path::Path;
-
-use assert2::{assert, check};
-use krabka_broker::BrokerConfig;
-use krabka_metadata::{
-    AclEntry, AclOperation, MetadataImage, MetadataRecord, NodeId, PatternType, PermissionType,
-    ResourceType, TopicConfigRecord, TopicRecord,
-};
-use krabka_protocol::owned::describe_acls_request::DescribeAclsRequest;
-use uuid::Uuid;
-
-use crate::{
-    fixture::{Fixture, build_fixture},
-    restored::{fresh_restore, restore_for_controller},
-    topic_configuration::check_topic_configuration,
+use {
+    crate::{
+        fixture::{Fixture, build_fixture},
+        restored::{fresh_restore, restore_for_controller},
+        topic_configuration::check_topic_configuration,
+    },
+    assert2::{assert, check},
+    krabka_broker::BrokerConfig,
+    krabka_metadata::{
+        AclEntry, AclOperation, MetadataImage, MetadataRecord, NodeId, PatternType, PermissionType,
+        ResourceType, TopicConfigRecord, TopicRecord,
+    },
+    krabka_protocol::owned::describe_acls_request::DescribeAclsRequest,
+    std::path::Path,
+    uuid::Uuid,
 };
 
 krabka_macros::single_replica_partition_fixture!(single_replica_partition);
@@ -158,11 +158,12 @@ async fn restored_snapshot_reaches_describe_configs_and_describe_acls() {
     )
     .expect("write metadata snapshot");
 
-    let (_target, log_dir, mut controller, report) = restore_for_controller(
-        fixture.archive_root.path(),
-        &["--metadata-snapshot", &snapshot_path.display().to_string()],
-    )
-    .await;
+    let (_target, log_dir, mut controller, report) =
+        restore_for_controller(fixture.archive_root.path(), &[
+            "--metadata-snapshot",
+            &snapshot_path.display().to_string(),
+        ])
+        .await;
     check!(report.metadata.topic_configs == 1);
     check!(report.metadata.access_control_entries == 1);
 

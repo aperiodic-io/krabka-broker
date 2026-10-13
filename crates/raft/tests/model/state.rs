@@ -3,20 +3,20 @@
 //! the state space, so they are grouped here where their `Eq + Hash` derives
 //! stay visible together.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use krabka_raft::kraft::{
-    QuorumStateMachine,
-    action::TimerKind,
-    event::Event,
-    role::Role,
-    types::{Epoch, NodeId},
-};
-use stateright::semantics::LinearizabilityTester;
-
-use super::{
-    log::ModelLog,
-    spec::{AppenderId, ClientId, KraftLogSpec},
+use {
+    super::{
+        log::ModelLog,
+        spec::{AppenderId, ClientId, KraftLogSpec},
+    },
+    krabka_raft::kraft::{
+        QuorumStateMachine,
+        action::TimerKind,
+        event::Event,
+        role::Role,
+        types::{Epoch, NodeId},
+    },
+    stateright::semantics::LinearizabilityTester,
+    std::collections::{BTreeMap, BTreeSet},
 };
 
 /// One node: the real consensus machine, its log, and its committed high
@@ -156,9 +156,7 @@ pub(super) fn node_high_watermark(n: &NodeModel) -> i64 {
 }
 
 /// True if and only if `n` currently believes it is the leader.
-pub(super) fn is_leader(n: &NodeModel) -> bool {
-    n.machine.role().is_leader()
-}
+pub(super) fn is_leader(n: &NodeModel) -> bool { n.machine.role().is_leader() }
 
 /// Select the one authority an appender would route to. During an election
 /// handoff the model can contain leaders from different epochs; the

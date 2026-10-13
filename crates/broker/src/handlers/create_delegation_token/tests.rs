@@ -6,28 +6,30 @@
 //! resolution, and the lifetime rules that separate `expiry_timestamp_ms`
 //! from `max_timestamp_ms`.
 
-use assert2::assert;
-use krabka_protocol::owned::{
-    create_delegation_token_request::{CreatableRenewers, CreateDelegationTokenRequest},
-    create_delegation_token_response::CreateDelegationTokenResponse,
-};
-use krabka_security::{KafkaPrincipal, SecretBytes};
-use tempfile::TempDir;
-
-use super::{
-    test_support::{empty_super_users, super_users_with, token_acl},
-    *,
-};
-use crate::{
-    codes::{
-        DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_AUTHORIZATION_FAILED,
-        DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, INVALID_PRINCIPAL_TYPE, INVALID_REQUEST, NONE,
-        UNKNOWN_SERVER_ERROR,
+use {
+    super::{
+        test_support::{empty_super_users, super_users_with, token_acl},
+        *,
     },
-    handlers::delegation_token_test_support::{
-        DAY_MS as RENEW_24H_MS, SecretProvision, anonymous, authed, test_controller, token_authed,
+    crate::{
+        codes::{
+            DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_AUTHORIZATION_FAILED,
+            DELEGATION_TOKEN_REQUEST_NOT_ALLOWED, INVALID_PRINCIPAL_TYPE, INVALID_REQUEST, NONE,
+            UNKNOWN_SERVER_ERROR,
+        },
+        handlers::delegation_token_test_support::{
+            DAY_MS as RENEW_24H_MS, SecretProvision, anonymous, authed, test_controller,
+            token_authed,
+        },
+        test_support::{KafkaErrorCode, UnixMillis},
     },
-    test_support::{KafkaErrorCode, UnixMillis},
+    assert2::assert,
+    krabka_protocol::owned::{
+        create_delegation_token_request::{CreatableRenewers, CreateDelegationTokenRequest},
+        create_delegation_token_response::CreateDelegationTokenResponse,
+    },
+    krabka_security::{KafkaPrincipal, SecretBytes},
+    tempfile::TempDir,
 };
 
 fn principal(principal_type: &str, name: &str) -> KafkaPrincipal {
@@ -37,9 +39,7 @@ fn principal(principal_type: &str, name: &str) -> KafkaPrincipal {
     }
 }
 
-fn user(name: &str) -> KafkaPrincipal {
-    principal("User", name)
-}
+fn user(name: &str) -> KafkaPrincipal { principal("User", name) }
 
 fn renewer(principal_type: &str, name: &str) -> CreatableRenewers {
     CreatableRenewers {

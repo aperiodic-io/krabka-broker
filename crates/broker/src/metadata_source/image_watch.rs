@@ -3,11 +3,10 @@
 //! it is the one piece of this module that neither reads nor writes the
 //! controller log itself.
 
-use std::sync::Arc;
-
-use krabka_metadata::MetadataImage;
-use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
+use {
+    krabka_metadata::MetadataImage, std::sync::Arc, tokio::sync::watch,
+    tokio_util::sync::CancellationToken,
+};
 
 /// Apply `apply` to the current image and each observed latest image until
 /// shutdown or the publisher closes. Rapid updates can coalesce.
@@ -84,10 +83,10 @@ mod tests {
     /// on cancellation rather than on the next publish.
     #[tokio::test]
     async fn watch_image_loop_applies_current_then_each_published_image() {
-        use krabka_metadata::MetadataImage;
-        use tokio_util::sync::CancellationToken;
-
-        use super::watch_image_loop;
+        use {
+            super::watch_image_loop, krabka_metadata::MetadataImage,
+            tokio_util::sync::CancellationToken,
+        };
 
         let image = |n: u128| Arc::new(MetadataImage::new(uuid::Uuid::from_u128(n)));
         let (tx, rx) = watch::channel(image(1));

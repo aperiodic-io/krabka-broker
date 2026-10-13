@@ -7,21 +7,21 @@
 //! this file holds only the shape of the coordinator and the wiring that has
 //! to exist before any of it runs.
 
-use std::sync::Arc;
-
-use dashmap::DashMap;
-
-use super::{
-    actor::{GroupActorHandle, MetadataProvider},
-    config::NextGenConfig,
-    offsets_log::OffsetsLog,
-    seeds::{GroupSeed, ShareGroupSeed, StreamsGroupSeed},
-    share::{actor::ShareGroupActorHandle, config::ShareGroupConfig},
-    streams::{actor::StreamsGroupActorHandle, config::StreamsGroupConfig},
-};
-use crate::{
-    coordinator::leadership::ShardTerms, metadata_source::MetadataSource, metrics::BrokerMetrics,
-    share_coordinator::persister_client::SharePersister,
+use {
+    super::{
+        actor::{GroupActorHandle, MetadataProvider},
+        config::NextGenConfig,
+        offsets_log::OffsetsLog,
+        seeds::{GroupSeed, ShareGroupSeed, StreamsGroupSeed},
+        share::{actor::ShareGroupActorHandle, config::ShareGroupConfig},
+        streams::{actor::StreamsGroupActorHandle, config::StreamsGroupConfig},
+    },
+    crate::{
+        coordinator::leadership::ShardTerms, metadata_source::MetadataSource,
+        metrics::BrokerMetrics, share_coordinator::persister_client::SharePersister,
+    },
+    dashmap::DashMap,
+    std::sync::Arc,
 };
 
 /// Locked protocol identity for a `group_id`.
@@ -209,9 +209,7 @@ impl GroupCoordinator {
     ///
     /// `Broker::start` calls this once. A second call does nothing, because
     /// the `OnceLock` keeps the first value.
-    pub(crate) fn set_metrics(&self, metrics: BrokerMetrics) {
-        let _ = self.metrics.set(metrics);
-    }
+    pub(crate) fn set_metrics(&self, metrics: BrokerMetrics) { let _ = self.metrics.set(metrics); }
 
     /// Release every `consumer_group_lag` series for `group_id`.
     ///
@@ -259,12 +257,13 @@ impl GroupCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::{
-        image_metadata::ImageMetadataProvider,
-        test_support::{fixed_source, make_coord, make_share_persister, real_uuid},
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            image_metadata::ImageMetadataProvider,
+            test_support::{fixed_source, make_coord, make_share_persister, real_uuid},
+        },
+        assert2::{assert, check},
     };
 
     #[test]

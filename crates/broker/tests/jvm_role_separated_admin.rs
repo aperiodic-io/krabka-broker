@@ -35,10 +35,11 @@
 
 mod support;
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, NodeId, config::NodeRole};
+use {
+    assert2::{assert, check},
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, NodeId, config::NodeRole},
+    std::time::{Duration, Instant},
+};
 
 // Kafka 4.3.1 is the compatibility oracle: its `kafka-features.sh` exposes
 // the explicit `upgrade` / `downgrade` verbs, and its `AdminClient` routes
@@ -81,9 +82,7 @@ struct RoleSeparated {
 
 /// The bootstrap address a container uses. It is a broker-only node, so every
 /// request the `AdminClient` sends starts at a node that is not the controller.
-fn bootstrap() -> &'static str {
-    &ports().client_advertised[1]
-}
+fn bootstrap() -> &'static str { &ports().client_advertised[1] }
 
 /// A node config on the shared test timings, with the client listener bound on
 /// all interfaces and advertised under the name the containers resolve.
@@ -173,9 +172,7 @@ async fn start_role_separated() -> RoleSeparated {
 /// about its own deadline, indistinguishable from a genuine routing failure.
 /// Widening the budget is what makes a real routing failure legible; it is not
 /// a retry, and a request that is actually refused still fails at once.
-fn command_config() -> &'static std::path::Path {
-    support::jvm_admin_config()
-}
+fn command_config() -> &'static std::path::Path { support::jvm_admin_config() }
 
 /// Run one bundled Kafka CLI tool against `bootstrap` in a throwaway
 /// container, and return its captured output without asserting on the status,
@@ -215,9 +212,7 @@ async fn kafka_features(bootstrap: &str, args: &[&str]) -> std::process::Output 
     kafka_tool("/opt/kafka/bin/kafka-features.sh", bootstrap, args).await
 }
 
-fn combined(output: &std::process::Output) -> String {
-    support::combined_output(output)
-}
+fn combined(output: &std::process::Output) -> String { support::combined_output(output) }
 
 /// `FinalizedVersionLevel` for `feature` in `kafka-features describe` output.
 fn finalized_level(describe_stdout: &str, feature: &str) -> Option<i64> {
@@ -249,22 +244,18 @@ fn finalized_level(describe_stdout: &str, feature: &str) -> Option<i64> {
 async fn admin_write_tools_reach_the_controller_from_a_broker_only_node() {
     const TOPIC: &str = "role-separated-admin";
 
-    let cluster = start_role_separated().await;
+    let cluster = Box::pin(start_role_separated()).await;
     let bootstrap = bootstrap();
 
-    let created = kafka_tool(
-        "/opt/kafka/bin/kafka-topics.sh",
-        bootstrap,
-        &[
-            "--create",
-            "--topic",
-            TOPIC,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-        ],
-    )
+    let created = kafka_tool("/opt/kafka/bin/kafka-topics.sh", bootstrap, &[
+        "--create",
+        "--topic",
+        TOPIC,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+    ])
     .await;
     assert!(
         created.status.success(),
@@ -272,18 +263,15 @@ async fn admin_write_tools_reach_the_controller_from_a_broker_only_node() {
         combined(&created)
     );
 
-    let altered = kafka_configs(
-        bootstrap,
-        &[
-            "--alter",
-            "--entity-type",
-            "topics",
-            "--entity-name",
-            TOPIC,
-            "--add-config",
-            "retention.ms=60000",
-        ],
-    )
+    let altered = kafka_configs(bootstrap, &[
+        "--alter",
+        "--entity-type",
+        "topics",
+        "--entity-name",
+        TOPIC,
+        "--add-config",
+        "retention.ms=60000",
+    ])
     .await;
     assert!(
         altered.status.success(),
@@ -291,16 +279,13 @@ async fn admin_write_tools_reach_the_controller_from_a_broker_only_node() {
         combined(&altered)
     );
 
-    let described = kafka_configs(
-        bootstrap,
-        &[
-            "--describe",
-            "--entity-type",
-            "topics",
-            "--entity-name",
-            TOPIC,
-        ],
-    )
+    let described = kafka_configs(bootstrap, &[
+        "--describe",
+        "--entity-type",
+        "topics",
+        "--entity-name",
+        TOPIC,
+    ])
     .await;
     let rendered = combined(&described);
     check!(

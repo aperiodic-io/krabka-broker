@@ -2,29 +2,29 @@
 //! writes to a log that holds no `metadata.version`, and the bootstrap
 //! checkpoint whose records reach the image only through that write.
 
-use std::collections::BTreeMap;
-
-use assert2::check;
-use krabka_metadata::{
-    BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, FeatureLevelRecord,
-    group_version::GROUP_VERSION_FEATURE,
-    metadata_version::{ELR_VERSION_FEATURE, METADATA_VERSION_FEATURE},
-};
-use krabka_units::prelude::secs;
-
-use super::*;
-use crate::{
-    config::{DEFAULT_METADATA_RAFT_FETCH_MAX, LATEST_PRODUCTION_METADATA_VERSION},
-    kraft::controller::{
-        activation::{Activation, activation_records, check_bootstrap_records},
-        checkpoint::write_checkpoint,
-        records::metadata_record_batch,
-        test_support::{
-            ControllerOpenSetup, EngineSetup, await_leader, build_engine_only,
-            open_test_controller_with, voter_set,
+use {
+    super::*,
+    crate::{
+        config::{DEFAULT_METADATA_RAFT_FETCH_MAX, LATEST_PRODUCTION_METADATA_VERSION},
+        kraft::controller::{
+            activation::{Activation, activation_records, check_bootstrap_records},
+            checkpoint::write_checkpoint,
+            records::metadata_record_batch,
+            test_support::{
+                ControllerOpenSetup, EngineSetup, await_leader, build_engine_only,
+                open_test_controller_with, voter_set,
+            },
         },
+        serialize_bootstrap_snapshot,
     },
-    serialize_bootstrap_snapshot,
+    assert2::check,
+    krabka_metadata::{
+        BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, FeatureLevelRecord,
+        group_version::GROUP_VERSION_FEATURE,
+        metadata_version::{ELR_VERSION_FEATURE, METADATA_VERSION_FEATURE},
+    },
+    krabka_units::prelude::secs,
+    std::collections::BTreeMap,
 };
 
 /// A `metadata.version` level below the latest production one, which an
@@ -332,21 +332,15 @@ async fn the_records_of_the_bootstrap_checkpoint_reach_the_image_through_the_log
     write_checkpoint(dir.path(), 0, 0, &bytes).expect("write the bootstrap checkpoint");
 
     // The election timeout is long, so only the injected timeout elects.
-    let ctrl = open_test_controller_with(
-        dir.path().to_path_buf(),
-        ControllerOpenSetup {
-            voters: voters.clone(),
-            election_timeout: secs(60),
-            activation: Activation {
-                bootstrap_records: vec![feature(
-                    METADATA_VERSION_FEATURE,
-                    EARLIER_METADATA_VERSION,
-                )],
-                ..Activation::default()
-            },
-            ..Default::default()
+    let ctrl = open_test_controller_with(dir.path().to_path_buf(), ControllerOpenSetup {
+        voters: voters.clone(),
+        election_timeout: secs(60),
+        activation: Activation {
+            bootstrap_records: vec![feature(METADATA_VERSION_FEATURE, EARLIER_METADATA_VERSION)],
+            ..Activation::default()
         },
-    )
+        ..Default::default()
+    })
     .expect("open");
     let opened = ctrl.current_image();
     let before = (opened.finalized_features().clone(), opened.voters().clone());
@@ -390,24 +384,21 @@ fn the_activation_sets_the_cluster_min_insync_replicas_when_the_bootstrap_enable
     // (what, bootstrap records, static `min.insync.replicas`, the records)
     let cases = [
         ("no ELR record", vec![mv.clone()], 2, vec![mv.clone()]),
-        (
-            "ELR at level 1",
-            vec![mv.clone(), elr(1)],
-            2,
-            vec![mv.clone(), elr(1), cluster_min_isr(2)],
-        ),
+        ("ELR at level 1", vec![mv.clone(), elr(1)], 2, vec![
+            mv.clone(),
+            elr(1),
+            cluster_min_isr(2),
+        ]),
         (
             "ELR at level 1 and Kafka's default",
             vec![mv.clone(), elr(1)],
             1,
             vec![mv.clone(), elr(1), cluster_min_isr(1)],
         ),
-        (
-            "ELR at level 0",
-            vec![mv.clone(), elr(0)],
-            2,
-            vec![mv.clone(), elr(0)],
-        ),
+        ("ELR at level 0", vec![mv.clone(), elr(0)], 2, vec![
+            mv.clone(),
+            elr(0),
+        ]),
         (
             "ELR enabled and then disabled",
             vec![mv.clone(), elr(1), elr(0)],

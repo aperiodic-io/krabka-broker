@@ -11,13 +11,15 @@
 //! load, as Kafka's `CoordinatorLoaderImpl` does, so a failed state has no
 //! successor.
 
-use stateright::{Checker, Model, Property};
-
-use super::replay_policy::{
-    DELETED_ASSIGNMENT_EPOCH, ExistingGroup, GroupLookup, LEAVE_GROUP_MEMBER_EPOCH,
-    ModernGroupType, group_tombstone, member_tombstone, persisted_group, target_metadata_tombstone,
+use {
+    super::replay_policy::{
+        DELETED_ASSIGNMENT_EPOCH, ExistingGroup, GroupLookup, LEAVE_GROUP_MEMBER_EPOCH,
+        ModernGroupType, group_tombstone, member_tombstone, persisted_group,
+        target_metadata_tombstone,
+    },
+    crate::model_check::run_bfs,
+    stateright::{Checker, Model, Property},
 };
-use crate::model_check::run_bfs;
 
 const MAX_DEPTH: usize = 40;
 const MAX_STATES: usize = 2_000_000;
@@ -82,9 +84,7 @@ struct State {
 #[derive(Clone, Debug)]
 struct ReplayModel;
 
-fn bit(member: u8) -> u8 {
-    1 << member
-}
+fn bit(member: u8) -> u8 { 1 << member }
 
 /// Applies one record to `state` with the production decisions, and returns
 /// whether the load failed.
@@ -194,31 +194,8 @@ fn kafka_deletion(group: &Group) -> Vec<Record> {
 }
 
 impl Model for ReplayModel {
-    type State = State;
     type Action = Action;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![State::default()]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        if state.failed {
-            return;
-        }
-        let mut records = vec![Record::Group, Record::TargetEpoch, Record::Regex];
-        for member in 0..2 {
-            records.extend([
-                Record::Member(member),
-                Record::Target(member),
-                Record::Current(member),
-            ]);
-        }
-        for record in records {
-            actions.push(Action::Value(record));
-            actions.push(Action::Tombstone(record));
-        }
-        actions.push(Action::DeleteGroup);
-    }
+    type State = State;
 
     krabka_macros::model_transition! { last, action, state; {
         if action == Action::DeleteGroup {
@@ -253,6 +230,27 @@ impl Model for ReplayModel {
         }
         (state != *last).then_some(state)
     }}
+
+    fn init_states(&self) -> Vec<Self::State> { vec![State::default()] }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        if state.failed {
+            return;
+        }
+        let mut records = vec![Record::Group, Record::TargetEpoch, Record::Regex];
+        for member in 0..2 {
+            records.extend([
+                Record::Member(member),
+                Record::Target(member),
+                Record::Current(member),
+            ]);
+        }
+        for record in records {
+            actions.push(Action::Value(record));
+            actions.push(Action::Tombstone(record));
+        }
+        actions.push(Action::DeleteGroup);
+    }
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![

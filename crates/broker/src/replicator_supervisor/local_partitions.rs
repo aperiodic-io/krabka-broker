@@ -2,24 +2,24 @@
 //! sync of each one's cached leader and leader epoch, plus the ISR where this
 //! broker is the leader.
 
-use std::{collections::HashSet, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
-use tracing::warn;
-
-use super::{
-    ReplicatorSupervisor, TopicPartition,
-    materialize::{MaterializePartitionConfig, materialize_partition_with_replication_target},
-};
-use crate::{
-    config_keys::resolve_diskless,
-    partition::{PartitionRuntimeConfig, ReplicationTarget},
-    partition_writer::flag_storage_failure,
-    wal::{
-        ControllerSequencer, OffsetSequencer,
-        quorum::{follower::hydrate_on_promotion, registry::ShardId},
+use {
+    super::{
+        ReplicatorSupervisor, TopicPartition,
+        materialize::{MaterializePartitionConfig, materialize_partition_with_replication_target},
     },
+    crate::{
+        config_keys::resolve_diskless,
+        partition::{PartitionRuntimeConfig, ReplicationTarget},
+        partition_writer::flag_storage_failure,
+        wal::{
+            ControllerSequencer, OffsetSequencer,
+            quorum::{follower::hydrate_on_promotion, registry::ShardId},
+        },
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
+    std::{collections::HashSet, sync::Arc},
+    tracing::warn,
 };
 
 impl ReplicatorSupervisor {
@@ -219,22 +219,22 @@ impl ReplicatorSupervisor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
-
-    use assert2::assert;
-    use krabka_metadata::MetadataRecord;
-    use krabka_raft::NodeId;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        partition::ReplicationTarget,
-        replicator_supervisor::test_support::{
-            SupervisorPartitionSetup, SupervisorTopicSetup, follower_promotion_images, image_with,
-            partition_record, reconciled_partition, supervisor_fixture, three_replica_image,
-            topic_record,
+    use {
+        super::*,
+        crate::{
+            partition::ReplicationTarget,
+            replicator_supervisor::test_support::{
+                SupervisorPartitionSetup, SupervisorTopicSetup, follower_promotion_images,
+                image_with, partition_record, reconciled_partition, supervisor_fixture,
+                three_replica_image, topic_record,
+            },
+            test_support::single_partition_topic,
         },
-        test_support::single_partition_topic,
+        assert2::assert,
+        krabka_metadata::MetadataRecord,
+        krabka_raft::NodeId,
+        std::sync::atomic::Ordering,
+        uuid::Uuid,
     };
 
     #[tokio::test]
@@ -324,9 +324,7 @@ mod tests {
 
     #[tokio::test]
     async fn reconcile_does_not_treat_reserved_diskless_offset_as_durable() {
-        use std::collections::BTreeMap;
-
-        use krabka_metadata::PartitionOffsetAdvanceRecord;
+        use {krabka_metadata::PartitionOffsetAdvanceRecord, std::collections::BTreeMap};
 
         let mut overrides = BTreeMap::new();
         overrides.insert("krabka.diskless".into(), "true".into());

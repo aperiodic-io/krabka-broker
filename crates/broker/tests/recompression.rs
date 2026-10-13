@@ -18,30 +18,30 @@ mod kafka_wire;
 
 mod support;
 
-use std::net::SocketAddr;
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
-use krabka_compression::CompressionType;
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{CreatableTopicConfig, CreateTopicsRequest},
-        create_topics_response::CreateTopicsResponse,
-        fetch_request::FetchRequest,
-        fetch_response::FetchResponse,
-        metadata_response::MetadataResponse,
-        produce_response::ProduceResponse,
+use {
+    crate::support::{
+        discovery::named_topic_metadata,
+        fetch::{SinglePartitionFetchSetup, single_partition_fetch},
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{batch_from_records, value_record},
     },
-    primitives::uuid::Uuid,
-    records::{Attributes, RecordBatch},
-};
-
-use crate::support::{
-    discovery::named_topic_metadata,
-    fetch::{SinglePartitionFetchSetup, single_partition_fetch},
-    produce::{SinglePartitionProduceSetup, batch_request},
-    records::{batch_from_records, value_record},
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+    krabka_compression::CompressionType,
+    krabka_protocol::{
+        owned::{
+            create_topics_request::{CreatableTopicConfig, CreateTopicsRequest},
+            create_topics_response::CreateTopicsResponse,
+            fetch_request::FetchRequest,
+            fetch_response::FetchResponse,
+            metadata_response::MetadataResponse,
+            produce_response::ProduceResponse,
+        },
+        primitives::uuid::Uuid,
+        records::{Attributes, RecordBatch},
+    },
+    std::net::SocketAddr,
 };
 
 const CLIENT_ID: &str = "krabka-recompression-test";
@@ -98,14 +98,11 @@ async fn produce_gzip(addr: SocketAddr, topic: &str, topic_id: Uuid, value: &[u8
         attributes: Attributes::default().with_compression(CompressionType::Gzip),
         ..batch_from_records(vec![value_record(0, Some(Bytes::copy_from_slice(value)))])
     };
-    let req = batch_request(
-        batch,
-        SinglePartitionProduceSetup {
-            topic: (topic).into(),
-            topic_id,
-            ..SinglePartitionProduceSetup::replicated()
-        },
-    );
+    let req = batch_request(batch, SinglePartitionProduceSetup {
+        topic: (topic).into(),
+        topic_id,
+        ..SinglePartitionProduceSetup::replicated()
+    });
     let version: i16 = 9;
     let (_, r): (usize, ProduceResponse) =
         kafka_wire::request_once(addr, &req, (0, version), CLIENT_ID, (1, true)).await;
@@ -195,8 +192,10 @@ async fn topic_compression_producer_preserves_producer_gzip() {
 
 #[test]
 fn stored_owned_batches_honor_every_codec_level() {
-    use krabka_log::{Log, LogConfig};
-    use krabka_units::gibibytes;
+    use {
+        krabka_log::{Log, LogConfig},
+        krabka_units::gibibytes,
+    };
 
     for (codec, levels) in [
         (CompressionType::Gzip, [1, 9]),

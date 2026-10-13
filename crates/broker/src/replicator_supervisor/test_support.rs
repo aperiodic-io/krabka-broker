@@ -2,46 +2,48 @@
 //! static `MetadataSource`, a counting `AssignDirsReporter`, and a supervisor
 //! built over a temporary log dir.
 
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
-
-use assert2::assert;
-use krabka_ids::PartitionIndex;
-use krabka_log::LogConfig;
-use krabka_metadata::{
-    BrokerEndpoint, BrokerRegistrationRecord, LeaderEpoch, MetadataImage, MetadataRecord,
-    PartitionRecord, TopicRecord,
-};
-use krabka_protocol::owned::assign_replicas_to_dirs_request::AssignReplicasToDirsRequest;
-use krabka_raft::NodeId;
-use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
-
-use super::{
-    ReplicatorSupervisor, ReplicatorSupervisorConfig, dir_assignments::AssignDirsReporter,
-    materialize::MaterializePartitionConfig,
-};
 pub(super) use crate::test_support::await_until;
-use crate::{
-    api_catalog::UnstableApiVersions,
-    config::ReplicationRuntimeConfig,
-    diskless::hot_tail::HotTailCache,
-    log_dir_id::LogDirIds,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
-    partition::{Partition, PartitionRuntimeConfig},
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    test_support::{FakeMetadataSource, PartitionCount, ReplicationFactor, broker_registration},
-    throttle::ThrottleState,
-    wal::quorum::registry::WalShardRegistry,
+use {
+    super::{
+        ReplicatorSupervisor, ReplicatorSupervisorConfig, dir_assignments::AssignDirsReporter,
+        materialize::MaterializePartitionConfig,
+    },
+    crate::{
+        api_catalog::UnstableApiVersions,
+        config::ReplicationRuntimeConfig,
+        diskless::hot_tail::HotTailCache,
+        log_dir_id::LogDirIds,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+        partition::{Partition, PartitionRuntimeConfig},
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        test_support::{
+            FakeMetadataSource, PartitionCount, ReplicationFactor, broker_registration,
+        },
+        throttle::ThrottleState,
+        wal::quorum::registry::WalShardRegistry,
+    },
+    assert2::assert,
+    krabka_ids::PartitionIndex,
+    krabka_log::LogConfig,
+    krabka_metadata::{
+        BrokerEndpoint, BrokerRegistrationRecord, LeaderEpoch, MetadataImage, MetadataRecord,
+        PartitionRecord, TopicRecord,
+    },
+    krabka_protocol::owned::assign_replicas_to_dirs_request::AssignReplicasToDirsRequest,
+    krabka_raft::NodeId,
+    std::{
+        path::PathBuf,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    },
+    tokio_util::sync::CancellationToken,
+    uuid::Uuid,
 };
 
 pub(super) fn image_with(records: &[MetadataRecord]) -> MetadataImage {
@@ -207,14 +209,11 @@ pub(super) fn materialized_partition_with_config(
 ) -> (tempfile::TempDir, Arc<PartitionRegistry>) {
     let dir = tempfile::tempdir().expect("tempdir");
     let partitions = Arc::new(PartitionRegistry::new());
-    MaterializeFixture::default().materialize(
-        &partitions,
-        MaterializeSetup {
-            log_dirs: &[dir.path().to_path_buf()],
-            log_config,
-            ..Default::default()
-        },
-    );
+    MaterializeFixture::default().materialize(&partitions, MaterializeSetup {
+        log_dirs: &[dir.path().to_path_buf()],
+        log_config,
+        ..Default::default()
+    });
     (dir, partitions)
 }
 

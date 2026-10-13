@@ -7,8 +7,7 @@
 //! the schema itself is compared here: a `FileConfig` change that is not
 //! followed by a regeneration fails this suite.
 
-use assert2::assert;
-use serde_json::Value;
+use {assert2::assert, serde_json::Value};
 
 #[path = "support/repository.rs"]
 mod repository;

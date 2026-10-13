@@ -45,26 +45,27 @@
 //! own previous run and never against a sibling, so that number has to be
 //! computed here.
 
-use std::{
-    sync::Arc,
-    thread,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use criterion::{Criterion, criterion_group, criterion_main};
-use krabka_broker::{
-    config::DEFAULT_MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS,
-    fetch_session::{
-        CachedPartitionState, FetchSessionCache, FetchSessionKey, INITIAL_EPOCH,
-        INVALID_SESSION_ID, SessionDecision,
+use {
+    assert2::assert,
+    criterion::{Criterion, criterion_group, criterion_main},
+    krabka_broker::{
+        config::DEFAULT_MAX_INCREMENTAL_FETCH_SESSION_CACHE_SLOTS,
+        fetch_session::{
+            CachedPartitionState, FetchSessionCache, FetchSessionKey, INITIAL_EPOCH,
+            INVALID_SESSION_ID, SessionDecision,
+        },
+    },
+    krabka_protocol::{
+        owned::fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    qubit_clock::ManualMonotonicClock,
+    std::{
+        sync::Arc,
+        thread,
+        time::{Duration, Instant},
     },
 };
-use krabka_protocol::{
-    owned::fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-    primitives::uuid::Uuid as WireUuid,
-};
-use qubit_clock::ManualMonotonicClock;
 
 /// Cache capacity, taken from the broker's own default so the bench measures
 /// the size a real broker runs at.
@@ -272,7 +273,7 @@ fn bench_occupancy_ratio(_c: &mut Criterion) {
                 (0..RUNS)
                     .map(|_| {
                         let elapsed = timed_across_threads(occupancy, threads, u64::from(SAMPLES));
-                        elapsed.as_secs_f64() * 1e9 / f64::from(SAMPLES)
+                        elapsed.as_secs_f64() * 1.0e9 / f64::from(SAMPLES)
                     })
                     .fold(f64::INFINITY, f64::min)
             })

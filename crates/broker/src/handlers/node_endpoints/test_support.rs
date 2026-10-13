@@ -1,14 +1,23 @@
 //! Shared KIP-951 examples, exercised through each response type's handler.
 
-use std::fmt::Debug;
-
-use assert2::assert;
-use krabka_metadata::{BrokerEndpoint, BrokerRegistrationRecord, MetadataImage, MetadataRecord};
+use {
+    assert2::assert,
+    krabka_metadata::{BrokerEndpoint, BrokerRegistrationRecord, MetadataImage, MetadataRecord},
+    std::fmt::Debug,
+};
 
 /// Instantiate the same KIP-951 response examples for the two wire shapes.
 /// The expected rows are built independently of the production converter.
 macro_rules! endpoint_tests {
-    ($wire:ident, $project:ident, $topic:ident, $name:ident, $parts:ident, $part:ident, $index:ident) => {
+    (
+        $wire:ident,
+        $project:ident,
+        $topic:ident,
+        $name:ident,
+        $parts:ident,
+        $part:ident,
+        $index:ident
+    ) => {
         #[cfg(test)]
         mod tests {
             use krabka_protocol::owned::$wire::{LeaderIdAndEpoch, NodeEndpoint, $part, $topic};
@@ -53,9 +62,8 @@ macro_rules! endpoint_tests {
     };
 }
 
-pub(crate) use endpoint_tests;
-
 use crate::test_support::broker_registration;
+pub(crate) use endpoint_tests;
 
 fn endpoint(name: &str, host: &str, port: u16) -> BrokerEndpoint {
     BrokerEndpoint {

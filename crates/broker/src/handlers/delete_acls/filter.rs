@@ -7,11 +7,12 @@
 //! resource. Getting that wrong would silently widen or narrow a delete, so
 //! the decision sits in a file of its own.
 
-use krabka_metadata::{AclEntry, AclEntryFilter};
-use krabka_protocol::owned::delete_acls_request::DeleteAclsFilter;
-
-use crate::handlers::acl_wire::binding_filter::{
-    AclBindingFilter, UnknownElement, WireAclBindingFilter,
+use {
+    crate::handlers::acl_wire::binding_filter::{
+        AclBindingFilter, UnknownElement, WireAclBindingFilter,
+    },
+    krabka_metadata::{AclEntry, AclEntryFilter},
+    krabka_protocol::owned::delete_acls_request::DeleteAclsFilter,
 };
 
 pub(super) fn build_filter(f: &DeleteAclsFilter) -> Result<AclBindingFilter, UnknownElement> {
@@ -47,16 +48,17 @@ pub(super) fn exact_filter(entry: &AclEntry) -> AclEntryFilter {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::{AclOperation, PatternType, PermissionType};
-
-    use super::*;
-    use crate::{
-        handlers::{
-            acl_test_support::expected_empty_match_filter,
-            delete_acls::test_support::{acl, filter},
+    use {
+        super::*,
+        crate::{
+            handlers::{
+                acl_test_support::expected_empty_match_filter,
+                delete_acls::test_support::{acl, filter},
+            },
+            test_support::AllowAclSetup,
         },
-        test_support::AllowAclSetup,
+        assert2::{assert, check},
+        krabka_metadata::{AclOperation, PatternType, PermissionType},
     };
 
     #[test]

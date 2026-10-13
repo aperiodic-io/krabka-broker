@@ -6,13 +6,14 @@
 //! position through the offset index, and decodes records from there until it
 //! finds the first one at or after the requested timestamp.
 
-use krabka_remote_storage::{
-    IndexType, LogOffset, RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError,
-    TimestampMs, TopicIdPartition, first_record_at_or_after_timestamp, parse_offset_index,
-    parse_time_index, position_for_relative_offset, relative_offset_floor_for_timestamp,
+use {
+    super::RemoteReader,
+    krabka_remote_storage::{
+        IndexType, LogOffset, RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError,
+        TimestampMs, TopicIdPartition, first_record_at_or_after_timestamp, parse_offset_index,
+        parse_time_index, position_for_relative_offset, relative_offset_floor_for_timestamp,
+    },
 };
-
-use super::RemoteReader;
 
 impl RemoteReader {
     /// Returns the smallest absolute offset and its record timestamp where the
@@ -84,12 +85,13 @@ impl RemoteReader {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use crate::remote_reader::test_support::{
-        append_time_remote_segment_reader, compressed_remote_segment_reader,
-        sparse_remote_segment_reader, sparse_remote_segment_reader_with_max_timestamp, tp,
-        unordered_timestamps_remote_segment_reader,
+    use {
+        crate::remote_reader::test_support::{
+            append_time_remote_segment_reader, compressed_remote_segment_reader,
+            sparse_remote_segment_reader, sparse_remote_segment_reader_with_max_timestamp, tp,
+            unordered_timestamps_remote_segment_reader,
+        },
+        assert2::assert,
     };
 
     #[tokio::test]

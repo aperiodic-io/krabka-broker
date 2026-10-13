@@ -2,30 +2,28 @@
 //! producers: nothing on a fresh partition, one fully populated row after a
 //! produce, and one row per producer when several share a partition.
 
-use assert2::{assert, check};
-
-use crate::{
-    producers_harness::{batch, create_topic, init_producer, topic_id_for},
-    support::{
-        self,
-        admin::describe_producers_request,
-        produce::{SinglePartitionProduceSetup, send_batch},
-        records::ProducerValuesSetup,
-        topics::CreateTopicSetup,
-        transactions::ProducerEpoch,
+use {
+    crate::{
+        producers_harness::{batch, create_topic, init_producer, topic_id_for},
+        support::{
+            self,
+            admin::describe_producers_request,
+            produce::{SinglePartitionProduceSetup, send_batch},
+            records::ProducerValuesSetup,
+            topics::CreateTopicSetup,
+            transactions::ProducerEpoch,
+        },
     },
+    assert2::{assert, check},
 };
 
 #[tokio::test]
 async fn empty_partition_returns_no_active_producers() {
     let p = support::start().await;
-    create_topic(
-        &p.client,
-        CreateTopicSetup {
-            topic: "fresh",
-            ..Default::default()
-        },
-    )
+    create_topic(&p.client, CreateTopicSetup {
+        topic: "fresh",
+        ..Default::default()
+    })
     .await;
 
     let resp = p
@@ -55,13 +53,10 @@ async fn empty_partition_returns_no_active_producers() {
 #[tokio::test]
 async fn after_idempotent_produce_describe_returns_the_producer() {
     let p = support::start().await;
-    create_topic(
-        &p.client,
-        CreateTopicSetup {
-            topic: "t",
-            ..Default::default()
-        },
-    )
+    create_topic(&p.client, CreateTopicSetup {
+        topic: "t",
+        ..Default::default()
+    })
     .await;
     let topic_id = topic_id_for(&p.client, "t").await;
 
@@ -117,13 +112,10 @@ async fn after_idempotent_produce_describe_returns_the_producer() {
 #[tokio::test]
 async fn multiple_producers_on_same_partition_all_surfaced() {
     let p = support::start().await;
-    create_topic(
-        &p.client,
-        CreateTopicSetup {
-            topic: "shared",
-            ..Default::default()
-        },
-    )
+    create_topic(&p.client, CreateTopicSetup {
+        topic: "shared",
+        ..Default::default()
+    })
     .await;
     let topic_id = topic_id_for(&p.client, "shared").await;
 

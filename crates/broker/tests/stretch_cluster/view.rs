@@ -5,15 +5,15 @@
 //! tests: a witness that led for a moment and then handed leadership on must
 //! fail the test that was watching.
 
-use std::{
-    collections::BTreeSet,
-    time::{Duration, Instant},
+use {
+    crate::{TOPIC, WITNESS, within},
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    std::{
+        collections::BTreeSet,
+        time::{Duration, Instant},
+    },
 };
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-
-use crate::{TOPIC, WITNESS, within};
 
 /// The partition as an operator sees it, as one value.
 #[derive(Debug, PartialEq, Eq)]

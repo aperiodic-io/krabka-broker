@@ -16,12 +16,13 @@
 //! per-partition error code, and `response` builds the fixed responses and
 //! encodes what goes back on the wire.
 
-use krabka_protocol::owned::{
-    assign_replicas_to_dirs_request::AssignReplicasToDirsRequest,
-    assign_replicas_to_dirs_response::AssignReplicasToDirsResponse,
+use {
+    crate::{codes, error::BrokerError, handlers::forward_to_controller::is_active_controller},
+    krabka_protocol::owned::{
+        assign_replicas_to_dirs_request::AssignReplicasToDirsRequest,
+        assign_replicas_to_dirs_response::AssignReplicasToDirsResponse,
+    },
 };
-
-use crate::{codes, error::BrokerError, handlers::forward_to_controller::is_active_controller};
 
 mod changes;
 mod response;
@@ -96,27 +97,38 @@ context_handler! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{FeatureLevelRecord, MetadataRecord, PartitionRecord, TopicRecord};
-    use krabka_protocol::{
-        owned::assign_replicas_to_dirs_response::{
-            DirectoryData as RespDirData, PartitionData as RespPartData, TopicData as RespTopicData,
+    use {
+        super::{
+            test_support::{VERSION, handle_allowed, own_broker_epoch, request},
+            *,
         },
-        primitives::uuid::Uuid as ProtocolUuid,
-    };
-
-    use super::{
-        test_support::{VERSION, handle_allowed, own_broker_epoch, request},
-        *,
-    };
-    use crate::{
-        broker::Broker,
-        handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup,
-        test_support::{peer, principal, request_context, wait_for_controller_leader},
+        crate::{
+            broker::Broker,
+            handlers::assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup,
+            test_support::{peer, principal, request_context, wait_for_controller_leader},
+        },
+        assert2::assert,
+        krabka_metadata::{FeatureLevelRecord, MetadataRecord, PartitionRecord, TopicRecord},
+        krabka_protocol::{
+            owned::assign_replicas_to_dirs_response::{
+                DirectoryData as RespDirData, PartitionData as RespPartData,
+                TopicData as RespTopicData,
+            },
+            primitives::uuid::Uuid as ProtocolUuid,
+        },
     };
 
     macro_rules! seeded_topic_fixture {
-        (($handle:ident, $directory:ident, $broker:ident, $epoch:ident, $dir_id:ident, $topic_id:ident)) => {
+        (
+            (
+                $handle:ident,
+                $directory:ident,
+                $broker:ident,
+                $epoch:ident,
+                $dir_id:ident,
+                $topic_id:ident
+            )
+        ) => {
             broker_fixture!(
                 ($handle, $directory, $broker),
                 crate::test_support::start_broker_with(|_| {}),

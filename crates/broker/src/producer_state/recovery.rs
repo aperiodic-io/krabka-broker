@@ -6,13 +6,13 @@
 //! `ProducerState` carries the sequence and epoch state that survived a
 //! restart or a remote-tier copy, or that a follower replicated.
 
-use std::{collections::HashMap, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use tokio::sync::Mutex;
-
-use super::{PartitionProducerState, ProducerEntry, ProducerState, RetainedBatch};
+use {
+    super::{PartitionProducerState, ProducerEntry, ProducerState, RetainedBatch},
+    krabka_ids::PartitionIndex,
+    krabka_log::ProducerId,
+    std::{collections::HashMap, sync::Arc},
+    tokio::sync::Mutex,
+};
 
 impl ProducerState {
     /// Replace one partition's producer sequence state with the state rebuilt

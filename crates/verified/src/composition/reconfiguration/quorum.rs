@@ -1,17 +1,18 @@
-use creusot_std::prelude::*;
-
-use super::constructed_voter_reconfiguration;
 #[cfg(creusot)]
 use super::spec::{
     adjacent_majorities_exceed_union, admitted_membership, grant_count, has_node,
     reconfiguration_admitted, single_change_shape,
 };
-use crate::{
-    consensus::election_has_quorum,
-    reconfiguration::{
-        CurrentVoterSet, ReconfigurationLeadership, TargetVoter, VoterChangeKind,
-        VoterChangeRequest, VoterReconfigurationPlan,
+use {
+    super::constructed_voter_reconfiguration,
+    crate::{
+        consensus::election_has_quorum,
+        reconfiguration::{
+            CurrentVoterSet, ReconfigurationLeadership, TargetVoter, VoterChangeKind,
+            VoterChangeRequest, VoterReconfigurationPlan,
+        },
     },
+    creusot_std::prelude::*,
 };
 
 type QuorumOverlap = Option<(

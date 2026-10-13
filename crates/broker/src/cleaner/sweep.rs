@@ -24,23 +24,23 @@
 //! the partitions the cleaner has lost across sweeps, and the sweep counter
 //! is left where it was so a failing pass never reports success.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
-
-use krabka_log::LogError;
-use krabka_metadata::MetadataImage;
-use krabka_units::prelude::{ByteSize, ByteSizeExt};
-use krabka_verified::FreezeMutationKind;
-use tracing::warn;
-
-use crate::{
-    error::BrokerError,
-    freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
-    metrics::BrokerMetrics,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
+use {
+    crate::{
+        error::BrokerError,
+        freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
+        metrics::BrokerMetrics,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+    },
+    krabka_log::LogError,
+    krabka_metadata::MetadataImage,
+    krabka_units::prelude::{ByteSize, ByteSizeExt},
+    krabka_verified::FreezeMutationKind,
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        sync::Arc,
+    },
+    tracing::warn,
 };
 
 /// What keeps a partition on the uncleanable list.
@@ -92,9 +92,7 @@ pub(crate) struct UncleanablePartitions {
 
 impl UncleanablePartitions {
     /// How many partitions the cleaner currently cannot clean.
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
+    fn len(&self) -> usize { self.inner.len() }
 
     /// Whether the sweep must leave `key` alone: a pass on it would refuse the
     /// same record again, because `record_limit` is still the limit that

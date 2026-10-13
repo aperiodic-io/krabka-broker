@@ -1,15 +1,15 @@
 //! The broker binary's command line, as the clap parser the process entry
 //! point builds its configuration from.
 
-use std::{net::SocketAddr, path::PathBuf};
-
-use base64::Engine as _;
-use clap::Parser;
-use krabka_raft::NodeId;
-use krabka_units::{ByteSize, Time};
-use uuid::Uuid;
-
-use crate::runtime_args::RuntimeArgs;
+use {
+    crate::runtime_args::RuntimeArgs,
+    base64::Engine as _,
+    clap::Parser,
+    krabka_raft::NodeId,
+    krabka_units::{ByteSize, Time},
+    std::{net::SocketAddr, path::PathBuf},
+    uuid::Uuid,
+};
 
 #[krabka_macros::runtime_policy_fields(node_cli)]
 #[krabka_macros::krabka_env]
@@ -370,11 +370,7 @@ fn parse_metadata_raft_command_queue_capacity(value: &str) -> Result<usize, Stri
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::secs;
-
-    use super::*;
-    use crate::test_support::env_guard;
+    use {super::*, crate::test_support::env_guard, assert2::assert, krabka_units::secs};
 
     /// `--cluster-id` accepts Kafka's base64 `Uuid` form -- what `Metadata`
     /// and `DescribeCluster` report (#1082) -- as well as the hyphenated

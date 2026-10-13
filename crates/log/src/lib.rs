@@ -29,10 +29,12 @@
 //! ## Quick start
 //!
 //! ```no_run
-//! use krabka_ids::Offset;
-//! use krabka_log::{Log, LogConfig};
-//! use krabka_protocol::records::RecordBatch;
-//! use krabka_units::prelude::mebibytes;
+//! use {
+//!     krabka_ids::Offset,
+//!     krabka_log::{Log, LogConfig},
+//!     krabka_protocol::records::RecordBatch,
+//!     krabka_units::prelude::mebibytes,
+//! };
 //!
 //! let mut log = Log::open("/var/kafka/my-topic-0", LogConfig::default()).unwrap();
 //! let mut batch = RecordBatch::default();
@@ -106,42 +108,46 @@ mod test_support;
 pub mod topic_name;
 mod txn_index;
 
-pub use config::{
-    CleanupPolicy, DEFAULT_MAX_MESSAGE_SIZE, DEFAULT_READ_AHEAD_MAX, DEFAULT_TAIL_CACHE_SIZE,
-    DeliveryPolicy, LogConfig, RemoteTierFlags, ScheduleOrder, SegmentAllocation,
-};
-pub use delivery::{DeliveryAdvance, batch_is_deliverable};
-pub use error::LogError;
-pub use filter::{FilteredBatch, filter_batch};
-pub use io::write_file_atomic;
 #[cfg(any(test, feature = "test-helpers"))]
 pub use io::{DirectFile, IoTarget, LogIo};
-pub use krabka_ids::{LeaderEpoch, Offset, ProducerId};
-pub use leader_epoch_checkpoint::{
-    EpochEntry, LeaderEpochCheckpoint, epoch_and_offset_for_entries,
+pub use {
+    config::{
+        CleanupPolicy, DEFAULT_MAX_MESSAGE_SIZE, DEFAULT_READ_AHEAD_MAX, DEFAULT_TAIL_CACHE_SIZE,
+        DeliveryPolicy, LogConfig, RemoteTierFlags, ScheduleOrder, SegmentAllocation,
+    },
+    delivery::{DeliveryAdvance, batch_is_deliverable},
+    error::LogError,
+    filter::{FilteredBatch, filter_batch},
+    io::write_file_atomic,
+    krabka_ids::{LeaderEpoch, Offset, ProducerId},
+    leader_epoch_checkpoint::{EpochEntry, LeaderEpochCheckpoint, epoch_and_offset_for_entries},
 };
 sendfile_cfg! {
     pub use log::RawReadDesc;
 }
-pub use log::{
-    ActiveProducer, ActiveSegmentExport, BARRIER_CONTROL_TYPE, CompactionContext, Log, RawRead,
-    ReadOutput, SegmentExport, TransactionAppendRefusal, TransactionalBatch, VerbatimBatch,
-    VerificationGuard,
+pub use {
+    log::{
+        ActiveProducer, ActiveSegmentExport, BARRIER_CONTROL_TYPE, CompactionContext, Log, RawRead,
+        ReadOutput, SegmentExport, TransactionAppendRefusal, TransactionalBatch, VerbatimBatch,
+        VerificationGuard,
+    },
+    producer_snapshot::{
+        NUM_BATCHES_TO_RETAIN, ProducerBatchMetadata, ProducerSnapshotEntry, RecoveredProducer,
+        SnapshotDecodeError, decode as decode_producer_snapshot,
+    },
+    retention::now_ms as epoch_ms,
 };
-pub use producer_snapshot::{
-    NUM_BATCHES_TO_RETAIN, ProducerBatchMetadata, ProducerSnapshotEntry, RecoveredProducer,
-    SnapshotDecodeError, decode as decode_producer_snapshot,
-};
-pub use retention::now_ms as epoch_ms;
 sendfile_cfg! {
     pub use segment::RawSegmentDesc;
 }
 // Re-export the zero-copy fetch descriptor so broker code can name
 // `krabka_log::FileRegion` without depending on the protocol crate's path.
-pub use krabka_protocol::records::FileRegion;
-pub use segment::{RawSegmentRead, Segment};
-pub use stamp_index::{StampEntry, StampIndex};
 #[cfg(any(test, feature = "test-helpers"))]
 pub use stamp_source::MonotonicStampSource;
-pub use stamp_source::StampSource;
-pub use txn_index::{AbortedTxn, TxnIndex};
+pub use {
+    krabka_protocol::records::FileRegion,
+    segment::{RawSegmentRead, Segment},
+    stamp_index::{StampEntry, StampIndex},
+    stamp_source::StampSource,
+    txn_index::{AbortedTxn, TxnIndex},
+};

@@ -36,13 +36,15 @@
 //! one adds a `max_request_version` arm in `krabka-metadata`, and the matching
 //! encode and decode methods here.
 
-use bytes::{Buf, BufMut, Bytes};
-use krabka_metadata::{
-    KrabkaVersion, MetadataImage, PrivateRpc,
-    krabka_version::{KRABKA_VERSION_MAX, KRABKA_VERSION_MIN},
-    private_rpc_version,
+use {
+    bytes::{Buf, BufMut, Bytes},
+    krabka_metadata::{
+        KrabkaVersion, MetadataImage, PrivateRpc,
+        krabka_version::{KRABKA_VERSION_MAX, KRABKA_VERSION_MIN},
+        private_rpc_version,
+    },
+    krabka_protocol::ProtocolError,
 };
-use krabka_protocol::ProtocolError;
 
 const I32_LEN: usize = 4;
 const SUBMIT_CHANGE_RESPONSE_FIXED_LEN: usize = 10;
@@ -397,9 +399,7 @@ impl KrabkaMetadataFetchResponse {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// The v0 `SubmitChange` request body that [`submit_request`] encodes to.
     const SUBMIT_REQUEST_V0: &[u8] = &[0, 0, 0, 3, 1, 2, 3];

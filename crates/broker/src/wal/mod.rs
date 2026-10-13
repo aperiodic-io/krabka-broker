@@ -8,15 +8,10 @@ mod local_fsync;
 mod offset_sequencer;
 pub(crate) mod quorum;
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use krabka_ids::Offset;
 #[cfg(test)]
 pub(crate) use local_fsync::LocalFsyncWal;
 pub(crate) use offset_sequencer::{ControllerSequencer, OffsetSequencer};
-
-use crate::error::BrokerError;
+use {crate::error::BrokerError, async_trait::async_trait, krabka_ids::Offset, std::sync::Arc};
 
 /// A durability medium behind the partition writer.
 #[async_trait]

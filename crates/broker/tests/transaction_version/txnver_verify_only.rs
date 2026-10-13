@@ -5,35 +5,34 @@
 //! `InitProducerId` readiness loop it needs to reach a loaded transaction
 //! coordinator.
 
-use std::time::Duration;
-
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_protocol::owned::common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic;
-
-use crate::{
-    support::{
-        discovery::coordinator_lookup_request,
-        topics::TopicPartitionCount,
-        transaction_wire::{TransactionPartitionsSetup, partitions_request},
-        transactions::{
-            InitProducerSetup, PartitionRegistration, ProducerIdentity, init_producer_request,
+use {
+    crate::{
+        support::{
+            discovery::coordinator_lookup_request,
+            topics::TopicPartitionCount,
+            transaction_wire::{TransactionPartitionsSetup, partitions_request},
+            transactions::{
+                InitProducerSetup, PartitionRegistration, ProducerIdentity, init_producer_request,
+            },
+        },
+        txnver_harness::{
+            NONE, TRANSACTION_ABORTABLE, admin_client, boot_single, create_topic,
+            expected_partitions,
         },
     },
-    txnver_harness::{
-        NONE, TRANSACTION_ABORTABLE, admin_client, boot_single, create_topic, expected_partitions,
-    },
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_protocol::owned::common::add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+    std::time::Duration,
 };
 
 const VERIFY_TID: &str = "verify-tid";
 
 async fn await_transaction_coordinator(client: &Client) -> (i64, i16) {
     let coordinator = client
-        .send(coordinator_lookup_request(
-            VERIFY_TID,
-            1,
-            vec![VERIFY_TID.into()],
-        ))
+        .send(coordinator_lookup_request(VERIFY_TID, 1, vec![
+            VERIFY_TID.into(),
+        ]))
         .await
         .expect("FindCoordinator");
     assert!(

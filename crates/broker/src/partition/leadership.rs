@@ -3,15 +3,15 @@
 //! epoch from the metadata image. That publication is a locking protocol of its
 //! own, shared with produce admission, so it lives in its own module.
 
-use std::sync::{Arc, atomic::Ordering};
-
-use krabka_log::Log;
-
-use crate::{
-    codes::{FENCED_LEADER_EPOCH, UNKNOWN_LEADER_EPOCH},
-    error::BrokerError,
-    partition::Partition,
-    producer_state::ProducerState,
+use {
+    crate::{
+        codes::{FENCED_LEADER_EPOCH, UNKNOWN_LEADER_EPOCH},
+        error::BrokerError,
+        partition::Partition,
+        producer_state::ProducerState,
+    },
+    krabka_log::Log,
+    std::sync::{Arc, atomic::Ordering},
 };
 
 #[cfg(test)]
@@ -363,16 +363,17 @@ impl Partition {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_log::Offset;
-    use tokio::sync::Notify;
-
-    use super::*;
-    use crate::{
-        codes::{FENCED_LEADER_EPOCH, UNKNOWN_LEADER_EPOCH},
-        partition::test_support::{
-            EpochCheckpointFull, epoch_history as test_epoch_history, test_partition,
+    use {
+        super::*,
+        crate::{
+            codes::{FENCED_LEADER_EPOCH, UNKNOWN_LEADER_EPOCH},
+            partition::test_support::{
+                EpochCheckpointFull, epoch_history as test_epoch_history, test_partition,
+            },
         },
+        assert2::assert,
+        krabka_log::Offset,
+        tokio::sync::Notify,
     };
 
     #[tokio::test]

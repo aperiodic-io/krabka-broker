@@ -2,12 +2,12 @@
 //! site-aware placement of the new partitions, and the validation of an
 //! explicit `assignments` list.
 
-use std::collections::BTreeSet;
-
-use assert2::assert;
-
-use super::*;
-use crate::handlers::{create_partitions::test_support::assn, test_support::sorted_replica_sites};
+use {
+    super::*,
+    crate::handlers::{create_partitions::test_support::assn, test_support::sorted_replica_sites},
+    assert2::assert,
+    std::collections::BTreeSet,
+};
 
 /// The seeds that a test runs the placement with.
 const SEEDS: std::ops::Range<u64> = 0..64;

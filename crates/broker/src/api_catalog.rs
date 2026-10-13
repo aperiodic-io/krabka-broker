@@ -23,10 +23,11 @@
 //! entry in the literal shape the existing ones use: the generator does not
 //! compile Rust.
 
-use krabka_protocol::owned::api_versions_response::ApiVersion;
 pub use krabka_raft::UnstableApiVersions;
-
-use crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR;
+use {
+    crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR,
+    krabka_protocol::owned::api_versions_response::ApiVersion,
+};
 
 /// How far the broker takes one KIP.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1814,11 +1815,7 @@ fn admin_apis() -> Vec<CatalogApi> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert, std::collections::BTreeSet};
 
     /// The default gates: Kafka 4.3.1's table exactly.
     const STRICT: VersionGates = VersionGates {
@@ -2190,9 +2187,7 @@ mod tests {
     }
 
     /// The KIP number of a `KIP-<n>` key, or `None` for a scope-only key.
-    fn kip_number(key: &str) -> Option<u32> {
-        key.strip_prefix("KIP-")?.parse().ok()
-    }
+    fn kip_number(key: &str) -> Option<u32> { key.strip_prefix("KIP-")?.parse().ok() }
 
     #[test]
     fn kip_annotation_keys_are_unique_and_ordered() {

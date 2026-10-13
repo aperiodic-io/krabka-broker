@@ -47,13 +47,14 @@
 //! | 4 | A write failed, or the quorum flags name an invalid voter set. |
 //! | 5 | A `--feature`, `--release-version`, or quorum-mode combination is invalid. |
 
-use std::path::{Path, PathBuf};
-
-use krabka_metadata::{
-    KRaftVersionRecord, MetadataRecord, ScramCredentialRecord, VoterSet, VotersRecord,
+use {
+    krabka_metadata::{
+        KRaftVersionRecord, MetadataRecord, ScramCredentialRecord, VoterSet, VotersRecord,
+    },
+    krabka_security::scram::{MIN_SCRAM_ITERATIONS, hash_scram_password_with_salt},
+    ring::rand::{SecureRandom, SystemRandom},
+    std::path::{Path, PathBuf},
 };
-use krabka_security::scram::{MIN_SCRAM_ITERATIONS, hash_scram_password_with_salt};
-use ring::rand::{SecureRandom, SystemRandom};
 
 mod acl;
 mod args;
@@ -70,15 +71,17 @@ pub use self::{
     features::LATEST_PRODUCTION_METADATA_VERSION,
     output::FAIL_AFTER_ENV,
 };
-use self::{
-    ensemble::{Ensemble, SurveyError, remove_partial_output},
-    features::resolve_format_features,
-    output::{Fault, write_bootstrap_files, write_dynamic_checkpoint, write_meta_properties},
-    quorum::{build_initial_voters, is_dynamic_format},
-};
-use crate::{
-    ids::{ClusterId, DirectoryId},
-    meta_properties::MetaProperties,
+use {
+    self::{
+        ensemble::{Ensemble, SurveyError, remove_partial_output},
+        features::resolve_format_features,
+        output::{Fault, write_bootstrap_files, write_dynamic_checkpoint, write_meta_properties},
+        quorum::{build_initial_voters, is_dynamic_format},
+    },
+    crate::{
+        ids::{ClusterId, DirectoryId},
+        meta_properties::MetaProperties,
+    },
 };
 
 /// Exit codes. The table in the module documentation gives the cause of each.
@@ -101,9 +104,7 @@ const EXIT_INVALID_FEATURE: i32 = 5;
 /// appearing in it. `is_dynamic_format` rejects that combination before this
 /// point, so reaching the panic means that validation and this branch have
 /// drifted apart.
-pub async fn run(args: FormatArgs) -> i32 {
-    run_with_records(args, Vec::new()).await
-}
+pub async fn run(args: FormatArgs) -> i32 { run_with_records(args, Vec::new()).await }
 
 // `async` matches the entry point in `main.rs`; the body is sync today
 // (purely fs + crypto) but a real raft-log bootstrap would await tokio I/O.
@@ -218,9 +219,7 @@ impl DirectoryKind {
 
     /// Kafka's `DirectoryType.isMetadataDirectory`: the directory gets the
     /// bootstrap files.
-    fn is_metadata(self) -> bool {
-        self != Self::Data
-    }
+    fn is_metadata(self) -> bool { self != Self::Data }
 
     /// The directory also gets the offset-zero checkpoint.
     fn is_dynamic_metadata(self) -> bool {

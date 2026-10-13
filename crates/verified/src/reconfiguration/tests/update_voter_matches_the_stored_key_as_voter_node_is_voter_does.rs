@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn update_voter_matches_the_stored_key_as_voter_node_is_voter_does() {

@@ -6,9 +6,10 @@
 //! `TOPIC_AUTHORIZATION_FAILED` -- no partial disclosure, and the group
 //! coordinator never runs.
 
-use krabka_protocol::owned::streams_group_heartbeat_request::Topology;
-
-use crate::{broker::Broker, internal_topics::is_internal_topic};
+use {
+    crate::{broker::Broker, internal_topics::is_internal_topic},
+    krabka_protocol::owned::streams_group_heartbeat_request::Topology,
+};
 
 /// Generate the same topic-name traversal for wire and stored topology shapes.
 macro_rules! define_required_topics {
@@ -93,13 +94,14 @@ pub(super) fn invalid_topology_message(broker: &Broker, required: &[String]) -> 
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::{
-        common::streams_group_heartbeat_request::topic_info::TopicInfo,
-        streams_group_heartbeat_request::Subtopology,
+    use {
+        super::*,
+        assert2::check,
+        krabka_protocol::owned::{
+            common::streams_group_heartbeat_request::topic_info::TopicInfo,
+            streams_group_heartbeat_request::Subtopology,
+        },
     };
-
-    use super::*;
 
     fn info(name: &str) -> TopicInfo {
         TopicInfo {
@@ -115,16 +117,13 @@ mod tests {
     fn required_topics_collects_every_kind_once_each() {
         let topology = Topology {
             epoch: 1,
-            subtopologies: vec![
-                crate::test_support::source_to_repartition(),
-                Subtopology {
-                    subtopology_id: "1".into(),
-                    source_topics: vec!["orders".into()],
-                    repartition_source_topics: vec![info("rp")],
-                    state_changelog_topics: vec![info("store-changelog")],
-                    ..Default::default()
-                },
-            ],
+            subtopologies: vec![crate::test_support::source_to_repartition(), Subtopology {
+                subtopology_id: "1".into(),
+                source_topics: vec!["orders".into()],
+                repartition_source_topics: vec![info("rp")],
+                state_changelog_topics: vec![info("store-changelog")],
+                ..Default::default()
+            }],
             ..Default::default()
         };
 

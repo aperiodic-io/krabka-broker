@@ -7,20 +7,21 @@
 //! durable prefix a shard opens on, and `distributed` keeps the diskless
 //! voter-set quorum.
 
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc, Mutex, OnceLock,
-        atomic::{AtomicBool, AtomicI64, Ordering},
+use {
+    bytes::Bytes,
+    krabka_ids::{LeaderEpoch, Offset},
+    krabka_kraft_core::{LogView as _, NodeId},
+    krabka_log::{Log, VerbatimBatch},
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::{
+        collections::HashMap,
+        sync::{
+            Arc, Mutex, OnceLock,
+            atomic::{AtomicBool, AtomicI64, Ordering},
+        },
     },
+    tokio::sync::Notify,
 };
-
-use bytes::Bytes;
-use krabka_ids::{LeaderEpoch, Offset};
-use krabka_kraft_core::{LogView as _, NodeId};
-use krabka_log::{Log, VerbatimBatch};
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-use tokio::sync::Notify;
 
 mod batches;
 mod distributed;
@@ -32,17 +33,19 @@ mod replica_io;
 
 #[cfg(test)]
 use self::recovery::{bootstrap_durable_prefix, recover_durable_prefix};
-use self::replica_io::trim_log;
 pub(super) use self::{
     batches::{
         read_batches_exact, read_log_batches_covering, read_log_batches_exact, split_batches,
     },
     replica_io::sync_replica,
 };
-use crate::{
-    error::BrokerError,
-    metrics::BrokerMetrics,
-    wal::quorum::{log_view::ShardLog, registry::ShardId},
+use {
+    self::replica_io::trim_log,
+    crate::{
+        error::BrokerError,
+        metrics::BrokerMetrics,
+        wal::quorum::{log_view::ShardLog, registry::ShardId},
+    },
 };
 
 /// A single durable member of a WAL quorum.
@@ -76,9 +79,7 @@ impl WalReplica {
 
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn id(&self) -> NodeId {
-        self.id
-    }
+    pub(crate) fn id(&self) -> NodeId { self.id }
 }
 
 /// Drives the durable quorum frontier of a WAL shard.
@@ -562,13 +563,9 @@ fn fetch_divergence(
 }
 
 #[cfg(test)]
-fn replica_end_offset(replica: &WalReplica) -> Offset {
-    Offset(replica.log.end_offset())
-}
+fn replica_end_offset(replica: &WalReplica) -> Offset { Offset(replica.log.end_offset()) }
 
-fn replica_start_offset(replica: &WalReplica) -> Offset {
-    replica.log.lock().log_start_offset()
-}
+fn replica_start_offset(replica: &WalReplica) -> Offset { replica.log.lock().log_start_offset() }
 
 #[derive(Debug, Clone)]
 pub(super) struct BatchBytes {
@@ -579,15 +576,15 @@ pub(super) struct BatchBytes {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use assert2::assert;
-    use bytes::{Bytes, BytesMut};
-    use krabka_log::LogConfig;
-    use krabka_protocol::records::{Record, RecordBatch};
-
-    use super::*;
-    use crate::wal::quorum::test_support::{batch, distributed_engine, open_log};
+    use {
+        super::*,
+        crate::wal::quorum::test_support::{batch, distributed_engine, open_log},
+        assert2::assert,
+        bytes::{Bytes, BytesMut},
+        krabka_log::LogConfig,
+        krabka_protocol::records::{Record, RecordBatch},
+        std::path::Path,
+    };
 
     fn configured_engine(path: &Path) -> WalShardEngine {
         let source = open_log(path);

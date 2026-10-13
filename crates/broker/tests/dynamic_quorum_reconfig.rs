@@ -19,20 +19,20 @@
 //! `meta.properties` that `krabka-format` wrote, read as the binary reads it,
 //! and a fresh directory starts in `Bootstrap` mode.
 
-use std::{
-    collections::BTreeSet,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    time::{Duration, Instant},
+use {
+    crate::support::{AddressedNodeSetup, addressed_node_config},
+    assert2::assert,
+    krabka_broker::{BootstrapMode, Broker, BrokerHandle, NodeId, config::NodeRole},
+    krabka_client_admin::{AdminClient, AdminError, RaftVoterEndpoint},
+    std::{
+        collections::BTreeSet,
+        net::SocketAddr,
+        path::{Path, PathBuf},
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
+    tokio::net::TcpListener,
 };
-
-use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker, BrokerHandle, NodeId, config::NodeRole};
-use krabka_client_admin::{AdminClient, AdminError, RaftVoterEndpoint};
-use tempfile::TempDir;
-use tokio::net::TcpListener;
-
-use crate::support::{AddressedNodeSetup, addressed_node_config};
 
 mod support;
 
@@ -100,14 +100,11 @@ async fn start(
         None,
     )
     .expect("krabka-format wrote meta.properties");
-    let mut config = addressed_node_config(
-        log_dir,
-        AddressedNodeSetup {
-            node: krabka_broker::NodeId(node.id),
-            client: node.client_addr,
-            controller: node.controller_addr,
-        },
-    );
+    let mut config = addressed_node_config(log_dir, AddressedNodeSetup {
+        node: krabka_broker::NodeId(node.id),
+        client: node.client_addr,
+        controller: node.controller_addr,
+    });
     config.controller_quorum_voters = vec![];
     config.bootstrap_servers = bootstrap.iter().map(ToString::to_string).collect();
     config.roles = roles;
@@ -232,10 +229,11 @@ async fn brokers_and_controllers_find_a_standalone_quorum_through_bootstrap_serv
 
     // The standalone controller is the whole voter set and elects itself.
     let listener = first_controller.to_string();
-    let log_dir = format(
-        &first,
-        &["--standalone", "--controller-listener", &listener],
-    )
+    let log_dir = format(&first, &[
+        "--standalone",
+        "--controller-listener",
+        &listener,
+    ])
     .await;
     let (first, first_dir) = start(first, vec![NodeRole::Controller], &log_dir, &bootstrap).await;
     first.wait_until_controller_leader().await;

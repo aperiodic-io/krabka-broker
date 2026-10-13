@@ -9,9 +9,11 @@
 mod jvm_acceptance;
 mod support;
 
-use assert2::{assert, check};
-use jvm_acceptance::*;
-use krabka_broker::Broker;
+use {
+    assert2::{assert, check},
+    jvm_acceptance::*,
+    krabka_broker::Broker,
+};
 
 // 200 records of ~30 bytes seal several segments at TIERED_SEGMENT_SIZE.
 const RECORDS: usize = 200;
@@ -223,23 +225,20 @@ async fn tiered_storage_topic_rlmm_survives_restart() {
 
     // Consume from offset 0 post-restart. Older offsets only exist in MinIO;
     // the RLMM must recover its metadata from __remote_log_metadata + snapshot.
-    let consumer_out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TIERED,
-        &[
-            "kafka-console-consumer",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--topic",
-            TOPIC,
-            "--partition",
-            "0",
-            "--from-beginning",
-            "--max-messages",
-            &RECORDS.to_string(),
-            "--timeout-ms",
-            "30000",
-        ],
-    );
+    let consumer_out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TIERED, &[
+        "kafka-console-consumer",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--topic",
+        TOPIC,
+        "--partition",
+        "0",
+        "--from-beginning",
+        "--max-messages",
+        &RECORDS.to_string(),
+        "--timeout-ms",
+        "30000",
+    ]);
     let stdout = String::from_utf8_lossy(&consumer_out.stdout);
     let consumed = stdout.lines().filter(|l| !l.trim().is_empty()).count();
     eprintln!("KRABKA[test] consumed {consumed} records post-restart");

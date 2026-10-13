@@ -6,16 +6,16 @@
 //! Installing a target assignment and reconciling a member against it live in
 //! the `reconcile` sibling.
 
-use std::{cmp::Ordering, collections::HashMap, time::Instant};
-
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::{TargetAssignment, member::MemberState, regex::ResolvedRegularExpression};
-use crate::{
-    codes,
-    coordinator::unified::{
-        INITIAL_GROUP_EPOCH, actor::CommitFence, persistence_next_gen::MemberAssignmentState,
+use {
+    super::{TargetAssignment, member::MemberState, regex::ResolvedRegularExpression},
+    crate::{
+        codes,
+        coordinator::unified::{
+            INITIAL_GROUP_EPOCH, actor::CommitFence, persistence_next_gen::MemberAssignmentState,
+        },
     },
+    krabka_protocol::primitives::uuid::Uuid,
+    std::{cmp::Ordering, collections::HashMap, time::Instant},
 };
 
 /// The first `OffsetCommit` version that a member of the consumer protocol
@@ -77,6 +77,29 @@ enum LogPresence {
 }
 
 impl GroupState {
+    crate::coordinator::unified::member_helpers::shared_group_state_methods!();
+
+    crate::coordinator::unified::member_helpers::expired_members_method!();
+
+    crate::coordinator::unified::member_helpers::evict_expired!();
+
+    crate::coordinator::unified::member_helpers::fence_rebalance_timeouts_method! {
+    /// Removes every member whose rebalance timeout fired at `now` while the
+    /// member still had partitions to revoke. Returns the removed member ids,
+    /// sorted.
+    ///
+    /// This is the fence of Kafka's `scheduleConsumerGroupRebalanceTimeout`
+    /// (`consumerGroupFenceMember`). The removal frees the partitions the
+    /// member did not revoke, so their new owners can take them.
+    ///
+    /// A hosted classic member never sends `ConsumerGroupHeartbeat`, so no
+    /// heartbeat arms its timeout. This pass arms it the first time it sees
+    /// the member with partitions to revoke. Kafka bounds the same member with
+    /// its join and sync timers, which also use the rebalance timeout. The
+    /// pass also cancels the deadlines that no longer apply, so a past
+    /// deadline never stays armed.
+    }
+
     pub fn new(group_id: impl Into<String>) -> Self {
         Self {
             group_id: group_id.into(),
@@ -101,17 +124,11 @@ impl GroupState {
 
     /// Whether the log holds the group. See [`Self::mark_persisted`].
     #[must_use]
-    pub(crate) fn is_persisted(&self) -> bool {
-        self.presence == LogPresence::Present
-    }
+    pub(crate) fn is_persisted(&self) -> bool { self.presence == LogPresence::Present }
 
     /// Records that the log holds the group: a batch of its records was
     /// appended, or it was loaded from the log.
-    pub(crate) fn mark_persisted(&mut self) {
-        self.presence = LogPresence::Present;
-    }
-
-    crate::coordinator::unified::member_helpers::assignment_delay_method!();
+    pub(crate) fn mark_persisted(&mut self) { self.presence = LogPresence::Present; }
 
     /// Records that a target assignment calculation finished at `now_ms`, the
     /// wall-clock time that Kafka's `TargetAssignmentBuilder` writes as the
@@ -122,19 +139,13 @@ impl GroupState {
 
     /// Kafka's `ConsumerGroup.assignmentTimestamp`.
     #[must_use]
-    pub(crate) fn assignment_timestamp_ms(&self) -> i64 {
-        self.assignment_timestamp_ms
-    }
-
-    crate::coordinator::unified::member_helpers::bump_group_epoch!(self;);
+    pub(crate) fn assignment_timestamp_ms(&self) -> i64 { self.assignment_timestamp_ms }
 
     /// `true` while the group epoch is ahead of the target assignment epoch:
     /// Kafka's `maybeUpdateTargetAssignment` then computes a new target at
     /// the next heartbeat that the assignment interval allows.
     #[must_use]
-    pub fn target_is_stale(&self) -> bool {
-        self.group_epoch > self.target.epoch
-    }
+    pub fn target_is_stale(&self) -> bool { self.group_epoch > self.target.epoch }
 
     /// Kafka's `ConsumerGroup.validateOffsetCommit`, with the per-partition
     /// validator of `createAssignmentEpochValidator` (KIP-1251) run over
@@ -246,9 +257,7 @@ impl GroupState {
 
     /// Kafka's `ModernGroup.requestMetadataRefresh`: the next heartbeat
     /// computes the metadata hash of the subscribed topics again.
-    pub fn request_metadata_refresh(&mut self) {
-        self.metadata_refresh_requested = true;
-    }
+    pub fn request_metadata_refresh(&mut self) { self.metadata_refresh_requested = true; }
 
     /// Kafka's `ModernGroup.hasMetadataExpired`: `true` from a
     /// [`Self::request_metadata_refresh`] until the group records a metadata
@@ -258,15 +267,11 @@ impl GroupState {
     /// `GroupMetadataManager.METADATA_REFRESH_INTERVAL_MS` is
     /// `Integer.MAX_VALUE`, so only a request makes the metadata expire.
     #[must_use]
-    pub fn metadata_refresh_requested(&self) -> bool {
-        self.metadata_refresh_requested
-    }
+    pub fn metadata_refresh_requested(&self) -> bool { self.metadata_refresh_requested }
 
     /// Kafka's `ConsumerGroup.hasSubscriptionMetadataRecord`.
     #[must_use]
-    pub fn has_subscription_metadata_record(&self) -> bool {
-        self.has_subscription_metadata_record
-    }
+    pub fn has_subscription_metadata_record(&self) -> bool { self.has_subscription_metadata_record }
 
     /// Kafka's `ConsumerGroup.setHasSubscriptionMetadataRecord`, which the
     /// replay of a key-v4 value sets and the replay of its tombstone clears.
@@ -276,9 +281,7 @@ impl GroupState {
 
     /// The metadata hash that the group recorded last.
     #[must_use]
-    pub fn metadata_hash(&self) -> i64 {
-        self.metadata_hash
-    }
+    pub fn metadata_hash(&self) -> i64 { self.metadata_hash }
 
     /// Records `hash` as the metadata of the current target and ends a
     /// requested refresh. Kafka's `updateSubscriptionMetadata` also sets the
@@ -291,13 +294,7 @@ impl GroupState {
     /// Records `hash` as the group's metadata hash and leaves a requested
     /// refresh as it is, as the replay of the epoch record that Kafka's
     /// `consumerGroupFenceMembers` writes does.
-    pub fn set_metadata_hash(&mut self, hash: i64) {
-        self.metadata_hash = hash;
-    }
-
-    crate::coordinator::unified::member_helpers::expired_members_method!();
-
-    crate::coordinator::unified::member_helpers::evict_expired!();
+    pub fn set_metadata_hash(&mut self, hash: i64) { self.metadata_hash = hash; }
 
     /// Arms or cancels the rebalance timeout of `member_id` after a
     /// reconciliation, as Kafka's `GroupMetadataManager.maybeReconcile` does.
@@ -344,23 +341,6 @@ impl GroupState {
     #[must_use]
     pub fn next_rebalance_deadline(&self) -> Option<Instant> {
         self.rebalance_deadlines.values().min().copied()
-    }
-
-    crate::coordinator::unified::member_helpers::fence_rebalance_timeouts_method! {
-    /// Removes every member whose rebalance timeout fired at `now` while the
-    /// member still had partitions to revoke. Returns the removed member ids,
-    /// sorted.
-    ///
-    /// This is the fence of Kafka's `scheduleConsumerGroupRebalanceTimeout`
-    /// (`consumerGroupFenceMember`). The removal frees the partitions the
-    /// member did not revoke, so their new owners can take them.
-    ///
-    /// A hosted classic member never sends `ConsumerGroupHeartbeat`, so no
-    /// heartbeat arms its timeout. This pass arms it the first time it sees
-    /// the member with partitions to revoke. Kafka bounds the same member with
-    /// its join and sync timers, which also use the rebalance timeout. The
-    /// pass also cancels the deadlines that no longer apply, so a past
-    /// deadline never stays armed.
     }
 
     /// The members whose rebalance timeout fired at `now` while they still
@@ -476,14 +456,14 @@ impl GroupState {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::{
-        test_support::sorted_epoch_pairs,
-        unified::consumer_state::test_support::{Topics, member, subscribed_member},
+    use {
+        super::*,
+        crate::coordinator::{
+            test_support::sorted_epoch_pairs,
+            unified::consumer_state::test_support::{Topics, member, subscribed_member},
+        },
+        assert2::assert,
+        std::time::Duration,
     };
 
     #[test]
@@ -844,15 +824,11 @@ mod tests {
 
         // Epoch 2: partition 1 goes. The member still owns it, so it is
         // pending revocation with the epoch it was assigned at.
-        reconcile_step(
-            &mut g,
-            &topics,
-            ReconciliationStep {
-                epoch: 2,
-                target: vec![0],
-                owned: vec![0, 1],
-            },
-        );
+        reconcile_step(&mut g, &topics, ReconciliationStep {
+            epoch: 2,
+            target: vec![0],
+            owned: vec![0, 1],
+        });
         steps.push(epochs(&g));
 
         // The member revokes it and moves to epoch 2.
@@ -860,15 +836,11 @@ mod tests {
         steps.push(epochs(&g));
 
         // Epoch 3: partition 2 comes, at epoch 3; partition 0 keeps epoch 1.
-        reconcile_step(
-            &mut g,
-            &topics,
-            ReconciliationStep {
-                epoch: 3,
-                target: vec![0, 2],
-                owned: vec![0],
-            },
-        );
+        reconcile_step(&mut g, &topics, ReconciliationStep {
+            epoch: 3,
+            target: vec![0, 2],
+            owned: vec![0],
+        });
         steps.push(epochs(&g));
 
         // A static leave keeps the assignment at epoch 0.

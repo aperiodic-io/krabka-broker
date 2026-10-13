@@ -7,12 +7,13 @@
 //! takes effect for the next write. So does this module: it reads them out of
 //! the metadata image each time.
 
-use krabka_metadata::{MetadataImage, NodeId};
-
-use super::DlqError;
-use crate::{
-    config_keys::ERRORS_DEADLETTERQUEUE_GROUP_ENABLE,
-    share_partition::group_settings::{KEY_DLQ_COPY_RECORD_ENABLE, KEY_DLQ_TOPIC_NAME},
+use {
+    super::DlqError,
+    crate::{
+        config_keys::ERRORS_DEADLETTERQUEUE_GROUP_ENABLE,
+        share_partition::group_settings::{KEY_DLQ_COPY_RECORD_ENABLE, KEY_DLQ_TOPIC_NAME},
+    },
+    krabka_metadata::{MetadataImage, NodeId},
 };
 
 /// Kafka's `GroupCoordinatorConfig.ERRORS_DEADLETTERQUEUE_AUTO_CREATE_TOPICS_ENABLE_CONFIG`.
@@ -56,9 +57,7 @@ impl ClusterSettings {
 }
 
 /// A boolean config, as Kafka's `ConfigDef` reads it: `true` in any case.
-fn is_true(value: &str) -> bool {
-    value.trim().eq_ignore_ascii_case("true")
-}
+fn is_true(value: &str) -> bool { value.trim().eq_ignore_ascii_case("true") }
 
 /// The dead-letter settings of one group.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,14 +153,15 @@ pub(super) fn validate(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{
-        BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, GroupConfigRecord, MetadataRecord,
-        TopicConfigRecord, TopicRecord,
+    use {
+        super::*,
+        crate::test_support::string_pairs as configs,
+        assert2::assert,
+        krabka_metadata::{
+            BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, GroupConfigRecord, MetadataRecord,
+            TopicConfigRecord, TopicRecord,
+        },
     };
-
-    use super::*;
-    use crate::test_support::string_pairs as configs;
 
     fn broker_config(node_id: NodeId, name: &str, value: &str) -> MetadataRecord {
         MetadataRecord::V1BrokerConfig(BrokerConfigRecord {

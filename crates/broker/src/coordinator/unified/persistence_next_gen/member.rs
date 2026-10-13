@@ -27,21 +27,22 @@
 //! `apply_seed` hydrates the group. See
 //! `crate::coordinator::unified::actor::seed`.
 
-use bytes::{BufMut, Bytes, BytesMut};
-use krabka_protocol::ProtocolError;
-
-use crate::{
-    coordinator::unified::persistence::{
-        flex::{
-            get_compact_array, get_compact_bytes, get_compact_nullable_string, get_compact_string,
-            get_member_client, get_string_array, get_value_version, put_compact_array,
-            put_compact_bytes, put_compact_nullable_string, put_compact_string,
-            put_empty_tagged_fields, put_member_client, put_string_array, put_tagged_fields,
-            read_tagged, skip_tagged_fields,
+use {
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{
+                get_compact_array, get_compact_bytes, get_compact_nullable_string,
+                get_compact_string, get_member_client, get_string_array, get_value_version,
+                put_compact_array, put_compact_bytes, put_compact_nullable_string,
+                put_compact_string, put_empty_tagged_fields, put_member_client, put_string_array,
+                put_tagged_fields, read_tagged, skip_tagged_fields,
+            },
+            get_i32,
         },
-        get_i32,
+        error::BrokerError,
     },
-    error::BrokerError,
+    bytes::{BufMut, Bytes, BytesMut},
+    krabka_protocol::ProtocolError,
 };
 
 /// Kafka's tag for the `ClassicMemberMetadata` field of
@@ -186,10 +187,7 @@ impl MemberMetadataValue {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::test_support::wire_bytes;
+    use {super::*, crate::coordinator::unified::test_support::wire_bytes, assert2::assert};
 
     fn native() -> MemberMetadataValue {
         MemberMetadataValue {

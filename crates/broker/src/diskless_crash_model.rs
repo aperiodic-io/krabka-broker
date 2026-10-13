@@ -36,9 +36,10 @@
 //! [distributed WAL quorum]: ../docs/diskless-wal-design.md#distributed-wal-quorum-and-stateless-appenders
 //! [diskless WAL design]: ../docs/diskless-wal-design.md
 
-use stateright::{Checker, Model, Property};
-
-use crate::model_check::run_bfs;
+use {
+    crate::model_check::run_bfs,
+    stateright::{Checker, Model, Property},
+};
 
 const MAX_OFFSET: i64 = 2;
 const APPENDERS: usize = 2;
@@ -109,58 +110,6 @@ impl Model for CrashModel {
     type Action = Act;
     type State = CrashState;
 
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![CrashState {
-            kraft_next: 0,
-            log_end: 0,
-            wal_nodes: [0; WAL_NODES],
-            wal_lost: [false; WAL_NODES],
-            wal_acked: 0,
-            handoff_wal_acked: 0,
-            advertised_hwm: 0,
-            sequencer_epoch: 0,
-            object_frontier: 0,
-            index_frontier: 0,
-            trimmed: 0,
-            producer_committed: 0,
-            reservations: Vec::new(),
-            appenders_seen: 0,
-            witnesses: 0,
-        }]
-    }
-
-    fn actions(&self, s: &Self::State, acts: &mut Vec<Self::Action>) {
-        if s.kraft_next < MAX_OFFSET {
-            for node in 0..APPENDERS {
-                if !s.wal_lost[node] {
-                    acts.push(Act::ReserveVia(node));
-                }
-            }
-        }
-        if s.log_end < s.kraft_next {
-            acts.push(Act::FsyncAppend);
-            acts.push(Act::CrashBeforeFsync);
-            acts.push(Act::CrashMidFsync);
-        }
-        if s.object_frontier < s.wal_acked {
-            acts.push(Act::PutObject);
-        }
-        if s.index_frontier < s.object_frontier {
-            acts.push(Act::CommitIndex);
-        }
-        if s.trimmed < s.index_frontier {
-            acts.push(Act::Trim);
-        }
-        if s.wal_lost.iter().filter(|lost| **lost).count() == 0 && s.wal_acked > 0 {
-            for node in 0..WAL_NODES {
-                acts.push(Act::LoseWalNode(node));
-            }
-        }
-        if s.wal_acked > 0 && s.sequencer_epoch < 2 {
-            acts.push(Act::SequencerHandoff);
-        }
-    }
-
     krabka_macros::model_transition!(last, action, s; {
             match action {
                 Act::ReserveVia(node) => {
@@ -227,6 +176,58 @@ impl Model for CrashModel {
             Some(s)
 
     });
+
+    fn init_states(&self) -> Vec<Self::State> {
+        vec![CrashState {
+            kraft_next: 0,
+            log_end: 0,
+            wal_nodes: [0; WAL_NODES],
+            wal_lost: [false; WAL_NODES],
+            wal_acked: 0,
+            handoff_wal_acked: 0,
+            advertised_hwm: 0,
+            sequencer_epoch: 0,
+            object_frontier: 0,
+            index_frontier: 0,
+            trimmed: 0,
+            producer_committed: 0,
+            reservations: Vec::new(),
+            appenders_seen: 0,
+            witnesses: 0,
+        }]
+    }
+
+    fn actions(&self, s: &Self::State, acts: &mut Vec<Self::Action>) {
+        if s.kraft_next < MAX_OFFSET {
+            for node in 0..APPENDERS {
+                if !s.wal_lost[node] {
+                    acts.push(Act::ReserveVia(node));
+                }
+            }
+        }
+        if s.log_end < s.kraft_next {
+            acts.push(Act::FsyncAppend);
+            acts.push(Act::CrashBeforeFsync);
+            acts.push(Act::CrashMidFsync);
+        }
+        if s.object_frontier < s.wal_acked {
+            acts.push(Act::PutObject);
+        }
+        if s.index_frontier < s.object_frontier {
+            acts.push(Act::CommitIndex);
+        }
+        if s.trimmed < s.index_frontier {
+            acts.push(Act::Trim);
+        }
+        if s.wal_lost.iter().filter(|lost| **lost).count() == 0 && s.wal_acked > 0 {
+            for node in 0..WAL_NODES {
+                acts.push(Act::LoseWalNode(node));
+            }
+        }
+        if s.wal_acked > 0 && s.sequencer_epoch < 2 {
+            acts.push(Act::SequencerHandoff);
+        }
+    }
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![
@@ -355,6 +356,4 @@ fn run() {
 }
 
 #[test]
-fn diskless_crash_model() {
-    run();
-}
+fn diskless_crash_model() { run(); }

@@ -11,12 +11,13 @@
 //! Every label set is bounded. The `action` label takes one of the seven action
 //! names, and the `state` label takes one of the four state names.
 
-use krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord, MetadataImage};
-
-use crate::{
-    break_glass::{config::BreakGlassPolicy, gate::distinct_approvers},
-    config::BreakGlassConfig,
-    metrics::{BreakGlassAction as ActionLabel, BreakGlassState, BrokerMetrics},
+use {
+    crate::{
+        break_glass::{config::BreakGlassPolicy, gate::distinct_approvers},
+        config::BreakGlassConfig,
+        metrics::{BreakGlassAction as ActionLabel, BreakGlassState, BrokerMetrics},
+    },
+    krabka_metadata::{BreakGlassAction, BreakGlassProposalRecord, MetadataImage},
 };
 
 /// Account one gated transition that the broker refused for want of an approved
@@ -94,16 +95,17 @@ fn state_index(state: BreakGlassState) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::BreakGlassProposalRecord;
-
-    use super::*;
-    use crate::{
-        break_glass::{
-            ALL_ACTIONS, action_name,
-            gate::tests::{EXPIRES_MS, NOW_MS, approval, config, image_of, proposal},
+    use {
+        super::*,
+        crate::{
+            break_glass::{
+                ALL_ACTIONS, action_name,
+                gate::tests::{EXPIRES_MS, NOW_MS, approval, config, image_of, proposal},
+            },
+            metrics::{BreakGlassActionLabel, BreakGlassStateLabel},
         },
-        metrics::{BreakGlassActionLabel, BreakGlassStateLabel},
+        assert2::check,
+        krabka_metadata::BreakGlassProposalRecord,
     };
 
     fn states_of(proposals: &[BreakGlassProposalRecord]) -> Vec<Option<BreakGlassState>> {

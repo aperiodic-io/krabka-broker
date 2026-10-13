@@ -1,22 +1,20 @@
-use std::collections::{HashMap, HashSet};
-
-use assert2::assert;
-use krabka_protocol::primitives::uuid::Uuid;
-use krabka_verified::uniform_assignor::{SubscriberLoad, select_least_loaded};
-use proptest::prelude::*;
-
-use super::{Balancer, UniformAssignor};
-use crate::coordinator::unified::assignor::{
-    Assignment, Assignor, GroupSpec, MemberSubscription, SubscriptionType, TopicMetadata,
+use {
+    super::{Balancer, UniformAssignor},
+    crate::coordinator::unified::assignor::{
+        Assignment, Assignor, GroupSpec, MemberSubscription, SubscriptionType, TopicMetadata,
+    },
+    assert2::assert,
+    krabka_protocol::primitives::uuid::Uuid,
+    krabka_verified::uniform_assignor::{SubscriberLoad, select_least_loaded},
+    proptest::prelude::*,
+    std::collections::{HashMap, HashSet},
 };
 
 const HOMOGENEOUS: SubscriptionType = SubscriptionType::Homogeneous;
 const HETEROGENEOUS: SubscriptionType = SubscriptionType::Heterogeneous;
 
 /// A topic ID whose rank in Kafka's `Uuid` order is `rank`.
-fn tid(rank: u8) -> Uuid {
-    Uuid([rank; 16])
-}
+fn tid(rank: u8) -> Uuid { Uuid([rank; 16]) }
 
 type Partitions<'a> = &'a [(Uuid, &'a [i32])];
 
@@ -137,42 +135,32 @@ fn homogeneous_builder_matches_kafka_scenarios() {
         Scenario {
             // Kafka's HashSet visits topic3 before topic1.
             name: "testFirstAssignmentTwoMembersTwoTopicsNoMemberRacks",
-            group: group(
-                HOMOGENEOUS,
-                vec![
-                    member("A", &[second, first], &[]),
-                    member("B", &[second, first], &[]),
-                ],
-            ),
+            group: group(HOMOGENEOUS, vec![
+                member("A", &[second, first], &[]),
+                member("B", &[second, first], &[]),
+            ]),
             topics: metadata(&[(second, 3), (first, 2)]),
             expected: assignment(&[("A", &[(first, &[0, 1])]), ("B", &[(second, &[0, 1, 2])])]),
         },
         Scenario {
             name: "testFirstAssignmentNumMembersGreaterThanTotalNumPartitions",
-            group: group(
-                HOMOGENEOUS,
-                vec![
-                    member("A", &[first], &[]),
-                    member("B", &[first], &[]),
-                    member("C", &[first], &[]),
-                ],
-            ),
+            group: group(HOMOGENEOUS, vec![
+                member("A", &[first], &[]),
+                member("B", &[first], &[]),
+                member("C", &[first], &[]),
+            ]),
             topics: metadata(&[(first, 2)]),
             expected: assignment(&[("A", &[]), ("B", &[(first, &[0])]), ("C", &[(first, &[1])])]),
         },
         Scenario {
             name: "testReassignmentForTwoMembersTwoTopicsGivenUnbalancedPrevAssignment",
-            group: group(
-                HOMOGENEOUS,
-                vec![
-                    member(
-                        "A",
-                        &[first, second],
-                        &[(first, &[0, 1]), (second, &[0, 1])],
-                    ),
-                    member("B", &[first, second], &[(first, &[2]), (second, &[2])]),
-                ],
-            ),
+            group: group(HOMOGENEOUS, vec![
+                member("A", &[first, second], &[
+                    (first, &[0, 1]),
+                    (second, &[0, 1]),
+                ]),
+                member("B", &[first, second], &[(first, &[2]), (second, &[2])]),
+            ]),
             topics: metadata(&[(first, 3), (second, 3)]),
             expected: assignment(&[
                 ("A", &[(first, &[0, 1]), (second, &[0])]),
@@ -182,13 +170,10 @@ fn homogeneous_builder_matches_kafka_scenarios() {
         Scenario {
             // Kafka's HashSet visits topic2 before topic1.
             name: "testReassignmentWhenPartitionsAreAddedForTwoMembersTwoTopics",
-            group: group(
-                HOMOGENEOUS,
-                vec![
-                    member("A", &[second, first], &[(second, &[0, 2]), (first, &[0])]),
-                    member("B", &[second, first], &[(second, &[1]), (first, &[1, 2])]),
-                ],
-            ),
+            group: group(HOMOGENEOUS, vec![
+                member("A", &[second, first], &[(second, &[0, 2]), (first, &[0])]),
+                member("B", &[second, first], &[(second, &[1]), (first, &[1, 2])]),
+            ]),
             topics: metadata(&[(second, 6), (first, 5)]),
             expected: assignment(&[
                 ("A", &[(second, &[0, 2]), (first, &[0, 3, 4])]),
@@ -197,14 +182,11 @@ fn homogeneous_builder_matches_kafka_scenarios() {
         },
         Scenario {
             name: "testReassignmentWhenOneMemberAddedAfterInitialAssignmentWithTwoMembersTwoTopics",
-            group: group(
-                HOMOGENEOUS,
-                vec![
-                    member("A", &[first, second], &[(first, &[0, 2]), (second, &[0])]),
-                    member("B", &[first, second], &[(first, &[1]), (second, &[1, 2])]),
-                    member("C", &[first, second], &[]),
-                ],
-            ),
+            group: group(HOMOGENEOUS, vec![
+                member("A", &[first, second], &[(first, &[0, 2]), (second, &[0])]),
+                member("B", &[first, second], &[(first, &[1]), (second, &[1, 2])]),
+                member("C", &[first, second], &[]),
+            ]),
             topics: metadata(&[(first, 3), (second, 3)]),
             expected: assignment(&[
                 ("A", &[(first, &[0, 2])]),
@@ -215,13 +197,10 @@ fn homogeneous_builder_matches_kafka_scenarios() {
         Scenario {
             // Kafka's HashSet visits topic2 before topic1.
             name: "testReassignmentWhenOneMemberRemovedAfterInitialAssignmentWithThreeMembersTwoTopics",
-            group: group(
-                HOMOGENEOUS,
-                vec![
-                    member("A", &[second, first], &[(second, &[0]), (first, &[0])]),
-                    member("B", &[second, first], &[(second, &[1]), (first, &[1])]),
-                ],
-            ),
+            group: group(HOMOGENEOUS, vec![
+                member("A", &[second, first], &[(second, &[0]), (first, &[0])]),
+                member("B", &[second, first], &[(second, &[1]), (first, &[1])]),
+            ]),
             topics: metadata(&[(second, 3), (first, 3)]),
             expected: assignment(&[
                 ("A", &[(second, &[0]), (first, &[0, 2])]),
@@ -230,13 +209,10 @@ fn homogeneous_builder_matches_kafka_scenarios() {
         },
         Scenario {
             name: "testReassignmentWhenOneSubscriptionRemovedAfterInitialAssignmentWithTwoMembersTwoTopics",
-            group: group(
-                HOMOGENEOUS,
-                vec![
-                    member("A", &[second], &[(first, &[0]), (second, &[0])]),
-                    member("B", &[second], &[(first, &[1]), (second, &[1])]),
-                ],
-            ),
+            group: group(HOMOGENEOUS, vec![
+                member("A", &[second], &[(first, &[0]), (second, &[0])]),
+                member("B", &[second], &[(first, &[1]), (second, &[1])]),
+            ]),
             topics: metadata(&[(first, 2), (second, 2)]),
             expected: assignment(&[("A", &[(second, &[0])]), ("B", &[(second, &[1])])]),
         },
@@ -253,10 +229,10 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
     let rows = vec![
         Scenario {
             name: "testTwoMembersNoTopicSubscription",
-            group: group(
-                HETEROGENEOUS,
-                vec![member("A", &[], &[]), member("B", &[], &[])],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[], &[]),
+                member("B", &[], &[]),
+            ]),
             topics: metadata(&[(t1, 3)]),
             expected: empty_two_member_assignment(),
         },
@@ -264,19 +240,19 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
             // Kafka throws PartitionAssignorException; missing topics are
             // skipped here.
             name: "testTwoMembersSubscribedToNonexistentTopics",
-            group: group(
-                HETEROGENEOUS,
-                vec![member("A", &[t3], &[]), member("B", &[t2], &[])],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t3], &[]),
+                member("B", &[t2], &[]),
+            ]),
             topics: metadata(&[(t1, 3)]),
             expected: empty_two_member_assignment(),
         },
         Scenario {
             name: "testFirstAssignmentTwoMembersTwoTopics",
-            group: group(
-                HETEROGENEOUS,
-                vec![member("A", &[t1, t3], &[]), member("B", &[t3], &[])],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t1, t3], &[]),
+                member("B", &[t3], &[]),
+            ]),
             topics: metadata(&[(t1, 3), (t3, 6)]),
             expected: assignment(&[
                 ("A", &[(t1, &[0, 1, 2]), (t3, &[4])]),
@@ -285,31 +261,25 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
         },
         Scenario {
             name: "testFirstAssignmentNumMembersGreaterThanTotalNumPartitions",
-            group: group(
-                HETEROGENEOUS,
-                vec![
-                    member("A", &[t3], &[]),
-                    member("B", &[t3], &[]),
-                    member("C", &[t1], &[]),
-                ],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t3], &[]),
+                member("B", &[t3], &[]),
+                member("C", &[t1], &[]),
+            ]),
             topics: metadata(&[(t1, 2), (t3, 1)]),
             expected: assignment(&[("A", &[(t3, &[0])]), ("B", &[]), ("C", &[(t1, &[0, 1])])]),
         },
         Scenario {
             name: "testReassignmentForTwoMembersThreeTopicsGivenUnbalancedPrevAssignment",
-            group: group(
-                HETEROGENEOUS,
-                vec![
-                    member("A", &[t1], &[(t1, &[0, 1, 2])]),
-                    member("B", &[t1, t2], &[(t1, &[3]), (t2, &[0])]),
-                    member(
-                        "C",
-                        &[t1, t2, t3],
-                        &[(t1, &[4, 5]), (t2, &[1, 2, 3]), (t3, &[0, 1, 2, 3])],
-                    ),
-                ],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t1], &[(t1, &[0, 1, 2])]),
+                member("B", &[t1, t2], &[(t1, &[3]), (t2, &[0])]),
+                member("C", &[t1, t2, t3], &[
+                    (t1, &[4, 5]),
+                    (t2, &[1, 2, 3]),
+                    (t3, &[0, 1, 2, 3]),
+                ]),
+            ]),
             topics: metadata(&[(t1, 6), (t2, 4), (t3, 4)]),
             expected: assignment(&[
                 ("A", &[(t1, &[0, 1, 2, 5])]),
@@ -319,17 +289,13 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
         },
         Scenario {
             name: "testReassignmentWhenPartitionsAreAddedForTwoMembers",
-            group: group(
-                HETEROGENEOUS,
-                vec![
-                    member("A", &[t1, t3], &[(t1, &[0, 1, 2, 3]), (t3, &[0, 1])]),
-                    member(
-                        "B",
-                        &[t1, t2, t3, t4],
-                        &[(t2, &[0, 1, 2]), (t4, &[0, 1, 2])],
-                    ),
-                ],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t1, t3], &[(t1, &[0, 1, 2, 3]), (t3, &[0, 1])]),
+                member("B", &[t1, t2, t3, t4], &[
+                    (t2, &[0, 1, 2]),
+                    (t4, &[0, 1, 2]),
+                ]),
+            ]),
             topics: metadata(&[(t1, 6), (t2, 5), (t3, 3), (t4, 3)]),
             expected: assignment(&[
                 ("A", &[(t1, &[0, 1, 2, 3, 4, 5]), (t3, &[0, 1, 2])]),
@@ -338,14 +304,11 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
         },
         Scenario {
             name: "testReassignmentWhenOneMemberAddedAndPartitionsAddedTwoMembersTwoTopics",
-            group: group(
-                HETEROGENEOUS,
-                vec![
-                    member("A", &[t1], &[(t1, &[0, 2]), (t2, &[0])]),
-                    member("B", &[t1, t2], &[(t1, &[1]), (t2, &[1, 2])]),
-                    member("C", &[t1, t2], &[]),
-                ],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t1], &[(t1, &[0, 2]), (t2, &[0])]),
+                member("B", &[t1, t2], &[(t1, &[1]), (t2, &[1, 2])]),
+                member("C", &[t1, t2], &[]),
+            ]),
             topics: metadata(&[(t1, 6), (t2, 7)]),
             expected: assignment(&[
                 ("A", &[(t1, &[0, 2, 3, 4, 5])]),
@@ -355,13 +318,10 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
         },
         Scenario {
             name: "testReassignmentWhenOneMemberRemovedAfterInitialAssignmentWithThreeMembersThreeTopics",
-            group: group(
-                HETEROGENEOUS,
-                vec![
-                    member("A", &[t1, t3], &[(t1, &[0, 1, 2]), (t3, &[0, 1])]),
-                    member("B", &[t2], &[(t2, &[3, 4, 5, 6])]),
-                ],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t1, t3], &[(t1, &[0, 1, 2]), (t3, &[0, 1])]),
+                member("B", &[t2], &[(t2, &[3, 4, 5, 6])]),
+            ]),
             topics: metadata(&[(t1, 3), (t2, 8), (t3, 3)]),
             expected: assignment(&[
                 ("A", &[(t1, &[0, 1, 2]), (t3, &[0, 1, 2])]),
@@ -370,29 +330,23 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
         },
         Scenario {
             name: "testReassignmentWhenOneSubscriptionRemovedAfterInitialAssignmentWithTwoMembersTwoTopics",
-            group: group(
-                HETEROGENEOUS,
-                vec![
-                    member("A", &[t1], &[(t1, &[0, 2]), (t2, &[1, 3])]),
-                    member("B", &[t1, t2], &[(t1, &[1]), (t2, &[0, 2, 4])]),
-                ],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t1], &[(t1, &[0, 2]), (t2, &[1, 3])]),
+                member("B", &[t1, t2], &[(t1, &[1]), (t2, &[0, 2, 4])]),
+            ]),
             topics: metadata(&[(t1, 3), (t2, 5)]),
             expected: assignment(&[("A", &[(t1, &[0, 1, 2])]), ("B", &[(t2, &[0, 1, 2, 3, 4])])]),
         },
         Scenario {
             name: "testReassignmentWhenTopicPartitionsRunOutAndMembersHaveNoPartitions",
-            group: group(
-                HETEROGENEOUS,
-                vec![
-                    member(
-                        "A",
-                        &[t1, t2, t3],
-                        &[(t1, &[0, 1]), (t2, &[0, 1]), (t3, &[0, 1])],
-                    ),
-                    member("B", &[t1, t2, t3], &[]),
-                ],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t1, t2, t3], &[
+                    (t1, &[0, 1]),
+                    (t2, &[0, 1]),
+                    (t3, &[0, 1]),
+                ]),
+                member("B", &[t1, t2, t3], &[]),
+            ]),
             topics: metadata(&[(t1, 2), (t2, 2), (t3, 2)]),
             expected: assignment(&[
                 ("A", &[(t2, &[0]), (t3, &[0, 1])]),
@@ -401,10 +355,10 @@ fn heterogeneous_builder_matches_kafka_scenarios() {
         },
         Scenario {
             name: "testFirstAssignmentWithTwoMembersIncludingOneWithoutSubscriptions",
-            group: group(
-                HETEROGENEOUS,
-                vec![member("A", &[t1], &[]), member("B", &[], &[])],
-            ),
+            group: group(HETEROGENEOUS, vec![
+                member("A", &[t1], &[]),
+                member("B", &[], &[]),
+            ]),
             topics: metadata(&[(t1, 3)]),
             expected: assignment(&[("A", &[(t1, &[0, 1, 2])]), ("B", &[])]),
         },
@@ -648,6 +602,4 @@ proptest! {
 }
 
 /// Kafka's independent expected mapping when neither fixture member gets a partition.
-fn empty_two_member_assignment() -> Assignment {
-    assignment(&[("A", &[]), ("B", &[])])
-}
+fn empty_two_member_assignment() -> Assignment { assignment(&[("A", &[]), ("B", &[])]) }

@@ -2,15 +2,16 @@
 //! [`MetadataImage`] and for the views that apply refreshes: the leader and
 //! quorum watches, and the committed slice an observer fetches.
 
-use assert2::{assert, check};
-
-use super::*;
-use crate::kraft::controller::{
-    records::{decode_batches, metadata_record_batch},
-    recovery::replay_committed_with_timestamp,
-    test_support::{
-        EngineSetup, build_engine_only, one_offset_batch, topic_record, topic_record_named,
+use {
+    super::*,
+    crate::kraft::controller::{
+        records::{decode_batches, metadata_record_batch},
+        recovery::replay_committed_with_timestamp,
+        test_support::{
+            EngineSetup, build_engine_only, one_offset_batch, topic_record, topic_record_named,
+        },
     },
+    assert2::{assert, check},
 };
 
 #[test]

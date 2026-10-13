@@ -4,30 +4,31 @@
 //! module maps each variant onto the generated KIP-595 request message at its
 //! captured version, and decodes each one back.
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use bytes::Bytes;
-use krabka_protocol::{
-    Decode,
-    owned::{
-        begin_quorum_epoch_request::{self as bqe_req, BeginQuorumEpochRequest},
-        end_quorum_epoch_request::{self as eqe_req, EndQuorumEpochRequest},
-        fetch_request::{self as fetch_req, FetchRequest},
-        fetch_snapshot_request::{self as fs_req, FetchSnapshotRequest},
-        vote_request::{self as vote_req, VoteRequest},
+use {
+    super::codec::{
+        FETCH_SNAPSHOT_VERSION, FETCH_VERSION, METADATA_PARTITION, METADATA_TOPIC,
+        METADATA_TOPIC_ID, QUORUM_EPOCH_VERSION, VOTE_VERSION, cluster_id_to_wire, encode_body,
+        epoch_from_wire, epoch_to_wire, node_from_wire, node_to_wire, uuid_from_wire, uuid_to_wire,
+    },
+    crate::kraft::types::{Epoch, NodeId},
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    bytes::Bytes,
+    krabka_protocol::{
+        Decode,
+        owned::{
+            begin_quorum_epoch_request::{self as bqe_req, BeginQuorumEpochRequest},
+            end_quorum_epoch_request::{self as eqe_req, EndQuorumEpochRequest},
+            fetch_request::{self as fetch_req, FetchRequest},
+            fetch_snapshot_request::{self as fs_req, FetchSnapshotRequest},
+            vote_request::{self as vote_req, VoteRequest},
+        },
+    },
+    krabka_verified::{
+        VoteWireDecision,
+        vote::{VoteEncodeDecision, vote_encode_decision},
+        vote_wire_decision,
     },
 };
-use krabka_verified::{
-    VoteWireDecision,
-    vote::{VoteEncodeDecision, vote_encode_decision},
-    vote_wire_decision,
-};
-
-use super::codec::{
-    FETCH_SNAPSHOT_VERSION, FETCH_VERSION, METADATA_PARTITION, METADATA_TOPIC, METADATA_TOPIC_ID,
-    QUORUM_EPOCH_VERSION, VOTE_VERSION, cluster_id_to_wire, encode_body, epoch_from_wire,
-    epoch_to_wire, node_from_wire, node_to_wire, uuid_from_wire, uuid_to_wire,
-};
-use crate::kraft::types::{Epoch, NodeId};
 
 macro_rules! singleton_metadata_topic {
     ($topic:ty, $partition:expr) => {{
@@ -303,9 +304,7 @@ impl PeerRequest {
 
     /// Decodes a request body. Returns `None` on a malformed frame.
     #[must_use]
-    pub fn decode(buf: &[u8]) -> Option<Self> {
-        decode_vote(buf)
-    }
+    pub fn decode(buf: &[u8]) -> Option<Self> { decode_vote(buf) }
 }
 
 /// Decodes a request body at `version`. The inbound handlers run Kafka's

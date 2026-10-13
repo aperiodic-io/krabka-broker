@@ -6,15 +6,16 @@
 //! on, because the in-process broker self-bootstraps at `TV_2` and each level
 //! below it has to be reached through a live feature downgrade.
 
-use assert2::assert;
-use krabka_client_core::Client;
-use krabka_protocol::owned::update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest};
-
-use crate::support::{
-    client::connect_client,
-    discovery::{coordinator_lookup_request, topic_metadata_request},
-    topics::TopicPartitionCount,
-    transaction_wire::{TransactionTopicSetup, create_topic as create_transaction_topic},
+use {
+    crate::support::{
+        client::connect_client,
+        discovery::{coordinator_lookup_request, topic_metadata_request},
+        topics::TopicPartitionCount,
+        transaction_wire::{TransactionTopicSetup, create_topic as create_transaction_topic},
+    },
+    assert2::assert,
+    krabka_client_core::Client,
+    krabka_protocol::owned::update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest},
 };
 
 // Kafka error codes asserted below.
@@ -28,15 +29,12 @@ pub async fn admin_client(bootstrap: &str) -> Client {
 }
 
 pub async fn create_topic(client: &Client, name: &str, partitions: TopicPartitionCount) {
-    create_transaction_topic(
-        client,
-        TransactionTopicSetup {
-            name,
-            partitions,
-            context: "create_topic",
-            ..Default::default()
-        },
-    )
+    create_transaction_topic(client, TransactionTopicSetup {
+        name,
+        partitions,
+        context: "create_topic",
+        ..Default::default()
+    })
     .await;
 }
 
@@ -107,11 +105,9 @@ pub async fn topic_id(client: &Client, topic: &str) -> krabka_protocol::primitiv
 /// Trigger loading of the transaction coordinator without asserting on the lookup response.
 pub async fn find_coordinator(client: &Client, transactional_id: &str) {
     let _ = client
-        .send(coordinator_lookup_request(
-            transactional_id,
-            1,
-            vec![transactional_id.into()],
-        ))
+        .send(coordinator_lookup_request(transactional_id, 1, vec![
+            transactional_id.into(),
+        ]))
         .await
         .expect("FindCoordinator");
 }

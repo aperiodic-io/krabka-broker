@@ -2,13 +2,14 @@
 //! child modules: the sample responses, the raw record batches behind them,
 //! and the temp-file records payload the sendfile tests need.
 
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{
-    owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
-    records::{Record, RecordBatch, RecordsPayload},
+use {
+    super::WriteOp,
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{
+        owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+        records::{Record, RecordBatch, RecordsPayload},
+    },
 };
-
-use super::WriteOp;
 
 crate::sendfile_cfg! {
     use std::{io::Write as _, sync::Arc};
@@ -89,20 +90,17 @@ pub(super) fn one_partition_response(
     version: i16,
     records: Option<RecordsPayload>,
 ) -> FetchResponse {
-    response_with_partitions(
-        version,
-        vec![PartitionData {
-            partition_index: 0,
-            error_code: 0,
-            high_watermark: 5,
-            last_stable_offset: 5,
-            log_start_offset: 0,
-            aborted_transactions: None,
-            preferred_read_replica: -1,
-            records,
-            ..PartitionData::default()
-        }],
-    )
+    response_with_partitions(version, vec![PartitionData {
+        partition_index: 0,
+        error_code: 0,
+        high_watermark: 5,
+        last_stable_offset: 5,
+        log_start_offset: 0,
+        aborted_transactions: None,
+        preferred_read_replica: -1,
+        records,
+        ..PartitionData::default()
+    }])
 }
 
 fn response_with_partitions(version: i16, partitions: Vec<PartitionData>) -> FetchResponse {

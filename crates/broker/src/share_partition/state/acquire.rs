@@ -8,11 +8,11 @@
 //! reached the delivery-attempt limit instead of giving it out again, lives
 //! here because `acquire` is the only place that counts an attempt.
 
-use std::time::{Duration, Instant};
-
-use krabka_log::Offset;
-
-use super::{AcquiredRange, AcquisitionState, InFlightBatch, RecordState, dlq::DlqCause};
+use {
+    super::{AcquiredRange, AcquisitionState, InFlightBatch, RecordState, dlq::DlqCause},
+    krabka_log::Offset,
+    std::time::{Duration, Instant},
+};
 
 /// The smallest delivery count at which Kafka throttles a run:
 /// `SharePartition.MINIMUM_THROTTLE_RECORDS_DELIVERY_LIMIT`.
@@ -341,12 +341,13 @@ impl AcquisitionState {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::share_partition::state::{
-        AckType,
-        test_support::{LOCK, t0},
+    use {
+        super::*,
+        crate::share_partition::state::{
+            AckType,
+            test_support::{LOCK, t0},
+        },
+        assert2::{assert, check},
     };
 
     #[test]

@@ -7,20 +7,20 @@
 //! wire. It lives in its own module because the only difference between its
 //! two callers is how they built their `Client`.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-use krabka_client_core::Client;
-
-use crate::{
-    support::{
-        fetch::{
-            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+use {
+    crate::{
+        support::{
+            fetch::{
+                FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, single_partition_fetch,
+            },
+            topic_id_for,
         },
-        topic_id_for,
+        topic_fixture::{create_configured_topic, tiered_configs},
     },
-    topic_fixture::{create_configured_topic, tiered_configs},
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    krabka_client_core::Client,
+    std::time::{Duration, Instant},
 };
 
 /// Shared copy→metadata→read body: create a tiered topic, wait for the

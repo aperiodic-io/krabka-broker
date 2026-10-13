@@ -33,10 +33,7 @@ pub fn partition_for_share_key(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use uuid::Uuid;
-
-    use super::*;
+    use {super::*, assert2::assert, uuid::Uuid};
 
     #[test]
     fn deterministic_for_same_key() {

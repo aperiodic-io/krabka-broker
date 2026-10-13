@@ -2,20 +2,21 @@
 //! group protocol. It routes the request to the per-group actor in
 //! `GroupCoordinator`.
 
-use krabka_protocol::owned::{
-    consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-    consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
-};
-
-use crate::{
-    codes,
-    coordinator::unified::{
-        actor::{GroupActorMessage, GroupKindTag},
-        config::NextGenConfig,
-        regex_resolver::ImageTopicRegexResolver,
+use {
+    crate::{
+        codes,
+        coordinator::unified::{
+            actor::{GroupActorMessage, GroupKindTag},
+            config::NextGenConfig,
+            regex_resolver::ImageTopicRegexResolver,
+        },
+        handlers::{ErrorResponse as _, group_version_disabled},
+        task_util::ask,
     },
-    handlers::{ErrorResponse as _, group_version_disabled},
-    task_util::ask,
+    krabka_protocol::owned::{
+        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
+    },
 };
 
 context_handler! {
@@ -221,32 +222,32 @@ fn validate_request(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{MetadataImage, MetadataRecord};
-    use krabka_protocol::Decode;
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        broker::{Broker, BrokerHandle},
-        coordinator::unified::config::NextGenConfig,
-        handlers::{
-            encode_response,
-            group_heartbeat_test_support::{
-                GroupAclSetup, GroupFeatureLevel, GroupTopicSetup, acl_authorizer, alice,
-                check_group_read_denied, describe_acl, grant_group_read, group_read_acl,
-                image_with_group_version, set_group_version,
-                subscribed_names_describe_denied_table as subscribed_names_describe_denied_cases,
-                topic_with_partitions, versioned_group_broker,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            broker::{Broker, BrokerHandle},
+            coordinator::unified::config::NextGenConfig,
+            handlers::{
+                encode_response,
+                group_heartbeat_test_support::{
+                    GroupAclSetup, GroupFeatureLevel, GroupTopicSetup, acl_authorizer, alice,
+                    check_group_read_denied, describe_acl, grant_group_read, group_read_acl,
+                    image_with_group_version, set_group_version,
+                    subscribed_names_describe_denied_table as subscribed_names_describe_denied_cases,
+                    topic_with_partitions, versioned_group_broker,
+                },
+                group_read_denied,
             },
-            group_read_denied,
+            task_util::ask,
+            test_support::{
+                KafkaErrorCode, peer, principal, request_context, start_group_broker, test_ctx,
+            },
         },
-        task_util::ask,
-        test_support::{
-            KafkaErrorCode, peer, principal, request_context, start_group_broker, test_ctx,
-        },
+        assert2::assert,
+        krabka_metadata::{MetadataImage, MetadataRecord},
+        krabka_protocol::Decode,
+        std::sync::Arc,
     };
 
     const VERSION: i16 = krabka_protocol::owned::consumer_group_heartbeat_request::MAX_VERSION;
@@ -669,9 +670,7 @@ mod tests {
     }
 
     #[test]
-    fn subscribed_names_describe_denied_table() {
-        subscribed_names_describe_denied_cases();
-    }
+    fn subscribed_names_describe_denied_table() { subscribed_names_describe_denied_cases(); }
 
     // ── Explicit-name and regex `Describe` checks (issue #716) ─────────
 
@@ -911,10 +910,10 @@ mod tests {
     {
         let first = uuid::Uuid::from_u128(1);
         let second = uuid::Uuid::from_u128(2);
-        joined_regex_member!(
-            (broker_handle, _dir, broker, member),
-            &[("orders-eu", first)]
-        );
+        joined_regex_member!((broker_handle, _dir, broker, member), &[(
+            "orders-eu",
+            first
+        )]);
         member.heartbeat_until_holding(&[first]).await;
 
         let node = krabka_raft::NodeId(broker_handle.node_id());
@@ -942,10 +941,10 @@ mod tests {
     async fn revoking_describe_on_a_resolved_topic_removes_it_at_a_later_heartbeat() {
         let allowed = uuid::Uuid::from_u128(1);
         let revoked = uuid::Uuid::from_u128(2);
-        joined_regex_member!(
-            (broker_handle, _dir, broker, member),
-            &[("orders-eu", allowed), ("orders-us", revoked)]
-        );
+        joined_regex_member!((broker_handle, _dir, broker, member), &[
+            ("orders-eu", allowed),
+            ("orders-us", revoked)
+        ]);
         member.heartbeat_until_holding(&[allowed, revoked]).await;
 
         broker

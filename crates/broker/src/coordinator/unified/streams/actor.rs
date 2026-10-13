@@ -22,15 +22,16 @@
 //! still mint a `member_id` and advance their epoch, but the actor assigns no
 //! tasks.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_protocol::owned::{
-    streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-};
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
+use {
+    krabka_protocol::owned::{
+        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
+    std::{collections::BTreeMap, sync::Arc},
+    tokio::{
+        sync::{mpsc, oneshot},
+        task::JoinHandle,
+    },
 };
 
 mod description;
@@ -50,25 +51,29 @@ mod tests;
 mod test_support;
 
 pub use self::description::{DescriptionPush, PushAnswer};
-use self::{
-    heartbeat::{handle_heartbeat, handle_session_tick},
-    records::{apply_seed, reconcile_and_flush},
-    response::build_describe,
-};
-use super::{
-    config::StreamsGroupConfig,
-    description::{DescriptionEpochs, SolicitationBackoff, StoredDescription, TopologyDescription},
-    persistence::StreamsGroupTopologyValue,
-    state::{self, StreamsGroupState},
-};
-use crate::{
-    codes,
-    coordinator::unified::{
-        actor::CommitFence,
-        offsets_log::{OffsetsLog, write_failure_code},
+use {
+    self::{
+        heartbeat::{handle_heartbeat, handle_session_tick},
+        records::{apply_seed, reconcile_and_flush},
+        response::build_describe,
     },
-    metadata_source::MetadataSource,
-    task_util::spawn_mailbox,
+    super::{
+        config::StreamsGroupConfig,
+        description::{
+            DescriptionEpochs, SolicitationBackoff, StoredDescription, TopologyDescription,
+        },
+        persistence::StreamsGroupTopologyValue,
+        state::{self, StreamsGroupState},
+    },
+    crate::{
+        codes,
+        coordinator::unified::{
+            actor::CommitFence,
+            offsets_log::{OffsetsLog, write_failure_code},
+        },
+        metadata_source::MetadataSource,
+        task_util::spawn_mailbox,
+    },
 };
 
 /// Messages accepted by a [`StreamsGroupActorHandle`].
@@ -688,9 +693,7 @@ impl DeferredReply {
 
 impl ActorState {
     /// Whether the target assignment is behind the group epoch.
-    fn assignment_pending(&self) -> bool {
-        self.state.target.epoch < self.state.group_epoch
-    }
+    fn assignment_pending(&self) -> bool { self.state.target.epoch < self.state.group_epoch }
 
     /// The configured topology, when it is ready for an assignment.
     fn ready_topology(&self) -> Option<&super::topology::ConfiguredTopology> {

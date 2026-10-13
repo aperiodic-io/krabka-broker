@@ -3,27 +3,27 @@
 //! versions, and the edits an attacker with write access to the bucket could
 //! make to what the fixture wrote.
 
-use std::{collections::HashMap, sync::Arc};
-
-use bytes::Bytes;
-use krabka_audit::signing::FileEd25519Signer;
-use krabka_object_store::{ObjectOps, ObjectStoreClient, PutRequest};
-use object_store::{GetOptions, ObjectStore, ObjectStoreExt as _, memory::InMemory, path::Path};
-use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-use uuid::Uuid;
-
-use crate::{
-    metadata::RemoteLogSegmentMetadata,
-    storage_manager::{partition_dir_name, segment_file_name},
-    worm::{
-        archiver::WormArchiver,
-        chain::WormChainRecord,
-        manifest::{
-            ChainHead, ChainStamp, EpochId, MANIFEST_FORMAT_VERSION, MANIFEST_SUFFIX, ManifestSeq,
-            ObjectEntry, SegmentManifest, Sha256Digest, manifest_head,
+use {
+    crate::{
+        metadata::RemoteLogSegmentMetadata,
+        storage_manager::{partition_dir_name, segment_file_name},
+        worm::{
+            archiver::WormArchiver,
+            chain::WormChainRecord,
+            manifest::{
+                ChainHead, ChainStamp, EpochId, MANIFEST_FORMAT_VERSION, MANIFEST_SUFFIX,
+                ManifestSeq, ObjectEntry, SegmentManifest, Sha256Digest, manifest_head,
+            },
+            verify::{ArchiveVerifyReport, TrustedManifestKeys, VerifyRequest, verify_archive},
         },
-        verify::{ArchiveVerifyReport, TrustedManifestKeys, VerifyRequest, verify_archive},
     },
+    bytes::Bytes,
+    krabka_audit::signing::FileEd25519Signer,
+    krabka_object_store::{ObjectOps, ObjectStoreClient, PutRequest},
+    object_store::{GetOptions, ObjectStore, ObjectStoreExt as _, memory::InMemory, path::Path},
+    ring::{rand::SystemRandom, signature::Ed25519KeyPair},
+    std::{collections::HashMap, sync::Arc},
+    uuid::Uuid,
 };
 
 pub(super) const TOPIC: &str = "orders";
@@ -300,14 +300,10 @@ pub(super) async fn put_entry(
     body: &[u8],
 ) -> ObjectEntry {
     let outcome = ops
-        .put(
-            &Path::from(key),
-            Bytes::copy_from_slice(body),
-            PutRequest {
-                digest: true,
-                ..Default::default()
-            },
-        )
+        .put(&Path::from(key), Bytes::copy_from_slice(body), PutRequest {
+            digest: true,
+            ..Default::default()
+        })
         .await
         .unwrap();
     ObjectEntry {

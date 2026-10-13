@@ -131,12 +131,13 @@ fn get_topic_partitions_infos(buf: &mut &[u8]) -> Result<Vec<TopicPartitionsInfo
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        share::persistence::{KEY_SHARE_GROUP_STATE_PARTITION_METADATA, ShareGroupKey},
-        test_support::wire_bytes,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            share::persistence::{KEY_SHARE_GROUP_STATE_PARTITION_METADATA, ShareGroupKey},
+            test_support::wire_bytes,
+        },
+        assert2::assert,
     };
 
     fn initialized(id: u8, name: &str, partitions: Vec<i32>) -> TopicPartitionsInfo {

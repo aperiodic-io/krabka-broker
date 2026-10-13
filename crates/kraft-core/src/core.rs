@@ -7,14 +7,15 @@
 //! vote rounds, `leadership` reacts to a leader announcing its epoch, and
 //! `replication` serves and answers Fetch.
 
-use krabka_units::prelude::{Time, TimeExt as _};
-use krabka_voters::VoterSet;
-
-use crate::{
-    action::{Action, TimerKind},
-    event::{Event, LogEnd},
-    role::Role,
-    types::{Epoch, LogView, NodeId, QuorumState, SimInstant},
+use {
+    crate::{
+        action::{Action, TimerKind},
+        event::{Event, LogEnd},
+        role::Role,
+        types::{Epoch, LogView, NodeId, QuorumState, SimInstant},
+    },
+    krabka_units::prelude::{Time, TimeExt as _},
+    krabka_voters::VoterSet,
 };
 
 mod election;
@@ -114,27 +115,20 @@ impl QuorumStateMachine {
     }
 
     #[must_use]
-    pub fn quorum_state(&self) -> &QuorumState {
-        &self.state
-    }
+    pub fn quorum_state(&self) -> &QuorumState { &self.state }
+
     /// This replica's own node id.
     #[must_use]
-    pub fn me(&self) -> NodeId {
-        self.me
-    }
+    pub fn me(&self) -> NodeId { self.me }
+
     #[must_use]
-    pub fn role(&self) -> &Role {
-        &self.role
-    }
+    pub fn role(&self) -> &Role { &self.role }
+
     #[must_use]
-    pub fn is_voter(&self) -> bool {
-        self.state.voters.contains(self.me)
-    }
+    pub fn is_voter(&self) -> bool { self.state.voters.contains(self.me) }
 
     #[cfg(test)]
-    pub(crate) fn force_epoch(&mut self, e: Epoch) {
-        self.state.leader_epoch = e;
-    }
+    pub(crate) fn force_epoch(&mut self, e: Epoch) { self.state.leader_epoch = e; }
 
     /// The deadline for an election timer armed at `now`.
     ///
@@ -293,11 +287,12 @@ impl QuorumStateMachine {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{millis, secs};
-
-    use super::*;
-    use crate::core::test_support::{FakeLog, machine, voters};
+    use {
+        super::*,
+        crate::core::test_support::{FakeLog, machine, voters},
+        assert2::check,
+        krabka_units::prelude::{millis, secs},
+    };
 
     #[test]
     fn election_deadline_is_the_configured_extent_plus_integer_jitter() {

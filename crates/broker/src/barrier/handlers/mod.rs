@@ -37,11 +37,6 @@ pub(crate) mod transport;
 pub(crate) mod trigger;
 pub(crate) mod write_markers;
 
-use krabka_protocol::krabka::barrier::{
-    BarrierCutPartition, BarrierCutTopic, BarrierMissingPartition,
-};
-use krabka_units::{Time, convert::TimeExt as _};
-
 // The `Describe` gate that `describe_groups` and `list_cuts` apply, and the
 // `ClusterAction` gate that `write_markers` applies. Both live in
 // `crate::handlers` beside their `Alter` twin, because the write-freeze and
@@ -49,9 +44,15 @@ use krabka_units::{Time, convert::TimeExt as _};
 // applies `ClusterAction` to `WriteTxnMarkers`, and `WriteBarrierMarkers` is
 // the same kind of inter-broker traffic.
 pub(crate) use crate::handlers::{cluster_action_denied, cluster_describe_denied};
-use crate::{
-    barrier::{error::BarrierError, persistence::CutValue},
-    codes,
+use {
+    crate::{
+        barrier::{error::BarrierError, persistence::CutValue},
+        codes,
+    },
+    krabka_protocol::krabka::barrier::{
+        BarrierCutPartition, BarrierCutTopic, BarrierMissingPartition,
+    },
+    krabka_units::{Time, convert::TimeExt as _},
 };
 
 /// The `interval_ms` value that turns periodic injection off.
@@ -96,9 +97,7 @@ pub(crate) fn error_code(error: &BarrierError) -> i16 {
 }
 
 /// The text that a response carries beside a non-zero error code.
-pub(crate) fn error_text(error: &BarrierError) -> String {
-    error.to_string()
-}
+pub(crate) fn error_text(error: &BarrierError) -> String { error.to_string() }
 
 /// The cut offsets of one published cut, grouped by topic.
 pub(crate) fn cut_topics(cut: &CutValue) -> Vec<BarrierCutTopic> {
@@ -151,15 +150,16 @@ pub(crate) fn interval_from_wire(interval_ms: i64) -> Option<Time> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::Offset;
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::{
-        barrier::persistence::{CutStatus, MissingPartition, PartitionOffset, TopicOffsets},
-        error::BrokerError,
+    use {
+        super::*,
+        crate::{
+            barrier::persistence::{CutStatus, MissingPartition, PartitionOffset, TopicOffsets},
+            error::BrokerError,
+        },
+        assert2::check,
+        krabka_ids::PartitionIndex,
+        krabka_log::Offset,
+        krabka_units::millis,
     };
 
     fn cut() -> CutValue {

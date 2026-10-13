@@ -6,37 +6,38 @@
 //! PLAIN-authenticated request drive, and the PBKDF2 salting that the
 //! validation cases in `alter_scram_validation` reuse.
 
-use std::{io, net::SocketAddr};
-
-use assert2::{assert, check};
-use krabka_broker::Broker;
-use krabka_ids::ApiKey as WireApiKey;
-use krabka_protocol::owned::{
-    alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
-    alter_user_scram_credentials_response::AlterUserScramCredentialsResponse,
-    api_versions_request::ApiVersionsRequest, sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
-};
-use krabka_security::SaslMechanism;
-use tokio::net::TcpStream;
-
-use crate::{
-    harness::{
-        admin_plain_password, alice_password, round_trip, sasl_authenticate_round_trip,
-        scram_admin_fixture, wrong_scram_password,
-    },
-    kafka_wire::{
-        SaslHandshakeSetup, decode_named, encode_named, plain_payload, sasl_handshake_on,
-    },
-    scram::drive_sasl_scram_session,
-    support::{
-        acl::use_simple_acl_authorizer,
-        sasl::{ScramAlgorithm, ScramUpsertionSetup, sasl_temp_config, scram_upsertion},
-        wire::{
-            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-            SocketExchangeSetup,
+use {
+    crate::{
+        harness::{
+            admin_plain_password, alice_password, round_trip, sasl_authenticate_round_trip,
+            scram_admin_fixture, wrong_scram_password,
+        },
+        kafka_wire::{
+            SaslHandshakeSetup, decode_named, encode_named, plain_payload, sasl_handshake_on,
+        },
+        scram::drive_sasl_scram_session,
+        support::{
+            acl::use_simple_acl_authorizer,
+            sasl::{ScramAlgorithm, ScramUpsertionSetup, sasl_temp_config, scram_upsertion},
+            wire::{
+                CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+                SocketExchangeSetup,
+            },
         },
     },
+    assert2::{assert, check},
+    krabka_broker::Broker,
+    krabka_ids::ApiKey as WireApiKey,
+    krabka_protocol::owned::{
+        alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
+        alter_user_scram_credentials_response::AlterUserScramCredentialsResponse,
+        api_versions_request::ApiVersionsRequest,
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+    },
+    krabka_security::SaslMechanism,
+    std::{io, net::SocketAddr},
+    tokio::net::TcpStream,
 };
 
 /// SCRAM mechanism byte on the `AlterUserScramCredentials` wire, from
@@ -169,13 +170,10 @@ pub async fn drive_alter_user_scram_credentials_as_plain(
     let _ = round_trip(&mut stream, SocketExchangeSetup::default(), &av_body).await?;
 
     // ── 2. SaslHandshake v1.
-    sasl_handshake_on(
-        &mut stream,
-        SaslHandshakeSetup {
-            client_id: "krabka-sasl-test",
-            ..Default::default()
-        },
-    )
+    sasl_handshake_on(&mut stream, SaslHandshakeSetup {
+        client_id: "krabka-sasl-test",
+        ..Default::default()
+    })
     .await?;
 
     // ── 3. SaslAuthenticate v2 (flexible). auth_bytes = \0user\0password.

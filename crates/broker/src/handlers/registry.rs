@@ -10,15 +10,18 @@
 //!
 //! [`dispatch_table!`]: krabka_macros::dispatch_table
 
-use bytes::Bytes;
-use futures_util::future::BoxFuture;
-use krabka_protocol::api_key::ApiKey;
-
-use crate::{
-    broker::Broker,
-    error::BrokerError,
-    handlers::{ApiVersion, CorrelationId, RequestContext, TelemetryContext, api_versions::handle},
-    network::auth::ConnectionAuth,
+use {
+    crate::{
+        broker::Broker,
+        error::BrokerError,
+        handlers::{
+            ApiVersion, CorrelationId, RequestContext, TelemetryContext, api_versions::handle,
+        },
+        network::auth::ConnectionAuth,
+    },
+    bytes::Bytes,
+    futures_util::future::BoxFuture,
+    krabka_protocol::api_key::ApiKey,
 };
 
 pub(crate) type ContextHandler = for<'a> fn(

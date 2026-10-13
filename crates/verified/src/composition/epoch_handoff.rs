@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{ProducerDecision, ProducerSnapshotEntryFacts, completed_batches_preserve_first_retry};
-use crate::transaction::{
-    InitProducerIdIdentityDecision, init_producer_id_identity_decision, next_producer_identity,
+use {
+    super::{ProducerDecision, ProducerSnapshotEntryFacts, completed_batches_preserve_first_retry},
+    crate::transaction::{
+        InitProducerIdIdentityDecision, init_producer_id_identity_decision, next_producer_identity,
+    },
+    creusot_std::prelude::*,
 };
 
 type EpochHandoff = (

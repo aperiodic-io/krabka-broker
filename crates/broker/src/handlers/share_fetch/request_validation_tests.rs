@@ -8,25 +8,25 @@
 //! characters) with `INVALID_REQUEST`. They do not ask the group coordinator
 //! whether the member exists.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    share_acknowledge_request::ShareAcknowledgeRequest,
-    share_acknowledge_response::{self, ShareAcknowledgeResponse},
-    share_fetch_request::ShareFetchRequest,
-    share_fetch_response::{self, ShareFetchResponse},
-};
-
-use crate::{
-    authorizer::AuthorizationResult,
-    broker::BrokerHandle,
-    codes,
-    test_support::{
-        decode_response, encode_request, peer, principal, start_broker_no_audit_with,
-        try_dispatch_context,
+use {
+    crate::{
+        authorizer::AuthorizationResult,
+        broker::BrokerHandle,
+        codes,
+        test_support::{
+            decode_response, encode_request, peer, principal, start_broker_no_audit_with,
+            try_dispatch_context,
+        },
     },
+    assert2::assert,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        share_acknowledge_request::ShareAcknowledgeRequest,
+        share_acknowledge_response::{self, ShareAcknowledgeResponse},
+        share_fetch_request::ShareFetchRequest,
+        share_fetch_response::{self, ShareFetchResponse},
+    },
+    std::sync::Arc,
 };
 
 /// The share group that the principal may read.

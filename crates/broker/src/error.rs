@@ -407,9 +407,7 @@ pub enum BrokerError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn display_unsupported_api() {

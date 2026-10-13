@@ -12,12 +12,12 @@
 //! .removeExpiredProducers` removes a producer when `producer.id.expiration.ms`
 //! has passed since its last write and it has no open transaction.
 
-use std::collections::HashMap;
-
-use krabka_ids::{Offset, ProducerId};
-
-use super::Log;
-use crate::compact::ProducerLastRecord;
+use {
+    super::Log,
+    crate::compact::ProducerLastRecord,
+    krabka_ids::{Offset, ProducerId},
+    std::collections::HashMap,
+};
 
 /// One producer as `DescribeProducers` reports it.
 ///

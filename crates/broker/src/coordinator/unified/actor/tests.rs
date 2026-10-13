@@ -2,23 +2,23 @@
 //! task, what a dead session-expiry ticker does to it, and the
 //! one-actor-per-group guarantee the handle registry gives.
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::{assert, check};
-use krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest;
-use qubit_clock::Timer;
-use tokio::sync::mpsc;
-
-use super::{
-    GroupActorMessage, GroupKindTag, chrono_now_ms, run_actor,
-    test_support::{empty_metadata, make_coordinator},
-};
-use crate::{
-    codes,
-    coordinator::unified::{
-        config::NextGenConfig, group::CoordinatorGroup, regex_resolver::no_topic_regex_resolver,
+use {
+    super::{
+        GroupActorMessage, GroupKindTag, chrono_now_ms, run_actor,
+        test_support::{empty_metadata, make_coordinator},
     },
-    test_support::{BrokenTimer, TimerFailure},
+    crate::{
+        codes,
+        coordinator::unified::{
+            config::NextGenConfig, group::CoordinatorGroup, regex_resolver::no_topic_regex_resolver,
+        },
+        test_support::{BrokenTimer, TimerFailure},
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+    qubit_clock::Timer,
+    std::{sync::Arc, time::Duration},
+    tokio::sync::mpsc,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

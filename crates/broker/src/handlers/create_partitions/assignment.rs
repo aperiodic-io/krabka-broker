@@ -3,13 +3,16 @@
 //! `assignments` list against the live broker set and the topic's
 //! replication factor.
 
-use krabka_protocol::owned::create_partitions_request::CreatePartitionsAssignment;
-use krabka_raft::NodeId;
-
-use crate::{
-    codes,
-    handlers::create_topics::validate_manual_partition_assignment,
-    site_placement::{PlacementRng, SiteBrokerView, placement_failure_reason, stretch_replicas},
+use {
+    crate::{
+        codes,
+        handlers::create_topics::validate_manual_partition_assignment,
+        site_placement::{
+            PlacementRng, SiteBrokerView, placement_failure_reason, stretch_replicas,
+        },
+    },
+    krabka_protocol::owned::create_partitions_request::CreatePartitionsAssignment,
+    krabka_raft::NodeId,
 };
 
 #[cfg(test)]

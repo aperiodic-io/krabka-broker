@@ -28,27 +28,27 @@
 //! The handler emits a `group_id` at most once. The registries are disjoint by
 //! `GroupType`, but the handler dedups defensively.
 
-use std::collections::HashSet;
-
-use krabka_protocol::owned::{
-    list_groups_request::ListGroupsRequest,
-    list_groups_response::{ListGroupsResponse, ListedGroup},
-};
-
 #[cfg(test)]
 use crate::authorizer::SimpleAclAuthorizer;
-use crate::{
-    broker::Broker,
-    codes,
-    coordinator::unified::{
-        GroupType, actor::GroupActorMessage, share::actor::ShareGroupActorMessage,
-        streams::actor::StreamsGroupActorMessage,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        coordinator::unified::{
+            GroupType, actor::GroupActorMessage, share::actor::ShareGroupActorMessage,
+            streams::actor::StreamsGroupActorMessage,
+        },
+        handlers::{
+            cluster_describe_denied, coordinator_routing::any_group_partition_loading,
+            group_describe_denied,
+        },
+        task_util::ask,
     },
-    handlers::{
-        cluster_describe_denied, coordinator_routing::any_group_partition_loading,
-        group_describe_denied,
+    krabka_protocol::owned::{
+        list_groups_request::ListGroupsRequest,
+        list_groups_response::{ListGroupsResponse, ListedGroup},
     },
-    task_util::ask,
+    std::collections::HashSet,
 };
 
 /// Wire `group_type` string for classic (pre-KIP-848) groups.
@@ -258,17 +258,17 @@ fn filter_groups(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{AclOperation, MetadataRecord, ResourceType};
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        coordinator::unified::classic_state::GroupState,
-        handlers::acl_wire::CLUSTER_RESOURCE_NAME,
-        test_support::{AllowAclSetup, allow_acl, start_broker_no_audit_with, test_ctx},
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            coordinator::unified::classic_state::GroupState,
+            handlers::acl_wire::CLUSTER_RESOURCE_NAME,
+            test_support::{AllowAclSetup, allow_acl, start_broker_no_audit_with, test_ctx},
+        },
+        assert2::assert,
+        krabka_metadata::{AclOperation, MetadataRecord, ResourceType},
+        std::sync::Arc,
     };
 
     const VERSION: i16 = krabka_protocol::owned::list_groups_response::MAX_VERSION;

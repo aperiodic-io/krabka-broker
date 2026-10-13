@@ -2,20 +2,20 @@
 //! whose log holds compactable duplicates, and the record count that shows
 //! whether a sweep compacted one.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_metadata::NodeId;
-use krabka_protocol::records::{Record, RecordBatch};
-use tempfile::TempDir;
-
-use crate::{
-    log_dir::partition_dir,
-    log_dir_status::LogDirRegistry,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    test_support::{CommittedPartitionSetup, block_log_artifact_paths, committed_partition},
+use {
+    crate::{
+        log_dir::partition_dir,
+        log_dir_status::LogDirRegistry,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        test_support::{CommittedPartitionSetup, block_log_artifact_paths, committed_partition},
+    },
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_metadata::NodeId,
+    krabka_protocol::records::{Record, RecordBatch},
+    std::sync::Arc,
+    tempfile::TempDir,
 };
 
 fn keyed_batch(base: i64, key: &[u8], value: &[u8]) -> RecordBatch {
@@ -90,16 +90,12 @@ pub(super) async fn compactable_partition(
     let mut active = keyed_batch(12, b"active-key", b"active");
     log.append(&mut active).expect("append active batch");
 
-    committed_partition(
-        root.path(),
-        log,
-        CommittedPartitionSetup {
-            topic,
-            partition: partition_id,
-            leader,
-            registry: log_dir_status,
-        },
-    )
+    committed_partition(root.path(), log, CommittedPartitionSetup {
+        topic,
+        partition: partition_id,
+        leader,
+        registry: log_dir_status,
+    })
     .await
 }
 
@@ -119,13 +115,10 @@ pub(super) async fn register_compactable(
     registry: &PartitionRegistry,
     topic: &str,
 ) -> (Arc<Partition>, usize) {
-    let partition = compactable_partition(
-        root,
-        CompactionSetup {
-            topic,
-            ..Default::default()
-        },
-    )
+    let partition = compactable_partition(root, CompactionSetup {
+        topic,
+        ..Default::default()
+    })
     .await;
     let initial_count = record_count(&partition);
     registry.insert(topic.into(), PartitionIndex(0), partition.clone());

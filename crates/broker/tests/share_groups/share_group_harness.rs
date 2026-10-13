@@ -6,11 +6,13 @@
 //! `ShareGroupHeartbeat` and `ShareGroupDescribe` over the wire. Those steps
 //! live here so each scenario module holds only its own assertions.
 
-use krabka_broker::{Broker, BrokerConfig};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    share_group_describe_request::ShareGroupDescribeRequest,
-    share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+use {
+    krabka_broker::{Broker, BrokerConfig},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        share_group_describe_request::ShareGroupDescribeRequest,
+        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+    },
 };
 
 const SHARE_STATE_PARTITIONS: i32 = 1;

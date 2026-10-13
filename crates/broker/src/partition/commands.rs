@@ -2,16 +2,17 @@
 //! a [`WriterMessage`] and awaits the writer's acknowledgement, and they are
 //! grouped here because they share that one request-response shape.
 
-use krabka_log::Offset;
-use krabka_protocol::records::RecordBatch;
-use tokio::sync::oneshot;
-
-use crate::{
-    blocking::run_blocking,
-    config_keys::apply_to_log_config,
-    error::BrokerError,
-    partition::{Partition, ProduceData, ProduceJob, ProducerAppendCheck, WriterMessage},
-    task_util::{AskError, ask},
+use {
+    crate::{
+        blocking::run_blocking,
+        config_keys::apply_to_log_config,
+        error::BrokerError,
+        partition::{Partition, ProduceData, ProduceJob, ProducerAppendCheck, WriterMessage},
+        task_util::{AskError, ask},
+    },
+    krabka_log::Offset,
+    krabka_protocol::records::RecordBatch,
+    tokio::sync::oneshot,
 };
 
 /// Whether an internal produce definitely failed or may already be appended.
@@ -369,10 +370,7 @@ impl Partition {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::partition::test_support::test_partition_with_writer;
+    use {super::*, crate::partition::test_support::test_partition_with_writer, assert2::assert};
 
     #[tokio::test]
     async fn test_set_log_start_updates_log_start_through_writer() {
@@ -393,8 +391,10 @@ mod tests {
     /// arrives as.
     #[tokio::test]
     async fn a_follower_takes_a_compressed_record_above_the_decompressed_limit() {
-        use krabka_ids::{LeaderEpoch, ProducerId};
-        use krabka_protocol::records::{Attributes, Record};
+        use {
+            krabka_ids::{LeaderEpoch, ProducerId},
+            krabka_protocol::records::{Attributes, Record},
+        };
 
         let (p, _td) = test_partition_with_writer();
         {

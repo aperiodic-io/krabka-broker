@@ -22,12 +22,13 @@
 //! all land on one broker. Krabka rotates instead of drawing at random: it
 //! spreads at least as evenly, and it needs no random source.
 
-use std::{
-    collections::HashSet,
-    sync::atomic::{AtomicUsize, Ordering},
+use {
+    krabka_metadata::{BrokerRegistrationRecord, MetadataImage},
+    std::{
+        collections::HashSet,
+        sync::atomic::{AtomicUsize, Ordering},
+    },
 };
-
-use krabka_metadata::{BrokerRegistrationRecord, MetadataImage};
 
 /// `MetadataResponse.NO_CONTROLLER_ID`, which `DescribeCluster` shares.
 pub(crate) const NO_CONTROLLER_ID: i32 = -1;
@@ -79,13 +80,13 @@ fn rotate(alive: &[i32], nth: usize) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use assert2::assert;
-    use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord, NodeId};
-
-    use super::*;
-    use crate::test_support::broker_registration;
+    use {
+        super::*,
+        crate::test_support::broker_registration,
+        assert2::assert,
+        krabka_metadata::{BrokerRegistrationRecord, MetadataRecord, NodeId},
+        std::collections::BTreeSet,
+    };
 
     fn broker_record(node_id: NodeId) -> BrokerRegistrationRecord {
         BrokerRegistrationRecord {

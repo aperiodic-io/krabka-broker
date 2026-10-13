@@ -4,10 +4,7 @@
 //! capacity, and the listener details the manager needs to reach a replica.
 //! It is built once from `BrokerConfig` and read on every job.
 
-use krabka_units::Time;
-
-use super::BackgroundRecovery;
-use crate::config_keys::RecoveryStrategy;
+use {super::BackgroundRecovery, crate::config_keys::RecoveryStrategy, krabka_units::Time};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RecoveryPolicy {
@@ -31,12 +28,10 @@ impl RecoveryPolicy {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_audit::AuditLog;
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::config::BreakGlassConfig;
+    use {
+        super::*, crate::config::BreakGlassConfig, assert2::assert, krabka_audit::AuditLog,
+        krabka_units::millis,
+    };
 
     #[test]
     fn recovery_policy_selects_configured_deadlines() {

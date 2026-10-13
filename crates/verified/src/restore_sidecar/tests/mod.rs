@@ -1,9 +1,10 @@
-use assert2::check;
-
-use super::{
-    RestoreAbortedTxn, RestoreSegmentExtent, restore_index_frontier,
-    restore_leader_epoch_entry_valid, restore_offset_index_entry_valid,
-    restore_producer_ids_strict, restore_time_index_entry_valid, restore_txn_index_entry_valid,
+use {
+    super::{
+        RestoreAbortedTxn, RestoreSegmentExtent, restore_index_frontier,
+        restore_leader_epoch_entry_valid, restore_offset_index_entry_valid,
+        restore_producer_ids_strict, restore_time_index_entry_valid, restore_txn_index_entry_valid,
+    },
+    assert2::check,
 };
 
 const SEGMENT: RestoreSegmentExtent = RestoreSegmentExtent {

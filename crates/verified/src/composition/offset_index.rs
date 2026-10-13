@@ -1,7 +1,8 @@
-use creusot_std::prelude::*;
-
-use super::{
-    offset_index_lookup, offset_index_position_at_or_after, restore_offset_index_entry_valid,
+use {
+    super::{
+        offset_index_lookup, offset_index_position_at_or_after, restore_offset_index_entry_valid,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

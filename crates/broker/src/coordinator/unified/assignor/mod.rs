@@ -5,11 +5,11 @@
 pub mod range;
 pub mod uniform;
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_protocol::primitives::uuid::Uuid;
-pub use range::RangeAssignor;
-pub use uniform::UniformAssignor;
+use {
+    krabka_protocol::primitives::uuid::Uuid,
+    std::collections::{HashMap, HashSet},
+};
+pub use {range::RangeAssignor, uniform::UniformAssignor};
 
 #[derive(Debug, Clone)]
 pub struct MemberSubscription {
@@ -123,11 +123,11 @@ pub fn subscription_type(members: &[SubscriptionShape<'_>]) -> SubscriptionType 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use assert2::assert;
-
-    use super::{SubscriptionShape, SubscriptionType, subscription_type};
+    use {
+        super::{SubscriptionShape, SubscriptionType, subscription_type},
+        assert2::assert,
+        std::collections::HashSet,
+    };
 
     fn names(list: &[&str]) -> HashSet<String> {
         list.iter().map(|name| (*name).to_owned()).collect()

@@ -7,21 +7,21 @@
 //! the Java helper source it compiles in-container, so it stands apart from the
 //! mixed-cluster scenarios.
 
-use std::{
-    process::Command,
-    time::{Duration, Instant},
-};
-
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle};
-use krabka_metadata::MetadataRecord;
-use tempfile::TempDir;
-
-use crate::{
-    docker::{
-        KAFKA_IMAGE, KAFKA_IMAGE_MODERN, docker_rm, docker_run_kafka_tool_with_image,
-        produce_lines_via_jvm,
+use {
+    crate::{
+        docker::{
+            KAFKA_IMAGE, KAFKA_IMAGE_MODERN, docker_rm, docker_run_kafka_tool_with_image,
+            produce_lines_via_jvm,
+        },
+        support::{self, JvmBrokerSetup, controller_voters, jvm_broker_config},
     },
-    support::{self, JvmBrokerSetup, controller_voters, jvm_broker_config},
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle},
+    krabka_metadata::MetadataRecord,
+    std::{
+        process::Command,
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
 };
 
 /// Single-broker Krabka config bound on `0.0.0.0:<client_port>`, advertised as
@@ -42,19 +42,16 @@ async fn start_host_broker_on(client_port: u16, controller_port: u16) -> (Broker
         // Keep it alive for the bounded in-container Java compile and probe.
         heartbeat_timeout: krabka_units::secs(120),
         bootstrap_mode: BootstrapMode::Bootstrap,
-        ..jvm_broker_config(
-            dir.path().to_path_buf(),
-            JvmBrokerSetup {
-                listen: format!("0.0.0.0:{client_port}").parse().expect("addr"),
-                controller: format!("0.0.0.0:{controller_port}").parse().expect("addr"),
-                advertised: format!("host.docker.internal:{client_port}"),
-                voters: controller_voters(&[(
-                    1,
-                    format!("0.0.0.0:{controller_port}").parse().expect("addr"),
-                )]),
-                ..Default::default()
-            },
-        )
+        ..jvm_broker_config(dir.path().to_path_buf(), JvmBrokerSetup {
+            listen: format!("0.0.0.0:{client_port}").parse().expect("addr"),
+            controller: format!("0.0.0.0:{controller_port}").parse().expect("addr"),
+            advertised: format!("host.docker.internal:{client_port}"),
+            voters: controller_voters(&[(
+                1,
+                format!("0.0.0.0:{controller_port}").parse().expect("addr"),
+            )]),
+            ..Default::default()
+        })
     };
     let handle = Broker::start(config).await.expect("start broker");
     (handle, dir)
@@ -161,22 +158,19 @@ async fn kip320_wire_conformance_offset_for_leader_epoch() {
     let (broker, _dir) = start_host_broker_on(client_port, controller_port).await;
 
     // 1. Create topic (1 partition, RF=1).
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE,
-        &[
-            "kafka-topics",
-            "--create",
-            "--if-not-exists",
-            "--topic",
-            TOPIC,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-            "--bootstrap-server",
-            bootstrap.as_str(),
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE, &[
+        "kafka-topics",
+        "--create",
+        "--if-not-exists",
+        "--topic",
+        TOPIC,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+        "--bootstrap-server",
+        bootstrap.as_str(),
+    ]);
     assert2::assert!(out.status.success(), "create topic failed");
 
     // 2. Produce a first batch at the current (epoch 0) leadership.

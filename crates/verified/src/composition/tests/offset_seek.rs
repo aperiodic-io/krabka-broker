@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, HashSet};
-
-use assert2::assert;
-
-use super::*;
+use {
+    super::*,
+    assert2::assert,
+    std::collections::{BTreeMap, HashSet},
+};
 
 fn valid_rows(rows: &[(u32, u32)], max_relative: i64, log_bytes: u64) -> bool {
     rows.iter().all(|&(offset, position)| {

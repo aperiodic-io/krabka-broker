@@ -5,11 +5,11 @@
 //! "whose session expired" under one lock acquisition each. The failover,
 //! rebalance and metrics loops read the registry only through these.
 
-use std::collections::HashSet;
-
-use krabka_raft::NodeId;
-
-use super::{BrokerLivenessState, ControllerLivenessState, registry::BrokerEntry};
+use {
+    super::{BrokerLivenessState, ControllerLivenessState, registry::BrokerEntry},
+    krabka_raft::NodeId,
+    std::collections::HashSet,
+};
 
 impl ControllerLivenessState {
     /// Return the current liveness state for `broker_id`, or `None` if
@@ -108,14 +108,14 @@ impl ControllerLivenessState {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        heartbeat::controller_state::{LivenessTransition, TestClock},
-        test_support::expired_broker_fixture,
+    use {
+        super::*,
+        crate::{
+            heartbeat::controller_state::{LivenessTransition, TestClock},
+            test_support::expired_broker_fixture,
+        },
+        assert2::assert,
+        std::time::Duration,
     };
 
     #[tokio::test]

@@ -3,20 +3,21 @@
 //! segment should produce, and the `--rlmm-snapshot` file the reconciliation
 //! tests hand back to the scan.
 
-use clap::Parser as _;
-use krabka_ids::{LeaderEpoch, Offset, PartitionIndex};
-use krabka_remote_storage::{
-    RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentState,
-    RlmmCacheDump, TopicIdPartition, kafka_uuid,
-};
-use krabka_remote_storage_topic::Snapshot;
-use uuid::Uuid;
-
-use crate::{
-    Cli,
-    args::RestoreArgs,
-    backend::ArchiveStore,
-    discover::{ArchiveObject, SegmentInventory},
+use {
+    crate::{
+        Cli,
+        args::RestoreArgs,
+        backend::ArchiveStore,
+        discover::{ArchiveObject, SegmentInventory},
+    },
+    clap::Parser as _,
+    krabka_ids::{LeaderEpoch, Offset, PartitionIndex},
+    krabka_remote_storage::{
+        RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+        RemoteLogSegmentState, RlmmCacheDump, TopicIdPartition, kafka_uuid,
+    },
+    krabka_remote_storage_topic::Snapshot,
+    uuid::Uuid,
 };
 
 /// transaction index is excluded on purpose: it is optional even for a
@@ -114,14 +115,11 @@ pub(super) fn write_artifact(root: &std::path::Path, setup: ArtifactSetup<'_>) {
 /// Write every artifact of one complete segment copy.
 pub(super) fn write_full_segment(root: &std::path::Path, setup: SegmentSetup<'_>) {
     for suffix in FULL_SEGMENT_SUFFIXES {
-        write_artifact(
-            root,
-            ArtifactSetup {
-                segment: setup,
-                suffix,
-                ..Default::default()
-            },
-        );
+        write_artifact(root, ArtifactSetup {
+            segment: setup,
+            suffix,
+            ..Default::default()
+        });
     }
 }
 
@@ -216,16 +214,13 @@ pub(super) fn single_segment_archive(base_offset: Offset) -> (tempfile::TempDir,
     let archive = tempfile::tempdir().expect("temp dir");
     let topic_id = Uuid::from_u128(1);
     let segment_id = Uuid::from_u128(10);
-    write_full_segment(
-        archive.path(),
-        SegmentSetup {
-            partition: PartitionKey {
-                topic_id,
-                ..Default::default()
-            },
-            base_offset,
-            segment_id,
+    write_full_segment(archive.path(), SegmentSetup {
+        partition: PartitionKey {
+            topic_id,
+            ..Default::default()
         },
-    );
+        base_offset,
+        segment_id,
+    });
     (archive, topic_id, segment_id)
 }

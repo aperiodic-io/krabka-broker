@@ -9,10 +9,11 @@
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::offset_delete_response::OffsetDeleteResponse;
-
-    use crate::{codes, handlers::ErrorCodeResponse as _};
+    use {
+        crate::{codes, handlers::ErrorCodeResponse as _},
+        assert2::check,
+        krabka_protocol::owned::offset_delete_response::OffsetDeleteResponse,
+    };
 
     #[test]
     fn whole_error_carries_only_the_top_level_code() {

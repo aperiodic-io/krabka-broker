@@ -5,8 +5,10 @@
 //! for the result to appear in an image, so the waits are gathered here rather
 //! than repeated next to each scenario.
 
-use krabka_broker::BrokerHandle;
-use krabka_metadata::{LeaderEpoch, PartitionRecord};
+use {
+    krabka_broker::BrokerHandle,
+    krabka_metadata::{LeaderEpoch, PartitionRecord},
+};
 
 /// Waits until `handle` sees `(topic, partition)` in its image.
 pub async fn wait_partition_exists(handle: &BrokerHandle, topic: &str, partition: i32) {

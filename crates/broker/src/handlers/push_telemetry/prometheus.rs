@@ -154,18 +154,19 @@ fn sanitize_prometheus_label(label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use opentelemetry_proto::tonic::{
-        common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value},
-        metrics::v1::{
-            AggregationTemporality, Gauge, Histogram, HistogramDataPoint, Metric, MetricsData,
-            NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum, metric, number_data_point,
+    use {
+        super::*,
+        crate::handlers::push_telemetry::test_support::{gauge_metric, metrics_data, number_point},
+        assert2::{assert, check},
+        opentelemetry_proto::tonic::{
+            common::v1::{AnyValue, InstrumentationScope, KeyValue, any_value},
+            metrics::v1::{
+                AggregationTemporality, Gauge, Histogram, HistogramDataPoint, Metric, MetricsData,
+                NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum, metric, number_data_point,
+            },
+            resource::v1::Resource,
         },
-        resource::v1::Resource,
     };
-
-    use super::*;
-    use crate::handlers::push_telemetry::test_support::{gauge_metric, metrics_data, number_point};
 
     #[test]
     fn flatten_for_prometheus_preserves_gauge_sum_and_histogram_points() {

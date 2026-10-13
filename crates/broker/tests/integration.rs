@@ -1,36 +1,40 @@
 //! Multi-RPC sequences against an in-process broker, driven through
 //! `krabka-client-core`. These run on every push (no Docker required).
 
-use assert2::{assert, check};
-
-use crate::support::{
-    client::connect_client,
-    discovery::{api_versions_request_for, topic_metadata_request},
-    fetch::{
-        FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, check_record_count,
-        single_partition_fetch,
+use {
+    crate::support::{
+        client::connect_client,
+        discovery::{api_versions_request_for, topic_metadata_request},
+        fetch::{
+            FetchLimits, RequestWaitMillis, SinglePartitionFetchSetup, check_record_count,
+            single_partition_fetch,
+        },
+        offsets::{list_offset_partition, single_partition_list_offsets},
+        produce::{ProduceAcknowledgements, SinglePartitionProduceSetup, batch_request},
+        records::value_record,
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        },
+        wire::write_frame,
     },
-    offsets::{list_offset_partition, single_partition_list_offsets},
-    produce::{ProduceAcknowledgements, SinglePartitionProduceSetup, batch_request},
-    records::value_record,
-    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
-    wire::write_frame,
+    assert2::{assert, check},
 };
 mod support;
 
-use std::time::Duration;
-
-use bytes::{BufMut, Bytes, BytesMut};
-use krabka_protocol::{
-    Encode,
-    owned::{
-        list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest},
-        metadata_request::MetadataRequest,
+use {
+    bytes::{BufMut, Bytes, BytesMut},
+    krabka_protocol::{
+        Encode,
+        owned::{
+            list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest},
+            metadata_request::MetadataRequest,
+        },
+        records::{Record, RecordBatch},
     },
-    records::{Record, RecordBatch},
+    std::time::Duration,
+    support::topic_id_for,
+    tokio::io::AsyncReadExt,
 };
-use support::topic_id_for;
-use tokio::io::AsyncReadExt;
 
 /// Build a `RecordBatch` with one entry per provided value. Codegen's
 /// `PartitionProduceData.records` is `Option<RecordsPayload>`. Callers
@@ -185,14 +189,11 @@ async fn end_to_end_create_produce_fetch_delete() {
         .client
         .send(ListOffsetsRequest {
             replica_id: -1,
-            ..single_partition_list_offsets(
-                "e2e",
-                ListOffsetsPartition {
-                    partition_index: 0,
-                    timestamp: -1, // latest
-                    ..Default::default()
-                },
-            )
+            ..single_partition_list_offsets("e2e", ListOffsetsPartition {
+                partition_index: 0,
+                timestamp: -1, // latest
+                ..Default::default()
+            })
         })
         .await
         .unwrap();

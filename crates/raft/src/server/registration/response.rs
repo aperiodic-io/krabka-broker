@@ -3,12 +3,13 @@
 //! Every refusal path in the controller registration handler ends in it, so the
 //! shape of a reply is decided in one place rather than at each early return.
 
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{
-    Encode, owned::controller_registration_response::ControllerRegistrationResponse,
+use {
+    crate::RaftError,
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{
+        Encode, owned::controller_registration_response::ControllerRegistrationResponse,
+    },
 };
-
-use crate::RaftError;
 
 pub(super) fn controller_registration_response(
     version: i16,
@@ -33,10 +34,11 @@ fn encode(response: &impl Encode, version: i16) -> Result<Bytes, RaftError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::server::{registration::NOT_CONTROLLER, test_support::decoded};
+    use {
+        super::*,
+        crate::server::{registration::NOT_CONTROLLER, test_support::decoded},
+        assert2::check,
+    };
 
     /// The controller registration response carries the error code and the
     /// message the caller passed, and encodes to bytes.

@@ -1,23 +1,23 @@
 //! A leadership change moves `__transaction_state-0` between two coordinators
 //! that share one partition log, as replication would.
 
-use std::path::Path;
-
-use assert2::{assert, check};
-
-use super::*;
-use crate::{
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    test_support::{PartitionCount, StandalonePartitionSetup, open_partition},
-    txn::{
-        coordinator::test_support::{StateImageSetup, test_prelude::*},
-        log_record::{encode_key, encode_value},
-        partitioner::partition_for_tid,
-        state::{TopicPartition, TxnEntry, TxnState},
-        version::TxnVersion,
+use {
+    super::*,
+    crate::{
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        test_support::{PartitionCount, StandalonePartitionSetup, open_partition},
+        txn::{
+            coordinator::test_support::{StateImageSetup, test_prelude::*},
+            log_record::{encode_key, encode_value},
+            partitioner::partition_for_tid,
+            state::{TopicPartition, TxnEntry, TxnState},
+            version::TxnVersion,
+        },
     },
+    assert2::{assert, check},
+    std::path::Path,
 };
 
 const TID: &str = "tid-moved";
@@ -33,13 +33,10 @@ fn image(leader: NodeId, leader_epoch: krabka_metadata::LeaderEpoch) -> Metadata
 }
 
 fn open_state_partition(dir: &Path) -> Arc<Partition> {
-    open_partition(
-        dir,
-        StandalonePartitionSetup {
-            topic: bootstrap::TOPIC,
-            ..Default::default()
-        },
-    )
+    open_partition(dir, StandalonePartitionSetup {
+        topic: bootstrap::TOPIC,
+        ..Default::default()
+    })
 }
 
 #[derive(Clone, Copy)]

@@ -1,10 +1,11 @@
 //! Diskless WAL quorum, object-flush, trim, and cold-read accounting.
 
-use krabka_ids::PartitionIndex;
-use krabka_raft::NodeId;
-use uuid::Uuid;
-
-use super::{BrokerMetrics, WalShardLabel, WalVoterLabel};
+use {
+    super::{BrokerMetrics, WalShardLabel, WalVoterLabel},
+    krabka_ids::PartitionIndex,
+    krabka_raft::NodeId,
+    uuid::Uuid,
+};
 
 impl BrokerMetrics {
     fn wal_shard_label(topic_id: Uuid, partition: PartitionIndex) -> WalShardLabel {
@@ -114,9 +115,7 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[tokio::test]
     async fn diskless_metrics_encode_with_bounded_shard_labels() {

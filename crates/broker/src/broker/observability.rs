@@ -3,19 +3,19 @@
 //! subscriptions. Both are observability endpoints rather than broker
 //! machinery, so they start together in one module.
 
-use std::sync::Arc;
-
-use krabka_units::convert::TimeExt as _;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    client_metrics::{
-        ClientMetrics, ClientMetricsManager, prometheus_sink::SharedClientMetricsCollector,
+use {
+    crate::{
+        client_metrics::{
+            ClientMetrics, ClientMetricsManager, prometheus_sink::SharedClientMetricsCollector,
+        },
+        config::BrokerConfig,
+        error::BrokerError,
+        metrics::BrokerMetrics,
+        metrics_server::run,
     },
-    config::BrokerConfig,
-    error::BrokerError,
-    metrics::BrokerMetrics,
-    metrics_server::run,
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
 };
 
 pub(super) struct ObservabilityStartup {

@@ -4,13 +4,11 @@
 //! binary turn one into an exit code and a line on stderr, so a caller that
 //! embeds the restore keeps the structured error.
 
-use std::path::PathBuf;
-
-use krabka_log::LogError;
-use krabka_object_store::ObjectStoreError;
-use krabka_protocol::records::RecordsError;
-use krabka_remote_storage::RemoteStorageError;
-use uuid::Uuid;
+use {
+    krabka_log::LogError, krabka_object_store::ObjectStoreError,
+    krabka_protocol::records::RecordsError, krabka_remote_storage::RemoteStorageError,
+    std::path::PathBuf, uuid::Uuid,
+};
 
 /// Exit codes:
 /// - 0: success
@@ -229,9 +227,7 @@ impl RestoreError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn exit_codes_are_distinct_and_documented() {

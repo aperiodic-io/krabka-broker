@@ -3,22 +3,22 @@
 //! `min.insync.replicas` pre-flight that gates an `acks=-1` produce but leaves
 //! `acks=1` alone.
 
-use std::time::Duration;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_protocol::{primitives::uuid::Uuid as WireUuid, records::RecordBatch};
-
-use crate::{
-    RESOURCE_TYPE_TOPIC,
-    admin_harness::create_topic_helper,
-    support::{
-        configs::{legacy_config, legacy_request, legacy_resource},
-        discovery::named_topic_metadata,
-        produce::{SinglePartitionProduceSetup, batch_request},
-        records::{batch_from_records, value_record},
-        start_n_node_client,
+use {
+    crate::{
+        RESOURCE_TYPE_TOPIC,
+        admin_harness::create_topic_helper,
+        support::{
+            configs::{legacy_config, legacy_request, legacy_resource},
+            discovery::named_topic_metadata,
+            produce::{SinglePartitionProduceSetup, batch_request},
+            records::{batch_from_records, value_record},
+            start_n_node_client,
+        },
     },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_protocol::{primitives::uuid::Uuid as WireUuid, records::RecordBatch},
+    std::time::Duration,
 };
 
 /// `AlterConfigs` round-trip: a request that sets `retention.ms` on a known
@@ -172,14 +172,11 @@ async fn min_insync_replicas_is_clamped_to_the_replica_count_for_acks_all() {
 
     // acks=-1 ("all"): ISR={1} meets the clamped threshold of 1.
     let all = client
-        .send(batch_request(
-            batch.clone(),
-            SinglePartitionProduceSetup {
-                topic: ("t-min-isr").into(),
-                topic_id,
-                ..SinglePartitionProduceSetup::replicated()
-            },
-        ))
+        .send(batch_request(batch.clone(), SinglePartitionProduceSetup {
+            topic: ("t-min-isr").into(),
+            topic_id,
+            ..SinglePartitionProduceSetup::replicated()
+        }))
         .await
         .expect("Produce (acks=-1)");
     assert!(
@@ -191,14 +188,11 @@ async fn min_insync_replicas_is_clamped_to_the_replica_count_for_acks_all() {
 
     // acks=1: leader-only; min.insync.replicas never gates it.
     let ok = client
-        .send(batch_request(
-            batch,
-            SinglePartitionProduceSetup {
-                topic: ("t-min-isr").into(),
-                topic_id,
-                ..Default::default()
-            },
-        ))
+        .send(batch_request(batch, SinglePartitionProduceSetup {
+            topic: ("t-min-isr").into(),
+            topic_id,
+            ..Default::default()
+        }))
         .await
         .expect("Produce (acks=1)");
     assert!(

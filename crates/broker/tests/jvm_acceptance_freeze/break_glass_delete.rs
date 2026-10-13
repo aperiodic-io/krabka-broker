@@ -5,14 +5,15 @@
 //! same binary against the same broker still creates a topic and still lists
 //! the one the gate saved.
 
-use assert2::check;
-
-use crate::{
-    host_broker::{gate_on, start_jvm_broker},
-    jvm_tool::run_tool,
-    vocabulary::{
-        ACTION_DELETE_TOPIC, DOOMED_TOPIC, POLICY_VIOLATION_EXCEPTION, no_proposal_refusal,
+use {
+    crate::{
+        host_broker::{gate_on, start_jvm_broker},
+        jvm_tool::run_tool,
+        vocabulary::{
+            ACTION_DELETE_TOPIC, DOOMED_TOPIC, POLICY_VIOLATION_EXCEPTION, no_proposal_refusal,
+        },
     },
+    assert2::check,
 };
 
 /// `kafka-topics --delete` with no break-glass proposal fails, and carries the
@@ -33,39 +34,31 @@ async fn kafka_topics_delete_carries_the_brokers_break_glass_refusal() {
     let broker = start_jvm_broker(gate_on).await;
     let bootstrap = broker.container.as_str();
 
-    let created = run_tool(
-        None,
-        None,
-        &[
-            "kafka-topics",
-            "--bootstrap-server",
-            bootstrap,
-            "--create",
-            "--topic",
-            DOOMED_TOPIC,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-        ],
-    );
+    let created = run_tool(None, None, &[
+        "kafka-topics",
+        "--bootstrap-server",
+        bootstrap,
+        "--create",
+        "--topic",
+        DOOMED_TOPIC,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+    ]);
     check!(
         created.succeeded(),
         "creating a topic is not gated, got {created:?}"
     );
 
-    let deleted = run_tool(
-        None,
-        None,
-        &[
-            "kafka-topics",
-            "--bootstrap-server",
-            bootstrap,
-            "--delete",
-            "--topic",
-            DOOMED_TOPIC,
-        ],
-    );
+    let deleted = run_tool(None, None, &[
+        "kafka-topics",
+        "--bootstrap-server",
+        bootstrap,
+        "--delete",
+        "--topic",
+        DOOMED_TOPIC,
+    ]);
     let refusal = no_proposal_refusal(ACTION_DELETE_TOPIC, DOOMED_TOPIC);
     check!(
         !deleted.succeeded(),
@@ -80,11 +73,12 @@ async fn kafka_topics_delete_carries_the_brokers_break_glass_refusal() {
         "the delete must print {refusal:?}, got {deleted:?}"
     );
 
-    let listed = run_tool(
-        None,
-        None,
-        &["kafka-topics", "--bootstrap-server", bootstrap, "--list"],
-    );
+    let listed = run_tool(None, None, &[
+        "kafka-topics",
+        "--bootstrap-server",
+        bootstrap,
+        "--list",
+    ]);
     check!(listed.succeeded(), "listing is not gated, got {listed:?}");
     check!(
         listed.says(DOOMED_TOPIC),

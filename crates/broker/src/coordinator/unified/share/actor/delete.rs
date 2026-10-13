@@ -9,26 +9,29 @@
 //! write the group tombstones (`ShareGroup.createGroupTombstoneRecords`),
 //! which tombstone the `ShareGroupStatePartitionMetadata` record too.
 
-use krabka_protocol::records::RecordBatch;
-
-use super::{
-    records::{PendingShareRecords, chrono_now_ms, flush_pending, state_partition_metadata_from},
-    share_state::TopicImage,
-};
-use crate::{
-    codes,
-    coordinator::{
-        DeleteGroupError,
-        unified::{
-            GroupCoordinator, OffsetRecordBatchBuilder,
-            offsets_log::OffsetsLog,
-            share::{
-                persistence::{ShareGroupKey, encode_share_key},
-                state::ShareGroupState,
+use {
+    super::{
+        records::{
+            PendingShareRecords, chrono_now_ms, flush_pending, state_partition_metadata_from,
+        },
+        share_state::TopicImage,
+    },
+    crate::{
+        codes,
+        coordinator::{
+            DeleteGroupError,
+            unified::{
+                GroupCoordinator, OffsetRecordBatchBuilder,
+                offsets_log::OffsetsLog,
+                share::{
+                    persistence::{ShareGroupKey, encode_share_key},
+                    state::ShareGroupState,
+                },
             },
         },
+        error::BrokerError,
     },
-    error::BrokerError,
+    krabka_protocol::records::RecordBatch,
 };
 
 /// Deletes the share group that `state` holds.
@@ -181,26 +184,26 @@ pub(super) fn tombstone_batch(group_id: &str, now_ms: i64) -> Result<RecordBatch
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use assert2::check;
-
-    use super::*;
-    use crate::{
-        coordinator::unified::{
-            ShareGroupSeed,
-            share::{
-                actor::ShareGroupActorMessage,
-                persistence::{
-                    DeletingTopic, ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::{
+                ShareGroupSeed,
+                share::{
+                    actor::ShareGroupActorMessage,
+                    persistence::{
+                        DeletingTopic, ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
+                    },
+                },
+                test_support::{
+                    AppendedRecords as Appended, appended_offsets_records as appended_records,
+                    fixed_source, make_coord_with_log, make_share_persister, share_member,
                 },
             },
-            test_support::{
-                AppendedRecords as Appended, appended_offsets_records as appended_records,
-                fixed_source, make_coord_with_log, make_share_persister, share_member,
-            },
+            metrics::{BrokerMetrics, ShareGroupIdLabel},
         },
-        metrics::{BrokerMetrics, ShareGroupIdLabel},
+        assert2::check,
+        std::collections::HashMap,
     };
 
     /// `(share group seed, persister wired, expected result, group kept,

@@ -5,25 +5,26 @@
 //! captured version, and decodes each one back into the variant the sending
 //! engine feeds to the core.
 
-use bytes::Bytes;
-use krabka_protocol::{
-    Decode,
-    owned::{
-        begin_quorum_epoch_response::{self as bqe_resp, BeginQuorumEpochResponse},
-        end_quorum_epoch_response::{self as eqe_resp, EndQuorumEpochResponse},
-        fetch_response::{self as fetch_resp, FetchResponse},
-        fetch_snapshot_response::{self as fs_resp, FetchSnapshotResponse},
-        vote_response::{self as vote_resp, VoteResponse},
+use {
+    super::codec::{
+        FETCH_SNAPSHOT_VERSION, FETCH_VERSION, METADATA_PARTITION, METADATA_TOPIC,
+        METADATA_TOPIC_ID, QUORUM_EPOCH_VERSION, VOTE_VERSION, encode_body, epoch_from_wire,
+        epoch_to_wire, node_from_wire, node_to_wire, records_payload_to_bytes,
     },
-    records::RecordsPayload,
+    crate::kraft::types::{Epoch, LogOffsetMetadata, NodeId},
+    bytes::Bytes,
+    krabka_protocol::{
+        Decode,
+        owned::{
+            begin_quorum_epoch_response::{self as bqe_resp, BeginQuorumEpochResponse},
+            end_quorum_epoch_response::{self as eqe_resp, EndQuorumEpochResponse},
+            fetch_response::{self as fetch_resp, FetchResponse},
+            fetch_snapshot_response::{self as fs_resp, FetchSnapshotResponse},
+            vote_response::{self as vote_resp, VoteResponse},
+        },
+        records::RecordsPayload,
+    },
 };
-
-use super::codec::{
-    FETCH_SNAPSHOT_VERSION, FETCH_VERSION, METADATA_PARTITION, METADATA_TOPIC, METADATA_TOPIC_ID,
-    QUORUM_EPOCH_VERSION, VOTE_VERSION, encode_body, epoch_from_wire, epoch_to_wire,
-    node_from_wire, node_to_wire, records_payload_to_bytes,
-};
-use crate::kraft::types::{Epoch, LogOffsetMetadata, NodeId};
 
 #[cfg(test)]
 mod tests;
@@ -164,9 +165,7 @@ pub struct QuorumLeader {
 }
 
 impl QuorumLeader {
-    fn leader_id_to_wire(&self) -> i32 {
-        self.leader_id.map_or(-1, node_to_wire)
-    }
+    fn leader_id_to_wire(&self) -> i32 { self.leader_id.map_or(-1, node_to_wire) }
 
     /// The `NodeEndpoints` entry, when the leader and its endpoint are known.
     fn node_endpoint(&self) -> Option<(i32, String, u16)> {

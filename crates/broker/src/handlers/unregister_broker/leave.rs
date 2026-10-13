@@ -13,11 +13,12 @@
 //! controller's, so the handler forwards the request to the active controller
 //! and refuses it anywhere else.
 
-use krabka_metadata::{MetadataImage, MetadataRecord, NodeId};
-
-use crate::{
-    broker::Broker, heartbeat::controller_state::replicated_registrations,
-    leader_election::compute_failover_changes,
+use {
+    crate::{
+        broker::Broker, heartbeat::controller_state::replicated_registrations,
+        leader_election::compute_failover_changes,
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord, NodeId},
 };
 
 /// The partition changes that make `node_id` leave every ISR and every

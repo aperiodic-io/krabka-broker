@@ -5,19 +5,20 @@
 //! carries. The module also maps the KIP-554 wire mechanism byte to a
 //! [`SaslMechanism`], because an unknown byte is itself a per-row error.
 
-use krabka_protocol::owned::alter_user_scram_credentials_request::{
-    ScramCredentialDeletion, ScramCredentialUpsertion,
+use {
+    crate::{broker::Broker, codes},
+    krabka_protocol::owned::alter_user_scram_credentials_request::{
+        ScramCredentialDeletion, ScramCredentialUpsertion,
+    },
+    krabka_security::{
+        SaslMechanism,
+        scram::{MAX_SCRAM_ITERATIONS, MIN_SCRAM_ITERATIONS},
+    },
+    krabka_verified::{
+        ScramAlterationDecision, ScramAlterationFacts, ScramAlterationKind, ScramPriorState,
+        scram_alteration_decision,
+    },
 };
-use krabka_security::{
-    SaslMechanism,
-    scram::{MAX_SCRAM_ITERATIONS, MIN_SCRAM_ITERATIONS},
-};
-use krabka_verified::{
-    ScramAlterationDecision, ScramAlterationFacts, ScramAlterationKind, ScramPriorState,
-    scram_alteration_decision,
-};
-
-use crate::{broker::Broker, codes};
 
 const EMPTY_USERNAME_MESSAGE: &str = "Username must not be empty";
 
@@ -167,23 +168,24 @@ fn wire_to_mech(wire: MechanismWireByte) -> Option<SaslMechanism> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{MetadataRecord, ScramCredentialRecord};
-    use krabka_protocol::owned::alter_user_scram_credentials_request::AlterUserScramCredentialsRequest;
-
-    use super::*;
-    use crate::{
-        handlers::alter_user_scram_credentials::{
-            answer,
-            test_support::{
-                KAFKA_MAX_SCRAM_ITERATIONS, KAFKA_UNACCEPTABLE_CREDENTIAL,
-                KAFKA_UNSUPPORTED_SASL_MECHANISM, deletion, expected_response, expected_result,
-                process_deletion, process_upsertion, start_broker, test_context, valid_upsertion,
+    use {
+        super::*,
+        crate::{
+            handlers::alter_user_scram_credentials::{
+                answer,
+                test_support::{
+                    KAFKA_MAX_SCRAM_ITERATIONS, KAFKA_UNACCEPTABLE_CREDENTIAL,
+                    KAFKA_UNSUPPORTED_SASL_MECHANISM, deletion, expected_response, expected_result,
+                    process_deletion, process_upsertion, start_broker, test_context,
+                    valid_upsertion,
+                },
             },
+            test_support::test_ctx,
         },
-        test_support::test_ctx,
+        assert2::assert,
+        krabka_metadata::{MetadataRecord, ScramCredentialRecord},
+        krabka_protocol::owned::alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
+        std::sync::Arc,
     };
 
     #[test]

@@ -3,15 +3,7 @@
 //! `LogSegment.append`, the offset is the **last** offset of the batch that
 //! starts at the position, not its base offset.
 
-use std::{fs::File, path::Path};
-
-use tracing::instrument;
-use zerocopy::{BigEndian, IntoBytes, byteorder::U32};
-
-use crate::{
-    error::LogError,
-    io::{IoTarget, LogIo},
-};
+use super::prelude::*;
 
 /// 8 bytes per entry.
 pub const OFFSET_ENTRY_SIZE: usize = 8;
@@ -104,26 +96,25 @@ impl OffsetIndex {
     }
 
     #[must_use]
-    pub fn last_entry(&self) -> Option<(u32, u32)> {
-        self.entries.last().copied()
-    }
+    pub fn last_entry(&self) -> Option<(u32, u32)> { self.entries.last().copied() }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::OpenOptions, io::Write};
-
-    use assert2::check;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        std::{fs::OpenOptions, io::Write},
+    };
 
     seed_index_fixture!(OffsetIndex, u32);
 
     fn reference_index() -> (tempfile::TempDir, std::path::PathBuf, OffsetIndex) {
-        populated_index(
-            "00000000000000000000.index",
-            &[(0, 0), (100, 4096), (200, 8192)],
-        )
+        populated_index("00000000000000000000.index", &[
+            (0, 0),
+            (100, 4096),
+            (200, 8192),
+        ])
     }
 
     fn assert_entry_metadata(index: &OffsetIndex, count: usize, last: Option<(u32, u32)>) {

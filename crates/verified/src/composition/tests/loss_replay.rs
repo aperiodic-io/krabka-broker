@@ -1,8 +1,9 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{admitted_loss_marker_preserves_pending, loss_settlement_is_idempotent};
-use crate::audit::{AuditLossMarkerAdmission, AuditLosses};
+use {
+    super::{admitted_loss_marker_preserves_pending, loss_settlement_is_idempotent},
+    crate::audit::{AuditLossMarkerAdmission, AuditLosses},
+    assert2::assert,
+    proptest::prelude::*,
+};
 
 fn loss_oracle(state: AuditLosses, marker: AuditLosses) -> AuditLosses {
     if state.generation != marker.generation {

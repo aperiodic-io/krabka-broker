@@ -6,27 +6,27 @@
 //! and one `PartitionRecord` per partition, so the restored cluster boots with
 //! its topics already present. This runs once, before any segment is written.
 
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
-
-use krabka_ids::LeaderEpoch;
 #[cfg(test)]
 use krabka_metadata::FeatureLevelRecord;
-use krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord};
-use krabka_remote_storage::{
-    ArchiveVerifyReport, ChainHead, ChainStamp, RemoteLogSegmentState, WormChainRecord,
-    parse_partition_dir_name,
-};
-use krabka_remote_storage_topic::Snapshot;
-use uuid::Uuid;
-
-use crate::{
-    args::RestoreArgs,
-    discover::{ArchiveInventory, load_snapshot},
-    error::RestoreError,
-    report::MetadataRestoreReport,
+use {
+    crate::{
+        args::RestoreArgs,
+        discover::{ArchiveInventory, load_snapshot},
+        error::RestoreError,
+        report::MetadataRestoreReport,
+    },
+    krabka_ids::LeaderEpoch,
+    krabka_metadata::{MetadataRecord, NodeId, PartitionRecord, TopicRecord},
+    krabka_remote_storage::{
+        ArchiveVerifyReport, ChainHead, ChainStamp, RemoteLogSegmentState, WormChainRecord,
+        parse_partition_dir_name,
+    },
+    krabka_remote_storage_topic::Snapshot,
+    std::{
+        collections::{HashMap, HashSet},
+        path::Path,
+    },
+    uuid::Uuid,
 };
 
 /// The formatter outcome needed by the final restore report.
@@ -435,22 +435,24 @@ fn seed_metadata_records(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{
-        AclEntry, AclOperation, ClientQuotaRecord, FeatureLevelRecord, FeaturesEpochRecord,
-        MetadataImage, PatternType, PermissionType, QuotaEntity, ResourceType,
-        ScramCredentialRecord, TopicConfigRecord,
-    };
-    use krabka_remote_storage::{
-        PartitionDump, RemotePartitionDeleteState, RlmmCacheDump, Sha256Digest, TopicIdPartition,
-    };
-    use krabka_security::SaslMechanism;
-
-    use super::*;
-    use crate::{
-        authenticate_captured_snapshot,
-        discover::UnrecognizedKeys,
-        materialize::test_support::{args_from, partition_inventory},
+    use {
+        super::*,
+        crate::{
+            authenticate_captured_snapshot,
+            discover::UnrecognizedKeys,
+            materialize::test_support::{args_from, partition_inventory},
+        },
+        assert2::check,
+        krabka_metadata::{
+            AclEntry, AclOperation, ClientQuotaRecord, FeatureLevelRecord, FeaturesEpochRecord,
+            MetadataImage, PatternType, PermissionType, QuotaEntity, ResourceType,
+            ScramCredentialRecord, TopicConfigRecord,
+        },
+        krabka_remote_storage::{
+            PartitionDump, RemotePartitionDeleteState, RlmmCacheDump, Sha256Digest,
+            TopicIdPartition,
+        },
+        krabka_security::SaslMechanism,
     };
 
     fn delete_marked_dump() -> RlmmCacheDump {

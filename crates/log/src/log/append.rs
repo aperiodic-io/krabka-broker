@@ -5,21 +5,22 @@
 //! caller-supplied one; both funnel into one private helper so the LSO,
 //! the producer state, and the leader-epoch checkpoint move identically.
 
-use krabka_ids::{LeaderEpoch, Offset, ProducerId};
-use krabka_protocol::records::{RecordBatch, TimestampType};
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _, Time, TimeExt as _};
-use tracing::instrument;
-
-use super::{
-    Log,
-    control::{ControlBatchKind, check_control_record_versions, control_batch_kind},
-};
-use crate::{
-    config::{DeliveryPolicy, ScheduleOrder, SegmentAllocation},
-    error::LogError,
-    producer_snapshot, retention,
-    segment::Segment,
-    txn_index::TxnIndex,
+use {
+    super::{
+        Log,
+        control::{ControlBatchKind, check_control_record_versions, control_batch_kind},
+    },
+    crate::{
+        config::{DeliveryPolicy, ScheduleOrder, SegmentAllocation},
+        error::LogError,
+        producer_snapshot, retention,
+        segment::Segment,
+        txn_index::TxnIndex,
+    },
+    krabka_ids::{LeaderEpoch, Offset, ProducerId},
+    krabka_protocol::records::{RecordBatch, TimestampType},
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _, Time, TimeExt as _},
+    tracing::instrument,
 };
 
 impl Log {

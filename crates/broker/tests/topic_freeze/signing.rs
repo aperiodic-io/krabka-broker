@@ -7,13 +7,14 @@
 //! and [`verifies_locally`] re-checks a registry entry with it on the reader's
 //! own machine. A drift between the two layouts fails both directions at once.
 
-use krabka_broker::operator_keys::freeze_signing_input;
-use krabka_protocol::{
-    krabka::freeze::{DescribedTopicFreeze, SetTopicFreezeRequest},
-    primitives::uuid::Uuid as WireUuid,
+use {
+    crate::support::OperatorKey,
+    krabka_broker::operator_keys::freeze_signing_input,
+    krabka_protocol::{
+        krabka::freeze::{DescribedTopicFreeze, SetTopicFreezeRequest},
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
-
-use crate::support::OperatorKey;
 
 /// Domain separator for a freeze-record signature.
 ///

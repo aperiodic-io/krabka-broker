@@ -1,10 +1,13 @@
-use assert2::check;
-
-use super::*;
-use crate::{
-    core::test_support::{FakeLog, TEST_ELECTION_TIMEOUT, machine, three_voter_machine, voters},
-    event::{Event, SuccessorRank},
-    types::{NodeId, QuorumState},
+use {
+    super::*,
+    crate::{
+        core::test_support::{
+            FakeLog, TEST_ELECTION_TIMEOUT, machine, three_voter_machine, voters,
+        },
+        event::{Event, SuccessorRank},
+        types::{NodeId, QuorumState},
+    },
+    assert2::check,
 };
 
 fn dynamic_machine() -> (QuorumStateMachine, uuid::Uuid, uuid::Uuid, uuid::Uuid) {
@@ -445,14 +448,11 @@ fn a_vote_survives_following_the_leader_of_its_epoch() {
         successors: 1,
     };
     let cases: Vec<(&str, Event)> = vec![
-        (
-            "the leader resigns",
-            Event::ReceiveEndQuorumEpoch {
-                leader_id: NodeId(3),
-                leader_epoch: 4,
-                successor_rank: end_epoch,
-            },
-        ),
+        ("the leader resigns", Event::ReceiveEndQuorumEpoch {
+            leader_id: NodeId(3),
+            leader_epoch: 4,
+            successor_rank: end_epoch,
+        }),
         ("the fetch times out", Event::FetchTimeout),
     ];
     for (label, event) in cases {
@@ -521,13 +521,10 @@ fn a_prospective_replica_that_followed_a_leader_grants_no_binding_vote_in_that_e
 
     check!(
         (
-            matches!(
-                m.role(),
-                Role::Prospective {
-                    abandoned_leader: Some(NodeId(3)),
-                    ..
-                }
-            ),
+            matches!(m.role(), Role::Prospective {
+                abandoned_leader: Some(NodeId(3)),
+                ..
+            }),
             m.quorum_state().leader_id,
             m.quorum_state().voted_key,
         ) == (true, None, None)
@@ -545,13 +542,10 @@ fn a_second_pre_vote_round_still_remembers_the_abandoned_leader() {
     m.on_event(Event::ElectionTimeout, &OUR_LOG, SimInstant(60));
 
     check!(
-        matches!(
-            m.role(),
-            Role::Prospective {
-                abandoned_leader: Some(NodeId(3)),
-                ..
-            }
-        ),
+        matches!(m.role(), Role::Prospective {
+            abandoned_leader: Some(NodeId(3)),
+            ..
+        }),
         "{:?}",
         m.role()
     );

@@ -4,25 +4,26 @@
 //! sequence of join, sync, heartbeat, commit, fetch, and leave runs against a
 //! single-member group here.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    heartbeat_request::HeartbeatRequest,
-    leave_group_request::LeaveGroupRequest,
-    offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
-};
-
-use crate::{
-    harness::{create_topic, topic_id_for},
-    support::{
-        classic::{
-            ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId,
-            classic_join_request, classic_sync_request, required_member_id, sync_assignment,
+use {
+    crate::{
+        harness::{create_topic, topic_id_for},
+        support::{
+            classic::{
+                ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId,
+                classic_join_request, classic_sync_request, required_member_id, sync_assignment,
+            },
+            offsets::{
+                offset_commit_partition, offset_commit_topic, offset_fetch_group,
+                offset_fetch_request, offset_fetch_topic,
+            },
+            start_ready_group as start,
         },
-        offsets::{
-            offset_commit_partition, offset_commit_topic, offset_fetch_group, offset_fetch_request,
-            offset_fetch_topic,
-        },
-        start_ready_group as start,
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        heartbeat_request::HeartbeatRequest,
+        leave_group_request::LeaveGroupRequest,
+        offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
     },
 };
 
@@ -147,14 +148,12 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
             group_id: "g".into(),
             generation_id_or_member_epoch: generation,
             member_id: mid.clone(),
-            topics: vec![offset_commit_topic(
-                "t",
-                tid,
-                vec![OffsetCommitRequestPartition {
+            topics: vec![offset_commit_topic("t", tid, vec![
+                OffsetCommitRequestPartition {
                     committed_leader_epoch: 0,
                     ..offset_commit_partition(0, 42, Some(String::new()))
-                }],
-            )],
+                },
+            ])],
             ..Default::default()
         })
         .await

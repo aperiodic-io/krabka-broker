@@ -3,21 +3,22 @@
 //! than on a client request, and an eviction is the one membership change the
 //! group makes on its own.
 
-use std::time::Instant;
-
-use super::{
-    heartbeat::fence_member,
-    records::{chrono_now_ms, flush_pending},
-    share_state::cleanup_deleted_topics,
-};
-use crate::{
-    coordinator::unified::{
-        GroupCoordinator,
-        actor::MetadataProvider,
-        offsets_log::OffsetsLog,
-        share::{config::ShareGroupConfig, state::ShareGroupState},
+use {
+    super::{
+        heartbeat::fence_member,
+        records::{chrono_now_ms, flush_pending},
+        share_state::cleanup_deleted_topics,
     },
-    error::BrokerError,
+    crate::{
+        coordinator::unified::{
+            GroupCoordinator,
+            actor::MetadataProvider,
+            offsets_log::OffsetsLog,
+            share::{config::ShareGroupConfig, state::ShareGroupState},
+        },
+        error::BrokerError,
+    },
+    std::time::Instant,
 };
 
 /// Called on every heartbeat-interval tick. Each member whose session
@@ -56,27 +57,27 @@ pub(super) async fn handle_session_tick(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::check;
-
-    use super::*;
-    use crate::{
-        coordinator::unified::{
-            config::NextGenConfig,
-            share::{
-                actor::{
-                    records::PendingShareRecords,
-                    test_support::{
-                        TopicMetadataSetup, make_coordinator_with_config, metadata_with_topic,
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::{
+                config::NextGenConfig,
+                share::{
+                    actor::{
+                        records::PendingShareRecords,
+                        test_support::{
+                            TopicMetadataSetup, make_coordinator_with_config, metadata_with_topic,
+                        },
                     },
+                    persistence::ShareGroupMetadataValue,
+                    state::ShareMemberState,
                 },
-                persistence::ShareGroupMetadataValue,
-                state::ShareMemberState,
+                test_support::{check_two_members_expired, expired_session_last_seen},
             },
-            test_support::{check_two_members_expired, expired_session_last_seen},
+            test_support::PartitionCount,
         },
-        test_support::PartitionCount,
+        assert2::check,
+        std::time::Duration,
     };
 
     /// Kafka runs a session timer per member, and each one that fires runs

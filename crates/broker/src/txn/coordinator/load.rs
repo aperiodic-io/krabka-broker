@@ -10,22 +10,22 @@
 //! the one it loads for, and then it queues every `Prepare*` transaction for
 //! completion.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
-use tracing::{info, warn};
-
-use super::{
-    TxnCoordinator,
-    leadership::{self, LoadStatus, StatePartitionLeaders},
-    persistence::replay_partition,
-    pid_index::RecoveredTransactions,
-};
-use crate::{
-    blocking::spawn_blocking,
-    error::BrokerError,
-    txn::{bootstrap, partitioner::partition_for_tid},
+use {
+    super::{
+        TxnCoordinator,
+        leadership::{self, LoadStatus, StatePartitionLeaders},
+        persistence::replay_partition,
+        pid_index::RecoveredTransactions,
+    },
+    crate::{
+        blocking::spawn_blocking,
+        error::BrokerError,
+        txn::{bootstrap, partitioner::partition_for_tid},
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
+    std::{sync::Arc, time::Duration},
+    tracing::{info, warn},
 };
 
 crate::task_util::scheduled_tasks_type! {

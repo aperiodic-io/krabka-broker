@@ -23,21 +23,22 @@
 //! compact, and every struct as well as the message ends with a tagged-field
 //! count.
 
-use bytes::{BufMut, BytesMut};
-
-use super::codec::{
-    decode_i16_list, decode_key_value_list, encode_i16_list, encode_key_value_list,
-};
-use crate::{
-    coordinator::unified::persistence::{
-        flex::{
-            get_compact_array, get_compact_string, get_string_array, put_compact_array,
-            put_compact_string, put_empty_tagged_fields, put_string_array, skip_tagged_fields,
-            value_codec,
-        },
-        get_i16, get_i32,
+use {
+    super::codec::{
+        decode_i16_list, decode_key_value_list, encode_i16_list, encode_key_value_list,
     },
-    error::BrokerError,
+    crate::{
+        coordinator::unified::persistence::{
+            flex::{
+                get_compact_array, get_compact_string, get_string_array, put_compact_array,
+                put_compact_string, put_empty_tagged_fields, put_string_array, skip_tagged_fields,
+                value_codec,
+            },
+            get_i16, get_i32,
+        },
+        error::BrokerError,
+    },
+    bytes::{BufMut, BytesMut},
 };
 
 /// An internal, changelog, or repartition topic that a subtopology refers to.
@@ -59,6 +60,7 @@ impl StoredTopicInfo {
         encode_key_value_list(buf, &self.topic_configs);
         put_empty_tagged_fields(buf);
     }
+
     fn decode_from(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let name = get_compact_string(buf)?;
         let partitions = get_i32(buf)?;
@@ -90,6 +92,7 @@ impl StoredCopartitionGroup {
         encode_i16_list(buf, &self.repartition_source_topics);
         put_empty_tagged_fields(buf);
     }
+
     fn decode_from(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let group = Self {
             source_topics: decode_i16_list(buf)?,
@@ -133,6 +136,7 @@ impl StoredSubtopology {
         });
         put_empty_tagged_fields(buf);
     }
+
     fn decode_from(buf: &mut &[u8]) -> Result<Self, BrokerError> {
         let subtopology_id = get_compact_string(buf)?;
         let source_topics = get_string_array(buf)?;
@@ -182,17 +186,18 @@ value_codec! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        streams::{
-            persistence::{
-                KEY_STREAMS_TOPOLOGY, StreamsGroupKey, encode_topology_key, parse_streams_key,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            streams::{
+                persistence::{
+                    KEY_STREAMS_TOPOLOGY, StreamsGroupKey, encode_topology_key, parse_streams_key,
+                },
+                topology::test_support::{example_subtopology, sub},
             },
-            topology::test_support::{example_subtopology, sub},
+            test_support::{peek_version, wire_bytes},
         },
-        test_support::{peek_version, wire_bytes},
+        assert2::assert,
     };
 
     #[test]

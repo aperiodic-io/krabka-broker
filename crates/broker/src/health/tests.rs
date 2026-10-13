@@ -1,11 +1,12 @@
 //! The readiness rule and the two routes, driven with a stub metadata
 //! authority so no quorum has to exist.
 
-use assert2::assert;
-use axum::{body::Body, http::Request};
-use tower::ServiceExt as _;
-
-use super::*;
+use {
+    super::*,
+    assert2::assert,
+    axum::{body::Body, http::Request},
+    tower::ServiceExt as _,
+};
 
 struct StubProgress {
     node: i64,
@@ -13,12 +14,9 @@ struct StubProgress {
 }
 
 impl MetadataProgress for StubProgress {
-    fn node_metadata_offset(&self) -> i64 {
-        self.node
-    }
-    fn quorum_committed_offset(&self) -> i64 {
-        self.quorum
-    }
+    fn node_metadata_offset(&self) -> i64 { self.node }
+
+    fn quorum_committed_offset(&self) -> i64 { self.quorum }
 }
 
 /// How far a case has taken the broker through startup.

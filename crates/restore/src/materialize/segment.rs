@@ -7,19 +7,20 @@
 //! also defines [`SegmentOutcome`], the per-segment tally the report renders.
 //! Under `--dry-run` it does the same work and opens no log at all.
 
-use krabka_ids::Offset;
-use krabka_log::{Log, LogConfig, name};
-use krabka_protocol::records::RecordBatchBorrowed;
-use krabka_remote_storage::TopicIdPartition;
-use serde::Serialize;
-use uuid::Uuid;
-
-use super::prepare::{BatchTally, PrepareBatchSetup, PreparedBatch, prepare_batch};
-use crate::{
-    args::{PartitionRef, RestoreArgs},
-    bound::Predicates,
-    error::RestoreError,
-    verify::VerifiedSegment,
+use {
+    super::prepare::{BatchTally, PrepareBatchSetup, PreparedBatch, prepare_batch},
+    crate::{
+        args::{PartitionRef, RestoreArgs},
+        bound::Predicates,
+        error::RestoreError,
+        verify::VerifiedSegment,
+    },
+    krabka_ids::Offset,
+    krabka_log::{Log, LogConfig, name},
+    krabka_protocol::records::RecordBatchBorrowed,
+    krabka_remote_storage::TopicIdPartition,
+    serde::Serialize,
+    uuid::Uuid,
 };
 
 /// What writing one segment into the target produced.
@@ -211,26 +212,23 @@ fn align_log_to_segment(
 }
 
 /// Convert a header's `records_count` (or any small non-negative `i32` count) to `u64`, treating a corrupt-but-CRC-valid negative count as zero rather than panicking. [`crate::verify::verify_segment`] has already checked every batch's CRC by the time this module sees it.
-fn nonneg_u64(count: i32) -> u64 {
-    u64::try_from(count.max(0)).unwrap_or(0)
-}
+fn nonneg_u64(count: i32) -> u64 { u64::try_from(count.max(0)).unwrap_or(0) }
 
 /// Convert a byte length to `u64` for [`SegmentOutcome::bytes_written`].
-fn bytes_len(len: usize) -> u64 {
-    u64::try_from(len).unwrap_or(u64::MAX)
-}
+fn bytes_len(len: usize) -> u64 { u64::try_from(len).unwrap_or(u64::MAX) }
 
 #[cfg(test)]
 mod tests {
     mod retry;
 
-    use assert2::check;
-    use krabka_protocol::records::{Attributes, RecordBatch};
-
-    use super::*;
-    use crate::materialize::test_support::{
-        args_from, batch, materialization_context, record, record_with_key, reopen_orders,
-        topic_id_partition, verified_segment,
+    use {
+        super::*,
+        crate::materialize::test_support::{
+            args_from, batch, materialization_context, record, record_with_key, reopen_orders,
+            topic_id_partition, verified_segment,
+        },
+        assert2::check,
+        krabka_protocol::records::{Attributes, RecordBatch},
     };
 
     // Preserve each archived batch's span even when filtering empties it.
@@ -311,14 +309,11 @@ mod tests {
         let (_target, args, partition, predicates) =
             materialization_context(&["--exclude-key", "^drop$"]);
 
-        let batch_a = batch(
-            0,
-            vec![
-                record(0, "keep0"),
-                record_with_key(1, "drop"),
-                record(2, "keep2"),
-            ],
-        );
+        let batch_a = batch(0, vec![
+            record(0, "keep0"),
+            record_with_key(1, "drop"),
+            record(2, "keep2"),
+        ]);
         let segment = verified_segment(0, std::slice::from_ref(&batch_a));
 
         let outcome = write_segment(&args, &partition, &segment, &predicates)

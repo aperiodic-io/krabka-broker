@@ -1,8 +1,9 @@
 //! Bounded retries for authorization decisions that may lag metadata apply.
 
-use std::{fmt::Debug, future::Future, time::Duration};
-
-use assert2::assert;
+use {
+    assert2::assert,
+    std::{fmt::Debug, future::Future, time::Duration},
+};
 
 pub(crate) trait ErrorCodeRows {
     fn all_cluster_authorization_failed(&self) -> bool;

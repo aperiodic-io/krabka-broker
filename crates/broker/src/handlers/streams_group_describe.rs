@@ -33,8 +33,10 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::group::{Included, describe_group};
-use crate::codes;
+use {
+    self::group::{Included, describe_group},
+    crate::codes,
+};
 
 context_handler! {
     // cargo-mutants: streams-coordinator response projection; integration-tested.

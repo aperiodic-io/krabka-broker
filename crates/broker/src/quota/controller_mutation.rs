@@ -13,12 +13,12 @@
 //! (`TokenBucket`, `QuotaFactory`), so `window` is that product: 11 s by
 //! default.
 
-use std::sync::{Arc, Mutex};
-
-use krabka_metadata::MetadataImage;
-use krabka_units::{Time, convert::TimeExt, secs};
-
-use super::buckets::{ControllerMutationBucket, QuotaBuckets};
+use {
+    super::buckets::{ControllerMutationBucket, QuotaBuckets},
+    krabka_metadata::MetadataImage,
+    krabka_units::{Time, convert::TimeExt, secs},
+    std::sync::{Arc, Mutex},
+};
 
 /// A strict quota refused one mutation: Kafka's
 /// `ThrottlingQuotaExceededException`.
@@ -159,9 +159,7 @@ impl ControllerMutationQuota {
     /// The throttle the response reports: the time the bucket needs to
     /// refill after the last refusal (strict) or overdraft (permissive).
     #[must_use]
-    pub(crate) fn delay(&self) -> Time {
-        self.delay
-    }
+    pub(crate) fn delay(&self) -> Time { self.delay }
 
     /// The throttle together with the quota entity it belongs to.
     #[must_use]
@@ -223,11 +221,12 @@ pub fn consume_controller_mutation_quota(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::{millis, secs};
-
-    use super::*;
-    use crate::quota::QuotaDelay;
+    use {
+        super::*,
+        crate::quota::QuotaDelay,
+        assert2::{assert, check},
+        krabka_units::{millis, secs},
+    };
 
     crate::quota::test_support::image_builder!(img_with_quota, "controller_mutation_rate");
 
@@ -369,26 +368,21 @@ mod tests {
             &'static [&'static [Outcome]],
         );
         let cases: [Case; 4] = [
-            (
-                "50 partitions, then two topics of 5",
-                &[&[50], &[5, 5]],
-                &[&[OK], &[OK, OK]],
-            ),
-            (
-                "60, 60 and 1 in one request",
-                &[&[60, 60, 1]],
-                &[&[OK, OK, REFUSED]],
-            ),
+            ("50 partitions, then two topics of 5", &[&[50], &[5, 5]], &[
+                &[OK],
+                &[OK, OK],
+            ]),
+            ("60, 60 and 1 in one request", &[&[60, 60, 1]], &[&[
+                OK, OK, REFUSED,
+            ]]),
             (
                 "a request that ends below zero refuses the next one",
                 &[&[120], &[1]],
                 &[&[OK], &[REFUSED]],
             ),
-            (
-                "a refused topic records nothing",
-                &[&[111, 5, 5]],
-                &[&[OK, REFUSED, REFUSED]],
-            ),
+            ("a refused topic records nothing", &[&[111, 5, 5]], &[&[
+                OK, REFUSED, REFUSED,
+            ]]),
         ];
 
         let img = img_with_quota(vec![("user", Some("alice"))], 10.0);

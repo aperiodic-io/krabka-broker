@@ -13,13 +13,14 @@
 //! of them matches, the request is still denied. Set it with
 //! [`SimpleAclAuthorizer::with_allow_everyone_if_no_acl_found`].
 
-use std::{collections::HashSet, net::SocketAddr};
-
-use krabka_metadata::{AclOperation, PatternType, PermissionType, ResourceType};
-use krabka_security::Principal;
-use krabka_verified::{
-    AclDecision, acl_decision,
-    authz::{AclDefault, AclFacts},
+use {
+    krabka_metadata::{AclOperation, PatternType, PermissionType, ResourceType},
+    krabka_security::Principal,
+    krabka_verified::{
+        AclDecision, acl_decision,
+        authz::{AclDefault, AclFacts},
+    },
+    std::{collections::HashSet, net::SocketAddr},
 };
 
 mod coverage;
@@ -29,11 +30,13 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    coverage::DeniedNames,
-    matching::{matches_host, matches_operation, matches_principal, matches_resource},
+use {
+    self::{
+        coverage::DeniedNames,
+        matching::{matches_host, matches_operation, matches_principal, matches_resource},
+    },
+    crate::{AclSource, AuthorizationRequest, AuthorizationResult, Authorizer, jdk_host_address},
 };
-use crate::{AclSource, AuthorizationRequest, AuthorizationResult, Authorizer, jdk_host_address};
 
 /// The resource name Kafka's default `authorizeByResourceType` probes first,
 /// a name that no real resource is expected to carry.

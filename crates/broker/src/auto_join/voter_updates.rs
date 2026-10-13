@@ -6,17 +6,18 @@
 //! keeps running for the life of the broker, whereas the join loop stops as
 //! soon as the node is a voter.
 
-use krabka_protocol::owned::update_raft_voter_request::{
-    KRaftVersionFeature, Listener as UpdateListener, UpdateRaftVoterRequest,
+use {
+    super::{
+        AutoJoinParams,
+        request::{advertised_controller_listener, select_bootstrap_server},
+        rpc::send_update_voter,
+    },
+    crate::codes,
+    krabka_protocol::owned::update_raft_voter_request::{
+        KRaftVersionFeature, Listener as UpdateListener, UpdateRaftVoterRequest,
+    },
+    krabka_units::convert::TimeExt as _,
 };
-use krabka_units::convert::TimeExt as _;
-
-use super::{
-    AutoJoinParams,
-    request::{advertised_controller_listener, select_bootstrap_server},
-    rpc::send_update_voter,
-};
-use crate::codes;
 
 /// Advertise this controller at startup and after each leader change. The
 /// leader accepts this at both `kraft.version` levels; level zero keeps the
@@ -171,17 +172,17 @@ pub(crate) fn build_update_raft_voter_request(
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
-
-    use krabka_metadata::{KRaftVersionRange, VoterEndpoint};
-    use krabka_raft::{Node, NodeId};
-
-    use super::*;
-    use crate::{
-        auto_join::test_support::{
-            ResponseHeaderMode, ResponseWireSetup, params, voter_update_params,
+    use {
+        super::*,
+        crate::{
+            auto_join::test_support::{
+                ResponseHeaderMode, ResponseWireSetup, params, voter_update_params,
+            },
+            test_support::FakeMetadataSource,
         },
-        test_support::FakeMetadataSource,
+        krabka_metadata::{KRaftVersionRange, VoterEndpoint},
+        krabka_raft::{Node, NodeId},
+        std::{sync::Arc, time::Duration},
     };
 
     #[test]
@@ -275,37 +276,31 @@ mod tests {
     #[test]
     fn resolve_target_controller_finds_leader_or_bootstrap() {
         let mut voter_nodes = std::collections::BTreeMap::new();
-        voter_nodes.insert(
-            NodeId(1),
-            Node {
-                directory_id: uuid::Uuid::from_u128(1),
-                endpoints: vec![
-                    VoterEndpoint {
-                        name: "OTHER".to_string(),
-                        host: "127.0.0.1".to_string(),
-                        port: 8080,
-                    },
-                    VoterEndpoint {
-                        name: "CONTROLLER".to_string(),
-                        host: "127.0.0.1".to_string(),
-                        port: 9093,
-                    },
-                ],
-                kraft_version: KRaftVersionRange::default(),
-            },
-        );
-        voter_nodes.insert(
-            NodeId(2),
-            Node {
-                directory_id: uuid::Uuid::from_u128(2),
-                endpoints: vec![VoterEndpoint {
-                    name: "INTERNAL".to_string(),
+        voter_nodes.insert(NodeId(1), Node {
+            directory_id: uuid::Uuid::from_u128(1),
+            endpoints: vec![
+                VoterEndpoint {
+                    name: "OTHER".to_string(),
                     host: "127.0.0.1".to_string(),
-                    port: 7070,
-                }],
-                kraft_version: KRaftVersionRange::default(),
-            },
-        );
+                    port: 8080,
+                },
+                VoterEndpoint {
+                    name: "CONTROLLER".to_string(),
+                    host: "127.0.0.1".to_string(),
+                    port: 9093,
+                },
+            ],
+            kraft_version: KRaftVersionRange::default(),
+        });
+        voter_nodes.insert(NodeId(2), Node {
+            directory_id: uuid::Uuid::from_u128(2),
+            endpoints: vec![VoterEndpoint {
+                name: "INTERNAL".to_string(),
+                host: "127.0.0.1".to_string(),
+                port: 7070,
+            }],
+            kraft_version: KRaftVersionRange::default(),
+        });
 
         let mut next = 0;
         let bootstraps = vec!["127.0.0.1:9092".to_string()];
@@ -366,20 +361,18 @@ mod tests {
         let count_clone = count.clone();
 
         tokio::spawn(async move {
-            use krabka_protocol::owned::{
-                update_raft_voter_request as req,
-                update_raft_voter_response::UpdateRaftVoterResponse,
+            use {
+                crate::auto_join::test_support::{negotiate_versions, read_frame, write_response},
+                krabka_protocol::owned::{
+                    update_raft_voter_request as req,
+                    update_raft_voter_response::UpdateRaftVoterResponse,
+                },
             };
-
-            use crate::auto_join::test_support::{negotiate_versions, read_frame, write_response};
             while let Ok((mut socket, _)) = listener.accept().await {
-                if negotiate_versions(
-                    &mut socket,
-                    &[(
-                        krabka_ids::ApiKey(req::API_KEY),
-                        krabka_ids::ApiVersion(req::MAX_VERSION),
-                    )],
-                )
+                if negotiate_versions(&mut socket, &[(
+                    krabka_ids::ApiKey(req::API_KEY),
+                    krabka_ids::ApiVersion(req::MAX_VERSION),
+                )])
                 .await
                 .is_ok()
                     && let Ok(frame) = read_frame(&mut socket).await
@@ -391,15 +384,10 @@ mod tests {
                         error_code: response_code,
                         ..Default::default()
                     };
-                    let _ = write_response(
-                        &mut socket,
-                        &frame,
-                        &response,
-                        ResponseWireSetup {
-                            version: krabka_ids::ApiVersion(req::MAX_VERSION),
-                            header: ResponseHeaderMode::Flexible,
-                        },
-                    )
+                    let _ = write_response(&mut socket, &frame, &response, ResponseWireSetup {
+                        version: krabka_ids::ApiVersion(req::MAX_VERSION),
+                        header: ResponseHeaderMode::Flexible,
+                    })
                     .await;
                 }
             }

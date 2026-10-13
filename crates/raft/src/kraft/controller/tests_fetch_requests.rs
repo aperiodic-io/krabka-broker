@@ -2,23 +2,23 @@
 //! checks, the replica id that moves no replica state, and the long poll of
 //! `fetchPurgatory`. Each row compares the whole decoded response.
 
-use std::time::Duration as StdDuration;
-
-use assert2::check;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        fetch_request::{self as fetch_req, FetchRequest},
-        fetch_response::FetchResponse,
+use {
+    super::*,
+    crate::kraft::{
+        controller::test_support::{EngineSetup, build_engine_only, one_offset_batch},
+        transport::wire::FETCH_VERSION,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use tokio::time::Instant;
-
-use super::*;
-use crate::kraft::{
-    controller::test_support::{EngineSetup, build_engine_only, one_offset_batch},
-    transport::wire::FETCH_VERSION,
+    assert2::check,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            fetch_request::{self as fetch_req, FetchRequest},
+            fetch_response::FetchResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::time::Duration as StdDuration,
+    tokio::time::Instant,
 };
 
 const NOT_LEADER_OR_FOLLOWER: i16 = 6;

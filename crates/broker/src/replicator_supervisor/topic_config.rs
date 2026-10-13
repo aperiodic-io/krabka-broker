@@ -1,18 +1,18 @@
 //! Propagation of a topic's config overrides from the metadata image onto
 //! every locally-hosted partition of that topic.
 
-use std::collections::HashSet;
-
-use krabka_ids::PartitionIndex;
-use krabka_log::LogConfig;
-use krabka_metadata::MetadataImage;
-use tracing::warn;
-
-use super::TopicPartition;
-use crate::{
-    api_catalog::UnstableApiVersions,
-    config_keys::{dynamic_log_base, log_max_decompressed_record},
-    partition_registry::PartitionRegistry,
+use {
+    super::TopicPartition,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        config_keys::{dynamic_log_base, log_max_decompressed_record},
+        partition_registry::PartitionRegistry,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::LogConfig,
+    krabka_metadata::MetadataImage,
+    std::collections::HashSet,
+    tracing::warn,
 };
 
 /// Push topic-config overrides onto every locally-hosted partition in
@@ -68,21 +68,21 @@ pub(crate) async fn push_topic_configs(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::assert;
-    use krabka_metadata::{
-        BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord, NodeId,
-    };
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        api_catalog::UnstableApiVersions,
-        replicator_supervisor::test_support::{
-            MaterializeSetup, await_until, materialized_partition_with_config,
-            single_partition_image,
+    use {
+        super::*,
+        crate::{
+            api_catalog::UnstableApiVersions,
+            replicator_supervisor::test_support::{
+                MaterializeSetup, await_until, materialized_partition_with_config,
+                single_partition_image,
+            },
         },
+        assert2::assert,
+        krabka_metadata::{
+            BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord, NodeId,
+        },
+        std::collections::BTreeMap,
+        uuid::Uuid,
     };
 
     #[derive(Clone, Copy)]

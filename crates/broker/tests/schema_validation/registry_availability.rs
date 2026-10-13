@@ -6,13 +6,14 @@
 //! topic's setting a lie. `fail_open` is the deliberate opt-out, and it is the
 //! only configuration here that admits an unresolvable record.
 
-use krabka_broker::BrokerConfig;
-use krabka_client_core::Client;
-use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
-
-use crate::harness::{
-    INVALID_RECORD, KNOWN_ID, SchemaTopicSetup, apply_registry_config, boot, boot_config,
-    check_value_append, create_topic, framed,
+use {
+    crate::harness::{
+        INVALID_RECORD, KNOWN_ID, SchemaTopicSetup, apply_registry_config, boot, boot_config,
+        check_value_append, create_topic, framed,
+    },
+    krabka_broker::BrokerConfig,
+    krabka_client_core::Client,
+    wiremock::{Mock, MockServer, ResponseTemplate, matchers::method},
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

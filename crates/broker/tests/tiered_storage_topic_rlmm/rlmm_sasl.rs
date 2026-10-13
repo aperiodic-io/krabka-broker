@@ -5,13 +5,14 @@
 //! authenticates as the inter-broker PLAIN principal, so it keeps the SASL
 //! client-security setup to itself.
 
-use krabka_client_core::security::{ClientSecurity, SaslCredentials};
-use krabka_security::ListenerProtocol;
-
-use crate::{
-    rlmm_cluster::{await_activation, build_client_secured, start_sasl_broker_with_topic_rlmm},
-    rlmm_round_trip::copy_then_fetch_round_trip,
-    run_broker_test,
+use {
+    crate::{
+        rlmm_cluster::{await_activation, build_client_secured, start_sasl_broker_with_topic_rlmm},
+        rlmm_round_trip::copy_then_fetch_round_trip,
+        run_broker_test,
+    },
+    krabka_client_core::security::{ClientSecurity, SaslCredentials},
+    krabka_security::ListenerProtocol,
 };
 
 /// The full copy→metadata→read round-trip, but the broker's only listener

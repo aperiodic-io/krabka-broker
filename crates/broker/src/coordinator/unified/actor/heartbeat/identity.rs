@@ -5,13 +5,14 @@
 //! Every function here is pure. It reads the group and the request and says
 //! which member the heartbeat belongs to, or which error Kafka answers.
 
-use krabka_protocol::owned::consumer_group_heartbeat_request::{
-    ConsumerGroupHeartbeatRequest, TopicPartitions,
-};
-
-use crate::{
-    codes,
-    coordinator::unified::consumer_state::{GroupState, MemberState},
+use {
+    crate::{
+        codes,
+        coordinator::unified::consumer_state::{GroupState, MemberState},
+    },
+    krabka_protocol::owned::consumer_group_heartbeat_request::{
+        ConsumerGroupHeartbeatRequest, TopicPartitions,
+    },
 };
 
 /// The member epoch of a `ConsumerGroupHeartbeat` that leaves the group.
@@ -29,9 +30,7 @@ pub(super) struct HeartbeatError {
 }
 
 impl HeartbeatError {
-    fn new(code: i16, message: String) -> Self {
-        Self { code, message }
-    }
+    fn new(code: i16, message: String) -> Self { Self { code, message } }
 }
 
 /// The member a regular heartbeat (member epoch 0 or more) belongs to.

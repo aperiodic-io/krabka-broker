@@ -5,10 +5,11 @@
 //! sweep and failure counters for the local-retention loop, which fails a
 //! disk in the same way and is alerted on the same way.
 
-use std::sync::Arc;
-
-use super::{BrokerMetrics, CleanerFailureLabel, CleanerFailureReason, PartitionLabel};
-use crate::error::BrokerError;
+use {
+    super::{BrokerMetrics, CleanerFailureLabel, CleanerFailureReason, PartitionLabel},
+    crate::error::BrokerError,
+    std::sync::Arc,
+};
 
 impl BrokerMetrics {
     /// Account one clean log-compaction sweep (a full `tick_all` pass that
@@ -19,9 +20,7 @@ impl BrokerMetrics {
     /// A sweep that failed a partition does not reach this counter: it is
     /// accounted by [`Self::record_cleaner_failure`] instead, so the pass
     /// rate never reports success during a compaction outage.
-    pub fn record_cleaner_run(&self) {
-        self.log_cleaner_runs_total.inc();
-    }
+    pub fn record_cleaner_run(&self) { self.log_cleaner_runs_total.inc(); }
 
     /// Account one successful per-partition compaction pass
     /// (`Partition::compact_log` returned `Ok`).
@@ -54,9 +53,7 @@ impl BrokerMetrics {
     /// Account one clean local-retention sweep (a full pass that failed no
     /// partition), the counterpart of [`Self::record_cleaner_run`] for the
     /// broker-wide local-retention loop.
-    pub fn record_retention_run(&self) {
-        self.log_retention_runs_total.inc();
-    }
+    pub fn record_retention_run(&self) { self.log_retention_runs_total.inc(); }
 
     /// Account one failed local-retention pass
     /// (`Partition::retain_log` returned `Err`), under the reason the sweep

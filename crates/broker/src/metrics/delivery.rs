@@ -2,9 +2,10 @@
 //! pending-record gauges the delivery scheduler publishes after it recomputes
 //! a partition.
 
-use std::sync::Arc;
-
-use super::{BrokerMetrics, PartitionLabel};
+use {
+    super::{BrokerMetrics, PartitionLabel},
+    std::sync::Arc,
+};
 
 impl BrokerMetrics {
     /// KFC-1: publish one scheduled partition's delivery watermark and the

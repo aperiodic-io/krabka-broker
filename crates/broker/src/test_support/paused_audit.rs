@@ -1,15 +1,15 @@
 //! A real fail-closed audit writer whose durable acknowledgment a test controls.
 
-use std::sync::Arc;
-
-use krabka_audit::{
-    AuditError, AuditLog, AuditMode, AuditRecord, AuditSink, AuditStats, AuditWriter,
-    AuditWriterParams, ChainState, MemorySink,
+use {
+    crate::broker::Broker,
+    krabka_audit::{
+        AuditError, AuditLog, AuditMode, AuditRecord, AuditSink, AuditStats, AuditWriter,
+        AuditWriterParams, ChainState, MemorySink,
+    },
+    krabka_units::prelude::hours,
+    std::sync::Arc,
+    tokio::{sync::Notify, task::JoinHandle},
 };
-use krabka_units::prelude::hours;
-use tokio::{sync::Notify, task::JoinHandle};
-
-use crate::broker::Broker;
 
 /// The first required write announces admission and waits for the test.
 #[derive(Debug, Default)]
@@ -58,7 +58,5 @@ impl PausedAudit {
         result
     }
 
-    pub(crate) fn records(&self) -> Vec<AuditRecord> {
-        self.records.records()
-    }
+    pub(crate) fn records(&self) -> Vec<AuditRecord> { self.records.records() }
 }

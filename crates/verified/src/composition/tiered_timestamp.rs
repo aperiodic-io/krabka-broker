@@ -1,11 +1,12 @@
-use creusot_std::prelude::*;
-
-use crate::{
-    list_offsets::{
-        ListOffsetsSelectionDecision, ListOffsetsSelectionFacts, earliest_timestamp_candidate,
-        list_offsets_kind, list_offsets_selection_decision,
+use {
+    crate::{
+        list_offsets::{
+            ListOffsetsSelectionDecision, ListOffsetsSelectionFacts, earliest_timestamp_candidate,
+            list_offsets_kind, list_offsets_selection_decision,
+        },
+        timestamp::first_timestamp_record_index,
     },
-    timestamp::first_timestamp_record_index,
+    creusot_std::prelude::*,
 };
 
 /// Floor-aware first matches in independently ordered, overlapping tiers

@@ -27,9 +27,7 @@ pub fn partition_for_tid(transactional_id: &str, num_partitions: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     // Reference vectors generated from the JVM implementation:
     //   Utils.abs(tid.hashCode()) % 50

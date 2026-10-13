@@ -2,9 +2,11 @@
 //! one `PartitionRecord` per partition, and the `TopicConfigRecord` that
 //! carries the config overrides the request asked for.
 
-use krabka_metadata::{MetadataRecord, TopicConfigRecord, TopicRecord};
-use krabka_protocol::owned::create_topics_request::CreatableTopic;
-use uuid::Uuid;
+use {
+    krabka_metadata::{MetadataRecord, TopicConfigRecord, TopicRecord},
+    krabka_protocol::owned::create_topics_request::CreatableTopic,
+    uuid::Uuid,
+};
 
 /// Kafka's `computeConfigChanges` refusal of a config with a null value: the
 /// `INVALID_CONFIG` message that names every such config, in request order.

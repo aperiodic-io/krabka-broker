@@ -1,17 +1,18 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::restored_aborts::{
     abort_intersects_fetch, restored_abort_index_valid, wire_abort_from_source,
     wire_aborts_cover_source,
 };
-use super::{
-    FetchWatermarks, RestoreAbortedTxn, RestoreSegmentExtent, fetch_visibility,
-    restored_aborts_remain_bounded_when_fetch_shrinks, truncation_frontier,
-};
-use crate::{
-    remote_txn::{RemoteTxnOverlapDecision, remote_txn_overlap_decision},
-    transaction::unique_aborted_transaction_rows,
+use {
+    super::{
+        FetchWatermarks, RestoreAbortedTxn, RestoreSegmentExtent, fetch_visibility,
+        restored_aborts_remain_bounded_when_fetch_shrinks, truncation_frontier,
+    },
+    crate::{
+        remote_txn::{RemoteTxnOverlapDecision, remote_txn_overlap_decision},
+        transaction::unique_aborted_transaction_rows,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Archive admission, consumer visibility, remote inclusive overlap and local

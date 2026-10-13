@@ -3,16 +3,16 @@
 //! The sink appends OCSF records to this broker's partition of the internal
 //! audit topic. This is the broker-affinity write path.
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use bytes::Bytes;
-use krabka_audit::{AuditError, AuditRecord, AuditSink};
-use krabka_ids::PartitionIndex;
-use krabka_protocol::records::{Record, RecordBatch, RecordHeader};
-
-use crate::{
-    metrics::BrokerMetrics, partition::ProduceBatchError, partition_registry::PartitionRegistry,
+use {
+    crate::{
+        metrics::BrokerMetrics, partition::ProduceBatchError, partition_registry::PartitionRegistry,
+    },
+    async_trait::async_trait,
+    bytes::Bytes,
+    krabka_audit::{AuditError, AuditRecord, AuditSink},
+    krabka_ids::PartitionIndex,
+    krabka_protocol::records::{Record, RecordBatch, RecordHeader},
+    std::sync::Arc,
 };
 
 /// Writes audit records to a single partition of the audit topic that this
@@ -107,27 +107,24 @@ impl AuditSink for KafkaTopicAuditSink {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_log::Offset;
-    use krabka_units::mebibytes;
-
-    use super::*;
-    use crate::{
-        partition::Partition,
-        test_support::{StandalonePartitionSetup, open_partition as fixture_partition},
+    use {
+        super::*,
+        crate::{
+            partition::Partition,
+            test_support::{StandalonePartitionSetup, open_partition as fixture_partition},
+        },
+        assert2::assert,
+        krabka_log::Offset,
+        krabka_units::mebibytes,
+        std::sync::Arc,
     };
 
     fn audit_partition(path: &std::path::Path) -> (Arc<Partition>, Arc<PartitionRegistry>) {
         let partitions = Arc::new(PartitionRegistry::new());
-        let partition = fixture_partition(
-            path,
-            StandalonePartitionSetup {
-                topic: "__audit",
-                ..Default::default()
-            },
-        );
+        let partition = fixture_partition(path, StandalonePartitionSetup {
+            topic: "__audit",
+            ..Default::default()
+        });
         partitions.insert("__audit".into(), PartitionIndex(0), Arc::clone(&partition));
         (partition, partitions)
     }

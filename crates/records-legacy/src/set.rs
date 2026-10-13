@@ -12,8 +12,7 @@
 //! a single compressed outer message. `decode_message_set` unwraps a
 //! single layer for the caller.
 
-use bytes::Bytes;
-use krabka_ids::Offset;
+use {bytes::Bytes, krabka_ids::Offset};
 
 mod decode;
 mod encode;

@@ -6,13 +6,14 @@
 //! top-level message, no rows), and success (a top-level `NONE`, with one
 //! `NONE` row per request row only at versions 0 and 1).
 
-use krabka_protocol::owned::{
-    update_features_request::UpdateFeaturesRequest,
-    update_features_response::{UpdatableFeatureResult, UpdateFeaturesResponse},
+use {
+    super::validate::UpdateError,
+    crate::codes,
+    krabka_protocol::owned::{
+        update_features_request::UpdateFeaturesRequest,
+        update_features_response::{UpdatableFeatureResult, UpdateFeaturesResponse},
+    },
 };
-
-use super::validate::UpdateError;
-use crate::codes;
 
 /// `Errors.NONE.message()`: `NONE` has no exception, so its message is the
 /// enum constant's name.
@@ -69,10 +70,10 @@ pub(super) fn success(request: &UpdateFeaturesRequest, version: i16) -> UpdateFe
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::owned::update_features_request::FeatureUpdateKey;
-
-    use super::*;
+    use {
+        super::*, assert2::assert,
+        krabka_protocol::owned::update_features_request::FeatureUpdateKey,
+    };
 
     fn request(features: &[&str]) -> UpdateFeaturesRequest {
         UpdateFeaturesRequest {

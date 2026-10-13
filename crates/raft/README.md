@@ -21,11 +21,13 @@ Run the [typed-input example](examples/quorum_state.rs) without starting a contr
 
 <!-- snippet: raft/examples/quorum_state.rs#quorum_state -->
 ```rust
-use assert2::assert;
-use krabka_metadata::{KRaftVersionRange, Voter, VoterEndpoint, VoterSet};
-use krabka_raft::kraft::{NodeId, QuorumState, QuorumStateMachine};
-use krabka_units::prelude::millis;
-use uuid::Uuid;
+use {
+    assert2::assert,
+    krabka_metadata::{KRaftVersionRange, Voter, VoterEndpoint, VoterSet},
+    krabka_raft::kraft::{NodeId, QuorumState, QuorumStateMachine},
+    krabka_units::prelude::millis,
+    uuid::Uuid,
+};
 
 fn main() {
     let node = NodeId(1);

@@ -6,9 +6,7 @@
 //! out of `kafka-metadata-4.3.1.jar` and quoted where each half is
 //! implemented.
 
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 /// Liveness where each of `alive` heartbeated inside the current window.
 async fn alive(alive: &[u64]) -> ControllerLivenessState {

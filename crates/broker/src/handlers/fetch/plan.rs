@@ -3,22 +3,22 @@
 //! before anything reads it, and the [`PendingRead`] each requested tuple
 //! resolves to.
 
-use std::sync::Arc;
-
-use krabka_log::{LeaderEpoch, Offset};
-use krabka_protocol::{
-    owned::fetch_response::{EpochEndOffset, LeaderIdAndEpoch, PartitionData},
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use super::request::{EffectivePartition, EffectiveTopic, FetchAuthorization};
-use crate::{
-    broker::Broker,
-    codes,
-    config_keys::resolve_broker_witness,
-    partition::{Partition, ReplicationTarget},
-    replica_selector::ReplicaView,
-    topic_resolve::resolve,
+use {
+    super::request::{EffectivePartition, EffectiveTopic, FetchAuthorization},
+    crate::{
+        broker::Broker,
+        codes,
+        config_keys::resolve_broker_witness,
+        partition::{Partition, ReplicationTarget},
+        replica_selector::ReplicaView,
+        topic_resolve::resolve,
+    },
+    krabka_log::{LeaderEpoch, Offset},
+    krabka_protocol::{
+        owned::fetch_response::{EpochEndOffset, LeaderIdAndEpoch, PartitionData},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::sync::Arc,
 };
 
 /// Resolved read for a single requested (topic, partition) tuple.
@@ -776,39 +776,33 @@ pub(super) async fn plan_partition_read(
             output.records = Some(krabka_protocol::records::RecordsPayload::Raw(
                 bytes::Bytes::new(),
             ));
-            return (
-                ResponseSlot::Read,
-                PendingRead {
-                    fetch_only_leader,
-                    ..PendingRead::planned(
-                        topic_name,
-                        topic_id,
-                        request,
-                        context.mode,
-                        // No `partition`: the read loop skips both the read and
-                        // the long-poll arm for an entry with none.
-                        None,
-                        output,
-                    )
-                },
-            );
+            return (ResponseSlot::Read, PendingRead {
+                fetch_only_leader,
+                ..PendingRead::planned(
+                    topic_name,
+                    topic_id,
+                    request,
+                    context.mode,
+                    // No `partition`: the read loop skips both the read and
+                    // the long-poll arm for an entry with none.
+                    None,
+                    output,
+                )
+            });
         }
     }
-    (
-        ResponseSlot::Read,
-        PendingRead {
-            fetch_only_leader,
-            follower_position,
-            ..PendingRead::planned(
-                topic_name,
-                topic_id,
-                request,
-                context.mode,
-                partition,
-                output,
-            )
-        },
-    )
+    (ResponseSlot::Read, PendingRead {
+        fetch_only_leader,
+        follower_position,
+        ..PendingRead::planned(
+            topic_name,
+            topic_id,
+            request,
+            context.mode,
+            partition,
+            output,
+        )
+    })
 }
 
 /// The first `Fetch` version that carries client metadata, from which Kafka
@@ -887,24 +881,24 @@ pub(super) async fn build_pending_reads(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{Log, LogConfig};
-
-    use crate::{
-        broker::{Broker, spawn_partition},
-        codes::{NONE, NOT_LEADER_OR_FOLLOWER, OFFSET_OUT_OF_RANGE},
-        config::{BrokerConfig, NodeRole},
-        config_keys::{BROKER_WITNESS, WITNESS_TRUE},
-        handlers::produce::test_support::image_with_topic,
-        partition::Partition,
-        producer_state::ProducerState,
-        test_support::{
-            StandalonePartitionSetup, broker_registration, spawn_standalone_partition,
-            temporary_partition,
+    use {
+        crate::{
+            broker::{Broker, spawn_partition},
+            codes::{NONE, NOT_LEADER_OR_FOLLOWER, OFFSET_OUT_OF_RANGE},
+            config::{BrokerConfig, NodeRole},
+            config_keys::{BROKER_WITNESS, WITNESS_TRUE},
+            handlers::produce::test_support::image_with_topic,
+            partition::Partition,
+            producer_state::ProducerState,
+            test_support::{
+                StandalonePartitionSetup, broker_registration, spawn_standalone_partition,
+                temporary_partition,
+            },
         },
+        assert2::assert,
+        krabka_ids::PartitionIndex,
+        krabka_log::{Log, LogConfig},
+        std::sync::Arc,
     };
 
     /// A three-site image: node 1 leads `orders` from `dc-a`, node 2 replicates
@@ -1532,15 +1526,11 @@ mod tests {
         }
 
         let cases = [
-            (
-                "the target is still installed",
-                false,
-                Recorded {
-                    advanced: true,
-                    high_watermark: super::Offset(2),
-                    follower_log_end: super::Offset(2),
-                },
-            ),
+            ("the target is still installed", false, Recorded {
+                advanced: true,
+                high_watermark: super::Offset(2),
+                follower_log_end: super::Offset(2),
+            }),
             (
                 "a new leader epoch was installed after the checks",
                 true,

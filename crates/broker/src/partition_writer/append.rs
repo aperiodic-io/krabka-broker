@@ -4,18 +4,18 @@
 //! diskless path, which appends at an externally assigned base offset, share
 //! the one-lock-per-group discipline, so they stay together in one module.
 
-use std::sync::{Arc, Mutex};
-
-use krabka_compression::CompressionType;
-use krabka_log::{Log, Offset};
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{ByteSizeExt as _, mebibytes};
-
-use super::storage::{lock_log, storage_failure_error};
-use crate::{
-    blocking::run_blocking_catching,
-    error::BrokerError,
-    partition::{AppendedBatch, ProduceData, ProducerAppendCheck},
+use {
+    super::storage::{lock_log, storage_failure_error},
+    crate::{
+        blocking::run_blocking_catching,
+        error::BrokerError,
+        partition::{AppendedBatch, ProduceData, ProducerAppendCheck},
+    },
+    krabka_compression::CompressionType,
+    krabka_log::{Log, Offset},
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{ByteSizeExt as _, mebibytes},
+    std::sync::{Arc, Mutex},
 };
 
 type CheckedBatches = (Vec<ProduceData>, Vec<Option<ProducerAppendCheck>>);
@@ -328,15 +328,16 @@ pub(crate) async fn run_produce_append_batch_at(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_log::{LogConfig, LogIo};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        error::BrokerError,
-        partition_writer::test_support::sample_batch,
-        test_support::{EmptyPayloadBatchSetup, RecordCount},
+    use {
+        super::*,
+        crate::{
+            error::BrokerError,
+            partition_writer::test_support::sample_batch,
+            test_support::{EmptyPayloadBatchSetup, RecordCount},
+        },
+        assert2::{assert, check},
+        krabka_log::{LogConfig, LogIo},
+        tempfile::tempdir,
     };
 
     #[derive(Debug)]
@@ -389,13 +390,10 @@ mod tests {
 
     fn lz4_log(path: &std::path::Path) -> Mutex<Log> {
         Mutex::new(
-            Log::open(
-                path,
-                LogConfig {
-                    compression_type: Some(CompressionType::Lz4),
-                    ..LogConfig::default()
-                },
-            )
+            Log::open(path, LogConfig {
+                compression_type: Some(CompressionType::Lz4),
+                ..LogConfig::default()
+            })
             .expect("open log"),
         )
     }

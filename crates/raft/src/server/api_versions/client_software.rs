@@ -37,9 +37,7 @@ pub fn is_valid_client_info(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     // ── KIP-511 client-info validation ─────────────────────────────────────
 

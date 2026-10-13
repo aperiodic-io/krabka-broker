@@ -33,9 +33,7 @@ use std::{
 /// reading that does not fit saturates, and `u32::MAX` is above every ceiling
 /// here, so an implausible sample fails its series rather than wrapping into a
 /// passing one.
-pub(crate) fn sampled(value: u64) -> f64 {
-    f64::from(u32::try_from(value).unwrap_or(u32::MAX))
-}
+pub(crate) fn sampled(value: u64) -> f64 { f64::from(u32::try_from(value).unwrap_or(u32::MAX)) }
 
 /// The same, for the `usize` a count comes back as.
 pub(crate) fn sampled_count(value: usize) -> f64 {
@@ -186,18 +184,14 @@ pub(crate) fn resident_bytes(pid: u32) -> Option<u64> {
 }
 
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// Equal to within a hair.
     ///
     /// Every value compared in this module is a small integer an `f64`
     /// represents exactly, so the tolerance hides no real difference -- it is
     /// how the comparison is written without a Clippy suppression.
-    fn near(a: f64, b: f64) -> bool {
-        (a - b).abs() < 1e-9
-    }
+    fn near(a: f64, b: f64) -> bool { (a - b).abs() < 1.0e-9 }
 
     /// The kernel writes kibibytes; reading them as bytes would understate
     /// every resident-set sample by a factor of 1024 and make the ceiling
@@ -300,10 +294,10 @@ krabka_broker_log_compactions_total_seconds 999
     fn segments_are_grouped_by_partition() {
         let dir = tempfile::TempDir::new().expect("tempdir");
         for (partition, names) in [
-            (
-                "t-0",
-                vec!["00000000000000000000.log", "00000000000000000512.log"],
-            ),
+            ("t-0", vec![
+                "00000000000000000000.log",
+                "00000000000000000512.log",
+            ]),
             ("t-1", vec!["00000000000000000000.log"]),
             ("__meta", vec!["leader-epoch-checkpoint"]),
         ] {

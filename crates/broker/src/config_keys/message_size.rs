@@ -6,9 +6,10 @@
 //! `i32::MAX` is refused as "not a 32-bit integer" rather than as an
 //! out-of-range one, which is what Kafka's own `ConfigDef` does.
 
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use super::MAX_MESSAGE_BYTES;
+use {
+    super::MAX_MESSAGE_BYTES,
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+};
 
 /// Resolve the largest record batch a topic accepts.
 ///
@@ -34,14 +35,14 @@ pub(crate) fn resolve_max_message_bytes(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::assert;
-    use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
-    use krabka_units::bytes;
-    use uuid::Uuid;
-
-    use super::{super::validation::validate_topic_config, *};
+    use {
+        super::{super::validation::validate_topic_config, *},
+        assert2::assert,
+        krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
+        krabka_units::bytes,
+        std::collections::BTreeMap,
+        uuid::Uuid,
+    };
 
     #[test]
     fn max_message_bytes_matches_kafkas_int_at_least_zero() {

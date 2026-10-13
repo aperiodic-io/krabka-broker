@@ -13,18 +13,18 @@
 //! You MUST run each config under the host memory watchdog while you tune the
 //! bounds.
 
-use std::{
-    collections::HashSet,
-    hash::{Hash, Hasher},
-    time::Instant,
+use {
+    super::ReplicaState,
+    crate::model_check::check_model,
+    krabka_log::Offset,
+    krabka_raft::NodeId,
+    stateright::{Model, Property},
+    std::{
+        collections::HashSet,
+        hash::{Hash, Hasher},
+        time::Instant,
+    },
 };
-
-use krabka_log::Offset;
-use krabka_raft::NodeId;
-use stateright::{Model, Property};
-
-use super::ReplicaState;
-use crate::model_check::check_model;
 
 /// Hard backstop on generated states. It bounds host memory even if
 /// `within_boundary` is looser than intended.
@@ -70,21 +70,13 @@ impl IsrModel {
         }
     }
 
-    fn safety(max_offset: i64) -> Self {
-        Self::new(max_offset, false)
-    }
+    fn safety(max_offset: i64) -> Self { Self::new(max_offset, false) }
 
-    fn overshoot(max_offset: i64) -> Self {
-        Self::new(max_offset, true)
-    }
+    fn overshoot(max_offset: i64) -> Self { Self::new(max_offset, true) }
 
-    fn leader(&self) -> NodeId {
-        self.replicas[0]
-    }
+    fn leader(&self) -> NodeId { self.replicas[0] }
 
-    fn followers(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.replicas[1..].iter().copied()
-    }
+    fn followers(&self) -> impl Iterator<Item = NodeId> + '_ { self.replicas[1..].iter().copied() }
 }
 
 /// The fingerprinted model state: the REAL core + the leader's own LEO.
@@ -119,15 +111,11 @@ impl IsrState {
 }
 
 impl PartialEq for IsrState {
-    fn eq(&self, other: &Self) -> bool {
-        self.project() == other.project()
-    }
+    fn eq(&self, other: &Self) -> bool { self.project() == other.project() }
 }
 impl Eq for IsrState {}
 impl Hash for IsrState {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.project().hash(state);
-    }
+    fn hash<H: Hasher>(&self, state: &mut H) { self.project().hash(state); }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -142,8 +130,40 @@ enum IsrAction {
 }
 
 impl Model for IsrModel {
-    type State = IsrState;
     type Action = IsrAction;
+    type State = IsrState;
+
+    krabka_macros::model_transition!(last, action, state; {
+            match action {
+                IsrAction::LeaderAppend => {
+                    if state.leader_leo >= self.max_offset {
+                        return None;
+                    }
+                    state.leader_leo += 1;
+                    state.rs.recompute_hw_for_leader_append(state.leader_leo);
+                }
+                IsrAction::FollowerFetch { follower, leo } => {
+                    state
+                        .rs
+                        .update_follower_leo(follower, leo, state.leader_leo, self.t0);
+                }
+                IsrAction::InstallIsr { isr } => {
+                    state
+                        .rs
+                        .install_isr(&isr, &self.replicas, self.leader(), self.t0);
+                }
+            }
+            // Transition invariant (kept out of the fingerprinted state): the
+            // high-watermark never regresses.
+            assert2::assert!(
+                state.rs.hw >= last.rs.hw,
+                "HWM regressed: {} -> {}",
+                last.rs.hw,
+                state.rs.hw
+            );
+            Some(state)
+
+    });
 
     fn init_states(&self) -> Vec<Self::State> {
         // Fresh leader: full replica set in the ISR, followers seeded at 0.
@@ -212,38 +232,6 @@ impl Model for IsrModel {
             actions.push(IsrAction::InstallIsr { isr });
         }
     }
-
-    krabka_macros::model_transition!(last, action, state; {
-            match action {
-                IsrAction::LeaderAppend => {
-                    if state.leader_leo >= self.max_offset {
-                        return None;
-                    }
-                    state.leader_leo += 1;
-                    state.rs.recompute_hw_for_leader_append(state.leader_leo);
-                }
-                IsrAction::FollowerFetch { follower, leo } => {
-                    state
-                        .rs
-                        .update_follower_leo(follower, leo, state.leader_leo, self.t0);
-                }
-                IsrAction::InstallIsr { isr } => {
-                    state
-                        .rs
-                        .install_isr(&isr, &self.replicas, self.leader(), self.t0);
-                }
-            }
-            // Transition invariant (kept out of the fingerprinted state): the
-            // high-watermark never regresses.
-            assert2::assert!(
-                state.rs.hw >= last.rs.hw,
-                "HWM regressed: {} -> {}",
-                last.rs.hw,
-                state.rs.hw
-            );
-            Some(state)
-
-    });
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![

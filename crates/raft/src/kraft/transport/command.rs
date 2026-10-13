@@ -6,20 +6,20 @@
 //! reply payloads that those handle ops carry back, [`MetadataFetchSlice`] and
 //! [`QuorumStateSnapshot`], live here with them.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use tokio::sync::oneshot;
-
-use crate::{
-    DelegationTokenMutation, SubmitChangeResult,
-    error::RaftError,
-    kraft::{
-        event::Event,
-        transport::PeerApi,
-        types::{Epoch, NodeId, ReplicaKey},
+use {
+    crate::{
+        DelegationTokenMutation, SubmitChangeResult,
+        error::RaftError,
+        kraft::{
+            event::Event,
+            transport::PeerApi,
+            types::{Epoch, NodeId, ReplicaKey},
+        },
+        reconfig::{ReconfigOutcome, VoterChange},
     },
-    reconfig::{ReconfigOutcome, VoterChange},
+    bytes::Bytes,
+    std::sync::Arc,
+    tokio::sync::oneshot,
 };
 
 /// An inbound KIP-595 RPC body, the request version its header carried, and a

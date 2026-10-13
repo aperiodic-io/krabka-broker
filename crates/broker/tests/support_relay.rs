@@ -11,12 +11,13 @@
 //! 600s kill, reported as TIMEOUT with no cause; a bounded one fails in seconds
 //! and says which step hung.
 
-use std::{future::Future, io, net::SocketAddr, sync::Arc, time::Duration};
-
-use assert2::{assert, check};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+use {
+    assert2::{assert, check},
+    std::{future::Future, io, net::SocketAddr, sync::Arc, time::Duration},
+    tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    },
 };
 
 mod support;

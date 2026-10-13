@@ -6,18 +6,19 @@
 //! bytes here are what the operator reads. Keeping the row constructors
 //! together makes the one-row-per-filter invariant easy to see.
 
-use krabka_metadata::AclEntry;
-use krabka_protocol::owned::delete_acls_response::{
-    DeleteAclsFilterResult, DeleteAclsMatchingAcl, DeleteAclsResponse,
-};
-
-use crate::{
-    codes,
-    handlers::{
-        acl_wire::{
-            operation_to_wire, pattern_type_to_wire, permission_to_wire, resource_type_to_wire,
+use {
+    crate::{
+        codes,
+        handlers::{
+            acl_wire::{
+                operation_to_wire, pattern_type_to_wire, permission_to_wire, resource_type_to_wire,
+            },
+            stamp_unset,
         },
-        stamp_unset,
+    },
+    krabka_metadata::AclEntry,
+    krabka_protocol::owned::delete_acls_response::{
+        DeleteAclsFilterResult, DeleteAclsMatchingAcl, DeleteAclsResponse,
     },
 };
 
@@ -75,16 +76,17 @@ pub(super) fn apply_submit_error<E: std::fmt::Display>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{AclOperation, PatternType};
-
-    use super::*;
-    use crate::{
-        handlers::{
-            acl_test_support::expected_deleted_orders_acl,
-            delete_acls::test_support::{OPERATION_WRITE, PATTERN_TYPE_PREFIXED, acl},
+    use {
+        super::*,
+        crate::{
+            handlers::{
+                acl_test_support::expected_deleted_orders_acl,
+                delete_acls::test_support::{OPERATION_WRITE, PATTERN_TYPE_PREFIXED, acl},
+            },
+            test_support::AllowAclSetup,
         },
-        test_support::AllowAclSetup,
+        assert2::assert,
+        krabka_metadata::{AclOperation, PatternType},
     };
 
     #[test]

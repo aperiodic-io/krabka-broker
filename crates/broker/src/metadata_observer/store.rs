@@ -39,13 +39,14 @@
 //! applied offset is therefore never persisted on its own — an offset ahead of
 //! the stored image would silently skip the records in between.
 
-use std::path::{Path, PathBuf};
-
-use krabka_metadata::MetadataImage;
-use krabka_raft::kraft::controller::checkpoint::{
-    latest_checkpoint_id, load_checkpoint_by_id, retain_latest_checkpoint, write_checkpoint,
+use {
+    krabka_metadata::MetadataImage,
+    krabka_raft::kraft::controller::checkpoint::{
+        latest_checkpoint_id, load_checkpoint_by_id, retain_latest_checkpoint, write_checkpoint,
+    },
+    std::path::{Path, PathBuf},
+    tracing::{debug, info, warn},
 };
-use tracing::{debug, info, warn};
 
 /// Directory holding the observer's checkpoints, under the metadata partition
 /// directory `__cluster_metadata-0`.
@@ -214,12 +215,10 @@ impl ObserverStore {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::MetadataRecord;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::test_support::single_partition_topic;
+    use {
+        super::*, crate::test_support::single_partition_topic, assert2::assert,
+        krabka_metadata::MetadataRecord, uuid::Uuid,
+    };
 
     fn image_with(topics: &[&str]) -> MetadataImage {
         let mut image = MetadataImage::new(Uuid::nil());

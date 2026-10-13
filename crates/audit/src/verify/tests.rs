@@ -1,20 +1,21 @@
 //! Unit tests for the offline verifier, driven end to end through
 //! [`verify_partition_dir`] over partitions built on disk.
 
-use assert2::check;
-use bytes::Bytes;
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch, RecordHeader};
-
-use super::*;
-use crate::{
-    FileEd25519Signer,
-    chain::{ChainState, GENESIS_HEAD},
-    checkpoint::Checkpoint,
-    event::AuditEventClass,
-    ids::EpochMs,
-    sink::AuditRecord,
-    test_support::shared_signer as signer,
+use {
+    super::*,
+    crate::{
+        FileEd25519Signer,
+        chain::{ChainState, GENESIS_HEAD},
+        checkpoint::Checkpoint,
+        event::AuditEventClass,
+        ids::EpochMs,
+        sink::AuditRecord,
+        test_support::shared_signer as signer,
+    },
+    assert2::check,
+    bytes::Bytes,
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch, RecordHeader},
 };
 
 fn audit_record_to_batch(rec: &AuditRecord, base_offset: i64) -> RecordBatch {

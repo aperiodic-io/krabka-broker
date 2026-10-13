@@ -5,16 +5,16 @@
 //! complete the handshake and exchange one `ApiVersions` request, and nothing
 //! else in the suite proves that in isolation.
 
-use std::process::Stdio;
-
-use assert2::assert;
-
-use crate::{
-    jvm_acceptance::{
-        KAFKA_IMAGE, broker0_advertised, nc_check_connectivity, prepare_jks_truststore,
-        start_ssl_broker, write_client_props,
+use {
+    crate::{
+        jvm_acceptance::{
+            KAFKA_IMAGE, broker0_advertised, nc_check_connectivity, prepare_jks_truststore,
+            start_ssl_broker, write_client_props,
+        },
+        support::{JvmDockerSetup, jvm_docker_command},
     },
-    support::{JvmDockerSetup, jvm_docker_command},
+    assert2::assert,
+    std::process::Stdio,
 };
 
 /// End-to-end TLS handshake check against an `SSL`-only listener. The test

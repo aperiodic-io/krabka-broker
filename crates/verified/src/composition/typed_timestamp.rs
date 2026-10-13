@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
-use super::tiered_timestamp_lookup_preserves_first;
-use crate::{
-    list_offsets::ListOffsetsSelectionDecision,
-    timestamp::{timestamp_record_coordinates, timestamp_record_time},
+use {
+    super::tiered_timestamp_lookup_preserves_first,
+    crate::{
+        list_offsets::ListOffsetsSelectionDecision,
+        timestamp::{timestamp_record_coordinates, timestamp_record_time},
+    },
+    creusot_std::prelude::*,
 };
 
 /// Batch timestamp type, checked record coordinates, retention and exclusive

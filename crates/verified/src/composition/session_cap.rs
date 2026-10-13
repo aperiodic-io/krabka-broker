@@ -1,7 +1,8 @@
-use creusot_std::prelude::*;
-
-use crate::authz::{
-    RequestAuthState, request_auth_admission, sasl_session_expiry, session_expired_for_request,
+use {
+    crate::authz::{
+        RequestAuthState, request_auth_admission, sasl_session_expiry, session_expired_for_request,
+    },
+    creusot_std::prelude::*,
 };
 
 /// PLAIN, regular SCRAM and GSSAPI have no credential expiry. A positive

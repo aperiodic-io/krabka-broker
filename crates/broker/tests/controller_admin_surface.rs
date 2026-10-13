@@ -18,75 +18,77 @@
 
 mod support;
 
-use std::time::Duration;
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_broker::{BrokerConfig, BrokerHandle, NodeId, config::NodeRole};
-use krabka_client_core::{Connection, ConnectionOptions};
-use krabka_protocol::{
-    UnknownTaggedFields,
-    owned::{
-        allocate_producer_ids_request::AllocateProducerIdsRequest,
-        allocate_producer_ids_response::AllocateProducerIdsResponse,
-        alter_partition_request::{
-            AlterPartitionRequest, BrokerState, PartitionData as AlterPartitionPartitionData,
-            TopicData as AlterPartitionTopicData,
-        },
-        alter_partition_response::{
-            AlterPartitionResponse, PartitionData as AlterPartitionResultPartition,
-            TopicData as AlterPartitionResultTopic,
-        },
-        alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
-        alter_user_scram_credentials_response::{
-            AlterUserScramCredentialsResponse, AlterUserScramCredentialsResult,
-        },
-        api_versions_request::ApiVersionsRequest,
-        api_versions_response::ApiVersionsResponse,
-        assign_replicas_to_dirs_request::{
-            AssignReplicasToDirsRequest, DirectoryData, PartitionData, TopicData,
-        },
-        assign_replicas_to_dirs_response::{
-            AssignReplicasToDirsResponse, DirectoryData as RespDirectoryData,
-            PartitionData as RespPartitionData, TopicData as RespTopicData,
-        },
-        broker_heartbeat_request::BrokerHeartbeatRequest,
-        broker_registration_request::{
-            BrokerRegistrationRequest, Feature as RegistrationFeature,
-            Listener as RegistrationListener,
-        },
-        create_delegation_token_request::CreateDelegationTokenRequest,
-        create_delegation_token_response::CreateDelegationTokenResponse,
-        create_partitions_request::{CreatePartitionsRequest, CreatePartitionsTopic},
-        create_partitions_response::{CreatePartitionsResponse, CreatePartitionsTopicResult},
-        create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
-        delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
-        delete_topics_response::{DeletableTopicResult, DeleteTopicsResponse},
-        describe_user_scram_credentials_request::{DescribeUserScramCredentialsRequest, UserName},
-        describe_user_scram_credentials_response::{
-            CredentialInfo, DescribeUserScramCredentialsResponse,
-            DescribeUserScramCredentialsResult,
-        },
-        expire_delegation_token_request::ExpireDelegationTokenRequest,
-        expire_delegation_token_response::ExpireDelegationTokenResponse,
-        renew_delegation_token_request::RenewDelegationTokenRequest,
-        renew_delegation_token_response::RenewDelegationTokenResponse,
-        sasl_authenticate_request::SaslAuthenticateRequest,
-        sasl_authenticate_response::SaslAuthenticateResponse,
-        sasl_handshake_request::SaslHandshakeRequest,
-        sasl_handshake_response::SaslHandshakeResponse,
-        unregister_controller_request::UnregisterControllerRequest,
-        update_features_request::UpdateFeaturesRequest,
+use {
+    crate::support::{
+        configs::{controller_registration, feature_update},
+        discovery::api_versions_request_for,
+        sasl::{ScramAlgorithm, ScramIterations, ScramUpsertionSetup, scram_upsertion},
+        start_with_bound_listeners,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::support::{
-    configs::{controller_registration, feature_update},
-    discovery::api_versions_request_for,
-    sasl::{ScramAlgorithm, ScramIterations, ScramUpsertionSetup, scram_upsertion},
-    start_with_bound_listeners,
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_broker::{BrokerConfig, BrokerHandle, NodeId, config::NodeRole},
+    krabka_client_core::{Connection, ConnectionOptions},
+    krabka_protocol::{
+        UnknownTaggedFields,
+        owned::{
+            allocate_producer_ids_request::AllocateProducerIdsRequest,
+            allocate_producer_ids_response::AllocateProducerIdsResponse,
+            alter_partition_request::{
+                AlterPartitionRequest, BrokerState, PartitionData as AlterPartitionPartitionData,
+                TopicData as AlterPartitionTopicData,
+            },
+            alter_partition_response::{
+                AlterPartitionResponse, PartitionData as AlterPartitionResultPartition,
+                TopicData as AlterPartitionResultTopic,
+            },
+            alter_user_scram_credentials_request::AlterUserScramCredentialsRequest,
+            alter_user_scram_credentials_response::{
+                AlterUserScramCredentialsResponse, AlterUserScramCredentialsResult,
+            },
+            api_versions_request::ApiVersionsRequest,
+            api_versions_response::ApiVersionsResponse,
+            assign_replicas_to_dirs_request::{
+                AssignReplicasToDirsRequest, DirectoryData, PartitionData, TopicData,
+            },
+            assign_replicas_to_dirs_response::{
+                AssignReplicasToDirsResponse, DirectoryData as RespDirectoryData,
+                PartitionData as RespPartitionData, TopicData as RespTopicData,
+            },
+            broker_heartbeat_request::BrokerHeartbeatRequest,
+            broker_registration_request::{
+                BrokerRegistrationRequest, Feature as RegistrationFeature,
+                Listener as RegistrationListener,
+            },
+            create_delegation_token_request::CreateDelegationTokenRequest,
+            create_delegation_token_response::CreateDelegationTokenResponse,
+            create_partitions_request::{CreatePartitionsRequest, CreatePartitionsTopic},
+            create_partitions_response::{CreatePartitionsResponse, CreatePartitionsTopicResult},
+            create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
+            delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
+            delete_topics_response::{DeletableTopicResult, DeleteTopicsResponse},
+            describe_user_scram_credentials_request::{
+                DescribeUserScramCredentialsRequest, UserName,
+            },
+            describe_user_scram_credentials_response::{
+                CredentialInfo, DescribeUserScramCredentialsResponse,
+                DescribeUserScramCredentialsResult,
+            },
+            expire_delegation_token_request::ExpireDelegationTokenRequest,
+            expire_delegation_token_response::ExpireDelegationTokenResponse,
+            renew_delegation_token_request::RenewDelegationTokenRequest,
+            renew_delegation_token_response::RenewDelegationTokenResponse,
+            sasl_authenticate_request::SaslAuthenticateRequest,
+            sasl_authenticate_response::SaslAuthenticateResponse,
+            sasl_handshake_request::SaslHandshakeRequest,
+            sasl_handshake_response::SaslHandshakeResponse,
+            unregister_controller_request::UnregisterControllerRequest,
+            update_features_request::UpdateFeaturesRequest,
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::time::Duration,
 };
 
 /// Kafka's `DELEGATION_TOKEN_REQUEST_NOT_ALLOWED`, which
@@ -176,21 +178,16 @@ async fn start_node(
 
 /// An `ApiVersions` request that passes Kafka's `ApiVersionsRequest.isValid`:
 /// from v3 the KIP-511 client software name and version must be set.
-fn api_versions_request() -> ApiVersionsRequest {
-    api_versions_request_for("krabka-test", "1.0")
-}
+fn api_versions_request() -> ApiVersionsRequest { api_versions_request_for("krabka-test", "1.0") }
 
 /// Dial the controller listener. `Connection::connect` runs the `ApiVersions`
 /// bootstrap, so every later `send` negotiates against what this listener
 /// advertises rather than against the client's own codec range.
 async fn dial_controller(broker: &BrokerHandle) -> Connection {
-    Connection::connect(
-        broker.controller_addr(),
-        ConnectionOptions {
-            client_id: "controller-admin-surface".to_owned(),
-            ..ConnectionOptions::default()
-        },
-    )
+    Connection::connect(broker.controller_addr(), ConnectionOptions {
+        client_id: "controller-admin-surface".to_owned(),
+        ..ConnectionOptions::default()
+    })
     .await
     .expect("dial the controller listener")
 }
@@ -965,14 +962,11 @@ async fn controller_listener_registers_a_restarted_broker_as_kafka_does() {
         } else {
             None
         };
-        outcomes.push((
-            what,
-            Outcome {
-                error_code: answer.error_code,
-                epoch,
-                registered,
-            },
-        ));
+        outcomes.push((what, Outcome {
+            error_code: answer.error_code,
+            epoch,
+            registered,
+        }));
         if answer.error_code != 0 || node != NodeId(7) {
             continue;
         }

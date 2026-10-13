@@ -1,8 +1,9 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{ProducerDecision, RetainedSequenceRange, rotation_marker_bounds_identity_retry};
-use crate::transaction::InitProducerIdIdentityDecision;
+use {
+    super::{ProducerDecision, RetainedSequenceRange, rotation_marker_bounds_identity_retry},
+    crate::transaction::InitProducerIdIdentityDecision,
+    assert2::assert,
+    proptest::prelude::*,
+};
 
 fn check_rotation(
     identities: (i64, i64),

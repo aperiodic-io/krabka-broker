@@ -7,18 +7,19 @@
 //! test in this suite starts here, so the boot lives in its own file rather
 //! than beside any one of them.
 
-use krabka_broker::{
-    BrokerConfig, BrokerHandle, NodeId,
-    config::{NodeRole, StretchProfile},
-    replica_selector::ReplicaSelectorKind,
-};
-use krabka_client_core::Client;
-use tempfile::TempDir;
-
-use crate::{
-    BROKER_WITNESS, SITE_A, SITE_C, SITES, STRETCH_PREFERRED_LEADER_SITE,
-    support::{self, client::connect_owned, shutdown_cluster},
-    within,
+use {
+    crate::{
+        BROKER_WITNESS, SITE_A, SITE_C, SITES, STRETCH_PREFERRED_LEADER_SITE,
+        support::{self, client::connect_owned, shutdown_cluster},
+        within,
+    },
+    krabka_broker::{
+        BrokerConfig, BrokerHandle, NodeId,
+        config::{NodeRole, StretchProfile},
+        replica_selector::ReplicaSelectorKind,
+    },
+    krabka_client_core::Client,
+    tempfile::TempDir,
 };
 
 fn stretch_profile() -> StretchProfile {

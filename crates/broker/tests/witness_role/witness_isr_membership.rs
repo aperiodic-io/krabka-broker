@@ -8,16 +8,16 @@
 //! same-rack in-ISR replica is exactly the candidate the rack-aware selector
 //! reaches for, which makes this the case where the redirect ban has to hold.
 
-use std::collections::BTreeMap;
-
-use assert2::check;
-use krabka_broker::codes;
-use krabka_protocol::owned::metadata_request::MetadataRequest;
-
-use crate::{
-    LEADER_ID, SITE_A, SITE_B, SITE_C, TOPIC, WITNESS_ID, cluster_lock,
-    witness_cluster::{client_at, shutdown, start_stretch_cluster, wait_for_witness_isr},
-    witness_wire::{PartitionView, consumer_fetch, create_topic, partition_view},
+use {
+    crate::{
+        LEADER_ID, SITE_A, SITE_B, SITE_C, TOPIC, WITNESS_ID, cluster_lock,
+        witness_cluster::{client_at, shutdown, start_stretch_cluster, wait_for_witness_isr},
+        witness_wire::{PartitionView, consumer_fetch, create_topic, partition_view},
+    },
+    assert2::check,
+    krabka_broker::codes,
+    krabka_protocol::owned::metadata_request::MetadataRequest,
+    std::collections::BTreeMap,
 };
 
 /// The witness registers like any other broker — rack included — and it takes

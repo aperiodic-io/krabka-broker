@@ -7,24 +7,24 @@
 //! Gated to non-Windows (openraft `debug_assert!` race on the hosted Windows
 //! runner -- the same gate as `tests/replication.rs`).
 
-use std::net::SocketAddr;
-
-use assert2::assert;
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle, config::InterBrokerCredentials};
-use krabka_protocol::{owned::create_topics_request::CreateTopicsRequest, records::RecordBatch};
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tempfile::TempDir;
-
-use crate::{
-    harness::admin_plain_password,
-    support::{
-        ClusterNodeSetup, NodeIndex, broker_config,
-        client::connect_client,
-        controller_voters, init_tracing_with,
-        produce::{batch_request, replicated_topic_produce_setup},
-        records::{batch_from_records, value_record},
-        shutdown_cluster,
+use {
+    crate::{
+        harness::admin_plain_password,
+        support::{
+            ClusterNodeSetup, NodeIndex, broker_config,
+            client::connect_client,
+            controller_voters, init_tracing_with,
+            produce::{batch_request, replicated_topic_produce_setup},
+            records::{batch_from_records, value_record},
+            shutdown_cluster,
+        },
     },
+    assert2::assert,
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle, config::InterBrokerCredentials},
+    krabka_protocol::{owned::create_topics_request::CreateTopicsRequest, records::RecordBatch},
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::net::SocketAddr,
+    tempfile::TempDir,
 };
 
 /// Reserve `n` ephemeral loopback ports and keep their listeners open.
@@ -98,32 +98,26 @@ async fn start_two_node_sasl() -> Vec<(BrokerHandle, BrokerConfig, TempDir)> {
         .collect();
 
     let dir0 = TempDir::new().unwrap();
-    let cfg0 = sasl_two_listener_config(
-        dir0.path(),
-        SaslNodeSetup {
-            cluster: ClusterNodeSetup {
-                client_addrs: &plaintext_addrs,
-                controller_addrs: &controller_addrs,
-                voters: controller_voters(&voters),
-                ..Default::default()
-            },
-            sasl_addrs: &sasl_addrs,
+    let cfg0 = sasl_two_listener_config(dir0.path(), SaslNodeSetup {
+        cluster: ClusterNodeSetup {
+            client_addrs: &plaintext_addrs,
+            controller_addrs: &controller_addrs,
+            voters: controller_voters(&voters),
+            ..Default::default()
         },
-    );
+        sasl_addrs: &sasl_addrs,
+    });
     let dir1 = TempDir::new().unwrap();
-    let cfg1 = sasl_two_listener_config(
-        dir1.path(),
-        SaslNodeSetup {
-            cluster: ClusterNodeSetup {
-                index: NodeIndex(1),
-                client_addrs: &plaintext_addrs,
-                controller_addrs: &controller_addrs,
-                voters: controller_voters(&voters),
-                ..Default::default()
-            },
-            sasl_addrs: &sasl_addrs,
+    let cfg1 = sasl_two_listener_config(dir1.path(), SaslNodeSetup {
+        cluster: ClusterNodeSetup {
+            index: NodeIndex(1),
+            client_addrs: &plaintext_addrs,
+            controller_addrs: &controller_addrs,
+            voters: controller_voters(&voters),
+            ..Default::default()
         },
-    );
+        sasl_addrs: &sasl_addrs,
+    });
     // KIP-595 static-quorum bootstrap: both brokers boot with the same
     // static voter set and elect among themselves over the SASL controller
     // wire — no add_learner / change_membership (KIP-853 dynamic voter reconfiguration). Start

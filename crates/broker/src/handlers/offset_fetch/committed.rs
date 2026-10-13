@@ -13,15 +13,16 @@
 //! decides between the two per partition and must see one consistent snapshot
 //! of both.
 
-use krabka_protocol::owned::offset_fetch_response as wire;
-
-use crate::{
-    broker::Broker,
-    coordinator::unified::{
-        actor::GroupActorMessage,
-        group::{GroupOffsets, OffsetEntry, OffsetFetchMember},
+use {
+    crate::{
+        broker::Broker,
+        coordinator::unified::{
+            actor::GroupActorMessage,
+            group::{GroupOffsets, OffsetEntry, OffsetFetchMember},
+        },
+        task_util::ask,
     },
-    task_util::ask,
+    krabka_protocol::owned::offset_fetch_response as wire,
 };
 
 /// Fetches the group's committed offsets, keyed by topic name and partition,

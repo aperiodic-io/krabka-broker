@@ -24,9 +24,10 @@
 //! biting. They are counters here rather than rates because Prometheus takes
 //! the derivative itself.
 
-use std::sync::Arc;
-
-use super::{BrokerMetrics, TopicLabel};
+use {
+    super::{BrokerMetrics, TopicLabel},
+    std::sync::Arc,
+};
 
 /// Which of the tier's three paths a count belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

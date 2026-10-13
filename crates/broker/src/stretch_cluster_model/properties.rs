@@ -5,13 +5,13 @@
 //! The transitions themselves live in the sibling modules. This file only
 //! dispatches to them and states what must hold.
 
-use std::collections::BTreeSet;
-
-use stateright::{Model, Property};
-
-use super::{
-    config::StretchModel,
-    state::{StretchAction, StretchState, WriteOutcome, impaired},
+use {
+    super::{
+        config::StretchModel,
+        state::{StretchAction, StretchState, WriteOutcome, impaired},
+    },
+    stateright::{Model, Property},
+    std::collections::BTreeSet,
 };
 
 impl StretchModel {
@@ -37,47 +37,8 @@ impl StretchModel {
 }
 
 impl Model for StretchModel {
-    type State = StretchState;
     type Action = StretchAction;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![StretchState {
-            down: BTreeSet::new(),
-            isolated: BTreeSet::new(),
-            leader: self.replicas[0],
-            isr: self.replicas.clone(),
-            leader_epoch: 0,
-            last_write: None,
-            commit_in_minority: false,
-            epoch_reused: false,
-            preferred_pinning_broken: false,
-        }]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        let room = impaired(state) < self.max_impaired;
-        for site in 0..self.site_count() {
-            if state.down.contains(&site) {
-                actions.push(StretchAction::SiteUp(site));
-                continue;
-            }
-            if state.isolated.contains(&site) {
-                actions.push(StretchAction::SiteHeal(site));
-                actions.push(StretchAction::SiteDown(site));
-            } else if room {
-                actions.push(StretchAction::SitePartition(site));
-                actions.push(StretchAction::SiteDown(site));
-            }
-        }
-        let alive = self.alive(state);
-        for &replica in &self.replicas {
-            if !alive.contains(&replica) {
-                actions.push(StretchAction::Failover(replica));
-            }
-        }
-        actions.push(StretchAction::PreferredElection);
-        actions.push(StretchAction::ProduceAcksAll);
-    }
+    type State = StretchState;
 
     krabka_macros::model_transition!(last, action, state; {
             match action {
@@ -118,6 +79,45 @@ impl Model for StretchModel {
             Some(state)
 
     });
+
+    fn init_states(&self) -> Vec<Self::State> {
+        vec![StretchState {
+            down: BTreeSet::new(),
+            isolated: BTreeSet::new(),
+            leader: self.replicas[0],
+            isr: self.replicas.clone(),
+            leader_epoch: 0,
+            last_write: None,
+            commit_in_minority: false,
+            epoch_reused: false,
+            preferred_pinning_broken: false,
+        }]
+    }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        let room = impaired(state) < self.max_impaired;
+        for site in 0..self.site_count() {
+            if state.down.contains(&site) {
+                actions.push(StretchAction::SiteUp(site));
+                continue;
+            }
+            if state.isolated.contains(&site) {
+                actions.push(StretchAction::SiteHeal(site));
+                actions.push(StretchAction::SiteDown(site));
+            } else if room {
+                actions.push(StretchAction::SitePartition(site));
+                actions.push(StretchAction::SiteDown(site));
+            }
+        }
+        let alive = self.alive(state);
+        for &replica in &self.replicas {
+            if !alive.contains(&replica) {
+                actions.push(StretchAction::Failover(replica));
+            }
+        }
+        actions.push(StretchAction::PreferredElection);
+        actions.push(StretchAction::ProduceAcksAll);
+    }
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![

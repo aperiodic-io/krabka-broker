@@ -21,13 +21,14 @@
 //! every fetch. [`TailCache`] keeps a bounded window of the most recently
 //! appended bytes in memory to serve those reads.
 
-use std::{
-    collections::VecDeque,
-    fs::File,
-    io::{Error, ErrorKind},
+use {
+    bytes::Bytes,
+    std::{
+        collections::VecDeque,
+        fs::File,
+        io::{Error, ErrorKind},
+    },
 };
-
-use bytes::Bytes;
 
 /// The `O_DIRECT` alignment rules of one file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,9 +55,7 @@ impl DioAlign {
     /// starts this many bytes further into an aligned buffer, at an aligned
     /// offset, is aligned in both address and offset. Both values are powers
     /// of two, so the larger is a multiple of the smaller.
-    fn step(self) -> usize {
-        self.mem.max(self.block)
-    }
+    fn step(self) -> usize { self.mem.max(self.block) }
 }
 
 /// A growable byte buffer whose contents start on an `align`-aligned address.
@@ -83,9 +82,7 @@ impl AlignedBuf {
         }
     }
 
-    pub(crate) fn clear(&mut self) {
-        self.len = 0;
-    }
+    pub(crate) fn clear(&mut self) { self.len = 0; }
 
     pub(crate) fn extend_from_slice(&mut self, bytes: &[u8]) {
         let new_len = self.len + bytes.len();
@@ -105,13 +102,9 @@ impl AlignedBuf {
         self.len = len;
     }
 
-    pub(crate) fn as_slice(&self) -> &[u8] {
-        &self.storage[self.offset..self.offset + self.len]
-    }
+    pub(crate) fn as_slice(&self) -> &[u8] { &self.storage[self.offset..self.offset + self.len] }
 
-    fn capacity(&self) -> usize {
-        self.storage.len() - self.offset
-    }
+    fn capacity(&self) -> usize { self.storage.len() - self.offset }
 
     /// Make room for `needed` bytes after the aligned start.
     fn reserve(&mut self, needed: usize) {
@@ -174,18 +167,12 @@ impl DirectWriter {
         })
     }
 
-    pub(crate) fn end(&self) -> u64 {
-        self.end
-    }
+    pub(crate) fn end(&self) -> u64 { self.end }
 
-    pub(crate) fn file(&self) -> &File {
-        &self.file
-    }
+    pub(crate) fn file(&self) -> &File { &self.file }
 
     /// The block size that file offsets and write lengths align to.
-    pub(crate) fn block(&self) -> usize {
-        self.align.block
-    }
+    pub(crate) fn block(&self) -> usize { self.align.block }
 
     /// Append the concatenation of `parts` at [`Self::end`].
     ///
@@ -322,13 +309,9 @@ impl TailCache {
         }
     }
 
-    pub(crate) fn start(&self) -> u64 {
-        self.start
-    }
+    pub(crate) fn start(&self) -> u64 { self.start }
 
-    pub(crate) fn end(&self) -> u64 {
-        self.start + to_u64(self.len)
-    }
+    pub(crate) fn end(&self) -> u64 { self.start + to_u64(self.len) }
 
     /// Record `bytes` appended at [`Self::end`].
     ///
@@ -449,11 +432,11 @@ impl TailCache {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::{cell::Cell, os::unix::fs::FileExt};
-
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        std::{cell::Cell, os::unix::fs::FileExt},
+    };
 
     const MEM: usize = 512;
 

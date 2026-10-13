@@ -3,16 +3,16 @@
 //! segment files on disk behind it, and the block that makes their deletion
 //! fail with a real `io::Error`.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_protocol::records::{Record, RecordBatch};
-use tempfile::TempDir;
-
-use crate::{
-    log_dir::partition_dir,
-    partition::Partition,
-    test_support::{CommittedPartitionSetup, block_log_artifact_paths, committed_partition},
+use {
+    crate::{
+        log_dir::partition_dir,
+        partition::Partition,
+        test_support::{CommittedPartitionSetup, block_log_artifact_paths, committed_partition},
+    },
+    bytes::Bytes,
+    krabka_protocol::records::{Record, RecordBatch},
+    std::sync::Arc,
+    tempfile::TempDir,
 };
 
 /// One record at `base`, timestamped at the epoch so every retention setting

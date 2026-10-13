@@ -5,14 +5,15 @@
 //! reports for that proposal. The approval count is over distinct principals,
 //! because the rule the feature promises is a rule about people.
 
-use krabka_metadata::BreakGlassProposalRecord;
-use krabka_verified::break_glass::{
-    BreakGlassAdmission, BreakGlassApprovalSigning, BreakGlassProposalFacts,
-    BreakGlassSignaturePolicy, break_glass_admission,
+use {
+    super::DenialReason,
+    crate::break_glass::config::BreakGlassPolicy,
+    krabka_metadata::BreakGlassProposalRecord,
+    krabka_verified::break_glass::{
+        BreakGlassAdmission, BreakGlassApprovalSigning, BreakGlassProposalFacts,
+        BreakGlassSignaturePolicy, break_glass_admission,
+    },
 };
-
-use super::DenialReason;
-use crate::break_glass::config::BreakGlassPolicy;
 
 /// Why `proposal` cannot authorize a transition now, or `None` when it can.
 pub(super) fn unusable_because(

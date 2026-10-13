@@ -1,33 +1,33 @@
 //! Fleet-complete KIP-932 backlog sampling for Prometheus/KEDA.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
-};
-
-use krabka_client_core::ConnectionOptions;
-use krabka_ids::PartitionIndex;
-use krabka_metadata::NodeId;
-use krabka_protocol::{
-    owned::{
-        fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-        fetch_response::FetchResponse,
+use {
+    crate::{
+        broker::registered_listener_endpoint,
+        codes,
+        coordinator::{GroupCoordinator, bootstrap::OFFSETS_TOPIC, partitioner},
+        metadata_source::MetadataSource,
+        metrics::{BrokerMetrics, ShareGroupLabel},
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        share_coordinator::persister_client::SharePersister,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-use krabka_security::ListenerProtocol;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    broker::registered_listener_endpoint,
-    codes,
-    coordinator::{GroupCoordinator, bootstrap::OFFSETS_TOPIC, partitioner},
-    metadata_source::MetadataSource,
-    metrics::{BrokerMetrics, ShareGroupLabel},
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    share_coordinator::persister_client::SharePersister,
+    krabka_client_core::ConnectionOptions,
+    krabka_ids::PartitionIndex,
+    krabka_metadata::NodeId,
+    krabka_protocol::{
+        owned::{
+            fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+            fetch_response::FetchResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
+    krabka_security::ListenerProtocol,
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+        time::Duration,
+    },
+    tokio_util::sync::CancellationToken,
 };
 
 pub(crate) fn effective_backlog(hwm: i64, spso: i64, log_start: i64) -> i64 {
@@ -343,27 +343,27 @@ fn clear(metrics: &BrokerMetrics, last: &mut HashMap<ShareGroupLabel, i64>) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use krabka_ids::LeaderEpoch;
-    use krabka_metadata::{MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicRecord};
-    use krabka_protocol::{
-        owned::{
-            fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
-            list_offsets_response::{
-                ListOffsetsPartitionResponse, ListOffsetsResponse, ListOffsetsTopicResponse,
-            },
+    use {
+        super::{
+            effective_backlog, fetch_offsets, latest_fetch_offset, owns_group, prune_stale, replace,
         },
-        primitives::uuid::Uuid as WireUuid,
-    };
-
-    use super::{
-        effective_backlog, fetch_offsets, latest_fetch_offset, owns_group, prune_stale, replace,
-    };
-    use crate::{
-        codes,
-        coordinator::{bootstrap::OFFSETS_TOPIC, partitioner},
-        metrics::{BrokerMetrics, ShareGroupLabel},
+        crate::{
+            codes,
+            coordinator::{bootstrap::OFFSETS_TOPIC, partitioner},
+            metrics::{BrokerMetrics, ShareGroupLabel},
+        },
+        krabka_ids::LeaderEpoch,
+        krabka_metadata::{MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicRecord},
+        krabka_protocol::{
+            owned::{
+                fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+                list_offsets_response::{
+                    ListOffsetsPartitionResponse, ListOffsetsResponse, ListOffsetsTopicResponse,
+                },
+            },
+            primitives::uuid::Uuid as WireUuid,
+        },
+        std::collections::HashMap,
     };
 
     fn routing_image() -> MetadataImage {

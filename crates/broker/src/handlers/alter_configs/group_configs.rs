@@ -7,13 +7,14 @@
 //! builder never reads the group's stored overrides: the request carries the
 //! complete set of non-default values.
 
-use krabka_metadata::{GroupConfigRecord, MetadataRecord};
-use krabka_protocol::owned::alter_configs_request::AlterConfigsResource;
-
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    config_keys::group::{GroupBounds, validate_group_configs},
+use {
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        config_keys::group::{GroupBounds, validate_group_configs},
+    },
+    krabka_metadata::{GroupConfigRecord, MetadataRecord},
+    krabka_protocol::owned::alter_configs_request::AlterConfigsResource,
 };
 
 /// Build the authoritative `V1GroupConfig` record for a GROUP resource. The
@@ -45,13 +46,16 @@ pub(super) fn group_config_record(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        api_catalog::UnstableApiVersions,
-        coordinator::unified::streams::config::{KEY_NUM_STANDBY_REPLICAS, KEY_SESSION_TIMEOUT_MS},
-        handlers::alter_configs::test_support::group_resource,
+    use {
+        super::*,
+        crate::{
+            api_catalog::UnstableApiVersions,
+            coordinator::unified::streams::config::{
+                KEY_NUM_STANDBY_REPLICAS, KEY_SESSION_TIMEOUT_MS,
+            },
+            handlers::alter_configs::test_support::group_resource,
+        },
+        assert2::assert,
     };
 
     #[test]

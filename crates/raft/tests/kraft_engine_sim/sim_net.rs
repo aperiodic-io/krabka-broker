@@ -7,20 +7,21 @@
 //! model a node that keeps running while the network cuts it off. The whole
 //! notion of reachability in this simulation lives here.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
-};
-
-use bytes::Bytes;
-use krabka_raft::{
-    RaftError,
-    kraft::{
-        KraftController, NodeId, PeerSender,
-        transport::{Inbound, api_key, wire},
+use {
+    bytes::Bytes,
+    krabka_raft::{
+        RaftError,
+        kraft::{
+            KraftController, NodeId, PeerSender,
+            transport::{Inbound, api_key, wire},
+        },
     },
+    std::{
+        collections::{HashMap, HashSet},
+        sync::{Arc, Mutex},
+    },
+    tokio::sync::oneshot,
 };
-use tokio::sync::oneshot;
 
 /// Shared registry of in-process engines, keyed by node id.
 ///
@@ -70,9 +71,7 @@ impl SimNet {
         self.registry.lock().unwrap().nodes.insert(id, ctrl);
     }
 
-    pub(crate) fn remove(&self, id: NodeId) {
-        self.registry.lock().unwrap().nodes.remove(&id);
-    }
+    pub(crate) fn remove(&self, id: NodeId) { self.registry.lock().unwrap().nodes.remove(&id); }
 
     pub(crate) fn get(&self, id: NodeId) -> Option<KraftController> {
         self.registry.lock().unwrap().nodes.get(&id).cloned()
@@ -93,9 +92,7 @@ impl SimNet {
     }
 
     /// Put `id` back on the network.
-    pub(crate) fn heal(&self, id: NodeId) {
-        self.registry.lock().unwrap().partitioned.remove(&id);
-    }
+    pub(crate) fn heal(&self, id: NodeId) { self.registry.lock().unwrap().partitioned.remove(&id); }
 
     fn reachable(&self, to: NodeId) -> Option<KraftController> {
         let registry = self.registry.lock().unwrap();

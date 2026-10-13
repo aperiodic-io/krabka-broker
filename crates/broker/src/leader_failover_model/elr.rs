@@ -11,15 +11,9 @@
 //! record is a claim about logs, which this model does not carry;
 //! `data_path_model`'s `data_elr` configuration checks it.
 
-use std::collections::BTreeSet;
-
-use krabka_metadata::{MetadataImage, PartitionRecord};
-
-use super::failover_state::{FailoverState, pr_of};
-use crate::{
-    config_keys::effective_min_insync_replicas,
-    elr::{maintain::next_partition_elr, state::PartitionElr},
-    test_support::elr_model_image,
+use {
+    super::failover_state::{FailoverState, pr_of},
+    crate::test_support::elr_model_prelude::*,
 };
 
 /// The one topic the modelled partition belongs to.

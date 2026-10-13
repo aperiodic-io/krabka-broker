@@ -5,22 +5,22 @@
 //! `JwksRefresher` builders that wire one to an injected timer, and the
 //! polling helper that replaces a real-time sleep in a test.
 
-use std::{
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicI64, AtomicU64, Ordering},
+use {
+    super::JwksRefresher,
+    krabka_security::{Jwks, JwksHandle},
+    krabka_units::{Time, hours, millis, secs},
+    qubit_clock::{ManualMonotonicClock, MonotonicClock as _, Timer},
+    std::{
+        net::SocketAddr,
+        path::PathBuf,
+        sync::{
+            Arc,
+            atomic::{AtomicI64, AtomicU64, Ordering},
+        },
     },
+    tokio::sync::mpsc,
+    tokio_util::sync::CancellationToken,
 };
-
-use krabka_security::{Jwks, JwksHandle};
-use krabka_units::{Time, hours, millis, secs};
-use qubit_clock::{ManualMonotonicClock, MonotonicClock as _, Timer};
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-
-use super::JwksRefresher;
 
 /// Returns a timer that holds every future deadline open indefinitely.
 ///
@@ -34,9 +34,7 @@ use super::JwksRefresher;
 /// first tick: a deadline that is already due when it is armed completes
 /// immediately, on a manual clock exactly as on a real one, so the t=0 fetch
 /// still happens. Everything after it is dormant.
-pub fn dormant_timer() -> Arc<dyn Timer> {
-    ManualMonotonicClock::new_shared().new_timer()
-}
+pub fn dormant_timer() -> Arc<dyn Timer> { ManualMonotonicClock::new_shared().new_timer() }
 
 /// Yield-polls until `cond` holds. A bounded hang-guard makes a real stall
 /// fail the test deterministically instead of spinning forever.

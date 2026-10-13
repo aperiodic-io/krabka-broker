@@ -7,13 +7,14 @@
 //! inputs each parser must reject, and the two round-trip properties run to
 //! nearly as many lines as the module they check.
 
-use assert2::check;
-use krabka_ids::{LeaderEpoch, Offset, PartitionIndex};
-use proptest::prelude::*;
-
-use super::*;
-use crate::metadata::{
-    RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentState, TopicIdPartition,
+use {
+    super::*,
+    crate::metadata::{
+        RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentState, TopicIdPartition,
+    },
+    assert2::check,
+    krabka_ids::{LeaderEpoch, Offset, PartitionIndex},
+    proptest::prelude::*,
 };
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

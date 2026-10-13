@@ -6,40 +6,39 @@
 //! mechanism needs. It returns the authenticated `Principal` to the caller,
 //! which authorizes it before the raft engine takes the connection.
 
-use std::net::SocketAddr;
-
-use krabka_client_core::ClientDuplex;
-use krabka_protocol::{
-    Decode,
-    owned::{
-        sasl_authenticate_request::SaslAuthenticateRequest,
-        sasl_handshake_request::SaslHandshakeRequest,
+use {
+    super::{
+        API_KEY_API_VERSIONS, API_KEY_SASL_AUTHENTICATE, API_KEY_SASL_HANDSHAKE,
+        BrokerRaftHandshake,
+        frame::{read_kafka_request, write_response, write_response_body},
     },
-};
-use krabka_raft::{ControllerApiVersions, RaftHandshakeError};
-use krabka_security::SaslMechanism;
-
-use super::{
-    API_KEY_API_VERSIONS, API_KEY_SASL_AUTHENTICATE, API_KEY_SASL_HANDSHAKE, BrokerRaftHandshake,
-    frame::{read_kafka_request, write_response, write_response_body},
-};
-use crate::{
-    codes::SASL_AUTHENTICATION_FAILED,
-    network::{
-        auth::{
-            ConnectionAuth, ReauthClock, generic_failure_message, handle_authenticate_gssapi,
-            handle_authenticate_oauthbearer_with_jwks_cache, handle_authenticate_plain,
-            handle_authenticate_scram, handle_handshake,
+    crate::{
+        codes::SASL_AUTHENTICATION_FAILED,
+        network::{
+            auth::{
+                ConnectionAuth, ReauthClock, generic_failure_message, handle_authenticate_gssapi,
+                handle_authenticate_oauthbearer_with_jwks_cache, handle_authenticate_plain,
+                handle_authenticate_scram, handle_handshake,
+            },
+            dispatch::sasl::{audit_principal, emit_authentication as emit_audit_authentication},
         },
-        dispatch::sasl::{audit_principal, emit_authentication as emit_audit_authentication},
+        time_util::now_ms,
     },
-    time_util::now_ms,
+    krabka_client_core::ClientDuplex,
+    krabka_protocol::{
+        Decode,
+        owned::{
+            sasl_authenticate_request::SaslAuthenticateRequest,
+            sasl_handshake_request::SaslHandshakeRequest,
+        },
+    },
+    krabka_raft::{ControllerApiVersions, RaftHandshakeError},
+    krabka_security::SaslMechanism,
+    std::net::SocketAddr,
 };
 
 /// Initial per-connection auth state for an unauthenticated SASL peer.
-fn pre_auth_state() -> ConnectionAuth {
-    ConnectionAuth::Anonymous
-}
+fn pre_auth_state() -> ConnectionAuth { ConnectionAuth::Anonymous }
 
 /// Regular controller credentials have no configured reauthentication cap.
 /// OAuth and delegation-token credentials retain their own absolute deadline,
@@ -324,25 +323,23 @@ async fn write_sasl_response<R: krabka_protocol::Encode>(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-    use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse;
-    use tokio::io::AsyncWriteExt;
-
-    use super::*;
-    use crate::{
-        network::test_support::assert_authentication_event,
-        raft_handshake::test_support::{
-            HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
-            RequestFrameSetup, api_versions_body, read_response_frame, request_frame,
-            sasl_authenticate_body, sasl_handshake_body, sasl_test_config,
+    use {
+        super::*,
+        crate::{
+            network::test_support::assert_authentication_event,
+            raft_handshake::test_support::{
+                HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
+                RequestFrameSetup, api_versions_body, read_response_frame, request_frame,
+                sasl_authenticate_body, sasl_handshake_body, sasl_test_config,
+            },
         },
+        assert2::assert,
+        krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse,
+        std::time::Duration,
+        tokio::io::AsyncWriteExt,
     };
 
-    fn test_peer() -> SocketAddr {
-        "192.0.2.11:9093".parse().expect("peer addr")
-    }
+    fn test_peer() -> SocketAddr { "192.0.2.11:9093".parse().expect("peer addr") }
 
     type SaslResult = Result<(krabka_security::Principal, bool, Option<i64>), RaftHandshakeError>;
 

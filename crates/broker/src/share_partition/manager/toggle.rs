@@ -6,10 +6,7 @@
 //! the manager drops its share sessions and its cached share partitions, so
 //! nothing of the old level answers a later request.
 
-use std::sync::Arc;
-
-use super::SharePartitionLeaderManager;
-use crate::features::share_groups_enabled;
+use {super::SharePartitionLeaderManager, crate::features::share_groups_enabled, std::sync::Arc};
 
 impl SharePartitionLeaderManager {
     /// Spawns the task that clears the manager when `share.version` drops
@@ -36,17 +33,17 @@ impl SharePartitionLeaderManager {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
-
-    use assert2::assert;
-    use krabka_log::Offset;
-    use krabka_metadata::{FeatureLevelRecord, MetadataImage, MetadataRecord};
-
-    use crate::{
-        features::SHARE_VERSION,
-        partition_registry::PartitionRegistry,
-        share_partition::{manager::test_support::manager_over, state::AcquisitionState},
-        test_support::FakeMetadataSource,
+    use {
+        crate::{
+            features::SHARE_VERSION,
+            partition_registry::PartitionRegistry,
+            share_partition::{manager::test_support::manager_over, state::AcquisitionState},
+            test_support::FakeMetadataSource,
+        },
+        assert2::assert,
+        krabka_log::Offset,
+        krabka_metadata::{FeatureLevelRecord, MetadataImage, MetadataRecord},
+        std::{sync::Arc, time::Duration},
     };
 
     fn image_with_share_version(level: i16) -> MetadataImage {

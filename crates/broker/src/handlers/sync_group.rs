@@ -9,16 +9,17 @@
 //! `protocol_name`, so an L7 proxy can route the call without remembering the
 //! earlier `JoinGroup` exchange.
 
-use krabka_protocol::owned::{
-    sync_group_request::SyncGroupRequest, sync_group_response::SyncGroupResponse,
-};
-use krabka_units::convert::TimeExt as _;
-
-use crate::{
-    codes,
-    coordinator::unified::actor::GroupActorMessage,
-    handlers::{ApiVersion, ErrorCodeResponse as _},
-    task_util::ask,
+use {
+    crate::{
+        codes,
+        coordinator::unified::actor::GroupActorMessage,
+        handlers::{ApiVersion, ErrorCodeResponse as _},
+        task_util::ask,
+    },
+    krabka_protocol::owned::{
+        sync_group_request::SyncGroupRequest, sync_group_response::SyncGroupResponse,
+    },
+    krabka_units::convert::TimeExt as _,
 };
 
 context_handler! {
@@ -79,23 +80,23 @@ fn mandatory_protocol_type_and_name_present(req: &SyncGroupRequest, version: Api
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, sync::Arc};
-
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_protocol::owned::{
-        join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
-        join_group_response,
-        sync_group_request::{SyncGroupRequest, SyncGroupRequestAssignment},
-        sync_group_response::{self, SyncGroupResponse},
-    };
-    use krabka_security::Principal;
-
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        broker::Broker,
-        handlers::{RequestContext, join_group::handle as join_group_handle},
-        test_support::{DenyAll, request_context, start_group_broker_no_audit},
+    use {
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            broker::Broker,
+            handlers::{RequestContext, join_group::handle as join_group_handle},
+            test_support::{DenyAll, request_context, start_group_broker_no_audit},
+        },
+        assert2::assert,
+        bytes::Bytes,
+        krabka_protocol::owned::{
+            join_group_request::{JoinGroupRequest, JoinGroupRequestProtocol},
+            join_group_response,
+            sync_group_request::{SyncGroupRequest, SyncGroupRequestAssignment},
+            sync_group_response::{self, SyncGroupResponse},
+        },
+        krabka_security::Principal,
+        std::{net::SocketAddr, sync::Arc},
     };
 
     const GROUP: &str = "sync-group-unit";
@@ -142,10 +143,12 @@ mod tests {
         (r2.member_id, r2.generation_id)
     }
 
-    use super::*;
-    use crate::{
-        handlers::group_read_denied,
-        test_support::{peer, principal},
+    use {
+        super::*,
+        crate::{
+            handlers::group_read_denied,
+            test_support::{peer, principal},
+        },
     };
 
     #[test]

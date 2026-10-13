@@ -1,33 +1,33 @@
 //! Unit tests for the KIP-848 heartbeat path.
 
-use std::{collections::HashMap, sync::Arc};
-
-use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::*;
-use crate::{
-    coordinator::unified::{
-        ClientIdentity,
-        actor::{
-            member_state::build_member,
+use {
+    super::*,
+    crate::{
+        coordinator::unified::{
+            ClientIdentity,
+            actor::{
+                member_state::build_member,
+                test_support::{
+                    ClassicMemberSetup, StaticMetadata, classic_member_for_topic,
+                    coordinator_with_log, empty_metadata, make_coordinator,
+                    make_coordinator_with_topic, make_coordinator_with_topic_policy,
+                    rpc::{self, consumer_request},
+                    seed_classic_member,
+                },
+            },
+            offsets_log::fake::InMemoryOffsetsLog,
+            persistence_next_gen::GroupMetadataValue,
+            reconciler::{ReconcileInput, metadata_hash},
             test_support::{
-                ClassicMemberSetup, StaticMetadata, classic_member_for_topic, coordinator_with_log,
-                empty_metadata, make_coordinator, make_coordinator_with_topic,
-                make_coordinator_with_topic_policy,
-                rpc::{self, consumer_request},
-                seed_classic_member,
+                ConsumerJoinSetup, MemberEpoch, assert_next_tombstone_batch, consumer_join_request,
             },
         },
-        offsets_log::fake::InMemoryOffsetsLog,
-        persistence_next_gen::GroupMetadataValue,
-        reconciler::{ReconcileInput, metadata_hash},
-        test_support::{
-            ConsumerJoinSetup, MemberEpoch, assert_next_tombstone_batch, consumer_join_request,
-        },
+        test_support::KafkaErrorCode,
     },
-    test_support::KafkaErrorCode,
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_protocol::primitives::uuid::Uuid,
+    std::{collections::HashMap, sync::Arc},
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -49,17 +49,14 @@ async fn first_join_emits_one_batch() {
 async fn first_join_adopts_client_member_id() {
     let (coord, log) = make_coordinator();
     let handle = coord.get_or_create_consumer("g");
-    let resp = rpc::consumer_request(
-        &handle,
-        ConsumerGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: "client-uuid-1".into(),
-            member_epoch: 0,
-            subscribed_topic_names: Some(vec!["t".into()]),
-            rebalance_timeout_ms: 60_000,
-            ..Default::default()
-        },
-    )
+    let resp = rpc::consumer_request(&handle, ConsumerGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: "client-uuid-1".into(),
+        member_epoch: 0,
+        subscribed_topic_names: Some(vec!["t".into()]),
+        rebalance_timeout_ms: 60_000,
+        ..Default::default()
+    })
     .await;
     // The join must succeed, echo the client-supplied member id, and
     // advance the epoch off 0. The client-id first-join takes the same
@@ -188,24 +185,21 @@ fn handoff_keepalive(
     member_epoch: i32,
     owned: Option<Vec<i32>>,
 ) -> HeartbeatStep {
-    handoff_heartbeat(
-        state,
-        ConsumerGroupHeartbeatRequest {
-            member_id: member_id.into(),
-            member_epoch,
-            rebalance_timeout_ms: -1,
-            topic_partitions: owned.map(|partitions| {
-                vec![
-                    krabka_protocol::owned::consumer_group_heartbeat_request::TopicPartitions {
-                        topic_id: IDENTITY_TOPIC,
-                        partitions,
-                        ..Default::default()
-                    },
-                ]
-            }),
-            ..Default::default()
-        },
-    )
+    handoff_heartbeat(state, ConsumerGroupHeartbeatRequest {
+        member_id: member_id.into(),
+        member_epoch,
+        rebalance_timeout_ms: -1,
+        topic_partitions: owned.map(|partitions| {
+            vec![
+                krabka_protocol::owned::consumer_group_heartbeat_request::TopicPartitions {
+                    topic_id: IDENTITY_TOPIC,
+                    partitions,
+                    ..Default::default()
+                },
+            ]
+        }),
+        ..Default::default()
+    })
 }
 
 /// The partitions of `t` that a response assigns, or `None` when it carries no
@@ -842,15 +836,12 @@ async fn leave_emits_tombstone_batch() {
     let mid = response.member_id.unwrap();
     let pre_leave = log.batches().await.len();
 
-    let _ = rpc::consumer_request(
-        &handle,
-        ConsumerGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: mid,
-            member_epoch: -1,
-            ..Default::default()
-        },
-    )
+    let _ = rpc::consumer_request(&handle, ConsumerGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: mid,
+        member_epoch: -1,
+        ..Default::default()
+    })
     .await;
     assert_next_tombstone_batch(&log, pre_leave).await;
 }
@@ -897,15 +888,12 @@ fn a_leave_bumps_the_epoch_and_the_next_heartbeat_assigns() {
     let (epoch, target_epoch) = (state.group_epoch, state.target.epoch);
     check!((epoch, target_epoch) == (3, 3));
 
-    let leave = step(
-        &mut state,
-        &ConsumerGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: "m2".into(),
-            member_epoch: -1,
-            ..Default::default()
-        },
-    );
+    let leave = step(&mut state, &ConsumerGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: "m2".into(),
+        member_epoch: -1,
+        ..Default::default()
+    });
     check!(
         leave.pending
             == PendingRecords {
@@ -922,16 +910,13 @@ fn a_leave_bumps_the_epoch_and_the_next_heartbeat_assigns() {
     check!((state.group_epoch, state.target.epoch) == (4, 3));
 
     let m1_epoch = state.members["m1"].member_epoch;
-    let next = step(
-        &mut state,
-        &ConsumerGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: "m1".into(),
-            member_epoch: m1_epoch,
-            rebalance_timeout_ms: -1,
-            ..Default::default()
-        },
-    );
+    let next = step(&mut state, &ConsumerGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: "m1".into(),
+        member_epoch: m1_epoch,
+        rebalance_timeout_ms: -1,
+        ..Default::default()
+    });
     check!(state.target.epoch == 4);
     check!(state.target.per_member["m1"][&topic_id] == vec![0, 1]);
     check!(next.pending.group_metadata == None);
@@ -989,17 +974,14 @@ async fn failed_upgrade_append_keeps_the_atomic_batch_unpublished() {
     log.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
 
-    let response = consumer_request(
-        &handle,
-        ConsumerGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: "native".into(),
-            member_epoch: 0,
-            subscribed_topic_names: Some(vec!["t".into()]),
-            rebalance_timeout_ms: 60_000,
-            ..Default::default()
-        },
-    )
+    let response = consumer_request(&handle, ConsumerGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: "native".into(),
+        member_epoch: 0,
+        subscribed_topic_names: Some(vec!["t".into()]),
+        rebalance_timeout_ms: 60_000,
+        ..Default::default()
+    })
     .await;
     check!(response.error_code == codes::COORDINATOR_LOAD_IN_PROGRESS);
     assert!(log.batches().await.is_empty());
@@ -1135,18 +1117,15 @@ async fn a_heartbeat_replaces_or_upgrades_a_classic_group_as_kafka_does() {
             )),
         );
         let handle = coord.find("g").expect("seeded classic actor");
-        let response = consumer_request(
-            &handle,
-            ConsumerGroupHeartbeatRequest {
-                group_id: "g".into(),
-                member_id: "native".into(),
-                member_epoch: epoch,
-                subscribed_topic_names: Some(vec!["t".into()]),
-                rebalance_timeout_ms: 60_000,
-                topic_partitions: Some(vec![]),
-                ..Default::default()
-            },
-        )
+        let response = consumer_request(&handle, ConsumerGroupHeartbeatRequest {
+            group_id: "g".into(),
+            member_id: "native".into(),
+            member_epoch: epoch,
+            subscribed_topic_names: Some(vec!["t".into()]),
+            rebalance_timeout_ms: 60_000,
+            topic_partitions: Some(vec![]),
+            ..Default::default()
+        })
         .await;
         let got = (
             response.error_code,

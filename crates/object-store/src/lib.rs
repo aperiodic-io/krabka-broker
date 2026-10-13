@@ -39,21 +39,23 @@ mod worm;
 pub use archive_args::{
     ArchiveArgs, ArchiveArgsError, DEFAULT_S3_REGION, normalize_prefix, prefixed_key,
 };
-pub use build::build_object_store;
-pub use config::{
-    DEFAULT_CONNECT_TIMEOUT, DEFAULT_MAX_RETRIES, DEFAULT_MULTIPART_CHUNK_SIZE,
-    DEFAULT_MULTIPART_THRESHOLD, DEFAULT_REQUEST_TIMEOUT, DEFAULT_RETRY_TIMEOUT, GcsConfig,
-    ObjectStoreConfig, S3Config,
-};
-pub use error::ObjectStoreError;
 #[cfg(not(target_family = "wasm"))]
 pub use multipart::{IncompleteMultipartUpload, list_s3_multipart_uploads};
-pub use ops::{ObjectOps, ObjectStoreClient, PutMode, PutOutcome, PutRequest};
-pub use read::read_capped;
 #[cfg(target_family = "wasm")]
 pub use unavailable::{verify_gcs_worm_bucket, verify_s3_worm_bucket};
 #[cfg(not(target_family = "wasm"))]
 pub use worm::{verify_gcs_worm_bucket, verify_s3_worm_bucket};
+pub use {
+    build::build_object_store,
+    config::{
+        DEFAULT_CONNECT_TIMEOUT, DEFAULT_MAX_RETRIES, DEFAULT_MULTIPART_CHUNK_SIZE,
+        DEFAULT_MULTIPART_THRESHOLD, DEFAULT_REQUEST_TIMEOUT, DEFAULT_RETRY_TIMEOUT, GcsConfig,
+        ObjectStoreConfig, S3Config,
+    },
+    error::ObjectStoreError,
+    ops::{ObjectOps, ObjectStoreClient, PutMode, PutOutcome, PutRequest},
+    read::read_capped,
+};
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod test_support;

@@ -6,13 +6,14 @@
 //! timeout that node ids stagger, so ties break deterministically and elections
 //! converge.
 
-use krabka_units::prelude::{Time, TimeExt as _, millis};
-
-use super::log::SimLog;
-use crate::{
-    core::QuorumStateMachine,
-    event::Event,
-    types::{Epoch, NodeId, SimInstant},
+use {
+    super::log::SimLog,
+    crate::{
+        core::QuorumStateMachine,
+        event::Event,
+        types::{Epoch, NodeId, SimInstant},
+    },
+    krabka_units::prelude::{Time, TimeExt as _, millis},
 };
 
 /// A message in flight on the bus: a destination node and the event it will
@@ -81,9 +82,7 @@ pub(super) use crate::simulation_support::voter_set as make_voter_set;
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn election_timeouts_land_on_whole_staggered_milliseconds() {

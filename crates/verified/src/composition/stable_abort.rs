@@ -1,15 +1,17 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::restored_aborts::{
     restored_abort_index_valid, wire_abort_from_source, wire_aborts_cover_source,
 };
-use super::{
-    FetchWatermarks, RestoreAbortedTxn, RestoreSegmentExtent, committed_fetch_excludes_unstable,
-    restored_abort_sources_cover_committed_fetch, truncation_frontier,
-};
 #[cfg(creusot)]
 use crate::transaction::pending_starts_bound_fetch;
+use {
+    super::{
+        FetchWatermarks, RestoreAbortedTxn, RestoreSegmentExtent,
+        committed_fetch_excludes_unstable, restored_abort_sources_cover_committed_fetch,
+        truncation_frontier,
+    },
+    creusot_std::prelude::*,
+};
 
 type StableAbortFetch = (i64, i64, Vec<(i64, i64)>);
 

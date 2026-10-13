@@ -4,18 +4,20 @@
 //! A model that no configuration can break is not evidence, so the broken
 //! controller and the runs that expose it stay together in one file.
 
-use std::collections::HashSet;
-
-use krabka_metadata::PartitionRecord;
-use krabka_raft::NodeId;
-
-use super::{
-    config::StretchModel,
-    election::production_elect,
-    runner::{PINNED_UNIQUE_STATES_RED_LEGACY_ELECT, PINNED_UNIQUE_STATES_RED_MIN_INSYNC_ONE, run},
-};
-use crate::{
-    config_keys::RecoveryStrategy, elr::state::PartitionElr, leader_election::FailoverDecision,
+use {
+    super::{
+        config::StretchModel,
+        election::production_elect,
+        runner::{
+            PINNED_UNIQUE_STATES_RED_LEGACY_ELECT, PINNED_UNIQUE_STATES_RED_MIN_INSYNC_ONE, run,
+        },
+    },
+    crate::{
+        config_keys::RecoveryStrategy, elr::state::PartitionElr, leader_election::FailoverDecision,
+    },
+    krabka_metadata::PartitionRecord,
+    krabka_raft::NodeId,
+    std::collections::HashSet,
 };
 
 /// The pre-witness controller decision. It is the same shape as

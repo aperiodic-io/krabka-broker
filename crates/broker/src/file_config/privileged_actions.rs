@@ -5,19 +5,20 @@
 //! demanded signature needs an operator key to verify it, and that key set is
 //! provisioned once for both the freeze path and the break-glass path.
 
-use krabka_units::Time;
-
-use super::{
-    FileConfigError,
-    validate::{invalid_runtime_value, positive_time},
-};
-use crate::{
-    break_glass::{ALL_ACTIONS, action_from_name, action_name},
-    config::{
-        BackgroundUncleanRecovery, BrokerConfig, DEFAULT_BREAK_GLASS_SIGNED_ACTIONS,
-        MIN_BREAK_GLASS_REQUIRED_APPROVALS,
+use {
+    super::{
+        FileConfigError,
+        validate::{invalid_runtime_value, positive_time},
     },
-    operator_keys::{OperatorKeyEntry, OperatorKeys},
+    crate::{
+        break_glass::{ALL_ACTIONS, action_from_name, action_name},
+        config::{
+            BackgroundUncleanRecovery, BrokerConfig, DEFAULT_BREAK_GLASS_SIGNED_ACTIONS,
+            MIN_BREAK_GLASS_REQUIRED_APPROVALS,
+        },
+        operator_keys::{OperatorKeyEntry, OperatorKeys},
+    },
+    krabka_units::Time,
 };
 
 /// TOML shape of one `[[operator_keys]]` entry. Maps to

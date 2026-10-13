@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use crate::retention::remote_prefix_charge;
-use crate::retention::{
-    RemoteRetentionSegment, remote_retention_floor_step, remote_retention_prefix,
+use {
+    crate::retention::{
+        RemoteRetentionSegment, remote_retention_floor_step, remote_retention_prefix,
+    },
+    creusot_std::prelude::*,
 };
 
 type RemoteDeletion = (Vec<RemoteRetentionSegment>, usize, usize, i64);

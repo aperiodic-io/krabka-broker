@@ -5,14 +5,15 @@
 //! that wrote it, so a fetch can report the aborted transactions that
 //! intersect the offsets it returns.
 
-use krabka_verified::remote_txn::{RemoteTxnOverlapDecision, remote_txn_overlap_decision};
-use zerocopy::{
-    BigEndian, FromBytes, Immutable, KnownLayout, Unaligned,
-    byteorder::{I16, I64},
+use {
+    super::{LogOffset, corrupt_index},
+    crate::error::RemoteStorageError,
+    krabka_verified::remote_txn::{RemoteTxnOverlapDecision, remote_txn_overlap_decision},
+    zerocopy::{
+        BigEndian, FromBytes, Immutable, KnownLayout, Unaligned,
+        byteorder::{I16, I64},
+    },
 };
-
-use super::{LogOffset, corrupt_index};
-use crate::error::RemoteStorageError;
 
 /// The only aborted-transaction record version Kafka writes or accepts.
 const SUPPORTED_VERSION: i16 = 0;
@@ -106,10 +107,11 @@ pub fn txn_overlaps(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_ids::{Offset, ProducerId};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_ids::{Offset, ProducerId},
+    };
 
     #[derive(Clone, Copy)]
     struct TxnIndexVersion(i16);

@@ -23,20 +23,21 @@
 //! same window by `accept::handshake_within_idle_window`, so a peer that opens
 //! the socket and never negotiates is reclaimed too.
 
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_util::codec::Framed;
-
-use super::{
-    RequestByteBudget,
-    receive::{ReceiveError, RequestFrame, receive_request},
-};
-use crate::{
-    config::BrokerConfig,
-    metrics::BrokerMetrics,
-    network::{
-        auth::ConnectionAuth,
-        codec::{KafkaCodec, is_invalid_receive},
+use {
+    super::{
+        RequestByteBudget,
+        receive::{ReceiveError, RequestFrame, receive_request},
     },
+    crate::{
+        config::BrokerConfig,
+        metrics::BrokerMetrics,
+        network::{
+            auth::ConnectionAuth,
+            codec::{KafkaCodec, is_invalid_receive},
+        },
+    },
+    tokio::io::{AsyncRead, AsyncWrite},
+    tokio_util::codec::Framed,
 };
 
 /// Process-lifetime ANONYMOUS principal.
@@ -140,9 +141,7 @@ impl RequestLimits {
     }
 
     /// The limit of an authenticated connection.
-    pub(super) fn request_max(self) -> usize {
-        self.request_max
-    }
+    pub(super) fn request_max(self) -> usize { self.request_max }
 }
 
 /// What the connection is held to while it waits for its next frame: the
@@ -240,10 +239,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::network::test_support::assert_authentication_event;
+    use {super::*, crate::network::test_support::assert_authentication_event, assert2::assert};
 
     /// The mTLS binding is the one authentication with no SASL frame behind
     /// it, so `initial_connection_auth` is the only place that can record it.

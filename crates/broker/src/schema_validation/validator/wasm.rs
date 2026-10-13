@@ -6,9 +6,10 @@
 //! constructed. A topic that turns validation on therefore fails closed, as it
 //! does on a native broker with no `[schema_registry]` section.
 
-use krabka_units::Time;
-
-use crate::{metrics::BrokerMetrics, schema_validation::ValidationMode};
+use {
+    crate::{metrics::BrokerMetrics, schema_validation::ValidationMode},
+    krabka_units::Time,
+};
 
 mod reject;
 
@@ -40,9 +41,7 @@ pub struct SchemaValidator {
 }
 
 impl std::fmt::Debug for SchemaValidator {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.never {}
-    }
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { match self.never {} }
 }
 
 impl SchemaValidator {

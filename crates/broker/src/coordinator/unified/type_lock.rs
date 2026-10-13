@@ -93,10 +93,7 @@ impl GroupCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::test_support::make_coord;
+    use {super::*, crate::coordinator::unified::test_support::make_coord, assert2::assert};
 
     #[test]
     fn mark_share_locks_group_type() {

@@ -1,17 +1,18 @@
 //! The client and wire fixtures that more than one `ListOffsets` test module
 //! needs, so each of them drives the handler through the same request shape.
 
-use assert2::assert;
-use krabka_protocol::owned::{
-    create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
-    list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
-    list_offsets_response::{ListOffsetsPartitionResponse, ListOffsetsResponse},
-};
-
-use super::sentinels::UNKNOWN_EPOCH;
-use crate::{
-    broker::BrokerHandle, codes, config::RemoteStorageBackend,
-    test_support::start_broker_no_audit_with,
+use {
+    super::sentinels::UNKNOWN_EPOCH,
+    crate::{
+        broker::BrokerHandle, codes, config::RemoteStorageBackend,
+        test_support::start_broker_no_audit_with,
+    },
+    assert2::assert,
+    krabka_protocol::owned::{
+        create_topics_request::{CreatableTopic, CreatableTopicConfig, CreateTopicsRequest},
+        list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
+        list_offsets_response::{ListOffsetsPartitionResponse, ListOffsetsResponse},
+    },
 };
 
 crate::test_support::wire_helpers!(

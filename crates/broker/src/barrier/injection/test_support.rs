@@ -4,15 +4,17 @@
 //! source over a fixed image are each needed by more than one of the test
 //! modules under this module, so the builders live in one file.
 
-use std::sync::Arc;
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataRecord;
-use krabka_units::millis;
-
-use crate::{
-    barrier::{config::BarrierConfig, marker::BarrierMarker, state::TargetPartition, test_support},
-    metadata_source::MetadataSource,
+use {
+    crate::{
+        barrier::{
+            config::BarrierConfig, marker::BarrierMarker, state::TargetPartition, test_support,
+        },
+        metadata_source::MetadataSource,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataRecord,
+    krabka_units::millis,
+    std::sync::Arc,
 };
 
 pub(super) fn at(topic: &str, partition: i32) -> TargetPartition {

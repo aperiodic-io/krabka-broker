@@ -4,11 +4,12 @@
 //! It is the only part of the handler that consults the authorizer per topic,
 //! so it sits apart from the acquisition machinery.
 
-use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
-
-use crate::{
-    broker::Broker,
-    handlers::{RequestContext, acl_denied},
+use {
+    crate::{
+        broker::Broker,
+        handlers::{RequestContext, acl_denied},
+    },
+    krabka_metadata::{AclOperation, MetadataImage, ResourceType},
 };
 
 /// Reports whether the per-topic `Read` ACL denies this row.

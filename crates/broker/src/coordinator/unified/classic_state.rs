@@ -70,10 +70,7 @@ impl OffsetEntry {
 
 #[cfg(test)]
 mod offset_entry_tests {
-    use assert2::check;
-    use krabka_log::Offset;
-
-    use super::*;
+    use {super::*, assert2::check, krabka_log::Offset};
 
     fn entry(commit_timestamp_ms: i64, expire_timestamp_ms: Option<i64>) -> OffsetEntry {
         OffsetEntry {

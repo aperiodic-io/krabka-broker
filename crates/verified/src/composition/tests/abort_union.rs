@@ -1,7 +1,8 @@
-use std::{collections::BTreeSet, vec};
-
-use super::*;
-use crate::transaction::unique_aborted_transaction_rows;
+use {
+    super::*,
+    crate::transaction::unique_aborted_transaction_rows,
+    std::{collections::BTreeSet, vec},
+};
 
 pub(super) fn visible_rows(
     remote: &[RestoreAbortedTxn],

@@ -6,8 +6,10 @@
 //! reordered delivery, and idempotent handling of a duplicated message.
 //! `krabka-docgen` renders the traces into the sequence-diagram slideshow.
 
-use super::{Sim, trace::ScenarioTrace};
-use crate::types::NodeId;
+use {
+    super::{Sim, trace::ScenarioTrace},
+    crate::types::NodeId,
+};
 
 /// Run the three curated, deterministic failure scenarios on a 3-voter cluster
 /// and return their recorded traces.

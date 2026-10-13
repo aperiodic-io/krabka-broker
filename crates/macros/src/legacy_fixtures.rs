@@ -1,8 +1,9 @@
 //! The fixed legacy wire input used by decompression-policy regressions.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::fixtures::named_root;
+use {
+    crate::fixtures::named_root,
+    moxy::{ast::ParseError, token::TokenStream},
+};
 
 pub(crate) fn policy(input: TokenStream) -> Result<TokenStream, ParseError> {
     let (name, root) = named_root(input)?;

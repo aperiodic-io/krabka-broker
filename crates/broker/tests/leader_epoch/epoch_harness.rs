@@ -6,16 +6,17 @@
 //! what they do to its epoch afterwards, so the setup lives here instead of
 //! being repeated beside each of them.
 
-use bytes::Bytes;
-use krabka_broker::BrokerHandle;
-use krabka_protocol::records::RecordBatch;
-
 pub use crate::support::boot_single;
 pub(crate) use crate::support::topic_id_for;
-use crate::support::{
-    client::connect_client,
-    records::value_record,
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        client::connect_client,
+        records::value_record,
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    bytes::Bytes,
+    krabka_broker::BrokerHandle,
+    krabka_protocol::records::RecordBatch,
 };
 
 pub(crate) async fn create_topic(broker: &BrokerHandle, bootstrap: &str, name: &str) {

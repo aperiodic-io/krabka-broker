@@ -51,18 +51,18 @@ pub(crate) fn resolve_delivery_max_delay(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::assert;
-    use krabka_log::LogConfig;
-    use krabka_units::millis;
-
-    use super::{
+    use {
         super::{
-            log_config::apply_to_log_config,
-            validation::{is_recognized, validate_topic_config},
+            super::{
+                log_config::apply_to_log_config,
+                validation::{is_recognized, validate_topic_config},
+            },
+            *,
         },
-        *,
+        assert2::assert,
+        krabka_log::LogConfig,
+        krabka_units::millis,
+        std::collections::BTreeMap,
     };
 
     #[test]
@@ -159,8 +159,10 @@ mod tests {
 
     #[test]
     fn delivery_settings_resolve_topic_overrides_over_defaults() {
-        use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
-        use uuid::Uuid;
+        use {
+            krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
+            uuid::Uuid,
+        };
 
         let mut image = MetadataImage::new(Uuid::nil());
         assert!(resolve_delivery_max_delay(&image, "t") == Some(millis(604_800_000)));
@@ -181,8 +183,10 @@ mod tests {
 
     #[test]
     fn corrupt_delivery_settings_resolve_to_their_defaults() {
-        use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
-        use uuid::Uuid;
+        use {
+            krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
+            uuid::Uuid,
+        };
 
         let cases = ["soon", "-5", ""];
         for value in cases {

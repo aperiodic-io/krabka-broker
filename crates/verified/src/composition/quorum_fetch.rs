@@ -1,7 +1,8 @@
-use creusot_std::prelude::*;
-
-use super::{FetchWatermarks, WalFetchSupport, fetch_visibility, wal_voter_set_valid};
-use crate::consensus::{majority_size, recompute_high_watermark};
+use {
+    super::{FetchWatermarks, WalFetchSupport, fetch_visibility, wal_voter_set_valid},
+    crate::consensus::{majority_size, recompute_high_watermark},
+    creusot_std::prelude::*,
+};
 
 /// A newly advanced consensus watermark gives every consumer fetch limit
 /// quorum support. An inherited, unchanged watermark needs prior-epoch evidence.

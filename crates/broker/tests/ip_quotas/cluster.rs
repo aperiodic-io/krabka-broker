@@ -7,16 +7,14 @@
 //! PLAINTEXT listener started with explicit `max_connections` and
 //! `max_connections_per_ip` values.
 
-use std::net::SocketAddr;
-
-use krabka_broker::BrokerHandle;
-use tempfile::TempDir;
-
-use crate::support::sasl::start_plaintext_configured;
 /// Starts a single-broker PLAINTEXT cluster, with no SASL. Returns
 /// `(handle, _dir, addr)`.
 pub use crate::support::sasl::start_single_broker_plaintext;
 pub use crate::support::sasl::start_single_broker_sasl_plaintext_with_users;
+use {
+    crate::support::sasl::start_plaintext_configured, krabka_broker::BrokerHandle,
+    std::net::SocketAddr, tempfile::TempDir,
+};
 
 /// Starts a single-broker PLAINTEXT cluster with explicit connection caps,
 /// `max.connections` and `max.connections.per.ip`. Returns

@@ -1,11 +1,13 @@
 //! What `#[derive(EnumStr)]` names, parses, lists and encodes.
 
-use assert2::assert;
-use krabka_macros::EnumStr;
-use prometheus_client::{
-    encoding::{EncodeLabelSet, text::encode},
-    metrics::{counter::Counter, family::Family},
-    registry::Registry,
+use {
+    assert2::assert,
+    krabka_macros::EnumStr,
+    prometheus_client::{
+        encoding::{EncodeLabelSet, text::encode},
+        metrics::{counter::Counter, family::Family},
+        registry::Registry,
+    },
 };
 
 /// Snake-cased names, one override, one alias, a renamed parser, `ALL` and a

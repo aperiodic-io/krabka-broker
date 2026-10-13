@@ -8,23 +8,23 @@
 //! The third replays one `__transaction_state` partition, tombstones
 //! included, for the load that follows an election.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_protocol::records::{Record, RecordBatch};
-use tokio::sync::Mutex;
-
-use super::{TxnCoordinator, pid_index::RecoveredTransactions};
-use crate::{
-    error::BrokerError,
-    partition::Partition,
-    txn::{
-        log_record::{decode_key, decode_value, encode_key, encode_value},
-        state::TxnEntry,
-        version::TxnVersion,
+use {
+    super::{TxnCoordinator, pid_index::RecoveredTransactions},
+    crate::{
+        error::BrokerError,
+        partition::Partition,
+        txn::{
+            log_record::{decode_key, decode_value, encode_key, encode_value},
+            state::TxnEntry,
+            version::TxnVersion,
+        },
     },
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_protocol::records::{Record, RecordBatch},
+    std::sync::Arc,
+    tokio::sync::Mutex,
 };
 
 impl TxnCoordinator {
@@ -365,17 +365,18 @@ fn recovery_next_offset(base: i64, last_delta: i32) -> Result<Offset, BrokerErro
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_ids::PartitionIndex;
-    use krabka_log::ProducerId;
-
-    use super::{Offset, recovery_next_offset};
-    use crate::{
-        error::BrokerError,
-        txn::{
-            bootstrap, coordinator::test_support::live_coordinator, state::TxnEntry,
-            version::TxnVersion,
+    use {
+        super::{Offset, recovery_next_offset},
+        crate::{
+            error::BrokerError,
+            txn::{
+                bootstrap, coordinator::test_support::live_coordinator, state::TxnEntry,
+                version::TxnVersion,
+            },
         },
+        assert2::{assert, check},
+        krabka_ids::PartitionIndex,
+        krabka_log::ProducerId,
     };
 
     #[test]
@@ -426,11 +427,12 @@ mod tests {
     /// Kafka's generated readers ignore them.
     #[tokio::test]
     async fn replay_skips_unknown_versions_and_stops_at_the_first_bad_record() {
-        use bytes::Bytes;
-        use krabka_protocol::records::{Record, RecordBatch};
-
-        use super::{RecoveredTransactions, replay_partition};
-        use crate::txn::log_record::{encode_key, encode_value};
+        use {
+            super::{RecoveredTransactions, replay_partition},
+            crate::txn::log_record::{encode_key, encode_value},
+            bytes::Bytes,
+            krabka_protocol::records::{Record, RecordBatch},
+        };
 
         let record = |key: Option<Vec<u8>>, value: Option<Vec<u8>>| RecordBatch {
             records: vec![Record {

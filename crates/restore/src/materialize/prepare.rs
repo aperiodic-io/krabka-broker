@@ -8,18 +8,19 @@
 //! batch folds into the segment's counts. Nothing here touches the log, so a
 //! dry run takes exactly the path a real run takes.
 
-use bytes::{Bytes, BytesMut};
-use krabka_ids::ProducerId;
-use krabka_log::{FilteredBatch, VerbatimBatch, filter_batch};
-use krabka_protocol::records::{
-    Attributes, RecordBatch, RecordBatchBorrowed, RecordBatchHeader, RecordsError,
-    validate_one_v2_batch,
-};
-
-use crate::{
-    args::PartitionRef,
-    bound::{BatchDecision, Predicates, RecordDecision, record_coordinates, timestamp_type},
-    error::RestoreError,
+use {
+    crate::{
+        args::PartitionRef,
+        bound::{BatchDecision, Predicates, RecordDecision, record_coordinates, timestamp_type},
+        error::RestoreError,
+    },
+    bytes::{Bytes, BytesMut},
+    krabka_ids::ProducerId,
+    krabka_log::{FilteredBatch, VerbatimBatch, filter_batch},
+    krabka_protocol::records::{
+        Attributes, RecordBatch, RecordBatchBorrowed, RecordBatchHeader, RecordsError,
+        validate_one_v2_batch,
+    },
 };
 
 /// What one archived batch becomes when it is appended to the target log: the exact bytes the log's zero-copy path needs, or an owned batch for the log's decode-and-append path.
@@ -136,10 +137,10 @@ fn prepare_filtered_batch(
                 last_offset_delta: owned.last_offset_delta,
                 ..rewritten
             };
-            (
-                prepare_owned_batch(rewritten)?,
-                BatchTally::Rewritten { kept, dropped },
-            )
+            (prepare_owned_batch(rewritten)?, BatchTally::Rewritten {
+                kept,
+                dropped,
+            })
         }
         FilteredBatch::Empty => {
             let bare = RecordBatch {
@@ -244,17 +245,18 @@ fn bare_header_batch(header: &RecordBatchHeader) -> RecordBatch {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::{Offset, ProducerId};
-    use krabka_log::{Log, LogConfig};
-    use krabka_protocol::records::{Attributes, Record, TimestampType};
-
-    use super::{
-        BatchTally, Bytes, BytesMut, PartitionRef, Predicates, PrepareBatchSetup, PreparedBatch,
-        RecordBatch, RecordBatchBorrowed, prepare_batch, prepare_owned_batch,
-        validate_one_v2_batch,
+    use {
+        super::{
+            BatchTally, Bytes, BytesMut, PartitionRef, Predicates, PrepareBatchSetup,
+            PreparedBatch, RecordBatch, RecordBatchBorrowed, prepare_batch, prepare_owned_batch,
+            validate_one_v2_batch,
+        },
+        crate::materialize::test_support::args_from,
+        assert2::check,
+        krabka_ids::{Offset, ProducerId},
+        krabka_log::{Log, LogConfig},
+        krabka_protocol::records::{Attributes, Record, TimestampType},
     };
-    use crate::materialize::test_support::args_from;
 
     fn rewrite(records: Vec<Record>) -> RecordBatch {
         RecordBatch {

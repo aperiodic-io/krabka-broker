@@ -8,22 +8,22 @@
 //! private fields below stay in this module so that every one of those
 //! submodules, as a descendant, can reach them.
 
-use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
-    path::PathBuf,
-};
-
-use krabka_ids::{Offset, ProducerId};
-
-use crate::{
-    config::LogConfig,
-    io::LogIo,
-    leader_epoch_checkpoint::LeaderEpochCheckpoint,
-    producer_snapshot::{ProducerBatchMetadata, ProducerSnapshotEntry},
-    segment::Segment,
-    stamp_index::StampIndex,
-    stamp_source::StampSource,
-    txn_index::TxnIndex,
+use {
+    crate::{
+        config::LogConfig,
+        io::LogIo,
+        leader_epoch_checkpoint::LeaderEpochCheckpoint,
+        producer_snapshot::{ProducerBatchMetadata, ProducerSnapshotEntry},
+        segment::Segment,
+        stamp_index::StampIndex,
+        stamp_source::StampSource,
+        txn_index::TxnIndex,
+    },
+    krabka_ids::{Offset, ProducerId},
+    std::{
+        collections::{BTreeMap, HashMap, VecDeque},
+        path::PathBuf,
+    },
 };
 
 mod active_producers;

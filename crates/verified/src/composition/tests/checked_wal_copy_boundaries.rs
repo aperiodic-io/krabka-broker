@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 fn check_two_durable_followers(reported: &[i64], watermarks: FetchWatermarks) {
     assert!(
@@ -138,17 +136,10 @@ fn installed_wal_fetch_support_boundaries() {
     );
     check_two_durable_followers(&[0, i64::MAX, i64::MAX], w);
     assert!(
-        installed_wal_quorum_bounds_fetch(
-            &[1, 2, 3],
-            &[3, 8, 10],
-            1,
-            3,
-            0,
-            FetchWatermarks {
-                lso: 5,
-                deliverable: 6,
-                ..w
-            }
-        ) == Some((8, 5, std::vec![(2, 8), (3, 10)]))
+        installed_wal_quorum_bounds_fetch(&[1, 2, 3], &[3, 8, 10], 1, 3, 0, FetchWatermarks {
+            lso: 5,
+            deliverable: 6,
+            ..w
+        }) == Some((8, 5, std::vec![(2, 8), (3, 10)]))
     );
 }

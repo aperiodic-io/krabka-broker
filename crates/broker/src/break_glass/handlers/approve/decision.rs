@@ -5,14 +5,16 @@
 //! the stored record, this broker's policy, its operator-key trust set, and
 //! the attempt, so a caller can replay it and reach the same record.
 
-use krabka_metadata::{BreakGlassApproval, BreakGlassProposalRecord};
-
-use crate::{
-    break_glass::{
-        action_name, config::BreakGlassPolicy, handlers::Refusal, signing::approval_signing_bytes,
+use {
+    crate::{
+        break_glass::{
+            action_name, config::BreakGlassPolicy, handlers::Refusal,
+            signing::approval_signing_bytes,
+        },
+        codes,
+        operator_keys::OperatorKeys,
     },
-    codes,
-    operator_keys::OperatorKeys,
+    krabka_metadata::{BreakGlassApproval, BreakGlassProposalRecord},
 };
 
 /// What one caller asked to do to one proposal.

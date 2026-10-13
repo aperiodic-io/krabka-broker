@@ -46,9 +46,7 @@ pub fn remote_txn_overlap_decision(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn overlap_is_inclusive_and_invalid_intervals_fail_closed() {

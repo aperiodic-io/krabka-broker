@@ -11,15 +11,11 @@
 //! reads the log instead: `DescribeProducers`, and the log cleaner, which
 //! keeps the last record of each producer.
 
-use std::sync::Arc;
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use krabka_verified::increment_sequence;
-use tokio::sync::Mutex;
-
-use crate::partition::LogOffset;
+use {
+    crate::partition::LogOffset, dashmap::DashMap, krabka_ids::PartitionIndex,
+    krabka_log::ProducerId, krabka_verified::increment_sequence, std::sync::Arc,
+    tokio::sync::Mutex,
+};
 
 #[cfg(test)]
 mod completed_commit;
@@ -132,19 +128,16 @@ impl ProducerState {
         let current_txn_first_offset = existing
             .and_then(|entry| entry.current_txn_first_offset)
             .or_else(|| is_transactional.then_some(base_offset));
-        s.entries.insert(
-            ProducerId(producer_id),
-            ProducerEntry {
-                epoch: producer_epoch,
-                last_sequence,
-                last_offset,
-                base_offset,
-                last_timestamp,
-                entry_timestamp: last_timestamp,
-                current_txn_first_offset,
-                earlier,
-            },
-        );
+        s.entries.insert(ProducerId(producer_id), ProducerEntry {
+            epoch: producer_epoch,
+            last_sequence,
+            last_offset,
+            base_offset,
+            last_timestamp,
+            entry_timestamp: last_timestamp,
+            current_txn_first_offset,
+            earlier,
+        });
     }
 
     /// Drop idempotent-producer entries whose last accepted batch was

@@ -8,13 +8,14 @@
 //! bytes received so far. Any mismatch or a changed snapshot id aborts the
 //! transfer, so the engine restarts cleanly against the current leader.
 
-use bytes::{Bytes, BytesMut};
-use krabka_macros::RefinedNewtype;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _, gibibytes};
-use krabka_verified::{SnapshotChunkDecision, snapshot_chunk_admission};
-use refined_type::rule::MinMaxU64;
-
-use crate::types::NodeId;
+use {
+    crate::types::NodeId,
+    bytes::{Bytes, BytesMut},
+    krabka_macros::RefinedNewtype,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _, gibibytes},
+    krabka_verified::{SnapshotChunkDecision, snapshot_chunk_admission},
+    refined_type::rule::MinMaxU64,
+};
 
 /// Snapshot identity: (`end_offset` exclusive, epoch), as KIP-630 `SnapshotId`.
 pub type SnapshotId = (i64, i32);
@@ -92,9 +93,7 @@ impl SnapshotFetchState {
 
     /// The byte position to request next, that is, the bytes received so far.
     #[must_use]
-    pub fn next_position(&self) -> i64 {
-        i64::try_from(self.buf.len()).unwrap_or(i64::MAX)
-    }
+    pub fn next_position(&self) -> i64 { i64::try_from(self.buf.len()).unwrap_or(i64::MAX) }
 
     /// Feed one response chunk.
     ///
@@ -140,10 +139,7 @@ impl SnapshotFetchState {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::prelude::bytes;
-
-    use super::*;
+    use {super::*, assert2::assert, krabka_units::prelude::bytes};
 
     #[test]
     fn snapshot_fetch_max_accepts_only_whole_bytes_within_the_security_ceiling() {

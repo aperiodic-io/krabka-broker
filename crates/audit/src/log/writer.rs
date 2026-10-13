@@ -7,22 +7,22 @@
 //! that commits the chain head. The degraded spool-and-replay path lives in
 //! `super::spool_mode`.
 
-use std::sync::Arc;
-
-use krabka_units::prelude::{Time, TimeExt as _};
-use qubit_clock::Timer;
-
-use super::handle::AuditReceiver;
-use crate::{
-    chain::ChainState,
-    checkpoint::Checkpoint,
-    event::AuditEvent,
-    ids::{EpochMs, Seq},
-    ocsf::ProductInfo,
-    signing::FileEd25519Signer,
-    sink::{AuditError, AuditRecord, AuditSink},
-    spool::{PendingLosses, Spool},
-    stats::AuditStats,
+use {
+    super::handle::AuditReceiver,
+    crate::{
+        chain::ChainState,
+        checkpoint::Checkpoint,
+        event::AuditEvent,
+        ids::{EpochMs, Seq},
+        ocsf::ProductInfo,
+        signing::FileEd25519Signer,
+        sink::{AuditError, AuditRecord, AuditSink},
+        spool::{PendingLosses, Spool},
+        stats::AuditStats,
+    },
+    krabka_units::prelude::{Time, TimeExt as _},
+    qubit_clock::Timer,
+    std::sync::Arc,
 };
 
 /// Construction parameters for [`AuditWriter`].
@@ -328,27 +328,28 @@ i64::MAX
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use qubit_clock::{
-        MonotonicClock, MonotonicInstant, StdMonotonicClock, TimeError, TimerFuture,
-    };
-
-    use super::*;
-    use crate::{
-        NodeId,
-        chain::{GENESIS_HEAD, chain_hash, to_hex},
-        event::AuditEventClass,
-        log::{
-            AuditLog,
-            test_support::{
-                AuditEventCount, CheckpointFrequency, CheckpointSetup,
-                FailableSink as TestFailableSink, ROOMY_CAP, await_until, failed_sink_stats,
-                finish_lifecycle_writer, finish_writer, header, life, params, quiet_params,
-                roomy_spool, spawn_writer, test_signer,
+    use {
+        super::*,
+        crate::{
+            NodeId,
+            chain::{GENESIS_HEAD, chain_hash, to_hex},
+            event::AuditEventClass,
+            log::{
+                AuditLog,
+                test_support::{
+                    AuditEventCount, CheckpointFrequency, CheckpointSetup,
+                    FailableSink as TestFailableSink, ROOMY_CAP, await_until, failed_sink_stats,
+                    finish_lifecycle_writer, finish_writer, header, life, params, quiet_params,
+                    roomy_spool, spawn_writer, test_signer,
+                },
             },
+            sink::{AuditSink, MemorySink},
+            spool::PendingLosses,
         },
-        sink::{AuditSink, MemorySink},
-        spool::PendingLosses,
+        assert2::check,
+        qubit_clock::{
+            MonotonicClock, MonotonicInstant, StdMonotonicClock, TimeError, TimerFuture,
+        },
     };
 
     #[derive(
@@ -414,17 +415,14 @@ mod tests {
     fn signed_writer(setup: SignedWriterSetup) -> SignedWriterFixture {
         let (signer, public_key) = test_signer();
         let directory = tempfile::tempdir().unwrap();
-        let writer = memory_writer(
-            directory.path(),
-            MemoryWriterSetup {
-                capacity: setup.capacity,
-                checkpoints: CheckpointSetup {
-                    signer: Some(signer),
-                    frequency: setup.frequency,
-                    ..Default::default()
-                },
+        let writer = memory_writer(directory.path(), MemoryWriterSetup {
+            capacity: setup.capacity,
+            checkpoints: CheckpointSetup {
+                signer: Some(signer),
+                frequency: setup.frequency,
+                ..Default::default()
             },
-        );
+        });
         (public_key, directory, writer)
     }
 
@@ -556,9 +554,7 @@ mod tests {
     struct DeadTimer(StdMonotonicClock);
 
     impl Timer for DeadTimer {
-        fn clock(&self) -> &dyn MonotonicClock {
-            &self.0
-        }
+        fn clock(&self) -> &dyn MonotonicClock { &self.0 }
 
         fn at(&self, _deadline: MonotonicInstant) -> Result<TimerFuture, TimeError> {
             Err(TimeError::InstantOverflow)

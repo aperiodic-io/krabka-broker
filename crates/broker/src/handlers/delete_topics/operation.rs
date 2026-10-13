@@ -1,32 +1,32 @@
 //! A generation-preserving topic deletion planned from each guarded image.
 
-use std::{future::Future, sync::Arc};
-
-use krabka_audit::PrivilegedPhase;
-use krabka_metadata::{BreakGlassAction, MetadataImage, MetadataRecord};
-use krabka_protocol::{
-    owned::delete_topics_response::DeletableTopicResult, primitives::uuid::Uuid as WireUuid,
-};
-use krabka_raft::RaftError;
-use krabka_verified::FreezeMutationKind;
-use uuid::Uuid;
-
-use super::{
-    audit::{audit_deleted_topics, deleted_topic_resources},
-    authz::{Admission, admit_row, topic_access},
-    gate::{consumed_proposal_id, delete_topic_records},
-    teardown::LocalDeletion,
-    tiering::{spawn_remote_cascades, tiered_partitions},
-    wire::{delete_topic_result, refused_topic_result},
-};
-use crate::{
-    break_glass::handlers::audit::{GatedTransition, audit_transition, require_transition},
-    broker::Broker,
-    codes,
-    freeze::resolve::{FreezeMutationResolution, FreezeVerdict, resolve_freeze_mutation},
-    handlers::{RequestContext, partition_transition::audit_refusal},
-    remote_log_manager::ArchiveMode,
-    time_util::now_ms,
+use {
+    super::{
+        audit::{audit_deleted_topics, deleted_topic_resources},
+        authz::{Admission, admit_row, topic_access},
+        gate::{consumed_proposal_id, delete_topic_records},
+        teardown::LocalDeletion,
+        tiering::{spawn_remote_cascades, tiered_partitions},
+        wire::{delete_topic_result, refused_topic_result},
+    },
+    crate::{
+        break_glass::handlers::audit::{GatedTransition, audit_transition, require_transition},
+        broker::Broker,
+        codes,
+        freeze::resolve::{FreezeMutationResolution, FreezeVerdict, resolve_freeze_mutation},
+        handlers::{RequestContext, partition_transition::audit_refusal},
+        remote_log_manager::ArchiveMode,
+        time_util::now_ms,
+    },
+    krabka_audit::PrivilegedPhase,
+    krabka_metadata::{BreakGlassAction, MetadataImage, MetadataRecord},
+    krabka_protocol::{
+        owned::delete_topics_response::DeletableTopicResult, primitives::uuid::Uuid as WireUuid,
+    },
+    krabka_raft::RaftError,
+    krabka_verified::FreezeMutationKind,
+    std::{future::Future, sync::Arc},
+    uuid::Uuid,
 };
 
 /// Reject disappearance or recreation without retargeting the deletion.
@@ -152,18 +152,13 @@ fn completion_audit(
     move || {
         // Both audit helpers consume only principal and source endpoint.
         let ctx = RequestContext::new(&principal, &peer, None, "", false, "");
-        audit_transition(
-            &audit,
-            &config,
-            &ctx,
-            &GatedTransition {
-                action: BreakGlassAction::DeleteTopic,
-                target: &name,
-                phase: PrivilegedPhase::Applied,
-                proposal_id,
-                reason: "topic deleted",
-            },
-        );
+        audit_transition(&audit, &config, &ctx, &GatedTransition {
+            action: BreakGlassAction::DeleteTopic,
+            target: &name,
+            phase: PrivilegedPhase::Applied,
+            proposal_id,
+            reason: "topic deleted",
+        });
         let row = delete_topic_result(Some(name), topic_id, codes::NONE);
         audit_deleted_topics(
             &audit,
@@ -257,32 +252,29 @@ async fn deletion_records(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::atomic::{AtomicBool, Ordering},
-        time::Duration,
-    };
-
-    use assert2::assert;
-    use krabka_metadata::{BrokerConfigRecord, TopicRecord};
-    use krabka_raft::{NodeId, SubmitChangeResult};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        config::BreakGlassConfig, handlers::forward_to_controller::guarded_operation_on_source,
-        metadata_source::MetadataSource, test_support::FakeMetadataSource,
+    use {
+        super::*,
+        crate::{
+            config::BreakGlassConfig, handlers::forward_to_controller::guarded_operation_on_source,
+            metadata_source::MetadataSource, test_support::FakeMetadataSource,
+        },
+        assert2::assert,
+        krabka_metadata::{BrokerConfigRecord, TopicRecord},
+        krabka_raft::{NodeId, SubmitChangeResult},
+        std::{
+            sync::atomic::{AtomicBool, Ordering},
+            time::Duration,
+        },
+        uuid::Uuid,
     };
 
     fn topic_image(id: u128) -> MetadataImage {
-        MetadataImage::from_records(
-            Uuid::nil(),
-            &[MetadataRecord::V1Topic(TopicRecord {
-                name: "orders".into(),
-                topic_id: Uuid::from_u128(id),
-                partitions: 1,
-                replication_factor: 1,
-            })],
-        )
+        MetadataImage::from_records(Uuid::nil(), &[MetadataRecord::V1Topic(TopicRecord {
+            name: "orders".into(),
+            topic_id: Uuid::from_u128(id),
+            partitions: 1,
+            replication_factor: 1,
+        })])
     }
 
     #[tokio::test]

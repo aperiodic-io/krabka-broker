@@ -8,15 +8,16 @@
 //! arrives, or to drain the parked followers. `read_sync_result` reads one
 //! member's installed assignment back out.
 
-use bytes::Bytes;
-use krabka_protocol::owned::sync_group_request::SyncGroupRequest;
-
-use crate::{
-    codes,
-    coordinator::unified::{
-        actor::SyncResult,
-        classic_state::{ClassicGroup as ClassicState, GroupState},
+use {
+    crate::{
+        codes,
+        coordinator::unified::{
+            actor::SyncResult,
+            classic_state::{ClassicGroup as ClassicState, GroupState},
+        },
     },
+    bytes::Bytes,
+    krabka_protocol::owned::sync_group_request::SyncGroupRequest,
 };
 
 /// What the actor should do with a `ClassicSync`.
@@ -160,12 +161,9 @@ fn sync_err(code: i16) -> SyncResult {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_protocol::owned::sync_group_request::SyncGroupRequestAssignment;
-
-    use super::*;
-    use crate::coordinator::unified::classic_ops::test_support::{
-        handle_join, join_req, stable_two_member_group,
+    use {
+        super::*, crate::coordinator::unified::classic_ops::test_support::prelude::*,
+        assert2::assert, krabka_protocol::owned::sync_group_request::SyncGroupRequestAssignment,
     };
 
     fn sync_req(member_id: &str, generation: i32) -> SyncGroupRequest {

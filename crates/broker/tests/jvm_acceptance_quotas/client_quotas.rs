@@ -7,12 +7,13 @@
 //! image, which is what proves the JVM tool's write went through raft rather
 //! than only through the broker that served it.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, SaslClusterSetup, broker0_advertised,
-    describe_console_entity, docker_run_kafka_tool_with_image_and_mount,
-    start_registered_sasl_cluster, write_plain_props,
+use {
+    crate::jvm_acceptance::{
+        ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, SaslClusterSetup, broker0_advertised,
+        describe_console_entity, docker_run_kafka_tool_with_image_and_mount,
+        start_registered_sasl_cluster, write_plain_props,
+    },
+    assert2::assert,
 };
 
 /// JVM acceptance: `kafka-configs --entity-type users` client quota round-trip.
@@ -120,24 +121,20 @@ async fn quota_round_trip(case: QuotaCase<'_>) {
     let admin_mount = admin_props.mount_str();
 
     // Set the user quota through the JVM admin client.
-    let out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-configs",
-            "--alter",
-            "--entity-type",
-            entity,
-            "--entity-name",
-            name,
-            "--add-config",
-            &format!("{quota}={value}"),
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-configs",
+        "--alter",
+        "--entity-type",
+        entity,
+        "--entity-name",
+        name,
+        "--add-config",
+        &format!("{quota}={value}"),
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+    ]);
     eprintln!(
         "KRABKA[test] alter status={} stdout={} stderr={}",
         out.status,
@@ -161,24 +158,20 @@ async fn quota_round_trip(case: QuotaCase<'_>) {
     );
 
     // Delete the config.
-    let del_out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-configs",
-            "--alter",
-            "--entity-type",
-            entity,
-            "--entity-name",
-            name,
-            "--delete-config",
-            quota,
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-        ],
-    );
+    let del_out = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-configs",
+        "--alter",
+        "--entity-type",
+        entity,
+        "--entity-name",
+        name,
+        "--delete-config",
+        quota,
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+    ]);
     assert!(
         del_out.status.success(),
         "delete-config failed: {}",

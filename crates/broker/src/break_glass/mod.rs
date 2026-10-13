@@ -147,14 +147,15 @@ pub(crate) fn action_targets_partition(action: BreakGlassAction) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::BreakGlassAction;
-
-    use super::{
-        ALL_ACTIONS, action_from_name, action_from_wire, action_name, action_targets_partition,
-        action_to_wire,
+    use {
+        super::{
+            ALL_ACTIONS, action_from_name, action_from_wire, action_name, action_targets_partition,
+            action_to_wire,
+        },
+        crate::config::DEFAULT_BREAK_GLASS_SIGNED_ACTIONS,
+        assert2::check,
+        krabka_metadata::BreakGlassAction,
     };
-    use crate::config::DEFAULT_BREAK_GLASS_SIGNED_ACTIONS;
 
     #[test]
     fn every_action_round_trips_through_its_wire_value() {

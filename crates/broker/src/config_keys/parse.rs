@@ -12,14 +12,10 @@
 //! a value that validation accepts is read back the same way.
 
 /// Java's `String.trim`: every character at or below U+0020 at either end.
-pub(crate) fn java_trim(value: &str) -> &str {
-    value.trim_matches(|c: char| c <= ' ')
-}
+pub(crate) fn java_trim(value: &str) -> &str { value.trim_matches(|c: char| c <= ' ') }
 
 /// The whitespace class `\s` of Kafka's `COMMA_WITH_WHITESPACE` split.
-fn regex_space(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\u{b}' | '\u{c}' | '\r')
-}
+fn regex_space(c: char) -> bool { matches!(c, ' ' | '\t' | '\n' | '\u{b}' | '\u{c}' | '\r') }
 
 /// Kafka's `ConfigException(name, value, message)` text.
 pub(crate) fn invalid_value(key: &str, value: impl std::fmt::Display, message: &str) -> String {
@@ -39,14 +35,10 @@ pub(crate) fn bool_value(value: &str) -> Option<bool> {
 }
 
 /// An `INT` value, as `Integer.parseInt` reads the trimmed string.
-pub(crate) fn int_value(value: &str) -> Option<i32> {
-    java_trim(value).parse().ok()
-}
+pub(crate) fn int_value(value: &str) -> Option<i32> { java_trim(value).parse().ok() }
 
 /// A `LONG` value, as `Long.parseLong` reads the trimmed string.
-pub(crate) fn long_value(value: &str) -> Option<i64> {
-    java_trim(value).parse().ok()
-}
+pub(crate) fn long_value(value: &str) -> Option<i64> { java_trim(value).parse().ok() }
 
 /// A `DOUBLE` value, as `Double.parseDouble` reads the trimmed string: an
 /// optional sign, `NaN`, `Infinity`, or a decimal number with an optional
@@ -100,7 +92,7 @@ pub(crate) fn java_double(value: f64) -> String {
         return if value > 0.0 { "Infinity" } else { "-Infinity" }.to_owned();
     }
     let magnitude = value.abs();
-    if magnitude == 0.0 || (1e-3..1e7).contains(&magnitude) {
+    if magnitude == 0.0 || (1.0e-3..1.0e7).contains(&magnitude) {
         return format!("{value:?}");
     }
     let scientific = format!("{value:e}");
@@ -226,9 +218,7 @@ pub(crate) fn check_valid_list<'a>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn values_parse_the_way_config_def_parses_them() {

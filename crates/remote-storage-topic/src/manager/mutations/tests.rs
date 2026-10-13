@@ -1,24 +1,24 @@
 //! Local mutation outcomes and completion when consumption stops.
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::assert;
-use futures_util::{StreamExt as _, stream};
-use krabka_remote_storage::{
-    RemoteLogMetadataManager, RemoteLogSegmentState, RemotePartitionDeleteMetadata,
-    RemotePartitionDeleteState, RemoteStorageError,
-};
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    error::MetadataLogError,
-    log::{
-        AssignmentHandle, InProcessMetadataEventLog, MetadataEventLog, MetadataEventStream,
-        PartitionStart,
+use {
+    crate::{
+        error::MetadataLogError,
+        log::{
+            AssignmentHandle, InProcessMetadataEventLog, MetadataEventLog, MetadataEventStream,
+            PartitionStart,
+        },
+        manager::test_support::{finish, on_blocking, start_manager_all, started, tp},
+        partitioning::metadata_partition_for,
+        serde::MetadataEvent,
     },
-    manager::test_support::{finish, on_blocking, start_manager_all, started, tp},
-    partitioning::metadata_partition_for,
-    serde::MetadataEvent,
+    assert2::assert,
+    futures_util::{StreamExt as _, stream},
+    krabka_remote_storage::{
+        RemoteLogMetadataManager, RemoteLogSegmentState, RemotePartitionDeleteMetadata,
+        RemotePartitionDeleteState, RemoteStorageError,
+    },
+    std::{sync::Arc, time::Duration},
+    tokio_util::sync::CancellationToken,
 };
 
 #[tokio::test(flavor = "multi_thread")]

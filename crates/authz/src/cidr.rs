@@ -170,11 +170,11 @@ fn v6_mask(prefix_len: u8) -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
-    use assert2::check;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        std::net::{Ipv4Addr, Ipv6Addr},
+    };
 
     #[test]
     fn parse_accepts_valid_cidrs() {

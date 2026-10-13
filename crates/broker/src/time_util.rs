@@ -16,13 +16,15 @@
 //!
 //! [`system_timer`] is the real-time timer those loops run on outside tests.
 
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-use qubit_clock::{
-    MonotonicClock, MonotonicInstant, StdMonotonicClock, StdTimer, TimeError, Timer, TimerFuture,
+use {
+    qubit_clock::{
+        MonotonicClock, MonotonicInstant, StdMonotonicClock, StdTimer, TimeError, Timer,
+        TimerFuture,
+    },
+    std::{
+        sync::Arc,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    },
 };
 
 /// Cadence and metadata authority shared by local log-maintenance sweeps.
@@ -74,9 +76,7 @@ pub(crate) fn duration_millis(duration: Duration) -> i64 {
 /// [`WallClock`](qubit_clock::WallClock) so a test can drive it reads
 /// `epoch_millis(clock.now())` instead.
 #[inline]
-pub(crate) fn now_ms() -> i64 {
-    epoch_millis(SystemTime::now())
-}
+pub(crate) fn now_ms() -> i64 { epoch_millis(SystemTime::now()) }
 
 /// Sleeps until `deadline`, or never resolves when it is `None`.
 ///
@@ -133,9 +133,7 @@ pub(crate) struct RuntimeTimer {
 }
 
 impl Timer for RuntimeTimer {
-    fn clock(&self) -> &dyn MonotonicClock {
-        &self.clock
-    }
+    fn clock(&self) -> &dyn MonotonicClock { &self.clock }
 
     fn at(&self, deadline: MonotonicInstant) -> Result<TimerFuture, TimeError> {
         deadline.validate_domain(MonotonicClock::domain(&self.clock))?;
@@ -177,16 +175,16 @@ macro_rules! run_sweeps {
         }
     }};
 }
-pub(crate) use run_sweeps;
-
 use crate::metadata_source::MetadataSource;
+pub(crate) use run_sweeps;
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use qubit_clock::ManualMonotonicClock;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        qubit_clock::ManualMonotonicClock,
+    };
 
     const TASK: &str = "a test loop";
 

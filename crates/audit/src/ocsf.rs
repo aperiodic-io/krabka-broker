@@ -7,15 +7,16 @@
 //! variant, so each class's field names and id numbers live in exactly one
 //! place. [`ProductInfo`] names the emitting product in every record.
 
-use krabka_ids::NodeId;
-
-use self::{
-    api_activity::{PrivilegedFields, ocsf_admin_operation, ocsf_privileged_action},
-    authentication::ocsf_authentication,
-    authorization::ocsf_authorization_denied,
-    lifecycle::ocsf_lifecycle,
+use {
+    self::{
+        api_activity::{PrivilegedFields, ocsf_admin_operation, ocsf_privileged_action},
+        authentication::ocsf_authentication,
+        authorization::ocsf_authorization_denied,
+        lifecycle::ocsf_lifecycle,
+    },
+    crate::{event::AuditEvent, ids::EpochMs},
+    krabka_ids::NodeId,
 };
-use crate::{event::AuditEvent, ids::EpochMs};
 
 mod api_activity;
 mod authentication;

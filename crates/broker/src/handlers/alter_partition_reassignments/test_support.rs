@@ -6,15 +6,16 @@
 //! planning tests and the cancel-approval tests seed the same one-partition
 //! image, so the fixtures live in one module rather than once per test file.
 
-use krabka_metadata::{
-    BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
-};
-use krabka_protocol::owned::alter_partition_reassignments_request::{
-    AlterPartitionReassignmentsRequest, ReassignablePartition, ReassignableTopic,
-};
-
-use crate::test_support::{
-    PartitionEpoch, ReassignmentSetup, broker_registration, reassignment_partition,
+use {
+    crate::test_support::{
+        PartitionEpoch, ReassignmentSetup, broker_registration, reassignment_partition,
+    },
+    krabka_metadata::{
+        BrokerRegistrationRecord, MetadataImage, MetadataRecord, PartitionRecord, TopicRecord,
+    },
+    krabka_protocol::owned::alter_partition_reassignments_request::{
+        AlterPartitionReassignmentsRequest, ReassignablePartition, ReassignableTopic,
+    },
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -35,9 +36,7 @@ pub(super) enum ReassignmentTarget {
 }
 
 impl Default for ReassignmentTarget {
-    fn default() -> Self {
-        Self::Replicas(vec![ReplicaBrokerId(1), ReplicaBrokerId(2)])
-    }
+    fn default() -> Self { Self::Replicas(vec![ReplicaBrokerId(1), ReplicaBrokerId(2)]) }
 }
 
 #[derive(krabka_macros::FieldDefaults)]

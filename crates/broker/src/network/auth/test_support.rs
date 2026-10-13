@@ -3,10 +3,10 @@
 //! The mechanism modules each check the same success and failure envelopes,
 //! so the comparisons live here rather than once per test module.
 
-use assert2::assert;
-use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse;
-
-use crate::codes::SASL_AUTHENTICATION_FAILED;
+use {
+    crate::codes::SASL_AUTHENTICATION_FAILED, assert2::assert,
+    krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse,
+};
 
 pub(super) fn assert_success_authenticate_response(
     resp: &SaslAuthenticateResponse,

@@ -1,6 +1,4 @@
-use assert2::check;
-
-use super::*;
+use {super::*, assert2::check};
 
 #[derive(Clone, Copy)]
 struct RetentionMillis(i64);

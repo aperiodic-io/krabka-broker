@@ -16,9 +16,7 @@ impl PlainCredentials {
     /// The table as a plain map, for
     /// [`krabka_security::verify_plain`].
     #[must_use]
-    pub fn as_map(&self) -> &std::collections::HashMap<String, String> {
-        &self.0
-    }
+    pub fn as_map(&self) -> &std::collections::HashMap<String, String> { &self.0 }
 }
 
 /// Prints the usernames and no password, so `{config:?}` cannot leak the

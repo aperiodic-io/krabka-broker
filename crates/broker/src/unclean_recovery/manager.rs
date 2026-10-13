@@ -5,33 +5,34 @@
 //! talks to the metadata source, so the selection helpers and the replica
 //! query stay free of controller state.
 
-use std::{collections::HashSet, sync::Arc};
-
-use futures_util::FutureExt as _;
-use krabka_metadata::{
-    LeaderRecoveryState, MetadataImage, MetadataRecord, PartitionRecord, PartitionRecoveryRecord,
-};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use krabka_raft::{NodeId, RaftError};
-use krabka_units::convert::TimeExt as _;
-use krabka_verified::unclean_recovery_commit_admission;
-use tokio::sync::{Mutex, mpsc};
-use tracing::warn;
-
-use super::{
-    Election, RecoveryJob, RecoveryOutcome, RecoveryPolicy, ReplicaLogInfo, UncleanRecoveryHandle,
-    has_newer_leader,
-    query::{ReplicaQuery, gather_responses, query_replica},
-    select_leader,
-};
-use crate::{
-    config_keys::witness_node_ids,
-    elr::{ElrPublisher, TopicElr},
-    heartbeat::controller_state::ControllerLivenessState,
-    metadata_epoch::next_partition_change,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
+use {
+    super::{
+        Election, RecoveryJob, RecoveryOutcome, RecoveryPolicy, ReplicaLogInfo,
+        UncleanRecoveryHandle, has_newer_leader,
+        query::{ReplicaQuery, gather_responses, query_replica},
+        select_leader,
+    },
+    crate::{
+        config_keys::witness_node_ids,
+        elr::{ElrPublisher, TopicElr},
+        heartbeat::controller_state::ControllerLivenessState,
+        metadata_epoch::next_partition_change,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+    },
+    futures_util::FutureExt as _,
+    krabka_metadata::{
+        LeaderRecoveryState, MetadataImage, MetadataRecord, PartitionRecord,
+        PartitionRecoveryRecord,
+    },
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    krabka_raft::{NodeId, RaftError},
+    krabka_units::convert::TimeExt as _,
+    krabka_verified::unclean_recovery_commit_admission,
+    std::{collections::HashSet, sync::Arc},
+    tokio::sync::{Mutex, mpsc},
+    tracing::warn,
 };
 
 #[cfg(test)]
@@ -189,19 +190,16 @@ impl UncleanRecoveryManager {
             let my_id = i32::try_from(self.node_id.0).unwrap_or(-1);
             futs.push(
                 async move {
-                    query_replica(
-                        &client,
-                        ReplicaQuery {
-                            proto,
-                            host,
-                            port,
-                            my_broker_id: my_id,
-                            topic_id,
-                            partition,
-                            replica: r,
-                            server_name,
-                        },
-                    )
+                    query_replica(&client, ReplicaQuery {
+                        proto,
+                        host,
+                        port,
+                        my_broker_id: my_id,
+                        topic_id,
+                        partition,
+                        replica: r,
+                        server_name,
+                    })
                     .await
                 }
                 .boxed(),

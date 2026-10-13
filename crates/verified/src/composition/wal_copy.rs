@@ -1,9 +1,11 @@
-use creusot_std::prelude::*;
-
-use super::{
-    DeleteRecordsTrimApplication, FetchWatermarks, WalCopyBatch, delete_records_trim_application,
-    fetch_visibility, in_half_open_window, local_append_coordinates, local_recovery_batch_step,
-    produce_durability_frontier, wal_batch_equal, wal_covering_batch_range,
+use {
+    super::{
+        DeleteRecordsTrimApplication, FetchWatermarks, WalCopyBatch,
+        delete_records_trim_application, fetch_visibility, in_half_open_window,
+        local_append_coordinates, local_recovery_batch_step, produce_durability_frontier,
+        wal_batch_equal, wal_covering_batch_range,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

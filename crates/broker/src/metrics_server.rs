@@ -17,15 +17,11 @@
 //! server on that target. `BrokerConfig::validate` refuses the setting there,
 //! and [`run`] answers `Unsupported`.
 
-use std::net::SocketAddr;
-
-#[cfg(not(target_family = "wasm"))]
-use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
-use tokio_util::sync::CancellationToken;
-
 #[cfg(not(target_family = "wasm"))]
 use crate::http_server::spawn;
-use crate::metrics::SharedRegistry;
+#[cfg(not(target_family = "wasm"))]
+use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
+use {crate::metrics::SharedRegistry, std::net::SocketAddr, tokio_util::sync::CancellationToken};
 
 /// Builds the router. It serves `/metrics` for Prometheus, and
 /// `/debug/pprof/{profile,heap}`. The CPU route is always present on Unix. The
@@ -102,14 +98,14 @@ async fn metrics(State(registry): State<SharedRegistry>) -> impl IntoResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use axum::{body::Body, http::Request};
-    use tower::ServiceExt as _;
-
-    use super::*;
-    use crate::metrics::BrokerMetrics;
+    use {
+        super::*,
+        crate::metrics::BrokerMetrics,
+        assert2::assert,
+        axum::{body::Body, http::Request},
+        std::sync::Arc,
+        tower::ServiceExt as _,
+    };
 
     #[tokio::test]
     async fn metrics_route_returns_openmetrics() {

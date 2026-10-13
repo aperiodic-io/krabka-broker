@@ -20,10 +20,11 @@ pub(super) fn success_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{codes, handlers::ErrorCodeResponse as _};
+    use {
+        super::*,
+        crate::{codes, handlers::ErrorCodeResponse as _},
+        assert2::assert,
+    };
 
     #[test]
     fn heartbeat_response_builders_preserve_non_default_fields() {

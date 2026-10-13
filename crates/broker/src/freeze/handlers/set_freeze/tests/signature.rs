@@ -4,23 +4,24 @@
 //! needs one when that setting is on, and a signature the request carries is
 //! verified whether or not the action needed it.
 
-use assert2::check;
-use krabka_metadata::{PatternType, TopicFreezeRecord};
-use krabka_protocol::{
-    krabka::freeze::{PATTERN_TYPE_LITERAL, SetTopicFreezeRequest},
-    primitives::uuid::Uuid as ProtocolUuid,
-};
-
-use super::{
-    super::checks::{FreezeEnv, check_signature, is_signed, prepare, record_of},
-    ALICE, ALICE_KEY, ALICE_NAME, PROPOSAL, alice_key_configuration, freeze_request, sign,
-};
-use crate::{
-    break_glass::handlers::principal_name,
-    codes,
-    config::{BrokerConfig, FreezeConfig},
-    test_support::KafkaErrorCode,
-    time_util::now_ms,
+use {
+    super::{
+        super::checks::{FreezeEnv, check_signature, is_signed, prepare, record_of},
+        ALICE, ALICE_KEY, ALICE_NAME, PROPOSAL, alice_key_configuration, freeze_request, sign,
+    },
+    crate::{
+        break_glass::handlers::principal_name,
+        codes,
+        config::{BrokerConfig, FreezeConfig},
+        test_support::KafkaErrorCode,
+        time_util::now_ms,
+    },
+    assert2::check,
+    krabka_metadata::{PatternType, TopicFreezeRecord},
+    krabka_protocol::{
+        krabka::freeze::{PATTERN_TYPE_LITERAL, SetTopicFreezeRequest},
+        primitives::uuid::Uuid as ProtocolUuid,
+    },
 };
 
 #[derive(Clone, Copy, Debug, Default)]

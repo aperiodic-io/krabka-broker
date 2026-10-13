@@ -8,19 +8,20 @@
 //! carries acknowledgements (`handleAcknowledgements`). Each half runs its own
 //! checks in its own order, so a row can fail one half and pass the other.
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::share_fetch_request::FetchPartition;
-
-use super::{
-    acknowledge::acknowledgement_batches_are_valid,
-    authorization::topic_read_denied,
-    pending::PendingPartition,
-    request::collect_ack_batches,
-    response::{not_leader_response, partition_response},
-};
-use crate::{
-    broker::Broker, codes, handlers::RequestContext,
-    share_partition::manager::SharePartitionLeaderManager,
+use {
+    super::{
+        acknowledge::acknowledgement_batches_are_valid,
+        authorization::topic_read_denied,
+        pending::PendingPartition,
+        request::collect_ack_batches,
+        response::{not_leader_response, partition_response},
+    },
+    crate::{
+        broker::Broker, codes, handlers::RequestContext,
+        share_partition::manager::SharePartitionLeaderManager,
+    },
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::share_fetch_request::FetchPartition,
 };
 
 /// The request-wide facts that every row resolution reads.

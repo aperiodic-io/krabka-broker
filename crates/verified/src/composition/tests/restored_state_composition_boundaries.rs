@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn restored_state_composition_boundaries() {
@@ -168,13 +166,11 @@ fn composition_boundary_witnesses() {
         (1, 5, 2, 2),
         (u64::MAX - 1, 5, u64::MAX - 1, 2),
     ] {
-        let (settled, replayed) = loss_settlement_is_idempotent(
-            AuditLosses { generation, count },
-            AuditLosses {
+        let (settled, replayed) =
+            loss_settlement_is_idempotent(AuditLosses { generation, count }, AuditLosses {
                 generation: marker_generation,
                 count: marker_count,
-            },
-        );
+            });
         assert!(settled == replayed);
     }
     // Witness the theorem's generation-exhaustion boundary explicitly.

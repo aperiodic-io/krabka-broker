@@ -66,19 +66,21 @@ mod recovery_state;
 #[path = "leader_failover_model/runner.rs"]
 mod runner;
 
-use self::{
-    failover_state::FailoverModel,
-    recovery_state::RecoveryModel,
-    runner::{
-        PINNED_UNIQUE_STATES_ELR_RECOVER, PINNED_UNIQUE_STATES_ELR_UNCLEAN,
-        PINNED_UNIQUE_STATES_FAILOVER_RECOVER, PINNED_UNIQUE_STATES_FAILOVER_SAFE,
-        PINNED_UNIQUE_STATES_FAILOVER_UNCLEAN, PINNED_UNIQUE_STATES_OFFSET_RECOVERY,
-        PINNED_UNIQUE_STATES_WITNESS_ELR_UNCLEAN, PINNED_UNIQUE_STATES_WITNESS_RECOVER,
-        PINNED_UNIQUE_STATES_WITNESS_SAFE, PINNED_UNIQUE_STATES_WITNESS_UNCLEAN, run_failover,
-        run_recovery,
+use {
+    self::{
+        failover_state::FailoverModel,
+        recovery_state::RecoveryModel,
+        runner::{
+            PINNED_UNIQUE_STATES_ELR_RECOVER, PINNED_UNIQUE_STATES_ELR_UNCLEAN,
+            PINNED_UNIQUE_STATES_FAILOVER_RECOVER, PINNED_UNIQUE_STATES_FAILOVER_SAFE,
+            PINNED_UNIQUE_STATES_FAILOVER_UNCLEAN, PINNED_UNIQUE_STATES_OFFSET_RECOVERY,
+            PINNED_UNIQUE_STATES_WITNESS_ELR_UNCLEAN, PINNED_UNIQUE_STATES_WITNESS_RECOVER,
+            PINNED_UNIQUE_STATES_WITNESS_SAFE, PINNED_UNIQUE_STATES_WITNESS_UNCLEAN, run_failover,
+            run_recovery,
+        },
     },
+    crate::config_keys::RecoveryStrategy,
 };
-use crate::config_keys::RecoveryStrategy;
 
 /// The three-site stretch shape: replica 2 is a data-bearing witness. It is
 /// not `replicas[0]`, so the initial leader is a data replica.

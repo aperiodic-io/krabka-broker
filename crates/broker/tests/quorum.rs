@@ -16,20 +16,22 @@
 // ids, and topics are built with `..Default::default()`. Hoisting these into
 // named helpers would obscure the per-test narrative.
 
-use assert2::assert;
-use krabka_broker::{BrokerConfig, BrokerHandle};
-
-use crate::support::{
-    client::connect_client,
-    discovery::topic_metadata_request,
-    shutdown_cluster,
-    topics::{ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        client::connect_client,
+        discovery::topic_metadata_request,
+        shutdown_cluster,
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+        },
+    },
+    assert2::assert,
+    krabka_broker::{BrokerConfig, BrokerHandle},
 };
 
 mod support;
 
-use support::cluster_lock;
-use tempfile::TempDir;
+use {support::cluster_lock, tempfile::TempDir};
 
 /// Waits until every broker reports an elected controller leader with a
 /// non-zero id.

@@ -16,12 +16,13 @@
 //! `ITS` = `INVALID_TXN_STATE`, `NONE` = no error and no write, and
 //! `EB` = no error and an epoch bump.
 
-use krabka_log::ProducerId;
-
-use super::producer_identity::client_producer_identity;
-use crate::{
-    codes,
-    txn::state::{TxnEntry, TxnState},
+use {
+    super::producer_identity::client_producer_identity,
+    crate::{
+        codes,
+        txn::state::{TxnEntry, TxnState},
+    },
+    krabka_log::ProducerId,
 };
 
 /// What `EndTxn` does with the entry it found.

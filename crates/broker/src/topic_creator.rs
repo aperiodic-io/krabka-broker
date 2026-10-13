@@ -22,28 +22,28 @@
 #[cfg(test)]
 mod tests;
 
-use std::{net::IpAddr, sync::Arc};
-
-use bytes::{Bytes, BytesMut};
-use krabka_client_core::{ClientError, Connection, ConnectionOptions};
-use krabka_protocol::{
-    Decode as _, Encode as _, ProtocolError,
-    owned::{
-        create_topics_request::{self, CreateTopicsRequest},
-        create_topics_response::CreateTopicsResponse,
-        envelope_request::EnvelopeRequest,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        controller_endpoint::{ControllerDialer, leader_endpoint},
+        envelope::{self, ForwardedPrincipal, ForwardedRequest},
+        handlers::RequestContext,
+        metadata_source::MetadataSource,
     },
-};
-use krabka_units::{Time, convert::TimeExt as _, millis, secs};
-use tokio::time::Instant;
-
-use crate::{
-    broker::Broker,
-    codes,
-    controller_endpoint::{ControllerDialer, leader_endpoint},
-    envelope::{self, ForwardedPrincipal, ForwardedRequest},
-    handlers::RequestContext,
-    metadata_source::MetadataSource,
+    bytes::{Bytes, BytesMut},
+    krabka_client_core::{ClientError, Connection, ConnectionOptions},
+    krabka_protocol::{
+        Decode as _, Encode as _, ProtocolError,
+        owned::{
+            create_topics_request::{self, CreateTopicsRequest},
+            create_topics_response::CreateTopicsResponse,
+            envelope_request::EnvelopeRequest,
+        },
+    },
+    krabka_units::{Time, convert::TimeExt as _, millis, secs},
+    std::{net::IpAddr, sync::Arc},
+    tokio::time::Instant,
 };
 
 /// How long a request can wait for a response before it fails with
@@ -120,9 +120,7 @@ fn envelope_message(code: i16) -> String {
 }
 
 impl From<ProtocolError> for TopicCreatorError {
-    fn from(error: ProtocolError) -> Self {
-        Self::Protocol(error.to_string())
-    }
+    fn from(error: ProtocolError) -> Self { Self::Protocol(error.to_string()) }
 }
 
 /// Sends `CreateTopics` requests to the active controller.

@@ -1,9 +1,10 @@
 //! KIP-932 share-coordinator (persister) configuration.
 
-use std::time::Duration;
-
-use krabka_compression::CompressionType;
-use krabka_units::{ByteSize, bytes, mebibytes};
+use {
+    krabka_compression::CompressionType,
+    krabka_units::{ByteSize, bytes, mebibytes},
+    std::time::Duration,
+};
 
 /// Kafka's `share.coordinator.*` keys of `ShareCoordinatorConfig`.
 ///
@@ -76,9 +77,7 @@ pub const CACHED_BUFFER_MAX_BYTES_DEFAULT: u32 = 1024 * 1024 + 12;
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn defaults_match_kafka() {

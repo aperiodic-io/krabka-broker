@@ -1,11 +1,12 @@
 //! Wire and metadata fixtures shared across test crates.
 
-use moxy::{
-    ast::ParseError,
-    token::{Span, TokenStream, TokenTree},
+use {
+    crate::fixtures::{function, name, named_items},
+    moxy::{
+        ast::ParseError,
+        token::{Span, TokenStream, TokenTree},
+    },
 };
-
-use crate::fixtures::{function, name, named_items};
 
 pub(crate) fn topic_record(tokens: TokenStream) -> Result<TokenStream, ParseError> {
     let name = name(tokens)?;

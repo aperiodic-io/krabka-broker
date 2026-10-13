@@ -148,9 +148,7 @@ pub const fn kafka_4_3_1_max(api_key: i16) -> Option<i16> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// Strictly ascending, so a key is listed once, and every row names
     /// versions `krabka-protocol` decodes: 4.3.1 is never ahead of trunk.

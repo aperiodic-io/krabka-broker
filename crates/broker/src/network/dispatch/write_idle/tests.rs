@@ -1,31 +1,30 @@
 //! Portable write stalls, continuing progress, and request-budget release.
 
-use std::time::Duration;
-
-use assert2::assert;
-use futures_util::{SinkExt as _, StreamExt as _};
-use krabka_security::ListenerProtocol;
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, DuplexStream};
-
-use super::WriteIdle;
-use crate::{
-    SslPrincipalMapper,
-    config::ListenerSpec,
-    network::{
-        dispatch::{serve_connection_stream, test_support::plaintext_loop},
-        fetch_writer::SendfileSink,
-        test_support::{RequestFrameSetup, request_frame},
+use {
+    super::WriteIdle,
+    crate::{
+        SslPrincipalMapper,
+        config::ListenerSpec,
+        network::{
+            dispatch::{serve_connection_stream, test_support::plaintext_loop},
+            fetch_writer::SendfileSink,
+            test_support::{RequestFrameSetup, request_frame},
+        },
+        test_support::start_broker_with,
     },
-    test_support::start_broker_with,
+    assert2::assert,
+    futures_util::{SinkExt as _, StreamExt as _},
+    krabka_security::ListenerProtocol,
+    std::time::Duration,
+    tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, DuplexStream},
 };
 
 impl SendfileSink for DuplexStream {
-    fn is_sendfile_capable(&self) -> bool {
-        false
-    }
     crate::sendfile_cfg! {
         fn tcp_for_sendfile(&self) -> Option<&tokio::net::TcpStream> { None }
     }
+
+    fn is_sendfile_capable(&self) -> bool { false }
 }
 
 #[tokio::test(start_paused = true)]

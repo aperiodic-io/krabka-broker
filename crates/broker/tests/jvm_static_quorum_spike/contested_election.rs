@@ -5,16 +5,16 @@
 //! It is the counterpart to the follower-join spike, and it is what the old
 //! pre-vote echo shortcut broke.
 
-use std::{process::Command, time::Duration};
-
-use uuid::Uuid;
-
-use crate::{
-    static_quorum_harness::{
-        MixedQuorum, docker_rm, jvm_controller_properties, kafka_cluster_id_string,
-        start_jvm_controller,
+use {
+    crate::{
+        static_quorum_harness::{
+            MixedQuorum, docker_rm, jvm_controller_properties, kafka_cluster_id_string,
+            start_jvm_controller,
+        },
+        support,
     },
-    support,
+    std::{process::Command, time::Duration},
+    uuid::Uuid,
 };
 
 const CONTESTED_CONTAINER: &str = "krabka-kip996-contested";

@@ -19,25 +19,28 @@
 //! The assignor offload keys are stored and reported, and not applied
 //! (`NOT_APPLIED`, and `docs/KIP_MATRIX.md`).
 
-use std::collections::BTreeMap;
-
-use super::{
-    kafka_broker::roster,
-    parse::{check_one_of, check_range, int_value, java_trim, parse_bool, parse_int, parse_long},
-};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    config::BrokerConfig,
-    coordinator::unified::{
-        config::NextGenConfig,
-        share::config::ShareGroupConfig,
-        streams::config::{
-            KEY_ACCEPTABLE_RECOVERY_LAG, KEY_ASSIGNOR_NAME, KEY_HEARTBEAT_INTERVAL_MS,
-            KEY_NUM_STANDBY_REPLICAS, KEY_NUM_WARMUP_REPLICAS, KEY_RACK_AWARE_ASSIGNMENT_TAGS,
-            KEY_SESSION_TIMEOUT_MS, KEY_SHARE_AUTO_OFFSET_RESET, KEY_TASK_OFFSET_INTERVAL_MS,
-            ShareAutoOffsetReset, StreamsGroupConfig,
+use {
+    super::{
+        kafka_broker::roster,
+        parse::{
+            check_one_of, check_range, int_value, java_trim, parse_bool, parse_int, parse_long,
         },
     },
+    crate::{
+        api_catalog::UnstableApiVersions,
+        config::BrokerConfig,
+        coordinator::unified::{
+            config::NextGenConfig,
+            share::config::ShareGroupConfig,
+            streams::config::{
+                KEY_ACCEPTABLE_RECOVERY_LAG, KEY_ASSIGNOR_NAME, KEY_HEARTBEAT_INTERVAL_MS,
+                KEY_NUM_STANDBY_REPLICAS, KEY_NUM_WARMUP_REPLICAS, KEY_RACK_AWARE_ASSIGNMENT_TAGS,
+                KEY_SESSION_TIMEOUT_MS, KEY_SHARE_AUTO_OFFSET_RESET, KEY_TASK_OFFSET_INTERVAL_MS,
+                ShareAutoOffsetReset, StreamsGroupConfig,
+            },
+        },
+    },
+    std::collections::BTreeMap,
 };
 
 /// One key of Kafka's `GroupConfig.CONFIG_DEF`.
@@ -574,12 +577,13 @@ pub(crate) fn validate_group_configs(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::{
-        api_catalog::UnstableApiVersions::{self, Disabled, Enabled},
-        test_support::config_map as overrides,
+    use {
+        super::*,
+        crate::{
+            api_catalog::UnstableApiVersions::{self, Disabled, Enabled},
+            test_support::config_map as overrides,
+        },
+        assert2::check,
     };
 
     /// One row of a table: a key and value, and the refusal text or `Ok`.

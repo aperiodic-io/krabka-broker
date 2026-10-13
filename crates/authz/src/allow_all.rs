@@ -26,9 +26,7 @@ impl Authorizer for AllowAllAuthorizer {
     /// `false`: this is the value a deployment holds when it configured no
     /// authorizer, which is what the ACL administration RPCs report as
     /// `SECURITY_DISABLED`.
-    fn is_configured(&self) -> bool {
-        false
-    }
+    fn is_configured(&self) -> bool { false }
 
     /// Always `Allow`, for the same reason `authorize` is: this authorizer
     /// never denies anything, on any resource of any type.
@@ -46,13 +44,13 @@ impl Authorizer for AllowAllAuthorizer {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-
-    use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
-    use krabka_security::{AuthMethod, Principal};
-    use uuid::Uuid;
-
-    use super::*;
+    use {
+        super::*,
+        krabka_metadata::{AclOperation, MetadataImage, ResourceType},
+        krabka_security::{AuthMethod, Principal},
+        std::net::SocketAddr,
+        uuid::Uuid,
+    };
 
     fn request_identity() -> (MetadataImage, Principal, SocketAddr) {
         let image = MetadataImage::new(Uuid::nil());

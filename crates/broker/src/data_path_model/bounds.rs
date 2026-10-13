@@ -27,9 +27,5 @@ pub(super) fn model_broker(value: u64) -> u8 {
     u8::try_from(value).expect("model broker id fits in u8")
 }
 
-pub(super) fn node(b: u8) -> u64 {
-    u64::from(b)
-}
-pub(super) fn has(mask: u8, b: u8) -> bool {
-    mask & (1 << b) != 0
-}
+pub(super) fn node(b: u8) -> u64 { u64::from(b) }
+pub(super) fn has(mask: u8, b: u8) -> bool { mask & (1 << b) != 0 }

@@ -4,9 +4,7 @@
 //! marker safety, tombstone aging, and a single horizon stamp. A separate prop
 //! checks the delete-horizon wire round-trip of a real `RecordBatch`.
 
-use proptest::prelude::*;
-
-use super::*;
+use {super::*, proptest::prelude::*};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum EntryKind {

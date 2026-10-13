@@ -5,20 +5,21 @@
 //! The scenario runs the full classic lifecycle first (join, commit, leave), so
 //! it is kept apart from the rejection scenario that only needs a live member.
 
-use assert2::assert;
-use krabka_protocol::owned::{
-    leave_group_request::{LeaveGroupRequest, MemberIdentity},
-    offset_commit_request::OffsetCommitRequest,
-};
-
-use crate::{
-    support::offsets::{offset_commit_partition, offset_commit_topic},
-    upgrade_classic::classic_join_sync,
-    upgrade_harness::{
-        ERR_NONE, assert_committed_offset, boot, connect, create_topic, finalize_streams_version,
-        topic_id_for,
+use {
+    crate::{
+        support::offsets::{offset_commit_partition, offset_commit_topic},
+        upgrade_classic::classic_join_sync,
+        upgrade_harness::{
+            ERR_NONE, assert_committed_offset, boot, connect, create_topic,
+            finalize_streams_version, topic_id_for,
+        },
+        upgrade_streams::{streams_join_and_converge, topology},
     },
-    upgrade_streams::{streams_join_and_converge, topology},
+    assert2::assert,
+    krabka_protocol::owned::{
+        leave_group_request::{LeaveGroupRequest, MemberIdentity},
+        offset_commit_request::OffsetCommitRequest,
+    },
 };
 
 /// The broker converts a drained classic group to a streams group when a

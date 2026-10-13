@@ -2,32 +2,34 @@
 //! heartbeat, applying steady-state updates to one, choosing the assignor, and
 //! driving the reconciler when the group is dirty.
 
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-use krabka_protocol::{
-    owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest, primitives::uuid::Uuid,
-};
-
-use super::{
-    FALLBACK_REBALANCE_TIMEOUT_MS, MetadataProvider,
-    regex_resolution::{
-        RegexRecord, RegexResolution, RegexUpdate, Resolutions, maybe_update_regular_expressions,
+use {
+    super::{
+        FALLBACK_REBALANCE_TIMEOUT_MS, MetadataProvider,
+        regex_resolution::{
+            RegexRecord, RegexResolution, RegexUpdate, Resolutions,
+            maybe_update_regular_expressions,
+        },
+        views::preferred_server_assignor,
     },
-    views::preferred_server_assignor,
-};
-use crate::{
-    coordinator::unified::{
-        ClientIdentity,
-        assignor::Assignor,
-        config::NextGenConfig,
-        consumer_state::{GroupState, MemberState},
-        reconciler, wall_clock_ms,
+    crate::{
+        coordinator::unified::{
+            ClientIdentity,
+            assignor::Assignor,
+            config::NextGenConfig,
+            consumer_state::{GroupState, MemberState},
+            reconciler, wall_clock_ms,
+        },
+        re2j::check,
     },
-    re2j::check,
+    krabka_protocol::{
+        owned::consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        primitives::uuid::Uuid,
+    },
+    std::{
+        collections::HashMap,
+        sync::Arc,
+        time::{Duration, Instant},
+    },
 };
 
 /// The partitions a member reports that it owns in its heartbeat, or `None`
@@ -346,26 +348,26 @@ pub(super) fn build_member(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::{
-        ClientIdentity,
-        actor::{
-            heartbeat::step_heartbeat,
-            regex_resolution::apply_regex_result,
-            test_support::{
-                StaticMetadata, coordinator_with_log, empty_metadata, rpc::consumer_request,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            ClientIdentity,
+            actor::{
+                heartbeat::step_heartbeat,
+                regex_resolution::apply_regex_result,
+                test_support::{
+                    StaticMetadata, coordinator_with_log, empty_metadata, rpc::consumer_request,
+                },
             },
+            assignor::{Assignment, GroupSpec, TopicMetadata},
+            consumer_state::GroupState,
+            offsets_log::fake::InMemoryOffsetsLog,
+            persistence_next_gen::MemberAssignmentState,
+            reconciler::ReconcileInput,
+            regex_resolver::FixedRegexResolver,
         },
-        assignor::{Assignment, GroupSpec, TopicMetadata},
-        consumer_state::GroupState,
-        offsets_log::fake::InMemoryOffsetsLog,
-        persistence_next_gen::MemberAssignmentState,
-        reconciler::ReconcileInput,
-        regex_resolver::FixedRegexResolver,
+        assert2::{assert, check},
+        std::sync::atomic::{AtomicUsize, Ordering},
     };
 
     /// Kafka's `consumerGroupHeartbeat` for a subscription change: the
@@ -933,9 +935,8 @@ mod tests {
         calls: Arc<AtomicUsize>,
     }
     impl Assignor for CountingAssignor {
-        fn name(&self) -> &'static str {
-            "counting"
-        }
+        fn name(&self) -> &'static str { "counting" }
+
         fn assign(&self, _group: &GroupSpec, _topics: &TopicMetadata) -> Assignment {
             self.calls.fetch_add(1, Ordering::SeqCst);
             std::collections::HashMap::new()
@@ -1028,18 +1029,15 @@ mod tests {
         let coord = coordinator_with_log(config, empty_metadata(), log);
         let handle = coord.get_or_create_consumer("g");
 
-        let resp = consumer_request(
-            &handle,
-            ConsumerGroupHeartbeatRequest {
-                group_id: "g".into(),
-                member_id: String::new(),
-                member_epoch: 0,
-                subscribed_topic_names: Some(vec!["t".into()]),
-                server_assignor: Some("counting".into()),
-                rebalance_timeout_ms: 60_000,
-                ..Default::default()
-            },
-        )
+        let resp = consumer_request(&handle, ConsumerGroupHeartbeatRequest {
+            group_id: "g".into(),
+            member_id: String::new(),
+            member_epoch: 0,
+            subscribed_topic_names: Some(vec!["t".into()]),
+            server_assignor: Some("counting".into()),
+            rebalance_timeout_ms: 60_000,
+            ..Default::default()
+        })
         .await;
         assert!(resp.error_code == 0);
         assert!(

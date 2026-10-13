@@ -24,9 +24,7 @@
 //! (identity and request construction), `rpc` (the one-shot wire calls) and
 //! `outcome` (reply classification).
 
-use std::sync::Arc;
-
-use krabka_units::Time;
+use {krabka_units::Time, std::sync::Arc};
 
 mod join_loop;
 mod outcome;

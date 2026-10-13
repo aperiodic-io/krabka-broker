@@ -1,11 +1,9 @@
 //! S3 endpoint and redacted credentials, preserving each configuration's docs.
 
-use moxy::{
-    ast::ParseError,
-    token::{Span, TokenStream, TokenTree},
+use crate::{
+    meta::{mode, named_body},
+    prelude::*,
 };
-
-use crate::meta::{mode, named_body};
 
 pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream, ParseError> {
     let (endpoint_doc, access_doc, secret_doc) = match mode(meta, ["file", "runtime"])? {
@@ -52,18 +50,15 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
         .iter()
         .rposition(TokenTree::is_punct_comma)
         .map_or(0, |comma| comma + 1);
-    fields.splice(
-        insertion..insertion,
-        moxy::template! {
-            {{ endpoint_doc }} pub endpoint: Option<String>,
-            {{ access_doc }}
-            #[debug("{:?}", access_key_id.as_ref().map(|_| "***"))]
-            pub access_key_id: Option<String>,
-            {{ secret_doc }}
-            #[debug("{:?}", secret_access_key.as_ref().map(|_| "***"))]
-            pub secret_access_key: Option<String>,
-        },
-    );
+    fields.splice(insertion..insertion, moxy::template! {
+        {{ endpoint_doc }} pub endpoint: Option<String>,
+        {{ access_doc }}
+        #[debug("{:?}", access_key_id.as_ref().map(|_| "***"))]
+        pub access_key_id: Option<String>,
+        {{ secret_doc }}
+        #[debug("{:?}", secret_access_key.as_ref().map(|_| "***"))]
+        pub secret_access_key: Option<String>,
+    });
     group.tokens = fields.into();
     Ok(tokens.into())
 }

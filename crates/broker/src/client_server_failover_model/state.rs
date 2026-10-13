@@ -6,11 +6,13 @@
 //! search space, including the client's cached routing and the accepted
 //! batch, on one screen.
 
-use super::{
-    bounds::{BASE_OFFSET, BASE_SEQUENCE, MAX_LOG_LEN, NB, PRODUCER_EPOCH, PRODUCER_ID},
-    witness::{WITNESS_ACKED_BEFORE_FAILOVER, WITNESS_FAILOVER, Witnesses},
+use {
+    super::{
+        bounds::{BASE_OFFSET, BASE_SEQUENCE, MAX_LOG_LEN, NB, PRODUCER_EPOCH, PRODUCER_ID},
+        witness::{WITNESS_ACKED_BEFORE_FAILOVER, WITNESS_FAILOVER, Witnesses},
+    },
+    crate::producer_state::{NO_EARLIER_BATCHES, ProducerEntry},
 };
-use crate::producer_state::{NO_EARLIER_BATCHES, ProducerEntry};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct LogBatch {
@@ -118,17 +120,11 @@ impl ProducerEntryProjection {
 }
 
 impl FailoverState {
-    pub fn live(&self, broker: usize) -> bool {
-        self.live & (1 << broker) != 0
-    }
+    pub fn live(&self, broker: usize) -> bool { self.live & (1 << broker) != 0 }
 
-    pub fn live_count(&self) -> u32 {
-        self.live.count_ones()
-    }
+    pub fn live_count(&self) -> u32 { self.live.count_ones() }
 
-    pub fn log_len(&self, broker: usize) -> usize {
-        self.logs[broker].iter().flatten().count()
-    }
+    pub fn log_len(&self, broker: usize) -> usize { self.logs[broker].iter().flatten().count() }
 
     pub fn log_contains_base(&self, broker: usize) -> bool {
         self.logs[broker]

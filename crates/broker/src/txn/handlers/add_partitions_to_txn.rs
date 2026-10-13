@@ -59,13 +59,15 @@ mod authorization_tests;
 #[cfg(test)]
 pub(in crate::txn::handlers) mod test_support;
 
-use self::versions::{HandlerDependencies, handle_v3, handle_v4};
-use crate::{
-    broker::Broker,
-    codes::CLUSTER_AUTHORIZATION_FAILED,
-    error::BrokerError,
-    handlers::{RequestContext, cluster_action_denied},
-    txn::version::resolve_txn_version,
+use {
+    self::versions::{HandlerDependencies, handle_v3, handle_v4},
+    crate::{
+        broker::Broker,
+        codes::CLUSTER_AUTHORIZATION_FAILED,
+        error::BrokerError,
+        handlers::{RequestContext, cluster_action_denied},
+        txn::version::resolve_txn_version,
+    },
 };
 
 pub(crate) async fn handle(

@@ -37,30 +37,30 @@
 //! can carry one. It gets `INVALID_REQUEST` (42) on every partition, and no
 //! partition is touched.
 
-use std::sync::atomic::Ordering;
-
-use krabka_ids::{NodeId, PartitionIndex};
-use krabka_metadata::MetadataImage;
-use krabka_protocol::krabka::barrier::{
-    WritableBarrierTopic, WriteBarrierMarkersRequest, WriteBarrierMarkersResponse,
-    WrittenBarrierPartition, WrittenBarrierTopic,
-};
-use krabka_verified::{
-    BarrierMarkerFenceDecision, BarrierMarkerFenceFacts, barrier_marker_fence_decision,
-};
-use tracing::warn;
-
-use crate::{
-    barrier::{
-        handlers::cluster_action_denied,
-        injection::{MarkerAppendError, append_marker},
-        marker::BarrierMarker,
+use {
+    crate::{
+        barrier::{
+            handlers::cluster_action_denied,
+            injection::{MarkerAppendError, append_marker},
+            marker::BarrierMarker,
+        },
+        codes,
+        coordinator::unified::persistence::MAX_STRING_BYTES,
+        handlers::encode_response,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
     },
-    codes,
-    coordinator::unified::persistence::MAX_STRING_BYTES,
-    handlers::encode_response,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
+    krabka_ids::{NodeId, PartitionIndex},
+    krabka_metadata::MetadataImage,
+    krabka_protocol::krabka::barrier::{
+        WritableBarrierTopic, WriteBarrierMarkersRequest, WriteBarrierMarkersResponse,
+        WrittenBarrierPartition, WrittenBarrierTopic,
+    },
+    krabka_verified::{
+        BarrierMarkerFenceDecision, BarrierMarkerFenceFacts, barrier_marker_fence_decision,
+    },
+    std::sync::atomic::Ordering,
+    tracing::warn,
 };
 
 /// The `offset` of a partition row that placed no marker.
@@ -244,31 +244,35 @@ fn response(topics: Vec<WrittenBarrierTopic>) -> WriteBarrierMarkersResponse {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::{NodeId, PartitionIndex};
-    use krabka_log::Offset;
-    use krabka_metadata::{MetadataImage, MetadataRecord};
-    use krabka_protocol::krabka::barrier::{
-        WritableBarrierPartition, WritableBarrierTopic, WrittenBarrierPartition,
-        WrittenBarrierTopic,
+    use {
+        assert2::check,
+        krabka_ids::{NodeId, PartitionIndex},
+        krabka_log::Offset,
+        krabka_metadata::{MetadataImage, MetadataRecord},
+        krabka_protocol::krabka::barrier::{
+            WritableBarrierPartition, WritableBarrierTopic, WrittenBarrierPartition,
+            WrittenBarrierTopic,
+        },
+        krabka_units::mebibytes,
+        tempfile::tempdir,
+        uuid::Uuid,
     };
-    use krabka_units::mebibytes;
-    use tempfile::tempdir;
-    use uuid::Uuid;
 
     /// A malformed epoch value that the receiving broker must fence.
     const NO_EXPECTED_LEADER_EPOCH: i32 = -1;
 
-    use super::{NO_OFFSET, mark, refused_topic, request_refusal, row};
-    use crate::{
-        barrier::{
-            marker::BarrierMarker,
-            test_support::{check_control_marker, open_partition, topic_records},
+    use {
+        super::{NO_OFFSET, mark, refused_topic, request_refusal, row},
+        crate::{
+            barrier::{
+                marker::BarrierMarker,
+                test_support::{check_control_marker, open_partition, topic_records},
+            },
+            codes,
+            coordinator::unified::persistence::MAX_STRING_BYTES,
+            partition_registry::PartitionRegistry,
+            test_support::StandalonePartitionSetup,
         },
-        codes,
-        coordinator::unified::persistence::MAX_STRING_BYTES,
-        partition_registry::PartitionRegistry,
-        test_support::StandalonePartitionSetup,
     };
 
     const LOCAL: NodeId = NodeId(1);

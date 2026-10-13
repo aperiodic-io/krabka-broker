@@ -11,16 +11,17 @@
 //! KIP-1071 early access, AND the `streams_group.enable` config kill-switch.
 //! BOTH must allow the request.
 
-use krabka_protocol::owned::{
-    streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-};
-
-use crate::{
-    codes,
-    coordinator::unified::streams::actor::{StreamsGroupActorMessage, response::error_resp},
-    task_util::ask,
-    time_util::now_ms,
+use {
+    crate::{
+        codes,
+        coordinator::unified::streams::actor::{StreamsGroupActorMessage, response::error_resp},
+        task_util::ask,
+        time_util::now_ms,
+    },
+    krabka_protocol::owned::{
+        streams_group_heartbeat_request::StreamsGroupHeartbeatRequest,
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
 };
 
 mod creation;
@@ -146,28 +147,28 @@ fn reply(code: i16, message: Option<String>) -> StreamsGroupHeartbeatResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, sync::Arc};
-
-    use assert2::assert;
-    use krabka_metadata::MetadataRecord;
-    use krabka_protocol::{Decode, owned::streams_group_heartbeat_response};
-
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        broker::{Broker, BrokerHandle},
-        config::BrokerConfig,
-        handlers::{
-            RequestContext, encode_response,
-            group_heartbeat_test_support::{
-                GroupAclSetup, GroupTopicSetup, check_group_read_denied, streams_request,
-                topic_with_partitions,
+    use {
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            broker::{Broker, BrokerHandle},
+            config::BrokerConfig,
+            handlers::{
+                RequestContext, encode_response,
+                group_heartbeat_test_support::{
+                    GroupAclSetup, GroupTopicSetup, check_group_read_denied, streams_request,
+                    topic_with_partitions,
+                },
+            },
+            task_util::ask,
+            test_support::{
+                ControllerPeerAllowed, GrantsInPrincipalName, PartitionCount, dispatch_wire, peer,
+                principal, request_context, start_group_broker_with,
             },
         },
-        task_util::ask,
-        test_support::{
-            ControllerPeerAllowed, GrantsInPrincipalName, PartitionCount, dispatch_wire, peer,
-            principal, request_context, start_group_broker_with,
-        },
+        assert2::assert,
+        krabka_metadata::MetadataRecord,
+        krabka_protocol::{Decode, owned::streams_group_heartbeat_response},
+        std::{net::SocketAddr, sync::Arc},
     };
 
     /// Dispatch every version through its wire codec so omitted fields stay observable.
@@ -188,9 +189,7 @@ mod tests {
     }
 
     /// A valid join of member `m1` with a one-subtopology topology.
-    fn request(group_id: &str) -> StreamsGroupHeartbeatRequest {
-        streams_request(group_id, "m1")
-    }
+    fn request(group_id: &str) -> StreamsGroupHeartbeatRequest { streams_request(group_id, "m1") }
 
     /// Creates a one-partition topic on the test broker, so that a streams
     /// topology can read it.
@@ -341,7 +340,9 @@ mod tests {
 
     /// Joining streams cases share the active protocol version and Alice's identity.
     macro_rules! streams_join_fixture {
-        (($version:ident, $handle:ident, $directory:ident, $broker:ident), ($principal:ident, $peer:ident, $context:ident)) => {
+        (
+            ($version:ident, $handle:ident, $directory:ident, $broker:ident),($principal:ident, $peer:ident, $context:ident)
+        ) => {
             let $version = streams_group_heartbeat_response::MAX_VERSION;
             broker_fixture!(($handle, $directory, $broker), start_broker(true));
             set_streams_version(&$broker, 1).await;
@@ -616,12 +617,13 @@ mod tests {
     /// creates the group.
     #[tokio::test]
     async fn handle_leaves_no_group_behind_a_join_the_coordinator_refuses() {
-        use krabka_protocol::owned::{
-            common::streams_group_heartbeat_request::topic_info::TopicInfo,
-            streams_group_heartbeat_request::Subtopology,
+        use {
+            crate::coordinator::unified::streams::actor::response::error_resp,
+            krabka_protocol::owned::{
+                common::streams_group_heartbeat_request::topic_info::TopicInfo,
+                streams_group_heartbeat_request::Subtopology,
+            },
         };
-
-        use crate::coordinator::unified::streams::actor::response::error_resp;
 
         let version = streams_group_heartbeat_response::MAX_VERSION;
         broker_fixture!((broker_handle, _dir, broker), start_broker(true));
@@ -640,13 +642,10 @@ mod tests {
         let rows = [
             (
                 "no-source-topics",
-                with_subtopology(
-                    "no-source-topics",
-                    Subtopology {
-                        subtopology_id: "0".into(),
-                        ..Default::default()
-                    },
-                ),
+                with_subtopology("no-source-topics", Subtopology {
+                    subtopology_id: "0".into(),
+                    ..Default::default()
+                }),
                 error_resp(
                     codes::STREAMS_INVALID_TOPOLOGY,
                     Some("No source topics found for subtopology 0".into()),
@@ -654,18 +653,15 @@ mod tests {
             ),
             (
                 "never-written-repartition",
-                with_subtopology(
-                    "never-written-repartition",
-                    Subtopology {
-                        subtopology_id: "0".into(),
-                        source_topics: vec!["in".into()],
-                        repartition_source_topics: vec![TopicInfo {
-                            name: "never-written-repartition-topic".into(),
-                            ..Default::default()
-                        }],
+                with_subtopology("never-written-repartition", Subtopology {
+                    subtopology_id: "0".into(),
+                    source_topics: vec!["in".into()],
+                    repartition_source_topics: vec![TopicInfo {
+                        name: "never-written-repartition-topic".into(),
                         ..Default::default()
-                    },
-                ),
+                    }],
+                    ..Default::default()
+                }),
                 error_resp(
                     codes::STREAMS_INVALID_TOPOLOGY,
                     Some(
@@ -817,10 +813,11 @@ mod tests {
     /// compares the whole response with the version 0 answer of the same join.
     #[tokio::test]
     async fn handle_sends_missing_client_tags_at_version_1_only() {
-        use krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status;
-
-        use crate::coordinator::unified::streams::{
-            config::KEY_RACK_AWARE_ASSIGNMENT_TAGS, topology::status,
+        use {
+            crate::coordinator::unified::streams::{
+                config::KEY_RACK_AWARE_ASSIGNMENT_TAGS, topology::status,
+            },
+            krabka_protocol::owned::common::streams_group_heartbeat_response::status::Status,
         };
 
         let (broker_handle, _dir, broker) = configured_streams_broker(|cfg| {

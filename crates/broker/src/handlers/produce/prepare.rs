@@ -3,25 +3,25 @@
 //! owned-decode fallback, plus the client-origin batch-header invariants that
 //! both paths apply.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_compression::RecordDecompressionPolicy;
-use krabka_protocol::{
-    owned::produce_response::BatchIndexAndErrorMessage,
-    records::{
-        Attributes, RecordBatch, RecordsError, RecordsPayload, TimestampType, ValidatedBatch,
-        validate_one_v2_batch,
+use {
+    super::{
+        framing::{NextBatch, PartitionPayload, V2_HEADER_LEN, next_batch},
+        owned_decode::decode_owned_batch,
+        topic_settings::TimestampPolicy,
     },
+    crate::{codes, metrics::BrokerMetrics, time_util::now_ms},
+    bytes::Bytes,
+    krabka_compression::RecordDecompressionPolicy,
+    krabka_protocol::{
+        owned::produce_response::BatchIndexAndErrorMessage,
+        records::{
+            Attributes, RecordBatch, RecordsError, RecordsPayload, TimestampType, ValidatedBatch,
+            validate_one_v2_batch,
+        },
+    },
+    krabka_verified::produce::{ProduceBatchAdmission, produce_batch_admission},
+    std::sync::Arc,
 };
-use krabka_verified::produce::{ProduceBatchAdmission, produce_batch_admission};
-
-use super::{
-    framing::{NextBatch, PartitionPayload, V2_HEADER_LEN, next_batch},
-    owned_decode::decode_owned_batch,
-    topic_settings::TimestampPolicy,
-};
-use crate::{codes, metrics::BrokerMetrics, time_util::now_ms};
 
 /// The topic-and-metrics context [`prepare_batch`] and [`owned_fallback`]
 /// need beside the batch's own bytes: what to label the decode-time metrics

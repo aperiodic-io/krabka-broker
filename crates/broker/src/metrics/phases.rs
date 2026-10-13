@@ -11,13 +11,14 @@
 //! The fields are atomics rather than cells because the accumulator is
 //! borrowed across `.await` points inside futures that must stay `Send`.
 
-use std::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
+use {
+    super::BrokerMetrics,
+    crate::handlers::ApiKeyCode,
+    std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::Duration,
+    },
 };
-
-use super::BrokerMetrics;
-use crate::handlers::ApiKeyCode;
 
 /// Nanosecond accumulators for the phases of one in-flight request.
 ///
@@ -33,26 +34,18 @@ pub(crate) struct RequestPhases {
 
 impl RequestPhases {
     /// Charge `elapsed` to the local phase: this broker's own log.
-    pub(crate) fn add_local(&self, elapsed: Duration) {
-        Self::add(&self.local_nanos, elapsed);
-    }
+    pub(crate) fn add_local(&self, elapsed: Duration) { Self::add(&self.local_nanos, elapsed); }
 
     /// Charge `elapsed` to the remote phase: a wait on something other than
     /// this broker's own log — a follower, a consumer's long poll, or the
     /// object store behind a tiered or diskless partition.
-    pub(crate) fn add_remote(&self, elapsed: Duration) {
-        Self::add(&self.remote_nanos, elapsed);
-    }
+    pub(crate) fn add_remote(&self, elapsed: Duration) { Self::add(&self.remote_nanos, elapsed); }
 
     /// Seconds charged to the local phase so far.
-    pub(crate) fn local_seconds(&self) -> f64 {
-        Self::seconds(&self.local_nanos)
-    }
+    pub(crate) fn local_seconds(&self) -> f64 { Self::seconds(&self.local_nanos) }
 
     /// Seconds charged to the remote phase so far.
-    pub(crate) fn remote_seconds(&self) -> f64 {
-        Self::seconds(&self.remote_nanos)
-    }
+    pub(crate) fn remote_seconds(&self) -> f64 { Self::seconds(&self.remote_nanos) }
 
     /// Saturating add, so a clock that jumped cannot wrap a total back to
     /// nearly zero and report a request as instantaneous.
@@ -87,9 +80,7 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn phases_accumulate_each_kind_independently() {
@@ -98,21 +89,21 @@ mod tests {
         phases.add_local(Duration::from_millis(7));
         phases.add_remote(Duration::from_millis(250));
 
-        assert!((phases.local_seconds() - 0.010).abs() < 1e-9);
-        assert!((phases.remote_seconds() - 0.250).abs() < 1e-9);
+        assert!((phases.local_seconds() - 0.010).abs() < 1.0e-9);
+        assert!((phases.remote_seconds() - 0.250).abs() < 1.0e-9);
     }
 
     #[test]
     fn phases_start_at_zero_and_saturate_instead_of_wrapping() {
         let phases = RequestPhases::default();
-        assert!(phases.local_seconds() < 1e-9);
-        assert!(phases.remote_seconds() < 1e-9);
+        assert!(phases.local_seconds() < 1.0e-9);
+        assert!(phases.remote_seconds() < 1.0e-9);
 
         // Two maximal durations must not wrap the total back toward zero: a
         // wrapped total would report a stalled request as instantaneous.
         phases.add_remote(Duration::MAX);
         phases.add_remote(Duration::MAX);
-        assert!(phases.remote_seconds() > 1e9);
+        assert!(phases.remote_seconds() > 1.0e9);
     }
 
     #[tokio::test]

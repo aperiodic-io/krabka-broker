@@ -1,11 +1,12 @@
 //! `#[derive(RegisterMetrics)]`: see the crate documentation.
 
-use moxy::{
-    ast::{Attributed, Field, ItemStruct, ParseError},
-    token::{Ident, LitStr, TokenStream},
+use {
+    crate::meta::{Tokens, field_ident, impl_block, named_fields},
+    moxy::{
+        ast::{Attributed, Field, ItemStruct, ParseError},
+        token::{Ident, LitStr, TokenStream},
+    },
 };
-
-use crate::meta::{Tokens, field_ident, impl_block, named_fields};
 
 /// The arguments of one `#[metric(...)]` field attribute.
 #[derive(Default, moxy::FromMeta)]
@@ -40,9 +41,7 @@ struct Metric {
 /// `prometheus-client` appends `_total` to the name of every counter, so a
 /// field that already ends in `_total` drops it. Any other field registers
 /// under its own name.
-fn default_name(field: &str) -> &str {
-    field.strip_suffix("_total").unwrap_or(field)
-}
+fn default_name(field: &str) -> &str { field.strip_suffix("_total").unwrap_or(field) }
 
 /// Whether `field` is a `Family<..>` rather than a single metric.
 fn is_family(field: &Field) -> bool {
@@ -107,38 +106,32 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         .map(metric)
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(impl_block(
-        item,
-        &TokenStream::new(),
-        &moxy::template! {
-            fn unregistered() -> Self {
-                Self {
-                    @for metric in &metrics {
-                        {{ metric.ident }}: {{ metric.constructor }},
-                    }
-                }
-            }
-
-            fn register(&self, registry: &mut ::prometheus_client::registry::Registry) {
+    Ok(impl_block(item, &TokenStream::new(), &moxy::template! {
+        fn unregistered() -> Self {
+            Self {
                 @for metric in &metrics {
-                    @if let Some((name, help)) = &metric.registration {
-                        registry.register(
-                            {{ name }},
-                            {{ help }},
-                            ::core::clone::Clone::clone(&self.{{ metric.ident }}),
-                        );
-                    }
+                    {{ metric.ident }}: {{ metric.constructor }},
                 }
             }
-        },
-    ))
+        }
+
+        fn register(&self, registry: &mut ::prometheus_client::registry::Registry) {
+            @for metric in &metrics {
+                @if let Some((name, help)) = &metric.registration {
+                    registry.register(
+                        {{ name }},
+                        {{ help }},
+                        ::core::clone::Clone::clone(&self.{{ metric.ident }}),
+                    );
+                }
+            }
+        }
+    }))
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::default_name;
+    use {super::default_name, assert2::assert};
 
     #[test]
     fn default_name_drops_only_a_trailing_total() {

@@ -1,22 +1,20 @@
 //! Tests for the verbatim-versus-owned prepare decision.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_compression::CompressionType;
-use krabka_protocol::records::Record;
-use krabka_units::{bytes, fraction};
-
-use super::*;
-use crate::{handlers::produce::test_support::encode_batch, metrics::BrokerMetrics};
+use {
+    super::*,
+    crate::{handlers::produce::test_support::encode_batch, metrics::BrokerMetrics},
+    assert2::assert,
+    krabka_compression::CompressionType,
+    krabka_protocol::records::Record,
+    krabka_units::{bytes, fraction},
+    std::sync::Arc,
+};
 
 krabka_macros::legacy_policy_fixture!(legacy_policy_wire, ::krabka_records_legacy);
 
 /// The topic name these cases record under, as the shared handle the metric
 /// label sets clone.
-fn topic() -> Arc<str> {
-    Arc::from("t")
-}
+fn topic() -> Arc<str> { Arc::from("t") }
 
 #[test]
 fn record_decompression_policy_limits_owned_and_verbatim_produce() {

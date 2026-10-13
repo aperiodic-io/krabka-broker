@@ -3,10 +3,10 @@
 //! Local replicas open through [`crate::handlers::partition_materialization`],
 //! which installs the same initial leader and ISR that these records name.
 
-use krabka_metadata::MetadataRecord;
-use krabka_raft::NodeId;
-
-use crate::handlers::create_topics::InitialLeadership;
+use {
+    crate::handlers::create_topics::InitialLeadership, krabka_metadata::MetadataRecord,
+    krabka_raft::NodeId,
+};
 
 pub(super) fn partition_records(
     topic: &str,
@@ -25,10 +25,10 @@ pub(super) fn partition_records(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::handlers::partition_materialization::should_materialize_locally;
+    use {
+        super::*, crate::handlers::partition_materialization::should_materialize_locally,
+        assert2::check,
+    };
 
     #[test]
     fn local_materialization_predicates_track_replica_membership_and_leader() {

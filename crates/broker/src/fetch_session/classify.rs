@@ -8,21 +8,21 @@
 //! fetch applies the partition-set diff and returns the full effective
 //! partition set under one lock.
 
-use std::sync::atomic::Ordering;
-
-use krabka_protocol::owned::fetch_request::FetchRequest;
-use qubit_clock::MonotonicClock as _;
-
-use super::{
-    cache::FetchSessionCache,
-    diff::apply_incremental,
-    epoch::{
-        FINAL_EPOCH, FIRST_TOPIC_ID_FETCH_VERSION, FetchSessionEpoch, FetchSessionId,
-        INITIAL_EPOCH, INVALID_SESSION_ID, next_epoch,
+use {
+    super::{
+        cache::FetchSessionCache,
+        diff::apply_incremental,
+        epoch::{
+            FINAL_EPOCH, FIRST_TOPIC_ID_FETCH_VERSION, FetchSessionEpoch, FetchSessionId,
+            INITIAL_EPOCH, INVALID_SESSION_ID, next_epoch,
+        },
+        state::{CachedPartitionState, FetchSessionKey},
     },
-    state::{CachedPartitionState, FetchSessionKey},
+    crate::codes,
+    krabka_protocol::owned::fetch_request::FetchRequest,
+    qubit_clock::MonotonicClock as _,
+    std::sync::atomic::Ordering,
 };
-use crate::codes;
 
 /// Outcome of `FetchSessionCache::classify`. The handler dispatches on this
 /// value before it does any read.
@@ -193,18 +193,19 @@ impl FetchSessionCache {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_protocol::{
-        owned::fetch_request::{FetchPartition, FetchTopic},
-        primitives::uuid::Uuid as WireUuid,
-    };
-
-    use super::*;
-    use crate::fetch_session::test_support::{
-        ForgottenTopicSetup, NAME_FETCH_VERSION, RequestSessionEpoch, RequestSessionId,
-        SessionAllocationSetup, SessionKeySetup, SessionRequestSetup, TopicAddressing,
-        allocate_session, allocated_cache, error_code, forgotten_topic, req,
-        seed_resolved_partition, session_key, topic,
+    use {
+        super::*,
+        crate::fetch_session::test_support::{
+            ForgottenTopicSetup, NAME_FETCH_VERSION, RequestSessionEpoch, RequestSessionId,
+            SessionAllocationSetup, SessionKeySetup, SessionRequestSetup, TopicAddressing,
+            allocate_session, allocated_cache, error_code, forgotten_topic, req,
+            seed_resolved_partition, session_key, topic,
+        },
+        assert2::{assert, check},
+        krabka_protocol::{
+            owned::fetch_request::{FetchPartition, FetchTopic},
+            primitives::uuid::Uuid as WireUuid,
+        },
     };
 
     #[test]
@@ -310,14 +311,11 @@ mod tests {
                 topic_id: WireUuid([1; 16]),
                 partition: 0,
             };
-            let id = allocate_session(
-                &cache,
-                SessionAllocationSetup {
-                    addressing: case.created_with_topic_ids,
-                    partitions: vec![(key, CachedPartitionState::default())],
-                    ..Default::default()
-                },
-            );
+            let id = allocate_session(&cache, SessionAllocationSetup {
+                addressing: case.created_with_topic_ids,
+                partitions: vec![(key, CachedPartitionState::default())],
+                ..Default::default()
+            });
             let decision = cache.classify(
                 &req(SessionRequestSetup {
                     session_epoch: RequestSessionEpoch(case.epoch),
@@ -453,20 +451,17 @@ mod tests {
                 ..Default::default()
             },
         )];
-        let id = allocate_session(
-            &cache,
-            SessionAllocationSetup {
-                partitions: initial,
-                ..Default::default()
-            },
-        );
+        let id = allocate_session(&cache, SessionAllocationSetup {
+            partitions: initial,
+            ..Default::default()
+        });
 
         // Incremental that updates partition 0's fetch_offset and adds partition 1.
         let r = req(SessionRequestSetup {
-            topics: vec![topic(
-                "t",
-                &[krabka_ids::PartitionIndex(0), krabka_ids::PartitionIndex(1)],
-            )],
+            topics: vec![topic("t", &[
+                krabka_ids::PartitionIndex(0),
+                krabka_ids::PartitionIndex(1),
+            ])],
             ..SessionRequestSetup::incremental(RequestSessionId(id))
         });
         match cache.classify(&r, NAME_FETCH_VERSION) {
@@ -660,13 +655,10 @@ mod tests {
                 CachedPartitionState::default(),
             ),
         ];
-        let id = allocate_session(
-            &cache,
-            SessionAllocationSetup {
-                partitions: initial,
-                ..Default::default()
-            },
-        );
+        let id = allocate_session(&cache, SessionAllocationSetup {
+            partitions: initial,
+            ..Default::default()
+        });
 
         let forgotten = vec![forgotten_topic(ForgottenTopicSetup {
             partitions: vec![krabka_ids::PartitionIndex(1)],
@@ -694,13 +686,10 @@ mod tests {
     fn incremental_that_empties_the_session_drops_it_and_reports_no_session() {
         let cache = FetchSessionCache::new(10);
         let key = session_key(SessionKeySetup::default());
-        let id = allocate_session(
-            &cache,
-            SessionAllocationSetup {
-                partitions: vec![(key, CachedPartitionState::default())],
-                ..Default::default()
-            },
-        );
+        let id = allocate_session(&cache, SessionAllocationSetup {
+            partitions: vec![(key, CachedPartitionState::default())],
+            ..Default::default()
+        });
 
         let forgotten = vec![forgotten_topic(ForgottenTopicSetup::default())];
         let r = req(SessionRequestSetup::forgetting(

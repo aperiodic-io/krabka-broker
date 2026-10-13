@@ -2,20 +2,21 @@
 //! apply/commit/truncate behaviour, the `LeaderChange` batch the leader
 //! appends, and the reasons a reconfiguration is refused before it is proposed.
 
-use assert2::{assert, check};
-
-use super::*;
-use crate::{
-    kraft::controller::{
-        PendingReconfig,
-        control_state::{voter_set_from_wire, voter_set_to_wire},
-        records::{leader_change_batch, typed_control_batch},
-        test_support::{
-            EngineSetup, build_engine_only, elect_single_voter_engine, one_offset_batch,
-            topic_record, voter_set,
+use {
+    super::*,
+    crate::{
+        kraft::controller::{
+            PendingReconfig,
+            control_state::{voter_set_from_wire, voter_set_to_wire},
+            records::{leader_change_batch, typed_control_batch},
+            test_support::{
+                EngineSetup, build_engine_only, elect_single_voter_engine, one_offset_batch,
+                topic_record, voter_set,
+            },
         },
+        reconfig::{AddVoter, ReconfigOutcome, VoterChange},
     },
-    reconfig::{AddVoter, ReconfigOutcome, VoterChange},
+    assert2::{assert, check},
 };
 
 fn wire_voter(id: i32, directory_byte: u8) -> krabka_protocol::owned::voters_record::Voter {
@@ -359,9 +360,7 @@ fn update_voter_preflight_at_level_0_updates_voter_history() {
 async fn reconfiguration_refuses_when_epoch_not_committed_and_admits_when_committed() {
     use crate::reconfig::{ReconfigOutcome, RemoveVoter, UpdateVoter, VoterChange};
 
-    fn add_of(id: u64) -> VoterChange {
-        VoterChange::Add(add_request(id, 0))
-    }
+    fn add_of(id: u64) -> VoterChange { VoterChange::Add(add_request(id, 0)) }
 
     let (mut leader, _dir) = build_engine_only(EngineSetup::default());
     leader.on_event(Event::ElectionTimeout);
@@ -907,10 +906,11 @@ async fn version_finalization_waits_for_the_unchanged_voters_record() {
 /// alone.
 #[test]
 fn the_first_leader_of_a_dynamic_quorum_writes_the_bootstrap_voters() {
-    use krabka_metadata::{KRaftVersionRecord, MetadataRecord, VotersRecord};
-
-    use crate::{
-        config::DEFAULT_METADATA_RAFT_FETCH_MAX, kraft::controller::control_batch_image_records,
+    use {
+        crate::{
+            config::DEFAULT_METADATA_RAFT_FETCH_MAX, kraft::controller::control_batch_image_records,
+        },
+        krabka_metadata::{KRaftVersionRecord, MetadataRecord, VotersRecord},
     };
 
     /// The control batch at `at`: its record count, whether its `LeaderChange`

@@ -71,20 +71,21 @@
 //! reported shape is Kafka's; only the effect is a superset, and nothing on
 //! the wire changes.
 
-use krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult;
-use krabka_units::convert::TimeExt as _;
-
-use super::{
-    entry::{DefaultLayer, EntryOptions, Layer, config_entry},
-    resources::StaticBrokerConfigs,
-    wire::CONFIG_SOURCE_STATIC_BROKER,
-};
-use crate::{
-    config::DEFAULT_CONNECTIONS_MAX_IDLE,
-    config_keys::{
-        CONNECTIONS_MAX_IDLE_MS,
-        registry::{self, ConfigScope},
+use {
+    super::{
+        entry::{DefaultLayer, EntryOptions, Layer, config_entry},
+        resources::StaticBrokerConfigs,
+        wire::CONFIG_SOURCE_STATIC_BROKER,
     },
+    crate::{
+        config::DEFAULT_CONNECTIONS_MAX_IDLE,
+        config_keys::{
+            CONNECTIONS_MAX_IDLE_MS,
+            registry::{self, ConfigScope},
+        },
+    },
+    krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult,
+    krabka_units::convert::TimeExt as _,
 };
 
 /// The per-listener key for `listener_name`. The name in the middle is

@@ -5,13 +5,15 @@
 //! and turns a handshake that arrives on an already-authenticated connection
 //! into the `Reauthenticating` state that KIP-368 defines -- when Kafka would.
 
-use krabka_protocol::owned::{
-    sasl_handshake_request::SaslHandshakeRequest, sasl_handshake_response::SaslHandshakeResponse,
+use {
+    super::state::{AuthenticatedSnapshot, ConnectionAuth, SaslExchange},
+    crate::codes::{ILLEGAL_SASL_STATE, UNSUPPORTED_SASL_MECHANISM},
+    krabka_protocol::owned::{
+        sasl_handshake_request::SaslHandshakeRequest,
+        sasl_handshake_response::SaslHandshakeResponse,
+    },
+    krabka_security::SaslMechanism,
 };
-use krabka_security::SaslMechanism;
-
-use super::state::{AuthenticatedSnapshot, ConnectionAuth, SaslExchange};
-use crate::codes::{ILLEGAL_SASL_STATE, UNSUPPORTED_SASL_MECHANISM};
 
 /// Kafka's `KafkaChannel.MIN_REAUTH_INTERVAL_ONE_SECOND_NANOS`, in ms: a
 /// connection may not start a re-authentication more than once a second.
@@ -173,10 +175,10 @@ fn exchange_for_mechanism(m: SaslMechanism) -> SaslExchange {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::network::auth::test_support::authenticated as test_authenticated;
+    use {
+        super::*, crate::network::auth::test_support::authenticated as test_authenticated,
+        assert2::assert,
+    };
 
     const NOW_MS: i64 = 10_000_000;
 
@@ -321,15 +323,10 @@ mod tests {
                 mechanism: mechanism.to_string(),
                 ..Default::default()
             };
-            let outcome = handle_handshake(
-                &req,
-                &mut auth,
-                &enabled,
-                &mut ReauthClock {
-                    now_ms: NOW_MS,
-                    last_start_ms: &mut last_start_ms,
-                },
-            );
+            let outcome = handle_handshake(&req, &mut auth, &enabled, &mut ReauthClock {
+                now_ms: NOW_MS,
+                last_start_ms: &mut last_start_ms,
+            });
             let mechanisms = if lists_mechanisms {
                 vec!["OAUTHBEARER".to_string(), "SCRAM-SHA-512".to_string()]
             } else {

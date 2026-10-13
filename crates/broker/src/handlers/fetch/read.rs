@@ -2,19 +2,19 @@
 //! mutex, the blocking seek-and-read that serves it, and the response
 //! fields the served bytes fill in.
 
-use std::sync::{Arc, Mutex};
-
-use krabka_log::{Log, LogError, Offset};
-use krabka_protocol::{
-    owned::fetch_response::{AbortedTransaction, PartitionData},
-    records::RecordsPayload,
-};
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use super::{FetchWatermarks, VisibilityWindow, compute_visibility_window, plan::refused_read};
-use crate::{
-    blocking::run_blocking_catching, codes, diskless::hot_tail::HotTailCache, error::BrokerError,
-    log_dir_status::LogDirRegistry, partition::Partition,
+use {
+    super::{FetchWatermarks, VisibilityWindow, compute_visibility_window, plan::refused_read},
+    crate::{
+        blocking::run_blocking_catching, codes, diskless::hot_tail::HotTailCache,
+        error::BrokerError, log_dir_status::LogDirRegistry, partition::Partition,
+    },
+    krabka_log::{Log, LogError, Offset},
+    krabka_protocol::{
+        owned::fetch_response::{AbortedTransaction, PartitionData},
+        records::RecordsPayload,
+    },
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::sync::{Arc, Mutex},
 };
 
 /// Hold the partition's log mutex for a short time to read the offsets, and
@@ -198,18 +198,15 @@ async fn read_local_log(
             read_committed_aborts,
         } => {
             let read_max = ByteSize::from_bytes_i64(i64::from(max_bytes.max(0)));
-            run_blocking_read(
-                &part.log,
-                &BlockingRead {
-                    fetch_offset,
-                    limit_offset,
-                    effective_lso,
-                    read_max,
-                    read_committed_aborts,
-                    sendfile_capable,
-                    sendfile_min_bytes,
-                },
-            )
+            run_blocking_read(&part.log, &BlockingRead {
+                fetch_offset,
+                limit_offset,
+                effective_lso,
+                read_max,
+                read_committed_aborts,
+                sendfile_capable,
+                sendfile_min_bytes,
+            })
             .await?
         }
     };
@@ -621,30 +618,31 @@ fn should_use_sendfile(total_bytes: usize, has_regions: bool, minimum_bytes: usi
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_ids::ProducerId;
-    use krabka_log::{DeliveryPolicy, Log, LogConfig, LogError, Offset};
-    use krabka_protocol::{
-        owned::fetch_response::{AbortedTransaction, PartitionData},
-        records::{Attributes, Record, RecordBatch, RecordsPayload},
-    };
-    use krabka_units::prelude::{ByteSizeExt as _, mebibytes};
-
-    use super::read_task_panicked;
-    use crate::{
-        blocking::inline_blocking_on_this_thread,
-        codes::{
-            CORRUPT_MESSAGE, KAFKA_STORAGE_ERROR, NONE, OFFSET_OUT_OF_RANGE, UNKNOWN_SERVER_ERROR,
+    use {
+        super::read_task_panicked,
+        crate::{
+            blocking::inline_blocking_on_this_thread,
+            codes::{
+                CORRUPT_MESSAGE, KAFKA_STORAGE_ERROR, NONE, OFFSET_OUT_OF_RANGE,
+                UNKNOWN_SERVER_ERROR,
+            },
+            delivery::test_support::batch_at,
+            error::BrokerError,
+            handlers::test_support::default_records_batch,
+            log_dir_status::LogDirRegistry,
+            partition::{Partition, test_support::test_partition},
+            time_util::now_ms,
         },
-        delivery::test_support::batch_at,
-        error::BrokerError,
-        handlers::test_support::default_records_batch,
-        log_dir_status::LogDirRegistry,
-        partition::{Partition, test_support::test_partition},
-        time_util::now_ms,
+        assert2::assert,
+        bytes::Bytes,
+        krabka_ids::ProducerId,
+        krabka_log::{DeliveryPolicy, Log, LogConfig, LogError, Offset},
+        krabka_protocol::{
+            owned::fetch_response::{AbortedTransaction, PartitionData},
+            records::{Attributes, Record, RecordBatch, RecordsPayload},
+        },
+        krabka_units::prelude::{ByteSizeExt as _, mebibytes},
+        std::sync::{Arc, Mutex},
     };
 
     /// The read budget for the hand-off test: larger than the log it reads, so
@@ -807,27 +805,21 @@ mod tests {
         let (_dir, log) = aborted_transaction_log();
         let (log, raw, limit) = locked_raw_log(log);
 
-        let read_committed = super::read_records(
-            &log,
-            &super::BlockingRead {
-                read_committed_aborts: true,
-                ..whole_log_read(limit)
-            },
-        )
+        let read_committed = super::read_records(&log, &super::BlockingRead {
+            read_committed_aborts: true,
+            ..whole_log_read(limit)
+        })
         .expect("the blocking read succeeds");
         let read_uncommitted =
             super::read_records(&log, &whole_log_read(limit)).expect("the blocking read succeeds");
 
         assert!(
             read_committed
-                == (
-                    RecordsPayload::Raw(raw.clone()),
-                    vec![AbortedTransaction {
-                        producer_id: PID,
-                        first_offset: 0,
-                        ..AbortedTransaction::default()
-                    }],
-                )
+                == (RecordsPayload::Raw(raw.clone()), vec![AbortedTransaction {
+                    producer_id: PID,
+                    first_offset: 0,
+                    ..AbortedTransaction::default()
+                }],)
         );
         assert!(read_uncommitted == (RecordsPayload::Raw(raw), Vec::new()));
     }
@@ -856,22 +848,19 @@ mod tests {
             .expect("read the first transaction alone");
 
         let log = Mutex::new(log);
-        let (records, aborted) = super::read_records(
-            &log,
-            &super::BlockingRead {
-                fetch_offset: Offset(0),
-                limit_offset: full_end,
-                // Spans both transactions; only the byte budget below clips
-                // the read to the first one.
-                effective_lso: full_end,
-                read_max: krabka_units::ByteSize::from_bytes(
-                    u64::try_from(clip.total).unwrap_or(u64::MAX),
-                ),
-                read_committed_aborts: true,
-                sendfile_capable: false,
-                sendfile_min_bytes: 0,
-            },
-        )
+        let (records, aborted) = super::read_records(&log, &super::BlockingRead {
+            fetch_offset: Offset(0),
+            limit_offset: full_end,
+            // Spans both transactions; only the byte budget below clips
+            // the read to the first one.
+            effective_lso: full_end,
+            read_max: krabka_units::ByteSize::from_bytes(
+                u64::try_from(clip.total).unwrap_or(u64::MAX),
+            ),
+            read_committed_aborts: true,
+            sendfile_capable: false,
+            sendfile_min_bytes: 0,
+        })
         .expect("the blocking read succeeds");
 
         assert!(records == RecordsPayload::Raw(clip.bytes));
@@ -985,15 +974,10 @@ mod tests {
         };
         let cases = [
             ("the whole log", 0, records.len(), served.clone()),
-            (
-                "nothing left to serve",
-                limit.0,
-                0,
-                PartitionData {
-                    records: None,
-                    ..served.clone()
-                },
-            ),
+            ("nothing left to serve", limit.0, 0, PartitionData {
+                records: None,
+                ..served.clone()
+            }),
             (
                 "past the log end",
                 limit.0 + 1,
@@ -1033,16 +1017,13 @@ mod tests {
         partition.replica_state.lock().await.hw = Offset(1);
         for (follower, committed) in [(false, false), (false, true), (true, false), (true, true)] {
             for (offset, expected) in [
-                (
-                    2,
-                    PartitionData {
-                        high_watermark: 1,
-                        last_stable_offset: 1,
-                        log_start_offset: 0,
-                        aborted_transactions: (committed && !follower).then(Vec::new),
-                        ..PartitionData::default()
-                    },
-                ),
+                (2, PartitionData {
+                    high_watermark: 1,
+                    last_stable_offset: 1,
+                    log_start_offset: 0,
+                    aborted_transactions: (committed && !follower).then(Vec::new),
+                    ..PartitionData::default()
+                }),
                 (3, expected_offset_out_of_range()),
             ] {
                 let request = super::ReadRequest {
@@ -1106,15 +1087,11 @@ mod tests {
         let cases = [
             ("high watermark inside the transaction", 1, held(1)),
             ("high watermark at the marker", 2, held(2)),
-            (
-                "high watermark past the marker",
-                3,
-                PartitionData {
-                    last_stable_offset: 3,
-                    records: Some(RecordsPayload::Raw(transaction)),
-                    ..held(3)
-                },
-            ),
+            ("high watermark past the marker", 3, PartitionData {
+                last_stable_offset: 3,
+                records: Some(RecordsPayload::Raw(transaction)),
+                ..held(3)
+            }),
         ];
 
         for (name, high_watermark, expected) in cases {
@@ -1154,20 +1131,14 @@ mod tests {
         };
         let cases = [
             ("read_uncommitted consumer", consumer_request(0)),
-            (
-                "read_committed consumer",
-                super::ReadRequest {
-                    read_committed: true,
-                    ..consumer_request(0)
-                },
-            ),
-            (
-                "follower",
-                super::ReadRequest {
-                    is_follower_fetch: true,
-                    ..consumer_request(0)
-                },
-            ),
+            ("read_committed consumer", super::ReadRequest {
+                read_committed: true,
+                ..consumer_request(0)
+            }),
+            ("follower", super::ReadRequest {
+                is_follower_fetch: true,
+                ..consumer_request(0)
+            }),
         ];
         for (name, request) in cases {
             let mut out = PartitionData {
@@ -1355,10 +1326,10 @@ mod tests {
     fn a_consumer_is_capped_at_the_delivery_watermark_and_a_follower_is_not() {
         let now_ms = now_ms();
         // Two batches of two records: [0, 1] is due, [2, 3] is an hour out.
-        let (_dir, mut log) = scheduled_log(
-            DeliveryPolicy::Scheduled,
-            &[now_ms - 3_600_000, now_ms + 3_600_000],
-        );
+        let (_dir, mut log) = scheduled_log(DeliveryPolicy::Scheduled, &[
+            now_ms - 3_600_000,
+            now_ms + 3_600_000,
+        ]);
 
         assert!(super::deliverable_offset(&mut log, Offset(4), false, now_ms) == Offset(2));
         // Replication is not gated: the follower reads the whole log.
@@ -1368,10 +1339,10 @@ mod tests {
     #[test]
     fn an_immediate_topic_is_capped_at_the_high_watermark_alone() {
         let now_ms = now_ms();
-        let (_dir, mut log) = scheduled_log(
-            DeliveryPolicy::Immediate,
-            &[now_ms + 3_600_000, now_ms + 7_200_000],
-        );
+        let (_dir, mut log) = scheduled_log(DeliveryPolicy::Immediate, &[
+            now_ms + 3_600_000,
+            now_ms + 7_200_000,
+        ]);
 
         // Nothing is held back by time, and the high watermark still caps the
         // window below the log end.

@@ -6,14 +6,15 @@
 //! the exhaustive state model and the property test can drive the KIP-98
 //! classification without a broker.
 
-use krabka_ids::PartitionIndex;
-use krabka_log::ProducerId;
-use krabka_verified::{
-    ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, producer_decision,
+use {
+    super::{ProducerEntry, ProducerState, RetainedBatch, entry::NUM_BATCHES_TO_RETAIN},
+    crate::{api_catalog::UnstableApiVersions, partition::LogOffset},
+    krabka_ids::PartitionIndex,
+    krabka_log::ProducerId,
+    krabka_verified::{
+        ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, producer_decision,
+    },
 };
-
-use super::{ProducerEntry, ProducerState, RetainedBatch, entry::NUM_BATCHES_TO_RETAIN};
-use crate::{api_catalog::UnstableApiVersions, partition::LogOffset};
 
 /// How the tracker answers one idempotent-producer batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,11 +192,11 @@ impl ProducerState {
 
 #[cfg(test)]
 mod fuzz {
-    use std::collections::HashMap;
-
-    use proptest::prelude::*;
-
-    use super::{Decision, ProducerEntry, check_pure};
+    use {
+        super::{Decision, ProducerEntry, check_pure},
+        proptest::prelude::*,
+        std::collections::HashMap,
+    };
 
     proptest! {
         /// Large-N randomized submit sequences over `check_pure`.

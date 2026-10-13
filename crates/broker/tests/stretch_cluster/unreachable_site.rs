@@ -5,16 +5,16 @@
 //! honestly — what an isolated *leader* must stop doing — and it is written
 //! against the one-way cut the crate documentation describes.
 
-use std::time::Duration;
-
-use assert2::check;
-use krabka_broker::codes;
-
-use crate::{
-    NODE_A, NODE_C, WITNESS, cluster_lock,
-    linked::linked_cluster_with_topic,
-    produce::{client_at, produce_once, produce_until_committed},
-    view::{wait_for_leader_and_isr, witness_never_leads},
+use {
+    crate::{
+        NODE_A, NODE_C, WITNESS, cluster_lock,
+        linked::linked_cluster_with_topic,
+        produce::{client_at, produce_once, produce_until_committed},
+        view::{wait_for_leader_and_isr, witness_never_leads},
+    },
+    assert2::check,
+    krabka_broker::codes,
+    std::time::Duration,
 };
 
 /// A leader whose replicas can no longer reach it must stop acknowledging

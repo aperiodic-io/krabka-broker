@@ -18,15 +18,15 @@
 //! that the coordinator already holds. Leader epochs restart when the topic is
 //! deleted and created again, so each value also records the topic id.
 
-use std::collections::HashMap;
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::{LeaderEpoch, MetadataImage, NodeId};
-use uuid::Uuid;
-
-use crate::{
-    codes::{COORDINATOR_LOAD_IN_PROGRESS, NOT_COORDINATOR},
-    txn::bootstrap,
+use {
+    crate::{
+        codes::{COORDINATOR_LOAD_IN_PROGRESS, NOT_COORDINATOR},
+        txn::bootstrap,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::{LeaderEpoch, MetadataImage, NodeId},
+    std::collections::HashMap,
+    uuid::Uuid,
 };
 
 /// The load status of a `__transaction_state` partition that this broker
@@ -82,9 +82,7 @@ pub(super) struct LeadershipChanges {
 }
 
 impl LeadershipChanges {
-    pub(super) fn is_empty(&self) -> bool {
-        self.unload.is_empty() && self.load.is_empty()
-    }
+    pub(super) fn is_empty(&self) -> bool { self.unload.is_empty() && self.load.is_empty() }
 }
 
 /// Applies the `__transaction_state` leadership of `image` to `known`.
@@ -134,14 +132,11 @@ pub(super) fn apply_image(
             }
             let term = (partition.leader == node_id)
                 .then(|| start_term(index, is_local(index), &mut next_generation, &mut changes));
-            known.insert(
-                index,
-                StatePartitionLeadership {
-                    topic_id,
-                    leader_epoch: partition.leader_epoch,
-                    term,
-                },
-            );
+            known.insert(index, StatePartitionLeadership {
+                topic_id,
+                leader_epoch: partition.leader_epoch,
+                term,
+            });
             continue;
         }
         let Some(mut current) = current else {

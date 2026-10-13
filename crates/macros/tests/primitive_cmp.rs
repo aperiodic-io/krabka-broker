@@ -1,7 +1,6 @@
 //! What `#[derive(PrimitiveCmp)]` compares, in both directions.
 
-use assert2::assert;
-use krabka_macros::PrimitiveCmp;
+use {assert2::assert, krabka_macros::PrimitiveCmp};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, PrimitiveCmp)]
 struct Seq(u64);

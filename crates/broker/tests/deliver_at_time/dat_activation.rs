@@ -6,14 +6,16 @@
 //! Both cases run once on a scheduled topic and once on an immediate one, and
 //! the immediate half is what shows the behaviour is the configuration.
 
-use std::time::Instant;
-
-use assert2::check;
-
-use crate::{
-    dat_fixtures::{ACTIVATION_DELAY_MS, IMMEDIATE, Mode, SCHEDULED, Visible, batch_at, now_ms},
-    dat_wire::{fetch_values, produce, ready_topic, visible, wait_until_visible},
-    support,
+use {
+    crate::{
+        dat_fixtures::{
+            ACTIVATION_DELAY_MS, IMMEDIATE, Mode, SCHEDULED, Visible, batch_at, now_ms,
+        },
+        dat_wire::{fetch_values, produce, ready_topic, visible, wait_until_visible},
+        support,
+    },
+    assert2::check,
+    std::time::Instant,
 };
 
 async fn produce_due_soon(

@@ -5,18 +5,18 @@
 //! local work instead, so they commit the consume first and enter here. This
 //! module keeps that ordering identical for both callers.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{BreakGlassAction, MetadataRecord};
-use krabka_raft::RaftError;
-use krabka_verified::{
-    BreakGlassLocalActionDecision, BreakGlassLocalActionFacts, BreakGlassLocalSpendState,
-    break_glass_local_action_decision,
+use {
+    super::gate::consumed_record_matches,
+    crate::broker::Broker,
+    krabka_metadata::{BreakGlassAction, MetadataRecord},
+    krabka_raft::RaftError,
+    krabka_verified::{
+        BreakGlassLocalActionDecision, BreakGlassLocalActionFacts, BreakGlassLocalSpendState,
+        break_glass_local_action_decision,
+    },
+    std::collections::HashSet,
+    uuid::Uuid,
 };
-use uuid::Uuid;
-
-use super::gate::consumed_record_matches;
-use crate::broker::Broker;
 
 fn proposal_id(record: &MetadataRecord) -> Option<Uuid> {
     match record {
@@ -108,12 +108,13 @@ pub(crate) async fn spend_before_local_action(
 
 #[cfg(test)]
 mod tests {
-    use krabka_metadata::{
-        BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, DeleteTopicRecord,
-        MetadataRecord,
+    use {
+        super::{BreakGlassLocalActionDecision, action_decision},
+        krabka_metadata::{
+            BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, DeleteTopicRecord,
+            MetadataRecord,
+        },
     };
-
-    use super::{BreakGlassLocalActionDecision, action_decision};
 
     fn consumed(action: BreakGlassAction, target: &str, consumed_at_ms: i64) -> MetadataRecord {
         MetadataRecord::V1BreakGlassProposal(BreakGlassProposalRecord {

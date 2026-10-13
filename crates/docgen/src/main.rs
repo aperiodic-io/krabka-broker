@@ -5,9 +5,10 @@
 //! CI runs `snippets` in place and fails when the working tree changes, so a
 //! source edit that a documentation page quotes cannot land on its own.
 
-use std::path::PathBuf;
-
-use clap::{Parser, Subcommand};
+use {
+    clap::{Parser, Subcommand},
+    std::path::PathBuf,
+};
 
 #[derive(Parser)]
 #[command(name = "krabka-docgen", about = "Generate Krabka reference docs")]

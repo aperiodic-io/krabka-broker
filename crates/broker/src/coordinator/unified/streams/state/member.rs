@@ -5,11 +5,11 @@
 //! [`StreamsMemberAssignmentState`] enum and the `i8` conversions that
 //! persistence needs live beside it rather than in the group state machine.
 
-use std::{collections::BTreeMap, time::Instant};
-
-use krabka_log::Offset;
-
-use super::TaskMap;
+use {
+    super::TaskMap,
+    krabka_log::Offset,
+    std::{collections::BTreeMap, time::Instant},
+};
 
 /// The reconciliation state of one streams-group member, Kafka's
 /// `org.apache.kafka.coordinator.group.streams.MemberState`. It covers the
@@ -38,9 +38,7 @@ pub enum StreamsMemberAssignmentState {
 impl StreamsMemberAssignmentState {
     /// Raw `i8` discriminant for the persistence layer.
     #[must_use]
-    pub fn as_i8(self) -> i8 {
-        self as i8
-    }
+    pub fn as_i8(self) -> i8 { self as i8 }
 
     /// Inverse of [`as_i8`](Self::as_i8). It returns `None` for an unknown
     /// discriminant instead of a panic, so that the caller, the actor, decides
@@ -182,9 +180,7 @@ impl StreamsMemberState {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn assignment_state_i8_roundtrips() {

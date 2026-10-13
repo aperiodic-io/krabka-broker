@@ -2,33 +2,33 @@
 //! [`GroupActorMessage`] to a live actor and awaits the reply, so a test reads
 //! as the RPC it exercises rather than as channel plumbing.
 
-use std::collections::HashMap;
-
-use krabka_protocol::{
-    owned::{
-        consumer_group_heartbeat_request::{ConsumerGroupHeartbeatRequest, TopicPartitions},
-        consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
-        heartbeat_request::HeartbeatRequest,
-        join_group_request::JoinGroupRequest,
-        leave_group_request::LeaveGroupRequest,
-        leave_group_response::MemberResponse,
-        sync_group_request::{SyncGroupRequest, SyncGroupRequestAssignment},
-    },
-    primitives::uuid::Uuid,
-};
-
-use super::subscription_blob;
-use crate::{
-    coordinator::unified::{
-        actor::{
-            ClassicView, CommitFence, CommitRequest, DescribeMember, DescribeView,
-            GroupActorHandle, GroupActorMessage, JoinResult, LeaveResult, SyncResult,
+use {
+    super::subscription_blob,
+    crate::{
+        coordinator::unified::{
+            actor::{
+                ClassicView, CommitFence, CommitRequest, DescribeMember, DescribeView,
+                GroupActorHandle, GroupActorMessage, JoinResult, LeaveResult, SyncResult,
+            },
+            classic_state::OffsetEntry,
+            group::GroupOffsets,
+            regex_resolver::no_topic_regex_resolver,
         },
-        classic_state::OffsetEntry,
-        group::GroupOffsets,
-        regex_resolver::no_topic_regex_resolver,
+        task_util::ask,
     },
-    task_util::ask,
+    krabka_protocol::{
+        owned::{
+            consumer_group_heartbeat_request::{ConsumerGroupHeartbeatRequest, TopicPartitions},
+            consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
+            heartbeat_request::HeartbeatRequest,
+            join_group_request::JoinGroupRequest,
+            leave_group_request::LeaveGroupRequest,
+            leave_group_response::MemberResponse,
+            sync_group_request::{SyncGroupRequest, SyncGroupRequestAssignment},
+        },
+        primitives::uuid::Uuid,
+    },
+    std::collections::HashMap,
 };
 
 /// Sends a request without awaiting its reply, so tests can retain the exact
@@ -263,27 +263,24 @@ pub async fn consumer_heartbeat_owning(
     member_epoch: i32,
     owned: &[(Uuid, &[i32])],
 ) -> ConsumerGroupHeartbeatResponse {
-    consumer_request(
-        handle,
-        ConsumerGroupHeartbeatRequest {
-            group_id: "g".into(),
-            member_id: member_id.into(),
-            member_epoch,
-            subscribed_topic_names: Some(vec!["t".into()]),
-            rebalance_timeout_ms: 60_000,
-            topic_partitions: Some(
-                owned
-                    .iter()
-                    .map(|(topic_id, partitions)| TopicPartitions {
-                        topic_id: *topic_id,
-                        partitions: partitions.to_vec(),
-                        ..Default::default()
-                    })
-                    .collect(),
-            ),
-            ..Default::default()
-        },
-    )
+    consumer_request(handle, ConsumerGroupHeartbeatRequest {
+        group_id: "g".into(),
+        member_id: member_id.into(),
+        member_epoch,
+        subscribed_topic_names: Some(vec!["t".into()]),
+        rebalance_timeout_ms: 60_000,
+        topic_partitions: Some(
+            owned
+                .iter()
+                .map(|(topic_id, partitions)| TopicPartitions {
+                    topic_id: *topic_id,
+                    partitions: partitions.to_vec(),
+                    ..Default::default()
+                })
+                .collect(),
+        ),
+        ..Default::default()
+    })
     .await
 }
 
@@ -317,16 +314,13 @@ pub async fn validate_commit(
     fence: CommitFence,
     partitions: &[(Uuid, i32)],
 ) -> Result<(), i16> {
-    validate_commit_request(
-        handle,
-        CommitRequest {
-            member_id: member_id.into(),
-            group_instance_id: None,
-            generation_or_epoch,
-            fence,
-            partitions: partitions.to_vec(),
-        },
-    )
+    validate_commit_request(handle, CommitRequest {
+        member_id: member_id.into(),
+        group_instance_id: None,
+        generation_or_epoch,
+        fence,
+        partitions: partitions.to_vec(),
+    })
     .await
 }
 

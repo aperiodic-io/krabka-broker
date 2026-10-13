@@ -4,19 +4,20 @@
 //! success. The caller reads the outcome from the response's own `error_code`,
 //! never from a transport failure.
 
-use krabka_audit::{AuditOutcome, AuditResource, PrivilegedPhase};
-use krabka_protocol::krabka::freeze::{SetTopicFreezeRequest, SetTopicFreezeResponse};
-use uuid::Uuid;
-
-use super::outcome::{Accepted, Refusal};
-use crate::{
-    broker::Broker,
-    codes,
-    freeze::{
-        freeze_target,
-        handlers::{FreezeAudit, audit_freeze, pattern_type_concrete},
+use {
+    super::outcome::{Accepted, Refusal},
+    crate::{
+        broker::Broker,
+        codes,
+        freeze::{
+            freeze_target,
+            handlers::{FreezeAudit, audit_freeze, pattern_type_concrete},
+        },
+        handlers::{RequestContext, audit_admin},
     },
-    handlers::{RequestContext, audit_admin},
+    krabka_audit::{AuditOutcome, AuditResource, PrivilegedPhase},
+    krabka_protocol::krabka::freeze::{SetTopicFreezeRequest, SetTopicFreezeResponse},
+    uuid::Uuid,
 };
 
 /// The audit action name of a freeze.

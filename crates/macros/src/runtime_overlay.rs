@@ -1,11 +1,12 @@
 //! `#[derive(RuntimeOverlay)]`: see the crate documentation.
 
-use moxy::{
-    ast::{Attributed, Field, ItemStruct, ParseError},
-    token::{Ident, TokenStream},
+use {
+    crate::meta::{Tokens, field_ident, impl_block, named_fields},
+    moxy::{
+        ast::{Attributed, Field, ItemStruct, ParseError},
+        token::{Ident, TokenStream},
+    },
 };
-
-use crate::meta::{Tokens, field_ident, impl_block, named_fields};
 
 /// The arguments of the `#[overlay(...)]` attribute on the struct.
 #[derive(moxy::FromMeta)]
@@ -69,23 +70,19 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         .filter_map(Result::transpose)
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(impl_block(
-        item,
-        &TokenStream::new(),
-        &moxy::template! {
-            pub(crate) fn copy_into(&self, target: &mut {{ target }}) {
-                @for copy in &copies {
-                    @if let Assignment::Plain(field) = copy {
-                        target.{{ field }} = self.{{ field }};
-                    }
-                    @if let Assignment::Refined(field) = copy {
-                        target.{{ field }} = self.{{ field }}.map(|value| value.into_value());
-                    }
-                    @if let Assignment::Clone(field) = copy {
-                        target.{{ field }}.clone_from(&self.{{ field }});
-                    }
+    Ok(impl_block(item, &TokenStream::new(), &moxy::template! {
+        pub(crate) fn copy_into(&self, target: &mut {{ target }}) {
+            @for copy in &copies {
+                @if let Assignment::Plain(field) = copy {
+                    target.{{ field }} = self.{{ field }};
+                }
+                @if let Assignment::Refined(field) = copy {
+                    target.{{ field }} = self.{{ field }}.map(|value| value.into_value());
+                }
+                @if let Assignment::Clone(field) = copy {
+                    target.{{ field }}.clone_from(&self.{{ field }});
                 }
             }
-        },
-    ))
+        }
+    }))
 }

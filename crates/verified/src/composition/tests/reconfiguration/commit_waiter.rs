@@ -1,8 +1,9 @@
-use assert2::assert;
-
-use super::{control_support::expected_control, *};
-use crate::{
-    composition::reconfiguration::CommittedControl, reconfiguration::ReconfigurationState,
+use {
+    super::{control_support::expected_control, *},
+    crate::{
+        composition::reconfiguration::CommittedControl, reconfiguration::ReconfigurationState,
+    },
+    assert2::assert,
 };
 
 /// Finalize the same three-voter version-zero set with both prefix reports.

@@ -23,9 +23,7 @@ pub trait SimNodeLog: LogView {
     /// consensus HWM the core has just computed. For the in-memory fake this is
     /// a no-op, because the harness mirrors the HWM separately. The real
     /// `KraftLog` uses it to gate committed reads. Default: no-op.
-    fn advance_hwm(&mut self, hwm: i64) {
-        let _ = hwm;
-    }
+    fn advance_hwm(&mut self, hwm: i64) { let _ = hwm; }
 
     /// Replicates from `leader` into `self` and brings `self` byte-for-byte in
     /// line with the leader's log.

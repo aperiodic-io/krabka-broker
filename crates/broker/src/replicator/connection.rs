@@ -8,14 +8,15 @@
 //! so a leader restart costs one redial per fetcher rather than one per
 //! partition -- the reconnect storm an operator used to see during a roll.
 
-use krabka_client_core::{Connection, ConnectionOptions};
-use krabka_security::ListenerProtocol;
-use krabka_units::{Time, convert::TimeExt, fmt::Human as _};
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
-
-use super::FetcherConfig;
-use crate::{config::ReplicationRuntimeConfig, network::client::InterBrokerClient};
+use {
+    super::FetcherConfig,
+    crate::{config::ReplicationRuntimeConfig, network::client::InterBrokerClient},
+    krabka_client_core::{Connection, ConnectionOptions},
+    krabka_security::ListenerProtocol,
+    krabka_units::{Time, convert::TimeExt, fmt::Human as _},
+    tokio_util::sync::CancellationToken,
+    tracing::warn,
+};
 
 pub(super) fn connection_options(client_id: &str) -> ConnectionOptions {
     ConnectionOptions {
@@ -127,11 +128,12 @@ fn reconnect_delay(replication: &ReplicationRuntimeConfig, previous: Option<Time
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{millis, secs};
-
-    use super::*;
-    use crate::replicator::test_support::{LEADER_ID, image_with_leader, test_config};
+    use {
+        super::*,
+        crate::replicator::test_support::{LEADER_ID, image_with_leader, test_config},
+        assert2::assert,
+        krabka_units::{millis, secs},
+    };
 
     #[test]
     fn configured_reconnect_delay_doubles_until_cap() {

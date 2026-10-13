@@ -47,23 +47,23 @@
 //! Deleting the group stops the actor; the coordinator drops the registry
 //! entry when it reads [`ReapOutcome::group_deleted`].
 
-use std::collections::HashSet;
-
-use tokio::sync::oneshot;
-
-use super::{
-    GroupTombstone, group_tombstone_keys,
-    offset_delete::{SubscribedTopics, offset_delete_guard},
-};
-use crate::{
-    coordinator::unified::{
-        GroupCoordinator, OffsetRecordBatchBuilder,
-        classic_state::GroupState as ClassicGroupState,
-        group::{CoordinatorGroup, GroupKind},
-        offsets_log::OffsetsLog,
-        persistence::{Key, OffsetCommitValue, encode_key},
+use {
+    super::{
+        GroupTombstone, group_tombstone_keys,
+        offset_delete::{SubscribedTopics, offset_delete_guard},
     },
-    error::BrokerError,
+    crate::{
+        coordinator::unified::{
+            GroupCoordinator, OffsetRecordBatchBuilder,
+            classic_state::GroupState as ClassicGroupState,
+            group::{CoordinatorGroup, GroupKind},
+            offsets_log::OffsetsLog,
+            persistence::{Key, OffsetCommitValue, encode_key},
+        },
+        error::BrokerError,
+    },
+    std::collections::HashSet,
+    tokio::sync::oneshot,
 };
 
 /// What one reap pass did to one group.
@@ -337,20 +337,20 @@ fn tombstone_batch(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use assert2::check;
-    use bytes::Bytes;
-    use krabka_log::Offset;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        actor::test_support::subscription_blob,
-        classic_state::{ClassicGroup, Member, OffsetEntry},
-        consumer_state::{
-            GroupState as ConsumerState, ResolvedRegularExpression, test_support::member,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            actor::test_support::subscription_blob,
+            classic_state::{ClassicGroup, Member, OffsetEntry},
+            consumer_state::{
+                GroupState as ConsumerState, ResolvedRegularExpression, test_support::member,
+            },
+            persistence_next_gen::{NextGenKey, encode_key as encode_next_gen_key},
         },
-        persistence_next_gen::{NextGenKey, encode_key as encode_next_gen_key},
+        assert2::check,
+        bytes::Bytes,
+        krabka_log::Offset,
+        std::collections::HashMap,
     };
 
     const RETENTION_MS: i64 = 1_000;
@@ -400,17 +400,14 @@ mod tests {
         commits
             .iter()
             .map(|(topic, commit_timestamp_ms)| {
-                (
-                    ((*topic).to_string(), 0),
-                    OffsetEntry {
-                        offset: Offset(7),
-                        leader_epoch: -1,
-                        metadata: String::new(),
-                        commit_timestamp_ms: *commit_timestamp_ms,
-                        expire_timestamp_ms: None,
-                        topic_id: None,
-                    },
-                )
+                (((*topic).to_string(), 0), OffsetEntry {
+                    offset: Offset(7),
+                    leader_epoch: -1,
+                    metadata: String::new(),
+                    commit_timestamp_ms: *commit_timestamp_ms,
+                    expire_timestamp_ms: None,
+                    topic_id: None,
+                })
             })
             .collect()
     }
@@ -440,11 +437,9 @@ mod tests {
             ),
             (
                 "rebalancing classic group expires nothing",
-                classic(
-                    ClassicGroupState::PreparingRebalance,
-                    Some("consumer"),
-                    &[&["a"]],
-                ),
+                classic(ClassicGroupState::PreparingRebalance, Some("consumer"), &[
+                    &["a"],
+                ]),
                 vec![("b", OLD_MS)],
                 vec![],
                 None,
@@ -574,29 +569,22 @@ mod tests {
                     tombstone(encode_key(&Key::GroupMetadata { group_id: gid() }).unwrap()),
                 ],
             ),
-            (
-                "consumer group",
-                Some(consumer(&[])),
-                vec![
-                    expired.clone(),
-                    ng(NextGenKey::TargetAssignmentMetadata { group_id: gid() }),
-                    ng(NextGenKey::PartitionMetadata { group_id: gid() }),
-                    ng(NextGenKey::GroupMetadata { group_id: gid() }),
-                ],
-            ),
+            ("consumer group", Some(consumer(&[])), vec![
+                expired.clone(),
+                ng(NextGenKey::TargetAssignmentMetadata { group_id: gid() }),
+                ng(NextGenKey::PartitionMetadata { group_id: gid() }),
+                ng(NextGenKey::GroupMetadata { group_id: gid() }),
+            ]),
             (
                 "consumer group with resolved regular expressions",
                 Some({
                     let mut group = ConsumerState::new("g");
                     for regex in ["b.*", "a.*"] {
-                        group.set_resolved_regex(
-                            regex.into(),
-                            ResolvedRegularExpression {
-                                topics: std::collections::BTreeSet::new(),
-                                version: 1,
-                                timestamp_ms: 2,
-                            },
-                        );
+                        group.set_resolved_regex(regex.into(), ResolvedRegularExpression {
+                            topics: std::collections::BTreeSet::new(),
+                            version: 1,
+                            timestamp_ms: 2,
+                        });
                     }
                     GroupKind::Consumer(group)
                 }),

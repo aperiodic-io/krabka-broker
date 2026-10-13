@@ -12,12 +12,13 @@
 //! ## Authorizing a request
 //!
 //! ```rust
-//! use std::net::SocketAddr;
-//!
-//! use krabka_authz::{AllowAllAuthorizer, AuthorizationRequest, AuthorizationResult, Authorizer};
-//! use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
-//! use krabka_security::{AuthMethod, Principal};
-//! use uuid::Uuid;
+//! use {
+//!     krabka_authz::{AllowAllAuthorizer, AuthorizationRequest, AuthorizationResult, Authorizer},
+//!     krabka_metadata::{AclOperation, MetadataImage, ResourceType},
+//!     krabka_security::{AuthMethod, Principal},
+//!     std::net::SocketAddr,
+//!     uuid::Uuid,
+//! };
 //!
 //! let image = MetadataImage::new(Uuid::nil());
 //! let principal = Principal {
@@ -47,15 +48,18 @@ mod precedence;
 mod simple;
 mod source;
 
-use std::net::SocketAddr;
-
-pub use allow_all::AllowAllAuthorizer;
-pub use cache::AclCache;
-pub use host_format::jdk_host_address;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_security::Principal;
-pub use simple::SimpleAclAuthorizer;
-pub use source::{AclEntries, AclSource};
+pub use {
+    allow_all::AllowAllAuthorizer,
+    cache::AclCache,
+    host_format::jdk_host_address,
+    simple::SimpleAclAuthorizer,
+    source::{AclEntries, AclSource},
+};
+use {
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_security::Principal,
+    std::net::SocketAddr,
+};
 
 /// What the caller asks `authorize`: which principal wants to do which
 /// operation on which resource, and from which host.
@@ -133,9 +137,7 @@ pub trait Authorizer: Send + Sync + std::fmt::Debug {
     /// `SECURITY_DISABLED`, as Kafka's `KafkaApis` does under
     /// `authorizer.isEmpty`. A decorator must forward it to the authorizer it
     /// wraps.
-    fn is_configured(&self) -> bool {
-        true
-    }
+    fn is_configured(&self) -> bool { true }
 
     /// Upper bound on how long a caller-side cache may reuse a decision from
     /// this authorizer without asking again, or `None` if a decision is
@@ -149,9 +151,7 @@ pub trait Authorizer: Send + Sync + std::fmt::Debug {
     /// keyed on metadata alone cannot outlive it and silently miss a policy
     /// change the metadata log never saw. A decorator MUST forward the
     /// wrapped authorizer's answer, as `is_configured` does.
-    fn decision_ttl(&self) -> Option<std::time::Duration> {
-        None
-    }
+    fn decision_ttl(&self) -> Option<std::time::Duration> { None }
 
     /// Whether `principal` holds `operation` on at least one resource pattern
     /// of `resource_type` -- Kafka's `AuthorizerUtils.authorizeByResourceType`,

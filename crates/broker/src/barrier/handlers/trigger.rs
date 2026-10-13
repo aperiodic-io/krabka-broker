@@ -26,19 +26,20 @@
 //! Authorization: `Alter` on `Cluster("kafka-cluster")`. On a deny the response
 //! carries `CLUSTER_AUTHORIZATION_FAILED` (31).
 
-use krabka_protocol::krabka::barrier::{
-    CUT_STATUS_PARTIAL, TriggerBarrierRequest, TriggerBarrierResponse,
-};
-use krabka_units::{Time, millis};
-
-use crate::{
-    barrier::{
-        coordinator::InjectionOutcome,
-        error::BarrierError,
-        handlers::{NO_EPOCH, cut_missing, cut_topics, error_code, error_text},
+use {
+    crate::{
+        barrier::{
+            coordinator::InjectionOutcome,
+            error::BarrierError,
+            handlers::{NO_EPOCH, cut_missing, cut_topics, error_code, error_text},
+        },
+        codes,
+        handlers::{cluster_alter_denied, encode_response},
     },
-    codes,
-    handlers::{cluster_alter_denied, encode_response},
+    krabka_protocol::krabka::barrier::{
+        CUT_STATUS_PARTIAL, TriggerBarrierRequest, TriggerBarrierResponse,
+    },
+    krabka_units::{Time, millis},
 };
 
 wire_handler!(
@@ -135,16 +136,17 @@ mod tests {
         }
     }
 
-    use assert2::check;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::Offset;
-    use krabka_protocol::krabka::barrier::{
-        BarrierCutPartition, BarrierCutTopic, BarrierMissingPartition, CUT_STATUS_COMPLETE,
-    };
-
-    use super::*;
-    use crate::barrier::persistence::{
-        CutStatus, CutValue, MissingPartition, PartitionOffset, TopicOffsets,
+    use {
+        super::*,
+        crate::barrier::persistence::{
+            CutStatus, CutValue, MissingPartition, PartitionOffset, TopicOffsets,
+        },
+        assert2::check,
+        krabka_ids::PartitionIndex,
+        krabka_log::Offset,
+        krabka_protocol::krabka::barrier::{
+            BarrierCutPartition, BarrierCutTopic, BarrierMissingPartition, CUT_STATUS_COMPLETE,
+        },
     };
 
     fn outcome(status: CutStatus, missing: Vec<MissingPartition>) -> InjectionOutcome {

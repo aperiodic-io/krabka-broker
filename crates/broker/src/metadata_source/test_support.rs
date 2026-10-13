@@ -2,10 +2,7 @@
 //! throwaway topic record to submit, and a wait for a freshly started
 //! controller to elect itself.
 
-use krabka_metadata::MetadataRecord;
-use uuid::Uuid;
-
-use crate::test_support::single_partition_topic;
+use {crate::test_support::single_partition_topic, krabka_metadata::MetadataRecord, uuid::Uuid};
 
 pub(super) fn topic_record(name: &str) -> MetadataRecord {
     MetadataRecord::V1Topic(single_partition_topic(name, Uuid::new_v4()))

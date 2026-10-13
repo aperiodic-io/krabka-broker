@@ -7,17 +7,17 @@
 //! round-trip resolves the topic `Uuid`, which the manual fetch path needs
 //! because Fetch v13 and later carry `topic_id` and not the name.
 
-use std::collections::BTreeMap;
-
-use krabka_client_admin::{
-    AdminClient, AlterConfigOp, ConfigResource, CreateTopicSpec, IncrementalAlterConfigsOptions,
-    TopicMutationOptions,
+use {
+    crate::{error::MetadataLogError, kafka_log::config::KafkaMetadataLogConfig},
+    krabka_client_admin::{
+        AdminClient, AlterConfigOp, ConfigResource, CreateTopicSpec,
+        IncrementalAlterConfigsOptions, TopicMutationOptions,
+    },
+    krabka_client_core::ConnectionOptions,
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    std::collections::BTreeMap,
+    tracing::{debug, instrument, warn},
 };
-use krabka_client_core::ConnectionOptions;
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use tracing::{debug, instrument, warn};
-
-use crate::{error::MetadataLogError, kafka_log::config::KafkaMetadataLogConfig};
 
 /// Provision the topic if it is missing and return `(partition_count,
 /// topic_id)`.
@@ -142,10 +142,10 @@ fn creation_configs(cfg: &KafkaMetadataLogConfig) -> BTreeMap<String, String> {
 async fn ensure_compacted(admin: &mut AdminClient, topic: &str) -> Result<(), MetadataLogError> {
     let outcomes = admin
         .incremental_alter_configs(
-            &BTreeMap::from([(
-                ConfigResource::topic(topic),
-                vec![AlterConfigOp::set("cleanup.policy", "compact")],
-            )]),
+            &BTreeMap::from([(ConfigResource::topic(topic), vec![AlterConfigOp::set(
+                "cleanup.policy",
+                "compact",
+            )])]),
             IncrementalAlterConfigsOptions::default(),
         )
         .await
@@ -176,15 +176,11 @@ fn warn_if_zero_topic_id(topic: &str, topic_id: WireUuid) {
 
 /// Convert the admin client's `uuid::Uuid` to the wire `Uuid` Fetch
 /// requires.
-fn to_wire_uuid(u: uuid::Uuid) -> WireUuid {
-    WireUuid(*u.as_bytes())
-}
+fn to_wire_uuid(u: uuid::Uuid) -> WireUuid { WireUuid(*u.as_bytes()) }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn creation_configs_follow_kafkas_metadata_topic() {

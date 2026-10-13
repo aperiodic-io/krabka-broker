@@ -7,13 +7,14 @@
 //! partition row the client named. A request with `topic_partitions = null`
 //! named no row, so its refusal carries none.
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::{
-    elect_leaders_request::ElectLeadersRequest,
-    elect_leaders_response::{ElectLeadersResponse, PartitionResult, ReplicaElectionResult},
+use {
+    crate::{codes, leader_election::ElectError},
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::{
+        elect_leaders_request::ElectLeadersRequest,
+        elect_leaders_response::{ElectLeadersResponse, PartitionResult, ReplicaElectionResult},
+    },
 };
-
-use crate::{codes, leader_election::ElectError};
 
 /// Kafka's default `Errors.ELECTION_NOT_NEEDED` message, which
 /// `new ApiError(Errors.ELECTION_NOT_NEEDED)` puts on the row.

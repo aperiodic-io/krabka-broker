@@ -5,9 +5,10 @@
 //! whole search space, which is the real `AcquisitionState` plus a two-field
 //! envelope, on one screen.
 
-use krabka_log::Offset;
-
-use crate::share_partition::state::{AckType, AcquisitionState};
+use {
+    crate::share_partition::state::{AckType, AcquisitionState},
+    krabka_log::Offset,
+};
 
 /// The fingerprinted model state. It holds the REAL machine plus the small
 /// finite clock and the produced-record high-watermark.

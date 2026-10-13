@@ -4,9 +4,7 @@
 //! the two functions that set and read that due time are pure and sit in their
 //! own file.
 
-use krabka_units::convert::TimeExt as _;
-
-use super::GroupEntry;
+use {super::GroupEntry, krabka_units::convert::TimeExt as _};
 
 /// Set when the scheduler should inject next.
 ///
@@ -25,11 +23,12 @@ pub(crate) fn is_due(entry: &GroupEntry, now_ms: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::millis;
-
-    use super::*;
-    use crate::barrier::state::GroupSpec;
+    use {
+        super::*,
+        crate::barrier::state::GroupSpec,
+        assert2::{assert, check},
+        krabka_units::millis,
+    };
 
     #[test]
     fn a_group_with_an_interval_gets_a_due_time() {

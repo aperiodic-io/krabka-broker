@@ -19,23 +19,23 @@
 //! Windows-gated like the other multi-broker tests, because openraft's
 //! `debug_assert!` races on the hosted Windows scheduler.
 
-use std::{collections::HashSet, time::Duration};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_client_consumer::AutoOffsetReset;
-use krabka_client_core::Client;
-use krabka_protocol::records::RecordBatch;
-use support::cluster_lock;
-
-use crate::support::{
-    client::{connect_client, connect_with_context, create_topic_with},
-    consumer_groups::{collect_routing_values, routing_consumer},
-    partitions::require_non_bootstrap_partitions,
-    produce::{SinglePartitionProduceSetup, batch_request},
-    records::value_record,
-    registered_cluster, shutdown_cluster,
-    topics::{CreateTopicSetup, TopicPartitionCount},
+use {
+    crate::support::{
+        client::{connect_client, connect_with_context, create_topic_with},
+        consumer_groups::{collect_routing_values, routing_consumer},
+        partitions::require_non_bootstrap_partitions,
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::value_record,
+        registered_cluster, shutdown_cluster,
+        topics::{CreateTopicSetup, TopicPartitionCount},
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_client_consumer::AutoOffsetReset,
+    krabka_client_core::Client,
+    krabka_protocol::records::RecordBatch,
+    std::{collections::HashSet, time::Duration},
+    support::cluster_lock,
 };
 
 mod support;
@@ -58,15 +58,12 @@ async fn produce_one(
     batch.last_offset_delta = 0;
     for attempt in 1..=10 {
         let resp = client
-            .send(batch_request(
-                batch.clone(),
-                SinglePartitionProduceSetup {
-                    topic: (topic).into(),
-                    topic_id,
-                    partition: krabka_ids::PartitionIndex(partition),
-                    ..SinglePartitionProduceSetup::replicated()
-                },
-            ))
+            .send(batch_request(batch.clone(), SinglePartitionProduceSetup {
+                topic: (topic).into(),
+                topic_id,
+                partition: krabka_ids::PartitionIndex(partition),
+                ..SinglePartitionProduceSetup::replicated()
+            }))
             .await
             .expect("produce");
         let err = resp.responses[0].partition_responses[0].error_code;
@@ -117,14 +114,11 @@ async fn consumer_fetches_from_non_bootstrap_leaders() {
     // Create the topic with replication_factor=1. Each partition lives on
     // exactly ONE broker; the bootstrap broker has NO replica for partitions
     // placed on the other two nodes.
-    let topic_id = create_topic_with(
-        &admin,
-        CreateTopicSetup {
-            topic,
-            num_partitions: TopicPartitionCount(n_partitions),
-            ..Default::default()
-        },
-    )
+    let topic_id = create_topic_with(&admin, CreateTopicSetup {
+        topic,
+        num_partitions: TopicPartitionCount(n_partitions),
+        ..Default::default()
+    })
     .await;
 
     // Wait until node 1's controller image knows every partition AND its

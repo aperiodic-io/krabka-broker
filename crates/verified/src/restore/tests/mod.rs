@@ -1,6 +1,4 @@
-use assert2::check;
-
-use super::*;
+use {super::*, assert2::check};
 
 const NO_CONTENT: RestoreContentExclusions = RestoreContentExclusions {
     key: false,

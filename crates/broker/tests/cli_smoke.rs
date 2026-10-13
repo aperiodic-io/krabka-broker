@@ -1,6 +1,4 @@
-use std::process::Command;
-
-use assert2::assert;
+use {assert2::assert, std::process::Command};
 
 fn broker_bin() -> std::path::PathBuf {
     let exe = std::env::var_os("CARGO_BIN_EXE_krabka-broker")
@@ -20,11 +18,11 @@ fn broker_bin() -> std::path::PathBuf {
 /// tree to build from, which a Bazel test sandbox does not have. This test is
 /// synchronous, so it drives the async formatter on a current-thread runtime.
 fn run_krabka_format(log_dir: &std::path::Path, node_id: u32, controller_listener: &str) {
-    format_log_dir(
-        log_dir,
-        node_id,
-        &["--standalone", "--controller-listener", controller_listener],
-    );
+    format_log_dir(log_dir, node_id, &[
+        "--standalone",
+        "--controller-listener",
+        controller_listener,
+    ]);
 }
 
 /// Formats a fresh log directory for `node_id` with the `quorum` flags of

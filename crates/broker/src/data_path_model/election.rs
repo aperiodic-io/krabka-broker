@@ -33,20 +33,20 @@
 //! that is the `elr_election_keeps_every_committed_record` property. Only an
 //! election reported as losing data may shorten `committed`.
 
-use std::collections::HashSet;
-
-use krabka_metadata::MetadataImage;
-
-use super::{
-    bounds::{NB_U8, has, model_broker, model_offset, node},
-    elr::{ids, maintain, partition_record},
-    state::{DpState, ELR_BEAT_LONGER_LOG, ELR_DROPPED_COMMITTED, ELR_ELECTED},
-};
-use crate::{
-    config_keys::RecoveryStrategy,
-    elr::state::PartitionElr,
-    leader_election::{FailoverDecision, Ladder, failover_one},
-    unclean_recovery::{ReplicaLogInfo, select_leader},
+use {
+    super::{
+        bounds::{NB_U8, has, model_broker, model_offset, node},
+        elr::{ids, maintain, partition_record},
+        state::{DpState, ELR_BEAT_LONGER_LOG, ELR_DROPPED_COMMITTED, ELR_ELECTED},
+    },
+    crate::{
+        config_keys::RecoveryStrategy,
+        elr::state::PartitionElr,
+        leader_election::{FailoverDecision, Ladder, failover_one},
+        unclean_recovery::{ReplicaLogInfo, select_leader},
+    },
+    krabka_metadata::MetadataImage,
+    std::collections::HashSet,
 };
 
 /// The rule that chose a new leader, which is what decides what the election

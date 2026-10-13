@@ -7,7 +7,6 @@
 //! always disabled: `BrokerConfig::validate` refuses an OTLP endpoint on that
 //! target.
 
-use opentelemetry_proto::tonic::metrics::v1::MetricsData;
 #[cfg(not(target_family = "wasm"))]
 use opentelemetry_proto::tonic::{
     collector::metrics::v1::{
@@ -15,8 +14,10 @@ use opentelemetry_proto::tonic::{
     },
     common::v1::{AnyValue, KeyValue, any_value::Value},
 };
-use prometheus_client::metrics::counter::Counter;
-use tokio::sync::mpsc;
+use {
+    opentelemetry_proto::tonic::metrics::v1::MetricsData,
+    prometheus_client::metrics::counter::Counter, tokio::sync::mpsc,
+};
 
 const FORWARD_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -154,9 +155,7 @@ impl OtlpForwarder {
     }
 
     /// Closes the queue and waits until every accepted batch has been sent.
-    pub(crate) async fn shutdown(&self) {
-        self.shutdown_with_timeout(FORWARD_DRAIN_TIMEOUT).await;
-    }
+    pub(crate) async fn shutdown(&self) { self.shutdown_with_timeout(FORWARD_DRAIN_TIMEOUT).await; }
 
     async fn shutdown_with_timeout(&self, drain_timeout: std::time::Duration) {
         self.tx
@@ -180,11 +179,12 @@ impl OtlpForwarder {
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry_proto::tonic::metrics::v1::{MetricsData, ResourceMetrics};
-    use prometheus_client::metrics::counter::Counter;
-    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::path};
-
-    use super::*;
+    use {
+        super::*,
+        opentelemetry_proto::tonic::metrics::v1::{MetricsData, ResourceMetrics},
+        prometheus_client::metrics::counter::Counter,
+        wiremock::{Mock, MockServer, ResponseTemplate, matchers::path},
+    };
 
     #[test]
     fn wraps_and_injects_instance_id() {

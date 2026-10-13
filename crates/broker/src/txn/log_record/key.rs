@@ -4,16 +4,17 @@
 //! not repeat. A `__transaction_state` record is therefore decoded key first,
 //! and the id it yields is handed to the value decoder.
 
-use bytes::BytesMut;
-use krabka_protocol::{
-    ProtocolError,
-    primitives::{
-        fixed::{get_i16, put_i16},
-        string_bytes::get_string_owned,
+use {
+    crate::{coordinator::unified::persistence::put_string, error::BrokerError},
+    bytes::BytesMut,
+    krabka_protocol::{
+        ProtocolError,
+        primitives::{
+            fixed::{get_i16, put_i16},
+            string_bytes::get_string_owned,
+        },
     },
 };
-
-use crate::{coordinator::unified::persistence::put_string, error::BrokerError};
 
 /// Encode the Kafka `TransactionLogKey`, version 0.
 ///
@@ -44,9 +45,7 @@ pub(crate) fn decode_key(bytes: &[u8]) -> Result<String, BrokerError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn key_round_trip() {

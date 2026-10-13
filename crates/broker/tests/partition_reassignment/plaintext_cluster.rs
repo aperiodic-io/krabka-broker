@@ -6,13 +6,10 @@
 //! address of the current raft controller leader. `AlterPartitionReassignments`
 //! must reach that leader, so every test starts from this address.
 
-use std::net::SocketAddr;
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-use tempfile::TempDir;
-
-use crate::support;
+use {
+    crate::support, assert2::assert, krabka_broker::BrokerHandle, std::net::SocketAddr,
+    tempfile::TempDir,
+};
 
 pub fn node_id(id: i32) -> krabka_metadata::NodeId {
     krabka_metadata::NodeId(u64::try_from(id).expect("broker IDs are non-negative"))

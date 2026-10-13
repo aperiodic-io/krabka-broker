@@ -36,26 +36,28 @@
 //! range from the partition leader one page at a time, and follows the leader
 //! when it moves. The `range` module holds that loop.
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex as StdMutex},
+use {
+    async_trait::async_trait,
+    bytes::Bytes,
+    futures_util::stream::{StreamExt, unfold},
+    krabka_client_core::{
+        BrokerInfo, BrokerPool, Client, ClientError, ClientFrameMax, Connection,
+        ConnectionDispatchQueueCapacity, ConnectionOptions, FetchMinBytes, FetchPartitionResult,
+        IsolatedFetch, MetadataScope, connection_target_host,
+        fetch_partition_with_isolation_progress,
+    },
+    krabka_client_producer::{Acks, Producer, ProducerRecord},
+    krabka_protocol::{
+        owned::list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    krabka_units::prelude::{ByteSize, Time, TimeExt as _},
+    std::{
+        collections::{BTreeMap, HashMap},
+        sync::{Arc, Mutex as StdMutex},
+    },
+    tracing::{instrument, warn},
 };
-
-use async_trait::async_trait;
-use bytes::Bytes;
-use futures_util::stream::{StreamExt, unfold};
-use krabka_client_core::{
-    BrokerInfo, BrokerPool, Client, ClientError, ClientFrameMax, Connection,
-    ConnectionDispatchQueueCapacity, ConnectionOptions, FetchMinBytes, FetchPartitionResult,
-    IsolatedFetch, MetadataScope, connection_target_host, fetch_partition_with_isolation_progress,
-};
-use krabka_client_producer::{Acks, Producer, ProducerRecord};
-use krabka_protocol::{
-    owned::list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
-    primitives::uuid::Uuid as WireUuid,
-};
-use krabka_units::prelude::{ByteSize, Time, TimeExt as _};
-use tracing::{instrument, warn};
 
 mod config;
 mod consumer;
@@ -68,14 +70,18 @@ pub use self::config::{
     DEFAULT_METADATA_TOPIC_CREATE_TIMEOUT, DEFAULT_MIN_ISR, DEFAULT_NUM_PARTITIONS,
     DEFAULT_REPLICATION, KafkaMetadataLogConfig, METADATA_TOPIC, MetadataEventQueueCapacity,
 };
-use self::{
-    consumer::{ConsumerState, KafkaAssignmentHandle, metadata_event_channel},
-    range::{RangeFetcher, RangeReadFailure, RangeTopic, visit_range_pages},
-    topic::ensure_topic,
-};
-use crate::{
-    error::MetadataLogError,
-    log::{AssignmentHandle, MetadataEventLog, MetadataEventStream, PartitionStart, RangeVisitor},
+use {
+    self::{
+        consumer::{ConsumerState, KafkaAssignmentHandle, metadata_event_channel},
+        range::{RangeFetcher, RangeReadFailure, RangeTopic, visit_range_pages},
+        topic::ensure_topic,
+    },
+    crate::{
+        error::MetadataLogError,
+        log::{
+            AssignmentHandle, MetadataEventLog, MetadataEventStream, PartitionStart, RangeVisitor,
+        },
+    },
 };
 
 /// Whether an opened log may write.
@@ -377,9 +383,7 @@ impl Drop for KafkaMetadataEventLog {
 
 #[async_trait]
 impl MetadataEventLog for KafkaMetadataEventLog {
-    fn partition_count(&self) -> i32 {
-        self.partition_count
-    }
+    fn partition_count(&self) -> i32 { self.partition_count }
 
     #[instrument(
         level = "debug",
@@ -485,20 +489,17 @@ impl RangeFetcher for KafkaMetadataEventLog {
         partition: i32,
         offset: i64,
     ) -> Result<FetchPartitionResult, ClientError> {
-        fetch_partition_with_isolation_progress(
-            leader,
-            IsolatedFetch {
-                topic: &self.topic,
-                topic_id: self.topic_id,
-                partition,
-                fetch_offset: offset,
-                max_wait: self.fetch_max_wait,
-                max: krabka_client_core::DEFAULT_FETCH_RESPONSE_MAX,
-                partition_max: self.fetch_max_bytes,
-                fetch_min: FetchMinBytes::default(),
-                isolation_level: 0,
-            },
-        )
+        fetch_partition_with_isolation_progress(leader, IsolatedFetch {
+            topic: &self.topic,
+            topic_id: self.topic_id,
+            partition,
+            fetch_offset: offset,
+            max_wait: self.fetch_max_wait,
+            max: krabka_client_core::DEFAULT_FETCH_RESPONSE_MAX,
+            partition_max: self.fetch_max_bytes,
+            fetch_min: FetchMinBytes::default(),
+            isolation_level: 0,
+        })
         .await
     }
 }
@@ -580,14 +581,17 @@ fn usize_count(n: i32) -> Result<usize, MetadataLogError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn metadata_requests_name_only_the_metadata_topic_without_auto_creation() {
-        use krabka_client_core::MetadataTopics;
-        use krabka_protocol::owned::metadata_request::{MetadataRequest, MetadataRequestTopic};
+        use {
+            krabka_client_core::MetadataTopics,
+            krabka_protocol::owned::metadata_request::{MetadataRequest, MetadataRequestTopic},
+        };
 
         let topics = MetadataTopics::new(METADATA_TOPIC_SCOPE);
         topics.set([config::METADATA_TOPIC]);

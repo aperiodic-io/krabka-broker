@@ -18,22 +18,23 @@
 //! request that carried it, and the round reads its own partition's row, so a
 //! range learns of its own records and no other's.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
-};
-
-use async_trait::async_trait;
-use krabka_metadata::NodeId;
-use krabka_protocol::{
-    owned::{
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        produce_response::ProduceResponse,
+use {
+    async_trait::async_trait,
+    krabka_metadata::NodeId,
+    krabka_protocol::{
+        owned::{
+            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+            produce_response::ProduceResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::{HEADER_LEN, Record, RecordBatch},
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::{HEADER_LEN, Record, RecordBatch},
+    std::{
+        collections::HashMap,
+        sync::{Arc, Mutex, MutexGuard, PoisonError},
+    },
+    tokio::sync::oneshot,
 };
-use tokio::sync::oneshot;
 
 /// The `timeout.ms` of the produce request: Kafka's
 /// `ServerConfigs.REQUEST_TIMEOUT_MS_DEFAULT`.
@@ -362,16 +363,16 @@ fn pack(mut waiting: Vec<Pending>) -> (Packed, Vec<Pending>) {
 /// A broker that the tests send requests to.
 #[cfg(test)]
 pub(super) mod test_support {
-    use std::sync::{Arc, Mutex};
-
-    use async_trait::async_trait;
-    use krabka_metadata::NodeId;
-    use krabka_protocol::owned::{
-        produce_request::ProduceRequest, produce_response::ProduceResponse,
+    use {
+        super::ProduceTransport,
+        async_trait::async_trait,
+        krabka_metadata::NodeId,
+        krabka_protocol::owned::{
+            produce_request::ProduceRequest, produce_response::ProduceResponse,
+        },
+        std::sync::{Arc, Mutex},
+        tokio::sync::Semaphore,
     };
-    use tokio::sync::Semaphore;
-
-    use super::ProduceTransport;
 
     type Script = dyn Fn(usize, &ProduceRequest) -> Result<ProduceResponse, String> + Send + Sync;
 
@@ -420,9 +421,7 @@ pub(super) mod test_support {
         }
 
         /// Lets every request, now and later, answer.
-        pub(in crate::share_partition::dlq) fn release(&self) {
-            self.gate.add_permits(1_000);
-        }
+        pub(in crate::share_partition::dlq) fn release(&self) { self.gate.add_permits(1_000); }
 
         pub(in crate::share_partition::dlq) fn sent(&self) -> Vec<(NodeId, ProduceRequest)> {
             self.sent.lock().expect("sent lock").clone()
@@ -449,21 +448,21 @@ pub(super) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::Bytes;
-    use futures_util::future::join_all;
-
-    use super::{test_support::FakeBroker, *};
+    use {
+        super::{test_support::FakeBroker, *},
+        assert2::assert,
+        bytes::Bytes,
+        futures_util::future::join_all,
+    };
 
     /// A `max.message.bytes` that leaves room for any round of these tests.
     const ROOMY: i32 = 1_048_588;
 
+    use crate::test_support::UnixMillis;
     /// A round of records with `values` for partition `partition` of the topic
     /// `dlq.<id>`, numbered from zero, all stamped `timestamp`: what
     /// `record::build_round` builds.
     use krabka_ids::PartitionIndex;
-
-    use crate::test_support::UnixMillis;
 
     #[derive(Clone, Copy)]
     struct FixtureTopicId(u8);
@@ -563,9 +562,7 @@ mod tests {
     }
 
     /// What the healthy broker answers every round with.
-    fn reached() -> Arc<ProduceResponse> {
-        Arc::new(ProduceResponse::default())
-    }
+    fn reached() -> Arc<ProduceResponse> { Arc::new(ProduceResponse::default()) }
 
     fn healthy() -> (FakeBroker, Coalescer<FakeBroker>) {
         let broker = FakeBroker::answering(|_, _| Ok(ProduceResponse::default()));
@@ -675,30 +672,27 @@ mod tests {
             sent == vec![
                 (
                     NodeId(1),
-                    request(
-                        1,
-                        vec![
-                            partition_data(
-                                0,
-                                batch_of(1_000, 1_000, &[(0, "a0"), (0, "a1"), (0, "c0")])
-                            ),
-                            partition_data(1, batch_of(1_000, 1_000, &[(0, "b0")])),
-                        ]
-                    ),
+                    request(1, vec![
+                        partition_data(
+                            0,
+                            batch_of(1_000, 1_000, &[(0, "a0"), (0, "a1"), (0, "c0")])
+                        ),
+                        partition_data(1, batch_of(1_000, 1_000, &[(0, "b0")])),
+                    ]),
                 ),
                 (
                     NodeId(1),
-                    request(
-                        1,
-                        vec![partition_data(0, batch_of(1_000, 1_000, &[(0, "e0")]))]
-                    ),
+                    request(1, vec![partition_data(
+                        0,
+                        batch_of(1_000, 1_000, &[(0, "e0")])
+                    )]),
                 ),
                 (
                     NodeId(2),
-                    request(
-                        1,
-                        vec![partition_data(0, batch_of(1_000, 1_000, &[(0, "d0")]))]
-                    ),
+                    request(1, vec![partition_data(
+                        0,
+                        batch_of(1_000, 1_000, &[(0, "d0")])
+                    )]),
                 ),
             ]
         );
@@ -728,20 +722,17 @@ mod tests {
                 == vec![
                     (
                         NodeId(1),
-                        request(
-                            1,
-                            vec![partition_data(0, batch_of(1_000, 1_000, &[(0, "a0")]))]
-                        ),
+                        request(1, vec![partition_data(
+                            0,
+                            batch_of(1_000, 1_000, &[(0, "a0")])
+                        )]),
                     ),
                     (
                         NodeId(1),
-                        request(
-                            1,
-                            vec![
-                                partition_data(1, batch_of(1_000, 1_000, &[(0, "b0")])),
-                                partition_data(2, batch_of(1_000, 1_000, &[(0, "c0")])),
-                            ]
-                        ),
+                        request(1, vec![
+                            partition_data(1, batch_of(1_000, 1_000, &[(0, "b0")])),
+                            partition_data(2, batch_of(1_000, 1_000, &[(0, "c0")])),
+                        ]),
                     ),
                 ]
         );
@@ -828,13 +819,10 @@ mod tests {
             broker.sent()
                 == vec![(
                     NodeId(1),
-                    request(
-                        1,
-                        vec![partition_data(
-                            0,
-                            batch_of(1_000, 2_000, &[(0, "old"), (1_000, "new")])
-                        )]
-                    ),
+                    request(1, vec![partition_data(
+                        0,
+                        batch_of(1_000, 2_000, &[(0, "old"), (1_000, "new")])
+                    )]),
                 )]
         );
     }

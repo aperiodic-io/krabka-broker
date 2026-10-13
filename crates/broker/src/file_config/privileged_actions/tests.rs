@@ -2,15 +2,16 @@
 //! `[[operator_keys]]`, `[freeze]` and `[break_glass]`, and the apply step's
 //! per-section validation plus the two rules that cross those sections.
 
-use assert2::{assert, check};
-use krabka_units::{hours, minutes, secs};
-use tempfile::TempDir;
-
-use super::{FileBreakGlassConfig, FileFreezeConfig, FileOperatorKey};
-use crate::{
-    break_glass::{ALL_ACTIONS, action_name},
-    config::{BackgroundUncleanRecovery, BrokerConfig},
-    file_config::{FileConfig, FileConfigError, test_support::configured},
+use {
+    super::{FileBreakGlassConfig, FileFreezeConfig, FileOperatorKey},
+    crate::{
+        break_glass::{ALL_ACTIONS, action_name},
+        config::{BackgroundUncleanRecovery, BrokerConfig},
+        file_config::{FileConfig, FileConfigError, test_support::configured},
+    },
+    assert2::{assert, check},
+    krabka_units::{hours, minutes, secs},
+    tempfile::TempDir,
 };
 
 fn check_operator_key_refusal(file: FileConfig, cfg: &mut BrokerConfig, case: &str) {

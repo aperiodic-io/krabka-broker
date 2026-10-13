@@ -5,9 +5,10 @@
 //! it offered in its `JoinGroup`, and the assignment the group leader installed
 //! for it in `SyncGroup`.
 
-use std::time::{Duration, Instant};
-
-use bytes::Bytes;
+use {
+    bytes::Bytes,
+    std::time::{Duration, Instant},
+};
 
 /// One member of a [`Group`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,9 +81,7 @@ impl Member {
     }
 
     #[must_use]
-    pub fn is_static(&self) -> bool {
-        self.group_instance_id.is_some()
-    }
+    pub fn is_static(&self) -> bool { self.group_instance_id.is_some() }
 }
 
 /// Outcome of [`Group::add_member`]. It drives the `JoinGroup` handler's

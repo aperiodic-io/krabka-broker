@@ -59,21 +59,18 @@ mod runner;
 #[path = "consumer_group_composition_model/state.rs"]
 mod state;
 
-use krabka_log::Offset;
-
-use self::{
-    config::CgcModel,
-    runner::{PINNED_UNIQUE_STATES_BASIC, PINNED_UNIQUE_STATES_WIDE, run},
+use {
+    self::{
+        config::CgcModel,
+        runner::{PINNED_UNIQUE_STATES_BASIC, PINNED_UNIQUE_STATES_WIDE, run},
+    },
+    super::reconciliation_model_support::TOPIC,
+    krabka_log::Offset,
 };
-use super::reconciliation_model_support::TOPIC;
 const MAX_OFFSET: Offset = Offset(2); // bound the committed offset so the state space stays finite
 
 #[test]
-fn cg_basic() {
-    run(CgcModel::basic(), "cg_basic", PINNED_UNIQUE_STATES_BASIC);
-}
+fn cg_basic() { run(CgcModel::basic(), "cg_basic", PINNED_UNIQUE_STATES_BASIC); }
 
 #[test]
-fn cg_wide() {
-    run(CgcModel::wide(), "cg_wide", PINNED_UNIQUE_STATES_WIDE);
-}
+fn cg_wide() { run(CgcModel::wide(), "cg_wide", PINNED_UNIQUE_STATES_WIDE); }

@@ -4,18 +4,18 @@
 //! The move completes only after the added replica fetches the real log and
 //! joins the ISR; no metadata record is injected by the test.
 
-use std::{io::Write as _, process::Stdio, time::Duration};
-
-use assert2::assert;
-
-use crate::{
-    cluster::{
-        admin_text_cluster, assert_reassigned, assignment, execute_plan, offline_for_partition,
-        reassignment_cluster, removed_replica,
+use {
+    crate::{
+        cluster::{
+            admin_text_cluster, assert_reassigned, assignment, execute_plan, offline_for_partition,
+            reassignment_cluster, removed_replica,
+        },
+        jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised, verify_console_reassignment},
+        oracle::{AssignedTopicCommandSetup, CliRun, OracleComparison},
+        support::{ContainerInput, JvmDockerSetup, jvm_docker_command},
     },
-    jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised, verify_console_reassignment},
-    oracle::{AssignedTopicCommandSetup, CliRun, OracleComparison},
-    support::{ContainerInput, JvmDockerSetup, jvm_docker_command},
+    assert2::assert,
+    std::{io::Write as _, process::Stdio, time::Duration},
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -136,13 +136,14 @@ async fn jvm_kafka_reassign_partitions_end_to_end() {
 // which is what stops a second `--execute` from cancelling the first one's
 // work.
 
-use std::collections::BTreeSet;
-
-use crate::{
-    oracle::{Side, ToolFile},
-    tool_output::{
-        Assignment, TopicPartition, parse_generate, reassignment_json, topics_to_move_json,
+use {
+    crate::{
+        oracle::{Side, ToolFile},
+        tool_output::{
+            Assignment, TopicPartition, parse_generate, reassignment_json, topics_to_move_json,
+        },
     },
+    std::collections::BTreeSet,
 };
 
 /// Where the documents these cases write are placed inside the container.
@@ -225,21 +226,18 @@ async fn reassign_partitions_generate_produces_a_usable_plan_on_both() {
 
     let document = topics_to_move_json(&[TOPIC]);
     for side in [&oracle_side, &krabka_side] {
-        side.run(
-            "kafka-topics",
-            &[
-                "--bootstrap-server",
-                side.bootstrap(),
-                "--create",
-                "--if-not-exists",
-                "--topic",
-                TOPIC,
-                "--partitions",
-                &PARTITIONS.to_string(),
-                "--replication-factor",
-                "1",
-            ],
-        )
+        side.run("kafka-topics", &[
+            "--bootstrap-server",
+            side.bootstrap(),
+            "--create",
+            "--if-not-exists",
+            "--topic",
+            TOPIC,
+            "--partitions",
+            &PARTITIONS.to_string(),
+            "--replication-factor",
+            "1",
+        ])
         .expect_success();
 
         let generated = reassign(

@@ -12,40 +12,40 @@
 //! where the decoder leaves it at its `-1` default, and `-1` at v2-v4 means
 //! the same thing: take the broker-wide retention.
 
-use std::sync::Arc;
-
-use krabka_metadata::AclOperation;
-use krabka_protocol::{
-    owned::{
-        offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestTopic},
-        offset_commit_response::{
-            OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
-        },
-    },
-    primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch},
-};
-
-use self::response::ResponseBuilder;
-use crate::{
-    authorizer::{AuthorizationResult, authorize_topics},
-    broker::Broker,
-    codes,
-    coordinator::{
-        persistence::OffsetCommitValue,
-        unified::{
-            actor::{
-                CommitFence, CommitRequest, GroupActorHandle, GroupActorMessage, GroupKindTag,
-                validate_commit,
+use {
+    self::response::ResponseBuilder,
+    crate::{
+        authorizer::{AuthorizationResult, authorize_topics},
+        broker::Broker,
+        codes,
+        coordinator::{
+            persistence::OffsetCommitValue,
+            unified::{
+                actor::{
+                    CommitFence, CommitRequest, GroupActorHandle, GroupActorMessage, GroupKindTag,
+                    validate_commit,
+                },
+                classic_state::OffsetEntry,
+                streams::actor::validate_streams_group_offset_commit,
             },
-            classic_state::OffsetEntry,
-            streams::actor::validate_streams_group_offset_commit,
         },
+        error::BrokerError,
+        handlers::group_coordinator_error,
+        task_util::ask,
+        time_util::now_ms,
     },
-    error::BrokerError,
-    handlers::group_coordinator_error,
-    task_util::ask,
-    time_util::now_ms,
+    krabka_metadata::AclOperation,
+    krabka_protocol::{
+        owned::{
+            offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestTopic},
+            offset_commit_response::{
+                OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
+            },
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::{Record, RecordBatch},
+    },
+    std::sync::Arc,
 };
 
 mod response;
@@ -375,18 +375,15 @@ async fn validate(
         )
         .await
     } else if let Some(handle) = coordinator.find(&req.group_id) {
-        let code = validate_commit(
-            &handle,
-            CommitRequest {
-                member_id: req.member_id.clone(),
-                group_instance_id: req.group_instance_id.clone(),
-                generation_or_epoch: generation,
-                fence: CommitFence::Offset {
-                    api_version: version,
-                },
-                partitions: committed_partitions(req, image),
+        let code = validate_commit(&handle, CommitRequest {
+            member_id: req.member_id.clone(),
+            group_instance_id: req.group_instance_id.clone(),
+            generation_or_epoch: generation,
+            fence: CommitFence::Offset {
+                api_version: version,
             },
-        )
+            partitions: committed_partitions(req, image),
+        })
         .await;
         return code.map_or(Ok(handle), Err);
     } else if generation < 0 {
@@ -556,13 +553,14 @@ fn build_response_all(req: &OffsetCommitRequest, code: i16) -> OffsetCommitRespo
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::MetadataImage;
-    use krabka_protocol::owned::offset_commit_request::OffsetCommitRequestPartition;
-
-    use super::*;
-    use crate::{
-        coordinator::unified::persistence::MAX_STRING_BYTES, test_support::segment_age_fixture,
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::persistence::MAX_STRING_BYTES, test_support::segment_age_fixture,
+        },
+        assert2::check,
+        krabka_metadata::MetadataImage,
+        krabka_protocol::owned::offset_commit_request::OffsetCommitRequestPartition,
     };
 
     #[test]

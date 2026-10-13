@@ -17,22 +17,22 @@
 //! `EndTxn` then fans markers out for a transaction the next coordinator still
 //! holds as `Ongoing`, and exactly-once breaks on failover.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_metadata::{LeaderEpoch, MetadataImage, NodeId};
-use krabka_protocol::records::RecordBatch;
-use tokio::sync::watch;
-
-use super::{TxnCoordinator, leadership};
-use crate::{
-    codes,
-    config_keys::node_min_insync_replicas,
-    error::BrokerError,
-    metadata_source::wait_for_image_change,
-    partition::{Partition, ProduceBatchError},
-    txn::bootstrap,
+use {
+    super::{TxnCoordinator, leadership},
+    crate::{
+        codes,
+        config_keys::node_min_insync_replicas,
+        error::BrokerError,
+        metadata_source::wait_for_image_change,
+        partition::{Partition, ProduceBatchError},
+        txn::bootstrap,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_metadata::{LeaderEpoch, MetadataImage, NodeId},
+    krabka_protocol::records::RecordBatch,
+    std::{sync::Arc, time::Duration},
+    tokio::sync::watch,
 };
 
 #[cfg(test)]

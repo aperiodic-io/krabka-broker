@@ -19,11 +19,12 @@
 //! decision is checked to have taken the highest rung the pre-state offered,
 //! so a data-losing rung is never chosen while a cleaner one was available.
 
-use assert2::assert;
-use krabka_raft::NodeId;
-
-use super::failover_state::{FailoverModel, FailoverState};
-use crate::{config_keys::RecoveryStrategy, leader_election::FailoverDecision};
+use {
+    super::failover_state::{FailoverModel, FailoverState},
+    crate::{config_keys::RecoveryStrategy, leader_election::FailoverDecision},
+    assert2::assert,
+    krabka_raft::NodeId,
+};
 
 /// What the pre-failover state offered each rung of the election ladder.
 struct Rungs {

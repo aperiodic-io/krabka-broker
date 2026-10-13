@@ -2,18 +2,19 @@
 //! auditing switched off, and a locally-led partition opened beneath it so
 //! that the handler finds it in `broker.partitions`.
 
-use std::{path::Path, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-
-use crate::{
-    broker::{Broker, BrokerHandle},
-    coordinator::{
-        bootstrap::OFFSETS_TOPIC, partitioner::partition_for_group, persistence::OffsetCommitValue,
+use {
+    crate::{
+        broker::{Broker, BrokerHandle},
+        coordinator::{
+            bootstrap::OFFSETS_TOPIC, partitioner::partition_for_group,
+            persistence::OffsetCommitValue,
+        },
+        partition::Partition,
+        test_support::{StandalonePartitionSetup, start_group_broker_with},
     },
-    partition::Partition,
-    test_support::{StandalonePartitionSetup, start_group_broker_with},
+    krabka_ids::PartitionIndex,
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+    std::{path::Path, sync::Arc},
 };
 
 /// Open `topic-partition` under `log_dir` and register it with the broker.
@@ -78,12 +79,9 @@ pub(super) fn transactional_offset_batch(
     (group, topic, partition): (&str, &str, i32),
     value: &OffsetCommitValue,
 ) -> krabka_protocol::records::RecordBatch {
-    single_transactional_batch(
-        (producer_id, producer_epoch),
-        Record {
-            key: Some(OffsetCommitValue::encode_key(group, topic, partition).unwrap()),
-            value: Some(value.encode_value()),
-            ..Record::default()
-        },
-    )
+    single_transactional_batch((producer_id, producer_epoch), Record {
+        key: Some(OffsetCommitValue::encode_key(group, topic, partition).unwrap()),
+        value: Some(value.encode_value()),
+        ..Record::default()
+    })
 }

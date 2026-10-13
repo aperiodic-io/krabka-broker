@@ -2,12 +2,15 @@
 //! shaping of the success, error, and assignment replies out of the request
 //! handlers that decide which of them to send.
 
-use krabka_protocol::owned::{
-    common::share_group_heartbeat_response::topic_partitions::TopicPartitions,
-    share_group_heartbeat_response::{Assignment as RespAssignment, ShareGroupHeartbeatResponse},
+use {
+    crate::coordinator::unified::share::{config::ShareGroupConfig, state::ShareGroupState},
+    krabka_protocol::owned::{
+        common::share_group_heartbeat_response::topic_partitions::TopicPartitions,
+        share_group_heartbeat_response::{
+            Assignment as RespAssignment, ShareGroupHeartbeatResponse,
+        },
+    },
 };
-
-use crate::coordinator::unified::share::{config::ShareGroupConfig, state::ShareGroupState};
 
 pub(super) fn base_resp(
     error_code: i16,

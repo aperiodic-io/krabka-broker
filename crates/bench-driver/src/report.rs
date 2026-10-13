@@ -1,20 +1,22 @@
 //! Aggregate per-run JSON outputs into a single Markdown summary.
 
-use std::{
-    collections::BTreeMap,
-    fmt::{Arguments, Write},
-    path::{Path, PathBuf},
-};
-
-use anyhow::{Context, Result};
-use krabka_units::{fmt::Human as _, prelude::*};
-
-use crate::{
-    aggregate::CellKey,
-    graph::{render_html as render_graph_html, render_web_fragment as render_graph_web_fragment},
-    ids::{MessageCount, TimeOffsetMs},
-    numeric::{mebibytes_f64, millis_f64, to_f64},
-    scenario::{Disturbance, LatencyPercentiles, RunOutput, Sample, Stack},
+use {
+    crate::{
+        aggregate::CellKey,
+        graph::{
+            render_html as render_graph_html, render_web_fragment as render_graph_web_fragment,
+        },
+        ids::{MessageCount, TimeOffsetMs},
+        numeric::{mebibytes_f64, millis_f64, to_f64},
+        scenario::{Disturbance, LatencyPercentiles, RunOutput, Sample, Stack},
+    },
+    anyhow::{Context, Result},
+    krabka_units::{fmt::Human as _, prelude::*},
+    std::{
+        collections::BTreeMap,
+        fmt::{Arguments, Write},
+        path::{Path, PathBuf},
+    },
 };
 
 fn push_fmt(output: &mut String, args: Arguments<'_>) {
@@ -785,13 +787,9 @@ fn rate_recovery_for_run(r: &RunOutput, select: SampleRate) -> Option<RateRecove
 /// How one of the two client message rates is read out of a time-series sample.
 type SampleRate = fn(&Sample) -> Frequency;
 
-fn producer_sample_rate(s: &Sample) -> Frequency {
-    s.producer_rate
-}
+fn producer_sample_rate(s: &Sample) -> Frequency { s.producer_rate }
 
-fn consumer_sample_rate(s: &Sample) -> Frequency {
-    s.consumer_rate
-}
+fn consumer_sample_rate(s: &Sample) -> Frequency { s.consumer_rate }
 
 fn render_rate_recovery_row(
     out: &mut String,
@@ -1113,18 +1111,19 @@ pub fn render_web_fragment(input_dir: &Path, strict: bool) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        ids::WallclockMs,
-        numeric::{event_rate, nonnegative_i64_to_u64},
-        scenario::{
-            Disturbance, FailoverSpec, LatencyPercentiles, ModeTag, Resource, Sample, Throughput,
-            Topology,
-            fixture::{scenario, short_scenario},
+    use {
+        super::*,
+        crate::{
+            ids::WallclockMs,
+            numeric::{event_rate, nonnegative_i64_to_u64},
+            scenario::{
+                Disturbance, FailoverSpec, LatencyPercentiles, ModeTag, Resource, Sample,
+                Throughput, Topology,
+                fixture::{scenario, short_scenario},
+            },
         },
+        assert2::check,
+        tempfile::tempdir,
     };
 
     fn fake_run(stack: Stack, msgs: u64) -> RunOutput {

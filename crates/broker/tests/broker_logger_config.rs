@@ -7,29 +7,31 @@
 //! resource, and a `tracing` event proves the filter actually moved — the
 //! whole point of the feature is the events, not the config entry.
 
-use assert2::{assert, check};
-
-use crate::support::{
-    client::connect_owned,
-    configs::{
-        ConfigOperation, IncrementalConfigsSetup, describe_resource, incremental_config,
-        incremental_request, incremental_resource,
+use {
+    crate::support::{
+        client::connect_owned,
+        configs::{
+            ConfigOperation, IncrementalConfigsSetup, describe_resource, incremental_config,
+            incremental_request, incremental_resource,
+        },
     },
+    assert2::{assert, check},
 };
 mod support;
 
-use std::sync::{Arc, Mutex};
-
-use krabka_protocol::owned::{
-    describe_configs_request::DescribeConfigsRequest,
-    describe_configs_response::DescribeConfigsResponse,
-    incremental_alter_configs_response::IncrementalAlterConfigsResponse,
-    list_config_resources_request::ListConfigResourcesRequest,
-    list_config_resources_response::ListConfigResourcesResponse,
+use {
+    krabka_protocol::owned::{
+        describe_configs_request::DescribeConfigsRequest,
+        describe_configs_response::DescribeConfigsResponse,
+        incremental_alter_configs_response::IncrementalAlterConfigsResponse,
+        list_config_resources_request::ListConfigResourcesRequest,
+        list_config_resources_response::ListConfigResourcesResponse,
+    },
+    krabka_telemetry::LogLevelController,
+    std::sync::{Arc, Mutex},
+    support::start_n_node_with,
+    tracing_subscriber::{Layer, layer::SubscriberExt as _},
 };
-use krabka_telemetry::LogLevelController;
-use support::start_n_node_with;
-use tracing_subscriber::{Layer, layer::SubscriberExt as _};
 
 /// Kafka resource type id for `BROKER_LOGGER`.
 const RESOURCE_TYPE_BROKER_LOGGER: i8 = 8;

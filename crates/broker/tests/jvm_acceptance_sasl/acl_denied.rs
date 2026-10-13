@@ -6,13 +6,14 @@
 //! refuses them, so each case asserts on the exception name the client logs to
 //! stderr.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, add_console_acl, create_console_topic,
-    denied_console_consumer, nc_check_connectivity, plain_jaas, produce_console,
-    start_plain_acl_topic_with_ops, start_sasl_plaintext_broker_with_super_user,
-    write_client_props, write_plain_props,
+use {
+    crate::jvm_acceptance::{
+        ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, add_console_acl,
+        create_console_topic, denied_console_consumer, nc_check_connectivity, plain_jaas,
+        produce_console, start_plain_acl_topic_with_ops,
+        start_sasl_plaintext_broker_with_super_user, write_client_props, write_plain_props,
+    },
+    assert2::assert,
 };
 
 /// JVM acceptance: produce by an unauthorized principal must fail.
@@ -36,10 +37,11 @@ async fn jvm_unauthorized_produce_fails() {
     const BOB: &str = "bob";
     const BOB_PASS: &str = "bob-secret";
 
-    let (broker, _dir) = start_sasl_plaintext_broker_with_super_user(
-        ADMIN,
-        &[(ADMIN, ADMIN_PASS), (ALICE, ALICE_PASS), (BOB, BOB_PASS)],
-    )
+    let (broker, _dir) = start_sasl_plaintext_broker_with_super_user(ADMIN, &[
+        (ADMIN, ADMIN_PASS),
+        (ALICE, ALICE_PASS),
+        (BOB, BOB_PASS),
+    ])
     .await;
     nc_check_connectivity();
 

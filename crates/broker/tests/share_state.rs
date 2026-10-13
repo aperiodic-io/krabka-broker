@@ -16,35 +16,35 @@
 
 mod support;
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::{assert, check};
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    delete_share_group_state_request::{
-        DeleteShareGroupStateRequest, DeleteStateData, PartitionData as DeletePart,
+use {
+    crate::support::{
+        client::{connect_client, create_topic_with},
+        discovery::coordinator_lookup_request,
+        topics::CreateTopicSetup,
     },
-    find_coordinator_request::FindCoordinatorRequest,
-    find_coordinator_response::Coordinator,
-    initialize_share_group_state_request::{
-        InitializeShareGroupStateRequest, InitializeStateData, PartitionData as InitPart,
+    assert2::{assert, check},
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        delete_share_group_state_request::{
+            DeleteShareGroupStateRequest, DeleteStateData, PartitionData as DeletePart,
+        },
+        find_coordinator_request::FindCoordinatorRequest,
+        find_coordinator_response::Coordinator,
+        initialize_share_group_state_request::{
+            InitializeShareGroupStateRequest, InitializeStateData, PartitionData as InitPart,
+        },
+        read_share_group_state_request::{
+            PartitionData as ReadPart, ReadShareGroupStateRequest, ReadStateData,
+        },
+        read_share_group_state_summary_request::{
+            PartitionData as SummaryPart, ReadShareGroupStateSummaryRequest, ReadStateSummaryData,
+        },
+        write_share_group_state_request::{
+            PartitionData as WritePart, StateBatch, WriteShareGroupStateRequest, WriteStateData,
+        },
     },
-    read_share_group_state_request::{
-        PartitionData as ReadPart, ReadShareGroupStateRequest, ReadStateData,
-    },
-    read_share_group_state_summary_request::{
-        PartitionData as SummaryPart, ReadShareGroupStateSummaryRequest, ReadStateSummaryData,
-    },
-    write_share_group_state_request::{
-        PartitionData as WritePart, StateBatch, WriteShareGroupStateRequest, WriteStateData,
-    },
-};
-
-use crate::support::{
-    client::{connect_client, create_topic_with},
-    discovery::coordinator_lookup_request,
-    topics::CreateTopicSetup,
+    std::{sync::Arc, time::Duration},
 };
 
 const COORDINATOR_LOAD_IN_PROGRESS: i16 = 14;
@@ -69,13 +69,10 @@ async fn connect(bootstrap: &str) -> Arc<Client> {
 /// coordinator refuses a read or a write of a topic partition that the
 /// metadata image does not hold.
 async fn create_topic(client: &Client, name: &str) -> uuid::Uuid {
-    let id = create_topic_with(
-        client,
-        CreateTopicSetup {
-            topic: name,
-            ..Default::default()
-        },
-    )
+    let id = create_topic_with(client, CreateTopicSetup {
+        topic: name,
+        ..Default::default()
+    })
     .await;
     uuid::Uuid::from_bytes(id.0)
 }
@@ -283,25 +280,22 @@ async fn persister_round_trip() {
     initialize_partition(&client, "g1", tid, 0, (0, 0)).await;
 
     // Write an in-flight batch above the new SPSO (5).
-    let w = write_state(
-        &client,
-        StateWrite {
-            group: "g1",
-            topic_id: tid,
-            partition: 0,
-            state_epoch: 0,
-            leader_epoch: 0,
-            start_offset: 5,
-            delivery_complete_count: 2,
-            batches: vec![StateBatch {
-                first_offset: 5,
-                last_offset: 9,
-                delivery_state: 2,
-                delivery_count: 1,
-                ..Default::default()
-            }],
-        },
-    )
+    let w = write_state(&client, StateWrite {
+        group: "g1",
+        topic_id: tid,
+        partition: 0,
+        state_epoch: 0,
+        leader_epoch: 0,
+        start_offset: 5,
+        delivery_complete_count: 2,
+        batches: vec![StateBatch {
+            first_offset: 5,
+            last_offset: 9,
+            delivery_state: 2,
+            delivery_count: 1,
+            ..Default::default()
+        }],
+    })
     .await;
     assert!(w == 0, "write error: {w}");
 
@@ -392,19 +386,16 @@ async fn write_fences_stale_state_epoch() {
     assert!(init == 0, "initialize error: {init}");
 
     // Write at state_epoch 0 (< durable 5) -> fenced.
-    let w = write_state(
-        &client,
-        StateWrite {
-            group: "g1",
-            topic_id: tid,
-            partition: 0,
-            state_epoch: 0,
-            leader_epoch: 0,
-            start_offset: 0,
-            delivery_complete_count: 0,
-            batches: vec![],
-        },
-    )
+    let w = write_state(&client, StateWrite {
+        group: "g1",
+        topic_id: tid,
+        partition: 0,
+        state_epoch: 0,
+        leader_epoch: 0,
+        start_offset: 0,
+        delivery_complete_count: 0,
+        batches: vec![],
+    })
     .await;
     assert!(
         w == FENCED_STATE_EPOCH,

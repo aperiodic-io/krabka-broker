@@ -25,10 +25,9 @@
 //! prints them. Only the OTLP layer enables that target, with the
 //! `otel_default_filter` passed to [`init`].
 
-use std::net::SocketAddr;
-
 // Re-export the generic OTLP pipeline from krabka-telemetry.
 pub use krabka_telemetry::{OtlpConfig, OtlpProtocol, TelemetryError, TelemetryGuard, init};
+use std::net::SocketAddr;
 
 /// `tracing` target carrying per-request server spans. The broker keeps it off
 /// the `fmt` layer's default filter so request spans only materialise for OTLP.
@@ -76,10 +75,11 @@ pub fn api_name(api_key: i16) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::test_support::peer;
+    use {
+        super::*,
+        crate::test_support::peer,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn api_name_known_and_unknown() {
@@ -97,13 +97,14 @@ mod tests {
 
     #[test]
     fn request_span_records_otel_name() {
-        use std::sync::{Arc, Mutex};
-
-        use tracing::{
-            field::{Field, Visit},
-            span::{Attributes, Record},
+        use {
+            std::sync::{Arc, Mutex},
+            tracing::{
+                field::{Field, Visit},
+                span::{Attributes, Record},
+            },
+            tracing_subscriber::{Layer, layer::Context, prelude::*},
         };
-        use tracing_subscriber::{Layer, layer::Context, prelude::*};
 
         #[derive(Default)]
         struct Captured {
@@ -116,6 +117,7 @@ mod tests {
         struct V<'a>(&'a mut Captured);
         impl Visit for V<'_> {
             fn record_debug(&mut self, _f: &Field, _v: &dyn std::fmt::Debug) {}
+
             fn record_str(&mut self, f: &Field, v: &str) {
                 match f.name() {
                     "otel.name" => self.0.name = Some(v.to_owned()),
@@ -123,6 +125,7 @@ mod tests {
                     _ => {}
                 }
             }
+
             fn record_i64(&mut self, f: &Field, v: i64) {
                 if f.name() == "kafka.api_key" {
                     self.0.api_key = Some(v);
@@ -134,6 +137,7 @@ mod tests {
             fn on_new_span(&self, attrs: &Attributes<'_>, _id: &tracing::Id, _ctx: Context<'_, S>) {
                 attrs.record(&mut V(&mut self.0.lock().unwrap()));
             }
+
             fn on_record(&self, _id: &tracing::Id, values: &Record<'_>, _ctx: Context<'_, S>) {
                 values.record(&mut V(&mut self.0.lock().unwrap()));
             }

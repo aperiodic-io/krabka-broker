@@ -4,13 +4,14 @@
 //! the rule a two-person rule. The child modules cover the proposal
 //! lifecycle, the operator signature, and the counts one request reports.
 
-use assert2::{assert, check};
-use krabka_metadata::{BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord};
-
-use super::*;
-use crate::{
-    break_glass::gate::tests::{NOW_MS, approval, config, proposal},
-    operator_keys::OperatorKeys,
+use {
+    super::*,
+    crate::{
+        break_glass::gate::tests::{NOW_MS, approval, config, proposal},
+        operator_keys::OperatorKeys,
+    },
+    assert2::{assert, check},
+    krabka_metadata::{BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord},
 };
 
 fn attempt(principal: &str) -> Attempt<'_> {

@@ -1,13 +1,13 @@
 //! Controller-backed offset assignment for diskless WAL partitions.
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use krabka_ids::{Offset, PartitionIndex};
-use krabka_metadata::{MetadataRecord, PartitionOffsetAdvanceRecord};
-use krabka_raft::RaftError;
-
-use crate::{error::BrokerError, metadata_source::MetadataSource};
+use {
+    crate::{error::BrokerError, metadata_source::MetadataSource},
+    async_trait::async_trait,
+    krabka_ids::{Offset, PartitionIndex},
+    krabka_metadata::{MetadataRecord, PartitionOffsetAdvanceRecord},
+    krabka_raft::RaftError,
+    std::sync::Arc,
+};
 
 #[async_trait]
 pub(crate) trait OffsetSequencer: Send + Sync {
@@ -53,9 +53,7 @@ pub(crate) struct ControllerSequencer {
 
 impl ControllerSequencer {
     #[must_use]
-    pub(crate) fn new(metadata: Arc<dyn MetadataSource>) -> Self {
-        Self { metadata }
-    }
+    pub(crate) fn new(metadata: Arc<dyn MetadataSource>) -> Self { Self { metadata } }
 }
 
 #[async_trait]
@@ -124,12 +122,12 @@ fn controller_epoch_coordinate(epoch: Option<u64>) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use krabka_raft::{NodeId, OffsetReservation, SubmitChangeResult};
-
-    use super::*;
-    use crate::test_support::FakeMetadataSource;
+    use {
+        super::*,
+        crate::test_support::FakeMetadataSource,
+        krabka_raft::{NodeId, OffsetReservation, SubmitChangeResult},
+        std::sync::Arc,
+    };
 
     fn reservation(
         topic: &str,

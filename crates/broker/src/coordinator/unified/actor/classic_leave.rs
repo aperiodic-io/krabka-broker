@@ -6,32 +6,32 @@
 //! member's next-gen records, and a delete appends the tombstones of the
 //! group's offsets and its group records, which stops the actor.
 
-use std::collections::{BTreeSet, HashSet};
-
-use krabka_protocol::owned::{
-    leave_group_request::LeaveGroupRequest, leave_group_response::MemberResponse,
-};
-use tokio::sync::oneshot;
-
-use super::{
-    ActorServices, ErrorCode, ParkedWaiters, chrono_now_ms,
-    downgrade::{downgrade_fencing, downgrades_without},
-    heartbeat::fence_members,
-    persistence::{flush_classic_metadata, flush_pending},
-    retention::append_tombstones,
-    waiters::settle_removed_classic_waiters,
-};
-use crate::{
-    codes,
-    coordinator::{
-        DeleteGroupError,
-        unified::{
-            classic_ops, consumer_state::GroupState, group::CoordinatorGroup,
-            offsets_log::OffsetsLog,
-        },
+use {
+    super::{
+        ActorServices, ErrorCode, ParkedWaiters, chrono_now_ms,
+        downgrade::{downgrade_fencing, downgrades_without},
+        heartbeat::fence_members,
+        persistence::{flush_classic_metadata, flush_pending},
+        retention::append_tombstones,
+        waiters::settle_removed_classic_waiters,
     },
-    error::BrokerError,
-    metadata_epoch::next_i32,
+    crate::{
+        codes,
+        coordinator::{
+            DeleteGroupError,
+            unified::{
+                classic_ops, consumer_state::GroupState, group::CoordinatorGroup,
+                offsets_log::OffsetsLog,
+            },
+        },
+        error::BrokerError,
+        metadata_epoch::next_i32,
+    },
+    krabka_protocol::owned::{
+        leave_group_request::LeaveGroupRequest, leave_group_response::MemberResponse,
+    },
+    std::collections::{BTreeSet, HashSet},
+    tokio::sync::oneshot,
 };
 
 #[cfg(test)]

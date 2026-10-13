@@ -3,14 +3,15 @@
 //! Kafka's `UnifiedLog.appendAsFollower` takes a batch whose first offset is
 //! at or past the follower's log end offset, so the follower still catches up.
 
-use krabka_ids::{LeaderEpoch, Offset};
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::mebibytes;
-use tempfile::tempdir;
-
-use super::*;
-use crate::log::test_support::{
-    compacting_segments, compaction_ctx, keyed_batch, set_segment_size, test_log, verbatim_from,
+use {
+    super::*,
+    crate::log::test_support::{
+        compacting_segments, compaction_ctx, keyed_batch, set_segment_size, test_log, verbatim_from,
+    },
+    krabka_ids::{LeaderEpoch, Offset},
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::mebibytes,
+    tempfile::tempdir,
 };
 
 /// A leader that one compaction pass has cut holes into. Each batch sits in a
@@ -27,10 +28,11 @@ fn compacted_leader(dir: &std::path::Path) -> Log {
     let mut log = Log::open(dir, compacting_segments()).unwrap();
     for mut batch in [
         keyed_batch(0, &[(0, b"k0", b"v0")]),
-        keyed_batch(
-            0,
-            &[(0, b"k1", b"v1"), (1, b"k2", b"v2"), (2, b"k3", b"v3")],
-        ),
+        keyed_batch(0, &[
+            (0, b"k1", b"v1"),
+            (1, b"k2", b"v2"),
+            (2, b"k3", b"v3"),
+        ]),
         keyed_batch(0, &[(0, b"k4", b"v4")]),
         keyed_batch(0, &[(0, b"k2", b"v5")]),
         keyed_batch(0, &[(0, b"k4", b"v6")]),

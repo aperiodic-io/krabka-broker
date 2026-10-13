@@ -13,15 +13,16 @@
 //! Filter decoding lives in `filter`, the response rows in `response`, and
 //! the audit trail in `audit`.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{AclEntry, MetadataRecord};
-use krabka_protocol::{
-    ProtocolError,
-    owned::{
-        delete_acls_request::DeleteAclsRequest,
-        delete_acls_response::{DeleteAclsFilterResult, DeleteAclsResponse},
+use {
+    krabka_metadata::{AclEntry, MetadataRecord},
+    krabka_protocol::{
+        ProtocolError,
+        owned::{
+            delete_acls_request::DeleteAclsRequest,
+            delete_acls_response::{DeleteAclsFilterResult, DeleteAclsResponse},
+        },
     },
+    std::collections::HashSet,
 };
 
 mod audit;
@@ -33,16 +34,18 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    audit::{audit_deleted_acls, deleted_acl_resources},
-    filter::{build_filter, exact_filter},
-    response::{apply_submit_error, delete_acls_response, filter_result, matching_acl_result},
+use {
+    self::{
+        audit::{audit_deleted_acls, deleted_acl_resources},
+        filter::{build_filter, exact_filter},
+        response::{apply_submit_error, delete_acls_response, filter_result, matching_acl_result},
+    },
+    super::acl_wire::{
+        MAX_ACL_RECORDS_PER_REQUEST, NO_AUTHORIZER_EXCEPTION_MESSAGE,
+        binding_filter::{AclBindingFilter, UnknownElement},
+    },
+    crate::codes,
 };
-use super::acl_wire::{
-    MAX_ACL_RECORDS_PER_REQUEST, NO_AUTHORIZER_EXCEPTION_MESSAGE,
-    binding_filter::{AclBindingFilter, UnknownElement},
-};
-use crate::codes;
 
 /// The message of a cluster-alter refusal. Kafka's `AuthHelper` writes
 /// "Request <request> needs ALTER permission.", where `<request>` is the JVM

@@ -3,15 +3,16 @@
 //! the in-memory entry. The handler gates on local leadership of the target
 //! `__share_group_state` partition.
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::{
-    delete_share_group_state_request::DeleteShareGroupStateRequest,
-    delete_share_group_state_response::{
-        DeleteShareGroupStateResponse, DeleteStateResult, PartitionResult,
+use {
+    crate::share_coordinator::coordinator::ShareCoordinator,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::{
+        delete_share_group_state_request::DeleteShareGroupStateRequest,
+        delete_share_group_state_response::{
+            DeleteShareGroupStateResponse, DeleteStateResult, PartitionResult,
+        },
     },
 };
-
-use crate::share_coordinator::coordinator::ShareCoordinator;
 
 super::share_state_handler!(
     DeleteShareGroupStateRequest,
@@ -55,21 +56,22 @@ async fn delete_state(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::Offset;
-    use krabka_protocol::{
-        owned::delete_share_group_state_request::{DeleteStateData, PartitionData},
-        primitives::uuid::Uuid as ProtoUuid,
-    };
-
-    use super::*;
-    use crate::{
-        codes,
-        share_coordinator::coordinator::test_support::{
-            Logged, image_with_topic, logged_records, logged_since,
+    use {
+        super::*,
+        crate::{
+            codes,
+            share_coordinator::coordinator::test_support::{
+                Logged, image_with_topic, logged_records, logged_since,
+            },
+            test_support::KafkaErrorCode,
         },
-        test_support::KafkaErrorCode,
+        assert2::check,
+        krabka_ids::PartitionIndex,
+        krabka_log::Offset,
+        krabka_protocol::{
+            owned::delete_share_group_state_request::{DeleteStateData, PartitionData},
+            primitives::uuid::Uuid as ProtoUuid,
+        },
     };
 
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([31; 16]);

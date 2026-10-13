@@ -6,10 +6,11 @@
 //! report about members, so they are kept apart from the share-state
 //! initialization scenarios that assert on the persister.
 
-use assert2::{assert, check};
-
-use crate::share_group_harness::{
-    boot, connect, create_topic, describe, heartbeat, rejoin, start, total_assigned,
+use {
+    crate::share_group_harness::{
+        boot, connect, create_topic, describe, heartbeat, rejoin, start, total_assigned,
+    },
+    assert2::{assert, check},
 };
 
 /// A single member joins and advances to epoch 1 with an empty assignment,

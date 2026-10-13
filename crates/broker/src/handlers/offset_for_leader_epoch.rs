@@ -45,23 +45,23 @@
 //!    installed role can lag the other way while a promotion prepares the
 //!    log.
 
-use std::sync::atomic::Ordering;
-
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    offset_for_leader_epoch_request::OffsetForLeaderEpochRequest,
-    offset_for_leader_epoch_response::{
-        EpochEndOffset, OffsetForLeaderEpochResponse, OffsetForLeaderTopicResult,
-    },
-};
-
 #[cfg(test)]
 use crate::test_support::StandalonePartitionSetup;
-use crate::{
-    broker::Broker,
-    codes,
-    handlers::{RequestContext, acl_denied, cluster_action_denied},
-    partition::Partition,
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        handlers::{RequestContext, acl_denied, cluster_action_denied},
+        partition::Partition,
+    },
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        offset_for_leader_epoch_request::OffsetForLeaderEpochRequest,
+        offset_for_leader_epoch_response::{
+            EpochEndOffset, OffsetForLeaderEpochResponse, OffsetForLeaderTopicResult,
+        },
+    },
+    std::sync::atomic::Ordering,
 };
 
 /// The two-state leader check Kafka's `ReplicaManager.lastOffsetForLeaderEpoch`
@@ -255,30 +255,30 @@ pub(crate) fn handle(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_protocol::owned::{
-        offset_for_leader_epoch_request::{
-            OffsetForLeaderEpochRequest, OffsetForLeaderPartition, OffsetForLeaderTopic,
+    use {
+        super::*,
+        crate::{
+            authorizer::AuthorizationResult,
+            broker::BrokerHandle,
+            handlers::{
+                produce::test_support::image_with_topic,
+                test_support::{ReplicatedTopicSetup, seed_partition_replicas},
+            },
+            test_support::{
+                append_partition_batch, peer, principal, start_broker_no_audit,
+                start_broker_with_authorizer_no_audit, temporary_partition,
+            },
         },
-        offset_for_leader_epoch_response::{
-            self, EpochEndOffset, OffsetForLeaderEpochResponse, OffsetForLeaderTopicResult,
+        assert2::assert,
+        krabka_protocol::owned::{
+            offset_for_leader_epoch_request::{
+                OffsetForLeaderEpochRequest, OffsetForLeaderPartition, OffsetForLeaderTopic,
+            },
+            offset_for_leader_epoch_response::{
+                self, EpochEndOffset, OffsetForLeaderEpochResponse, OffsetForLeaderTopicResult,
+            },
         },
-    };
-
-    use super::*;
-    use crate::{
-        authorizer::AuthorizationResult,
-        broker::BrokerHandle,
-        handlers::{
-            produce::test_support::image_with_topic,
-            test_support::{ReplicatedTopicSetup, seed_partition_replicas},
-        },
-        test_support::{
-            append_partition_batch, peer, principal, start_broker_no_audit,
-            start_broker_with_authorizer_no_audit, temporary_partition,
-        },
+        std::sync::Arc,
     };
 
     const VERSION: i16 = offset_for_leader_epoch_response::MAX_VERSION;
@@ -384,26 +384,22 @@ mod tests {
     #[tokio::test]
     async fn cluster_action_fast_path_table() {
         let cases: [(bool, bool, Vec<OffsetForLeaderTopicResult>); 4] = [
-            (
-                true,
-                false,
-                vec![unknown_topic_row("orders"), unknown_topic_row("payments")],
-            ),
-            (
-                false,
-                true,
-                vec![unknown_topic_row("orders"), unknown_topic_row("payments")],
-            ),
-            (
-                false,
-                false,
-                vec![unknown_topic_row("orders"), denied_row("payments")],
-            ),
-            (
-                true,
-                true,
-                vec![unknown_topic_row("orders"), unknown_topic_row("payments")],
-            ),
+            (true, false, vec![
+                unknown_topic_row("orders"),
+                unknown_topic_row("payments"),
+            ]),
+            (false, true, vec![
+                unknown_topic_row("orders"),
+                unknown_topic_row("payments"),
+            ]),
+            (false, false, vec![
+                unknown_topic_row("orders"),
+                denied_row("payments"),
+            ]),
+            (true, true, vec![
+                unknown_topic_row("orders"),
+                unknown_topic_row("payments"),
+            ]),
         ];
 
         for (cluster_action, payments_describe, expected_topics) in cases {
@@ -509,15 +505,12 @@ mod tests {
             leader,
             leader_epoch,
         } = setup;
-        seed_partition_replicas(
-            broker_handle,
-            ReplicatedTopicSetup {
-                topic,
-                topic_id,
-                leader,
-                ..Default::default()
-            },
-        )
+        seed_partition_replicas(broker_handle, ReplicatedTopicSetup {
+            topic,
+            topic_id,
+            leader,
+            ..Default::default()
+        })
         .await;
 
         let shared = broker_handle.broker_arc_for_test();
@@ -615,38 +608,31 @@ mod tests {
     /// unasserted" one.
     #[tokio::test]
     async fn kip_320_fence_and_leader_gate_answer_offset_for_leader_epoch_rows() {
-        use krabka_protocol::owned::offset_for_leader_epoch_request;
-        use offset_for_leader_epoch_request::MAX_VERSION as VERSION;
+        use {
+            krabka_protocol::owned::offset_for_leader_epoch_request,
+            offset_for_leader_epoch_request::MAX_VERSION as VERSION,
+        };
 
         let (broker, _dir) = start_broker_no_audit().await;
 
-        let leader_topic = seeded_topic(
-            &broker,
-            SeededEpochTopicSetup {
-                topic: "ofle-leader",
-                ..Default::default()
-            },
-        )
+        let leader_topic = seeded_topic(&broker, SeededEpochTopicSetup {
+            topic: "ofle-leader",
+            ..Default::default()
+        })
         .await;
-        seeded_topic(
-            &broker,
-            SeededEpochTopicSetup {
-                topic: "ofle-follower",
-                topic_id: uuid::Uuid::from_u128(2),
-                leader: NodeId(2),
-                ..Default::default()
-            },
-        )
+        seeded_topic(&broker, SeededEpochTopicSetup {
+            topic: "ofle-follower",
+            topic_id: uuid::Uuid::from_u128(2),
+            leader: NodeId(2),
+            ..Default::default()
+        })
         .await;
-        seeded_topic(
-            &broker,
-            SeededEpochTopicSetup {
-                topic: "ofle-epoch",
-                topic_id: uuid::Uuid::from_u128(3),
-                leader_epoch: LeaderEpoch(3),
-                ..Default::default()
-            },
-        )
+        seeded_topic(&broker, SeededEpochTopicSetup {
+            topic: "ofle-epoch",
+            topic_id: uuid::Uuid::from_u128(3),
+            leader_epoch: LeaderEpoch(3),
+            ..Default::default()
+        })
         .await;
 
         let refused = |error_code| EpochEndOffset {
@@ -784,30 +770,24 @@ mod tests {
             crate::test_support::start_broker_no_audit()
         );
 
-        let offline = seeded_topic(
-            &broker,
-            SeededEpochTopicSetup {
-                topic: "ofle-offline",
-                leader_epoch: LeaderEpoch(3),
-                ..Default::default()
-            },
-        )
+        let offline = seeded_topic(&broker, SeededEpochTopicSetup {
+            topic: "ofle-offline",
+            leader_epoch: LeaderEpoch(3),
+            ..Default::default()
+        })
         .await;
         shared
             .log_dir_status
             .mark_offline(&offline.log_dir.load(), "test: EIO");
 
         // Node 1 is not a replica of this partition, so it never hosts it.
-        seed_partition_replicas(
-            &broker,
-            ReplicatedTopicSetup {
-                topic: "ofle-moved",
-                topic_id: uuid::Uuid::from_u128(9),
-                leader: krabka_audit::NodeId(2),
-                replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
-                leader_epoch: krabka_ids::LeaderEpoch(3),
-            },
-        )
+        seed_partition_replicas(&broker, ReplicatedTopicSetup {
+            topic: "ofle-moved",
+            topic_id: uuid::Uuid::from_u128(9),
+            leader: krabka_audit::NodeId(2),
+            replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
+            leader_epoch: krabka_ids::LeaderEpoch(3),
+        })
         .await;
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
             while shared

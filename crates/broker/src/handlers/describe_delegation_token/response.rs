@@ -6,10 +6,12 @@
 //! KIP-373 token-requester fields, so they sit apart from the code that
 //! decides which tokens are visible.
 
-use krabka_protocol::owned::describe_delegation_token_response::{
-    DescribeDelegationTokenResponse, DescribedDelegationToken, DescribedDelegationTokenRenewer,
+use {
+    krabka_protocol::owned::describe_delegation_token_response::{
+        DescribeDelegationTokenResponse, DescribedDelegationToken, DescribedDelegationTokenRenewer,
+    },
+    krabka_security::{SecretBytes, compute_token_hmac},
 };
-use krabka_security::{SecretBytes, compute_token_hmac};
 
 /// The wire form of one visible token. The stored token has no HMAC, as in
 /// Kafka's metadata, so it is recomputed under `secret_key`, as Kafka's

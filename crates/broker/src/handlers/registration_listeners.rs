@@ -52,9 +52,8 @@ macro_rules! decode {
     }};
 }
 
-pub(super) use decode;
-
 use crate::{
     broker::Broker,
     codes::{CLUSTER_AUTHORIZATION_FAILED, NOT_CONTROLLER},
 };
+pub(super) use decode;

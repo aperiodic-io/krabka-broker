@@ -3,26 +3,27 @@
 //! current metadata image here, so the startup sequence sees one call instead
 //! of three near-identical construct-configure-recover blocks.
 
-use std::sync::Arc;
-
-use super::inter_broker_listener_protocol;
-use crate::{
-    api_catalog::UnstableApiVersions,
-    auto_topic_creation::AutoTopicCreation,
-    barrier::{
-        config::BarrierConfig, coordinator::BarrierCoordinator,
-        handlers::transport::InterBrokerMarkerWriter, metrics::BrokerBarrierMetrics,
+use {
+    super::inter_broker_listener_protocol,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        auto_topic_creation::AutoTopicCreation,
+        barrier::{
+            config::BarrierConfig, coordinator::BarrierCoordinator,
+            handlers::transport::InterBrokerMarkerWriter, metrics::BrokerBarrierMetrics,
+        },
+        config::BrokerConfig,
+        coordinator::GroupCoordinator,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        share_coordinator::{coordinator::ShareCoordinator, persister_client::SharePersister},
+        share_partition::{dlq::DlqWriter, manager::SharePartitionLeaderManager},
+        txn::coordinator::TxnCoordinator,
     },
-    config::BrokerConfig,
-    coordinator::GroupCoordinator,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    share_coordinator::{coordinator::ShareCoordinator, persister_client::SharePersister},
-    share_partition::{dlq::DlqWriter, manager::SharePartitionLeaderManager},
-    txn::coordinator::TxnCoordinator,
+    std::sync::Arc,
 };
 
 pub(super) struct CoordinatorStartup {

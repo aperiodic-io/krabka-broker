@@ -6,32 +6,33 @@
 //! with the enabled list and then closes, a v0 handshake runs the exchange as
 //! raw tokens, and anything but `SaslAuthenticate` after a handshake closes.
 
-use assert2::{assert, check};
-use bytes::BytesMut;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
-        metadata_request::MetadataRequest, sasl_handshake_request::SaslHandshakeRequest,
-        sasl_handshake_response::SaslHandshakeResponse,
-    },
-};
-use krabka_security::SaslMechanism;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
-
-use crate::{
-    harness::{alice_password, alice_plain_socket, round_trip},
-    kafka_wire::{ExchangeSetup as WireExchangeSetup, exchange},
-    support::{
-        sasl::sasl_plaintext_mechanisms,
-        wire::{
-            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-            SocketExchangeSetup, WireFrameSetup, request_frame, write_frame,
+use {
+    crate::{
+        harness::{alice_password, alice_plain_socket, round_trip},
+        kafka_wire::{ExchangeSetup as WireExchangeSetup, exchange},
+        support::{
+            sasl::sasl_plaintext_mechanisms,
+            wire::{
+                CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+                SocketExchangeSetup, WireFrameSetup, request_frame, write_frame,
+            },
         },
+    },
+    assert2::{assert, check},
+    bytes::BytesMut,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+            metadata_request::MetadataRequest, sasl_handshake_request::SaslHandshakeRequest,
+            sasl_handshake_response::SaslHandshakeResponse,
+        },
+    },
+    krabka_security::SaslMechanism,
+    tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
     },
 };
 

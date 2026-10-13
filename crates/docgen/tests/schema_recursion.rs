@@ -1,6 +1,8 @@
-use assert2::assert;
-use krabka_docgen::schema_md::{render_field_table, render_sectioned_field_table};
-use serde_json::json;
+use {
+    assert2::assert,
+    krabka_docgen::schema_md::{render_field_table, render_sectioned_field_table},
+    serde_json::json,
+};
 
 #[test]
 fn recursive_array_and_reference_schemas_render_with_bounded_labels() {

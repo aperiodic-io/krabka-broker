@@ -1,8 +1,9 @@
-use assert2::{assert, check};
-use base64::Engine as _;
-
-use super::*;
-use crate::{kraft::transport::api_key::END_QUORUM_EPOCH, network::negotiation::convert_request};
+use {
+    super::*,
+    crate::{kraft::transport::api_key::END_QUORUM_EPOCH, network::negotiation::convert_request},
+    assert2::{assert, check},
+    base64::Engine as _,
+};
 
 fn raw_vote_request() -> VoteRequest {
     VoteRequest {
@@ -23,9 +24,7 @@ fn raw_vote_request() -> VoteRequest {
     }
 }
 
-fn raw_vote_body(request: &VoteRequest) -> Bytes {
-    encode_body(request, VOTE_VERSION)
-}
+fn raw_vote_body(request: &VoteRequest) -> Bytes { encode_body(request, VOTE_VERSION) }
 
 fn candidate_vote(
     cluster_id: Option<uuid::Uuid>,

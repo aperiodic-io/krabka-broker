@@ -7,15 +7,16 @@
 //! tell that its view is current, and the active segment receives the appends
 //! that roll it by `metadata.log.segment.ms`. Every replay skips them.
 
-use krabka_units::prelude::TimeExt as _;
-use tokio::time::Instant;
-
-use super::{
-    Engine, KraftController,
-    offsets::{leader_alone_is_majority, validate_append_result},
-    records::{metadata_record_batch, noop_record_value},
+use {
+    super::{
+        Engine, KraftController,
+        offsets::{leader_alone_is_majority, validate_append_result},
+        records::{metadata_record_batch, noop_record_value},
+    },
+    crate::error::RaftError,
+    krabka_units::prelude::TimeExt as _,
+    tokio::time::Instant,
 };
-use crate::error::RaftError;
 
 impl Engine {
     /// Arm the no-op timer while this node leads and the interval is not

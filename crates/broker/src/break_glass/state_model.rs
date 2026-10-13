@@ -22,25 +22,27 @@
 //! created at zero and expires at [`EXPIRES_AT`], and an expire action advances
 //! the clock by one. The bound keeps the state graph exhaustive.
 
-use krabka_metadata::{
-    BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, MetadataImage, MetadataRecord,
-};
-use krabka_units::millis;
-use stateright::{Model, Property};
-use uuid::Uuid;
-
-use crate::{
-    break_glass::{
-        config::BreakGlassPolicy,
-        gate,
-        handlers::{
-            Refusal,
-            approve::{self, Attempt},
+use {
+    crate::{
+        break_glass::{
+            config::BreakGlassPolicy,
+            gate,
+            handlers::{
+                Refusal,
+                approve::{self, Attempt},
+            },
         },
+        config::BreakGlassConfig,
+        model_check::check_model,
+        operator_keys::OperatorKeys,
     },
-    config::BreakGlassConfig,
-    model_check::check_model,
-    operator_keys::OperatorKeys,
+    krabka_metadata::{
+        BreakGlassAction, BreakGlassApproval, BreakGlassProposalRecord, MetadataImage,
+        MetadataRecord,
+    },
+    krabka_units::millis,
+    stateright::{Model, Property},
+    uuid::Uuid,
 };
 
 /// The logical millisecond at which the proposal expires.
@@ -132,9 +134,7 @@ fn image_of(state: &ProposalState) -> MetadataImage {
 }
 
 impl BreakGlassModel {
-    fn policy(&self) -> BreakGlassPolicy<'_> {
-        BreakGlassPolicy::new(&self.config)
-    }
+    fn policy(&self) -> BreakGlassPolicy<'_> { BreakGlassPolicy::new(&self.config) }
 
     /// Apply one approval or one withdrawal through the real handler decision.
     fn settle(&self, state: &mut ProposalState, principal: &'static str, withdraw: bool) {
@@ -171,8 +171,25 @@ pub(super) fn distinct(approvals: &[&'static str]) -> usize {
 }
 
 impl Model for BreakGlassModel {
-    type State = ProposalState;
     type Action = Step;
+    type State = ProposalState;
+
+    krabka_macros::model_transition!(last, action, state; {
+            match action {
+                Step::Approve(principal) => self.settle(&mut state, principal, false),
+                Step::Withdraw(principal) => self.settle(&mut state, principal, true),
+                Step::Expire => state.now_ms = (state.now_ms + 1).min(EXPIRES_AT),
+                Step::Consume => self.consume(&mut state),
+            }
+            // Headline safety, per transition. It fires the moment an interleaving
+            // spends one approval twice, rather than at the end of the run.
+            assert2::assert!(
+                state.consumes <= 1,
+                "a proposal was consumed twice after {action:?}: {state:?}"
+            );
+            Some(state)
+
+    });
 
     fn init_states(&self) -> Vec<Self::State> {
         vec![ProposalState {
@@ -193,23 +210,6 @@ impl Model for BreakGlassModel {
         actions.push(Step::Expire);
         actions.push(Step::Consume);
     }
-
-    krabka_macros::model_transition!(last, action, state; {
-            match action {
-                Step::Approve(principal) => self.settle(&mut state, principal, false),
-                Step::Withdraw(principal) => self.settle(&mut state, principal, true),
-                Step::Expire => state.now_ms = (state.now_ms + 1).min(EXPIRES_AT),
-                Step::Consume => self.consume(&mut state),
-            }
-            // Headline safety, per transition. It fires the moment an interleaving
-            // spends one approval twice, rather than at the end of the run.
-            assert2::assert!(
-                state.consumes <= 1,
-                "a proposal was consumed twice after {action:?}: {state:?}"
-            );
-            Some(state)
-
-    });
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![

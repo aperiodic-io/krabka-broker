@@ -3,12 +3,13 @@
 //! The bounds sit next to the assertions that prove a run was exhaustive,
 //! because a truncated search proves nothing and the two must move together.
 
-use stateright::Checker;
-
-use super::config::ClassicModel;
-use crate::{
-    coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
-    model_check::run_bfs,
+use {
+    super::config::ClassicModel,
+    crate::{
+        coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
+        model_check::run_bfs,
+    },
+    stateright::Checker,
 };
 
 // Exhaustiveness is bounded on UNIQUE states (memory-proportional); the BFS's

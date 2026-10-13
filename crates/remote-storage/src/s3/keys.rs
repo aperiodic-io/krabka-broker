@@ -4,12 +4,13 @@
 //! partition directory holding one object per artifact, named by base offset
 //! and segment id.
 
-use object_store::path::Path as ObjectPath;
-
-use super::S3RemoteStorage;
-use crate::{
-    metadata::RemoteLogSegmentMetadata,
-    storage_manager::{IndexType, partition_dir_name, segment_file_name},
+use {
+    super::S3RemoteStorage,
+    crate::{
+        metadata::RemoteLogSegmentMetadata,
+        storage_manager::{IndexType, partition_dir_name, segment_file_name},
+    },
+    object_store::path::Path as ObjectPath,
 };
 
 impl S3RemoteStorage {
@@ -44,13 +45,10 @@ impl S3RemoteStorage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use object_store::memory::InMemory;
-
-    use super::S3RemoteStorage;
-    use crate::s3::test_support::sample_metadata;
+    use {
+        super::S3RemoteStorage, crate::s3::test_support::sample_metadata, assert2::assert,
+        object_store::memory::InMemory, std::sync::Arc,
+    };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn prefix_isolates_clusters() {

@@ -30,26 +30,27 @@
 //! `network::dispatch::response`, and the `encoded_len` walk in
 //! `replicator::response`. Both came out "keep".
 
-use std::{
-    future::Future,
-    hint::black_box,
-    io::IoSlice,
-    pin::Pin,
-    task::{Context, Poll, Waker},
-    time::{Duration, Instant},
+use {
+    assert2::assert,
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    criterion::{Criterion, Throughput, criterion_group, criterion_main},
+    futures_util::SinkExt as _,
+    krabka_broker::{
+        replicate_hot_path::ReplicaSeam,
+        response_framing::{self, KafkaCodec},
+    },
+    krabka_protocol::{api_key::ApiKey, records::RecordBatch},
+    std::{
+        future::Future,
+        hint::black_box,
+        io::IoSlice,
+        pin::Pin,
+        task::{Context, Poll, Waker},
+        time::{Duration, Instant},
+    },
+    tokio::{io::AsyncWrite, runtime::Runtime},
+    tokio_util::codec::{Encoder as _, Framed},
 };
-
-use assert2::assert;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use futures_util::SinkExt as _;
-use krabka_broker::{
-    replicate_hot_path::ReplicaSeam,
-    response_framing::{self, KafkaCodec},
-};
-use krabka_protocol::{api_key::ApiKey, records::RecordBatch};
-use tokio::{io::AsyncWrite, runtime::Runtime};
-use tokio_util::codec::{Encoder as _, Framed};
 
 /// Kafka's default `socket.request.max.bytes`, the request limit the broker
 /// builds its codec with.
@@ -111,9 +112,7 @@ impl AsyncWrite for NullSink {
         Poll::Ready(Ok(total))
     }
 
-    fn is_write_vectored(&self) -> bool {
-        true
-    }
+    fn is_write_vectored(&self) -> bool { true }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
@@ -398,7 +397,7 @@ const RUNS: u32 = 5;
 /// runs of [`SAMPLES`] iterations.
 fn fastest(measure: impl Fn(u64) -> Duration) -> f64 {
     (0..RUNS)
-        .map(|_| measure(u64::from(SAMPLES)).as_secs_f64() * 1e9 / f64::from(SAMPLES))
+        .map(|_| measure(u64::from(SAMPLES)).as_secs_f64() * 1.0e9 / f64::from(SAMPLES))
         .fold(f64::INFINITY, f64::min)
 }
 

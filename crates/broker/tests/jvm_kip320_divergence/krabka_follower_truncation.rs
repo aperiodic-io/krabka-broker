@@ -5,11 +5,7 @@
 //! replica, and asserts that the Krabka follower truncates to the shared prefix
 //! and resumes at the JVM leader's exact log end offset.
 
-use std::time::{Duration, Instant};
-
-use krabka_metadata::{LeaderEpoch, MetadataRecord};
-
-use crate::test_support::truncation::*;
+use crate::test_support::truncation::{prelude::*, *};
 
 /// Parks the Krabka replica behind a phantom leader, then verifies that it
 /// adopts the promoted JVM leader's divergent epoch and resumes replication.

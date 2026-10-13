@@ -5,12 +5,13 @@
 //! on. The pipeline stages are not reached: every case here stops on a flag or
 //! on the target directory.
 
-use std::{path::Path, process::Command};
-
-use assert2::check;
-use krabka_restore::{
-    ArchiveArgs, EXIT_ARCHIVE_UNREADABLE, EXIT_BAD_ARGUMENTS, EXIT_DIRTY_LOG_DIR, EXIT_OK,
-    ReportFormat, RestoreArgs, TargetArgs,
+use {
+    assert2::check,
+    krabka_restore::{
+        ArchiveArgs, EXIT_ARCHIVE_UNREADABLE, EXIT_BAD_ARGUMENTS, EXIT_DIRTY_LOG_DIR, EXIT_OK,
+        ReportFormat, RestoreArgs, TargetArgs,
+    },
+    std::{path::Path, process::Command},
 };
 
 fn run(args: &[&str]) -> std::process::Output {
@@ -22,9 +23,7 @@ fn run(args: &[&str]) -> std::process::Output {
         .expect("run krabka-restore")
 }
 
-fn code(output: &std::process::Output) -> i32 {
-    output.status.code().expect("exit code")
-}
+fn code(output: &std::process::Output) -> i32 { output.status.code().expect("exit code") }
 
 #[test]
 fn help_renders_every_flag_group() {

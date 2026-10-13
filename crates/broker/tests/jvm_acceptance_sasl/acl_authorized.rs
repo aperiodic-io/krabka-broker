@@ -6,12 +6,13 @@
 //! `JoinGroup`, `OffsetFetch` and `OffsetCommit` -- through the authorize
 //! preamble to a successful read.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, add_console_acl, assert_console_produced,
-    broker0_advertised, docker_run_kafka_tool_with_image_and_mount, numbered_payload, plain_jaas,
-    produce_console, start_plain_acl_topic_with_ops, write_client_props,
+use {
+    crate::jvm_acceptance::{
+        ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, add_console_acl, assert_console_produced,
+        broker0_advertised, docker_run_kafka_tool_with_image_and_mount, numbered_payload,
+        plain_jaas, produce_console, start_plain_acl_topic_with_ops, write_client_props,
+    },
+    assert2::assert,
 };
 
 /// JVM acceptance: authorized produce + consume round-trip.
@@ -86,10 +87,8 @@ async fn jvm_authorized_produce_consume() {
 
     // Consume via `--group cg-foo --from-beginning` (the group-coordinator
     // path; exercises JoinGroup/OffsetFetch/OffsetCommit authorize).
-    let consumer_out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &alice_mount,
-        &[
+    let consumer_out =
+        docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &alice_mount, &[
             "kafka-console-consumer",
             "--bootstrap-server",
             broker0_advertised(),
@@ -104,8 +103,7 @@ async fn jvm_authorized_produce_consume() {
             "30000",
             "--consumer.config",
             "/client.properties",
-        ],
-    );
+        ]);
     let s = String::from_utf8_lossy(&consumer_out.stdout);
     for i in 0..10 {
         let needle = format!("msg-{i}");

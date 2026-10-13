@@ -7,10 +7,11 @@
 //! would otherwise re-seed every feature at the latest release. That proves the
 //! `--feature` overrides survive boot and nothing overwrites them.
 
-use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig};
-
-use crate::support::{client::connect_owned, discovery::api_versions_request_for};
+use {
+    crate::support::{client::connect_owned, discovery::api_versions_request_for},
+    assert2::{assert, check},
+    krabka_broker::{Broker, BrokerConfig},
+};
 
 mod support;
 

@@ -6,34 +6,35 @@
 //! `transaction.two.phase.commit.enable`, not a `transaction.version` level.
 //! Keeping them out of the module root leaves the request flow readable.
 
-use std::{collections::HashSet, sync::Arc};
-
-use assert2::assert;
-use krabka_metadata::{
-    AclEntry, AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
-};
-use krabka_units::secs;
-
-use super::{handle as init_producer_id_handle, *};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    authorizer::SimpleAclAuthorizer,
-    broker::{Broker, BrokerHandle},
-    error::BrokerError,
-    handlers::{
-        RequestContext as HandlerRequestContext, context::RequestContext,
-        find_coordinator::handle as find_coordinator_handle,
+use {
+    super::{handle as init_producer_id_handle, *},
+    crate::{
+        api_catalog::UnstableApiVersions,
+        authorizer::SimpleAclAuthorizer,
+        broker::{Broker, BrokerHandle},
+        error::BrokerError,
+        handlers::{
+            RequestContext as HandlerRequestContext, context::RequestContext,
+            find_coordinator::handle as find_coordinator_handle,
+        },
+        test_support::{
+            ControllerPeerAllowed, peer, principal, start_broker_no_audit,
+            start_broker_no_audit_with, start_broker_with_authorizer_no_audit,
+            wait_for_controller_leader,
+        },
+        txn::{
+            coordinator::TxnCoordinator,
+            handlers::end_txn::handle as end_txn_handle,
+            state::{TxnEntry, TxnState},
+            version::TxnVersion,
+        },
     },
-    test_support::{
-        ControllerPeerAllowed, peer, principal, start_broker_no_audit, start_broker_no_audit_with,
-        start_broker_with_authorizer_no_audit, wait_for_controller_leader,
+    assert2::assert,
+    krabka_metadata::{
+        AclEntry, AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
     },
-    txn::{
-        coordinator::TxnCoordinator,
-        handlers::end_txn::handle as end_txn_handle,
-        state::{TxnEntry, TxnState},
-        version::TxnVersion,
-    },
+    krabka_units::secs,
+    std::{collections::HashSet, sync::Arc},
 };
 
 /// Persist the held transaction as ongoing after releasing its entry lock.
@@ -577,16 +578,13 @@ async fn half_an_identity_is_invalid_and_an_old_client_gets_invalid_producer_epo
         let response = init_producer_id_handle(&broker, request, version, &context)
             .await
             .expect("initialize transactional producer");
-        expected.push((
-            name,
-            InitProducerIdResponse {
-                throttle_time_ms: 0,
-                error_code: code,
-                producer_id: -1,
-                producer_epoch: -1,
-                ..Default::default()
-            },
-        ));
+        expected.push((name, InitProducerIdResponse {
+            throttle_time_ms: 0,
+            error_code: code,
+            producer_id: -1,
+            producer_epoch: -1,
+            ..Default::default()
+        }));
         actual.push((name, response));
     }
     assert!(actual == expected);

@@ -5,8 +5,10 @@
 //! control attribute bits. They are written once here so each scenario names
 //! only the shape it is about.
 
-use bytes::Bytes;
-use krabka_protocol::records::{Attributes, Record, RecordBatch, RecordHeader};
+use {
+    bytes::Bytes,
+    krabka_protocol::records::{Attributes, Record, RecordBatch, RecordHeader},
+};
 
 /// Base timestamp every fixture batch's `base_timestamp` starts from, so a
 /// record's absolute timestamp is `BASE_TIMESTAMP + timestamp_delta`.
@@ -70,9 +72,7 @@ pub(crate) fn producer_batch(producer_id: i64, records: Vec<Record>) -> RecordBa
 }
 
 /// A batch with no producer id (the ordinary, non-idempotent case).
-pub(crate) fn plain_batch(records: Vec<Record>) -> RecordBatch {
-    producer_batch(-1, records)
-}
+pub(crate) fn plain_batch(records: Vec<Record>) -> RecordBatch { producer_batch(-1, records) }
 
 /// A transactional (non-control) batch for `producer_id`.
 pub(crate) fn transactional_batch(producer_id: i64, records: Vec<Record>) -> RecordBatch {

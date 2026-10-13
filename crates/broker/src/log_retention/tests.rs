@@ -3,18 +3,19 @@
 //! shutdown token is cancelled, and gives up rather than spinning when its
 //! ticker dies.
 
-use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_metadata::NodeId;
-use krabka_units::secs;
-
-use super::*;
-use crate::{
-    log_retention::test_support::{expired_partition, segment_files},
-    test_support::{
-        BrokenTimer, CommittedPartitionSetup, TimerFailure, park_manual_timer as park,
-        sweep_registry_fixture,
+use {
+    super::*,
+    crate::{
+        log_retention::test_support::{expired_partition, segment_files},
+        test_support::{
+            BrokenTimer, CommittedPartitionSetup, TimerFailure, park_manual_timer as park,
+            sweep_registry_fixture,
+        },
     },
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_metadata::NodeId,
+    krabka_units::secs,
 };
 
 /// Block until the sweep has counted `want` clean passes, or give up.
@@ -38,14 +39,11 @@ async fn run_ticks_until_shutdown() {
     use qubit_clock::{ManualMonotonicClock, MonotonicClock as _};
 
     let (dir, registry) = sweep_registry_fixture();
-    let partition = expired_partition(
-        &dir,
-        CommittedPartitionSetup {
-            topic: "run-retain",
-            leader: NodeId(7),
-            ..Default::default()
-        },
-    )
+    let partition = expired_partition(&dir, CommittedPartitionSetup {
+        topic: "run-retain",
+        leader: NodeId(7),
+        ..Default::default()
+    })
     .await;
     let before = segment_files(&dir, "run-retain");
     registry.insert(
@@ -114,14 +112,11 @@ async fn run_ticks_until_shutdown() {
 #[tokio::test]
 async fn run_stops_without_sweeping_when_the_first_deadline_is_refused() {
     let (dir, registry) = sweep_registry_fixture();
-    let partition = expired_partition(
-        &dir,
-        CommittedPartitionSetup {
-            topic: "unarmable",
-            leader: NodeId(7),
-            ..Default::default()
-        },
-    )
+    let partition = expired_partition(&dir, CommittedPartitionSetup {
+        topic: "unarmable",
+        leader: NodeId(7),
+        ..Default::default()
+    })
     .await;
     let before = segment_files(&dir, "unarmable");
     registry.insert(

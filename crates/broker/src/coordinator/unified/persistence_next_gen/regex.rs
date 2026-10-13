@@ -16,11 +16,12 @@
 //! expression, both non-flexible strings; see
 //! [`NextGenKey::RegularExpression`](super::NextGenKey::RegularExpression).
 
-use bytes::BufMut;
-
-use crate::coordinator::unified::persistence::{
-    flex::{get_string_array, put_string_array, value_codec},
-    get_i64,
+use {
+    crate::coordinator::unified::persistence::{
+        flex::{get_string_array, put_string_array, value_codec},
+        get_i64,
+    },
+    bytes::BufMut,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,10 +56,7 @@ value_codec! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::test_support::wire_bytes;
+    use {super::*, crate::coordinator::unified::test_support::wire_bytes, assert2::assert};
 
     fn value() -> RegularExpressionValue {
         RegularExpressionValue {

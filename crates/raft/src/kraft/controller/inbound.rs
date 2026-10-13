@@ -2,22 +2,23 @@
 //! consensus core, and answered on its oneshot, including the leader's Fetch
 //! and `FetchSnapshot` serve paths and the Fetch long poll.
 
-use krabka_ids::Offset;
-use krabka_metadata::VoterSet;
-use krabka_protocol::owned::fetch_request::FetchRequest;
-use tokio::{sync::oneshot, time::Instant};
-
-use super::{
-    Engine,
-    quorum_requests::{INCONSISTENT_CLUSTER_ID, INVALID_REQUEST, NOT_LEADER_OR_FOLLOWER},
-    replication::should_serve_fetch_records,
-};
-use crate::kraft::{
-    action::Action,
-    event::Event,
-    role::Role,
-    transport::{Inbound, PeerApi, wire},
-    types::{Epoch, LogOffsetMetadata, LogView as _, NodeId, ReplicaKey},
+use {
+    super::{
+        Engine,
+        quorum_requests::{INCONSISTENT_CLUSTER_ID, INVALID_REQUEST, NOT_LEADER_OR_FOLLOWER},
+        replication::should_serve_fetch_records,
+    },
+    crate::kraft::{
+        action::Action,
+        event::Event,
+        role::Role,
+        transport::{Inbound, PeerApi, wire},
+        types::{Epoch, LogOffsetMetadata, LogView as _, NodeId, ReplicaKey},
+    },
+    krabka_ids::Offset,
+    krabka_metadata::VoterSet,
+    krabka_protocol::owned::fetch_request::FetchRequest,
+    tokio::{sync::oneshot, time::Instant},
 };
 
 /// The fields of one validated Fetch partition that answering it needs, kept

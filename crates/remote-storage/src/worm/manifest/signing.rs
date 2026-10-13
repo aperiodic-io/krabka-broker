@@ -4,11 +4,13 @@
 //! it, and `verify_manifest_signature` recomputes the head and checks the
 //! claim. The signature is a sibling of the body, never a member of it.
 
-use krabka_audit::signing::verify_signature;
-use serde::{Deserialize, Serialize};
-
-use super::{
-    ChainHead, EpochId, HexBytes, ManifestSeq, SegmentManifest, encoding::push_bytes, manifest_head,
+use {
+    super::{
+        ChainHead, EpochId, HexBytes, ManifestSeq, SegmentManifest, encoding::push_bytes,
+        manifest_head,
+    },
+    krabka_audit::signing::verify_signature,
+    serde::{Deserialize, Serialize},
 };
 
 /// Domain separation for the manifest signature. Distinct from
@@ -73,18 +75,19 @@ pub fn verify_manifest_signature(manifest: &SegmentManifest, public_key: &[u8]) 
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_audit::{
-        ids::{EpochMs, Seq},
-        signing::{CHECKPOINT_DOMAIN, FileEd25519Signer, checkpoint_signing_bytes},
-    };
-    use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::worm::manifest::{
-        MANIFEST_BODY_DOMAIN, ManifestBody, Sha256Digest, canonical_manifest_bytes,
-        test_support::{KEY_ID, sample_body},
+    use {
+        super::*,
+        crate::worm::manifest::{
+            MANIFEST_BODY_DOMAIN, ManifestBody, Sha256Digest, canonical_manifest_bytes,
+            test_support::{KEY_ID, sample_body},
+        },
+        assert2::check,
+        krabka_audit::{
+            ids::{EpochMs, Seq},
+            signing::{CHECKPOINT_DOMAIN, FileEd25519Signer, checkpoint_signing_bytes},
+        },
+        ring::{rand::SystemRandom, signature::Ed25519KeyPair},
+        uuid::Uuid,
     };
 
     fn fresh_signer(key_id: &str) -> (FileEd25519Signer, Vec<u8>) {

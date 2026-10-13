@@ -8,9 +8,10 @@
 //! it will submit in one pass. krabka is `KRaft`-only, so it follows the
 //! `KRaft` controller.
 
-use krabka_units::{Time, convert::TimeExt};
-
-use crate::{BrokerError, config::BrokerConfig};
+use {
+    crate::{BrokerError, config::BrokerConfig},
+    krabka_units::{Time, convert::TimeExt},
+};
 
 impl BrokerConfig {
     pub(super) fn validate_leader_rebalance(&self) -> Result<(), BrokerError> {
@@ -23,10 +24,11 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::minutes;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        krabka_units::minutes,
+    };
 
     #[test]
     fn auto_leader_rebalance_defaults_to_true_in_default() {

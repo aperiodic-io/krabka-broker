@@ -21,16 +21,17 @@
 //! resolves once, so a name that failed must not stay unenforced until the
 //! next metadata change.
 
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    future::Future,
-    net::IpAddr,
-    sync::{Mutex, MutexGuard, PoisonError},
-    time::Duration,
+use {
+    krabka_metadata::MetadataImage,
+    std::{
+        collections::{BTreeSet, HashMap, HashSet},
+        future::Future,
+        net::IpAddr,
+        sync::{Mutex, MutexGuard, PoisonError},
+        time::Duration,
+    },
+    tokio::time::Instant,
 };
-
-use krabka_metadata::MetadataImage;
-use tokio::time::Instant;
 
 /// The address an IP literal names, with an IPv4-mapped IPv6 address as the
 /// IPv4 address it maps to, as Java's `InetAddress.getByName` returns it.
@@ -270,11 +271,12 @@ impl IpNames {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::quota::test_support::{
-        QuotaRecordSetup, QuotaValue, image_with_quota, image_with_quotas, quota_record,
+    use {
+        super::*,
+        crate::quota::test_support::{
+            QuotaRecordSetup, QuotaValue, image_with_quota, image_with_quotas, quota_record,
+        },
+        assert2::check,
     };
 
     /// An IP literal names one address whatever its spelling, and an
@@ -439,9 +441,7 @@ mod tests {
         })
     }
 
-    fn db() -> Vec<String> {
-        vec!["db".to_owned()]
-    }
+    fn db() -> Vec<String> { vec!["db".to_owned()] }
 
     /// Runs a lookup of `hosts` that never answers, with a short timeout, and
     /// fails the test if the timeout does not cut it off.
@@ -468,10 +468,9 @@ mod tests {
 
         check!(
             (first, second)
-                == (
-                    vec!["db".to_owned(), "cache".to_owned()],
-                    vec!["other".to_owned()]
-                )
+                == (vec!["db".to_owned(), "cache".to_owned()], vec![
+                    "other".to_owned()
+                ])
         );
     }
 

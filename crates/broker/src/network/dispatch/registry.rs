@@ -2,26 +2,26 @@
 //! handler kind that the registry entry names, calls that handler, frames the
 //! body it returns, and writes the response back to the client.
 
-use std::net::SocketAddr;
-
-use bytes::Bytes;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_util::codec::Framed;
-use tracing::Instrument as _;
-
-use super::{
-    AfterResponse,
-    response::{ResponseShape, ThrottledResponse, apply_request_quota, encode_response},
-    session::principal_or_anonymous,
-};
-use crate::{
-    broker::Broker,
-    error::BrokerError,
-    handlers::{
-        DispatchEntry, DispatchKind, RequestContext, RequestQuotaPolicy, TelemetryContext,
-        produce::response_required,
+use {
+    super::{
+        AfterResponse,
+        response::{ResponseShape, ThrottledResponse, apply_request_quota, encode_response},
+        session::principal_or_anonymous,
     },
-    network::{auth::ConnectionAuth, codec::KafkaCodec, request::ParsedRequest},
+    crate::{
+        broker::Broker,
+        error::BrokerError,
+        handlers::{
+            DispatchEntry, DispatchKind, RequestContext, RequestQuotaPolicy, TelemetryContext,
+            produce::response_required,
+        },
+        network::{auth::ConnectionAuth, codec::KafkaCodec, request::ParsedRequest},
+    },
+    bytes::Bytes,
+    std::net::SocketAddr,
+    tokio::io::{AsyncRead, AsyncWrite},
+    tokio_util::codec::Framed,
+    tracing::Instrument as _,
 };
 
 pub(super) async fn send_registry_response<S>(
@@ -272,11 +272,7 @@ async fn dispatch_registry_response(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::check;
-
-    use super::with_active_time;
+    use {super::with_active_time, assert2::check, std::time::Duration};
 
     /// KIP-124 meters the time a request holds a handler thread, so a handler
     /// parked on a timer, a channel or a raft commit is not charged for the

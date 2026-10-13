@@ -1,23 +1,23 @@
 //! Tests for the assignment reconciler and the read gate, which cover the
 //! add, remove, and re-add transitions and the fail-closed HWM sentinel.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{
-    RemoteLogMetadataManager, RemoteLogSegmentId, RemoteLogSegmentMetadataUpdate,
-    RemoteLogSegmentState, RemoteStorageError, TopicIdPartition,
-};
-use uuid::Uuid;
-
-use crate::{
-    log::{InProcessMetadataEventLog, MetadataEventLog},
-    manager::test_support::{
-        HwmFlakyLog, on_blocking, seeded_manager, start_manager, start_manager_all, tp,
-        wait_finished_metadata, wait_ready,
+use {
+    crate::{
+        log::{InProcessMetadataEventLog, MetadataEventLog},
+        manager::test_support::{
+            HwmFlakyLog, on_blocking, seeded_manager, start_manager, start_manager_all, tp,
+            wait_finished_metadata, wait_ready,
+        },
+        partitioning::metadata_partition_for,
     },
-    partitioning::metadata_partition_for,
+    assert2::{assert, check},
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{
+        RemoteLogMetadataManager, RemoteLogSegmentId, RemoteLogSegmentMetadataUpdate,
+        RemoteLogSegmentState, RemoteStorageError, TopicIdPartition,
+    },
+    std::sync::Arc,
+    uuid::Uuid,
 };
 
 krabka_macros::remote_started_segment!(synthetic_started_segment, krabka_remote_storage);

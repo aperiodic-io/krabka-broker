@@ -6,18 +6,19 @@
 //! rather than reading group state directly, which is what separates them from
 //! the registry lookups next door.
 
-use std::sync::Arc;
-
-use super::{
-    actor::GroupActorMessage,
-    group_coordinator::{GroupCoordinator, GroupType},
-    share::actor::ShareGroupActorMessage,
-    streams::{self, actor::StreamsGroupActorMessage},
-};
-use crate::{
-    coordinator::{DeleteGroupError, GroupSnapshot},
-    task_util::{ask, cloned_registry_values, shutdown_actor},
-    time_util::now_ms,
+use {
+    super::{
+        actor::GroupActorMessage,
+        group_coordinator::{GroupCoordinator, GroupType},
+        share::actor::ShareGroupActorMessage,
+        streams::{self, actor::StreamsGroupActorMessage},
+    },
+    crate::{
+        coordinator::{DeleteGroupError, GroupSnapshot},
+        task_util::{ask, cloned_registry_values, shutdown_actor},
+        time_util::now_ms,
+    },
+    std::sync::Arc,
 };
 
 impl GroupCoordinator {
@@ -208,9 +209,7 @@ impl GroupCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use crate::coordinator::unified::test_support::make_coord;
+    use {crate::coordinator::unified::test_support::make_coord, assert2::assert};
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_all_closes_all_group_actors() {

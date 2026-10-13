@@ -5,25 +5,25 @@
 //! map, so the rule that no `DashMap` guard is held across an `.await` is
 //! checkable by reading one file.
 
-use std::sync::Arc;
-
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_remote_storage::TopicIdPartition;
-use tokio::sync::Mutex;
-use tracing::warn;
-
-use super::{
-    SharePartitionLeaderManager,
-    persistence::{fences_the_partition, persister_error_code},
-};
-use crate::{
-    codes::{KAFKA_STORAGE_ERROR, OFFSET_NOT_AVAILABLE, REQUEST_TIMED_OUT, from_broker_error},
-    config_keys::resolve_remote_list_offsets_timeout,
-    coordinator::unified::streams::config::ShareAutoOffsetReset,
-    handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
-    share_partition::{source::diskless_logical_start, state::AcquisitionState},
-    time_util::{duration_millis, now_ms},
+use {
+    super::{
+        SharePartitionLeaderManager,
+        persistence::{fences_the_partition, persister_error_code},
+    },
+    crate::{
+        codes::{KAFKA_STORAGE_ERROR, OFFSET_NOT_AVAILABLE, REQUEST_TIMED_OUT, from_broker_error},
+        config_keys::resolve_remote_list_offsets_timeout,
+        coordinator::unified::streams::config::ShareAutoOffsetReset,
+        handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
+        share_partition::{source::diskless_logical_start, state::AcquisitionState},
+        time_util::{duration_millis, now_ms},
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_remote_storage::TopicIdPartition,
+    std::sync::Arc,
+    tokio::sync::Mutex,
+    tracing::warn,
 };
 
 impl SharePartitionLeaderManager {
@@ -350,33 +350,34 @@ impl SharePartitionLeaderManager {
 #[cfg(test)]
 mod tests {
 
-    use std::{sync::Arc, time::Duration};
-
-    use assert2::assert;
-    use bytes::Bytes;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{LogConfig, Offset};
-    use krabka_metadata::{GroupConfigRecord, MetadataImage, MetadataRecord, NodeId, TopicRecord};
-    use krabka_protocol::records::{Record, RecordBatch};
-    use krabka_remote_storage::TopicIdPartition;
-    use krabka_units::bytes;
-
-    use crate::{
-        codes,
-        coordinator::unified::streams::config::KEY_SHARE_AUTO_OFFSET_RESET,
-        handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
-        partition::test_support::test_partition,
-        partition_registry::PartitionRegistry,
-        remote_reader::test_support::{sparse_remote_segment_reader_with_max_timestamp, tp},
-        share_partition::{
-            manager::test_support::{
-                DataPartitionSetup, manager, manager_with_image_and_partitions, open_data_partition,
+    use {
+        crate::{
+            codes,
+            coordinator::unified::streams::config::KEY_SHARE_AUTO_OFFSET_RESET,
+            handlers::list_offsets::timestamp::resolve_timestamp_with_sources,
+            partition::test_support::test_partition,
+            partition_registry::PartitionRegistry,
+            remote_reader::test_support::{sparse_remote_segment_reader_with_max_timestamp, tp},
+            share_partition::{
+                manager::test_support::{
+                    DataPartitionSetup, manager, manager_with_image_and_partitions,
+                    open_data_partition,
+                },
+                source::test_support::diskless_partition,
+                state::AcquisitionState,
             },
-            source::test_support::diskless_partition,
-            state::AcquisitionState,
+            test_support::append_partition_batch,
+            time_util::now_ms,
         },
-        test_support::append_partition_batch,
-        time_util::now_ms,
+        assert2::assert,
+        bytes::Bytes,
+        krabka_ids::PartitionIndex,
+        krabka_log::{LogConfig, Offset},
+        krabka_metadata::{GroupConfigRecord, MetadataImage, MetadataRecord, NodeId, TopicRecord},
+        krabka_protocol::records::{Record, RecordBatch},
+        krabka_remote_storage::TopicIdPartition,
+        krabka_units::bytes,
+        std::{sync::Arc, time::Duration},
     };
 
     krabka_macros::single_replica_partition_fixture!(partition_record);
@@ -392,10 +393,10 @@ mod tests {
         let registry = Arc::new(PartitionRegistry::new());
         registry.insert("t".into(), PartitionIndex(0), Arc::clone(&partition));
         let mgr = manager_with_image_and_partitions(
-            image_with_strategies(
-                tid,
-                [("earliest", "earliest"), ("duration", "by_duration:PT1H")],
-            ),
+            image_with_strategies(tid, [
+                ("earliest", "earliest"),
+                ("duration", "by_duration:PT1H"),
+            ]),
             registry,
         );
         mgr.set_read_sources(None, Some(reader.clone()));
@@ -474,24 +475,20 @@ mod tests {
         let now = now_ms();
         let hour = 60 * 60 * 1_000;
         let reg = std::sync::Arc::new(PartitionRegistry::new());
-        open_data_partition(
-            &reg,
-            dir.path(),
-            DataPartitionSetup {
-                batches: vec![
-                    crate::share_partition::manager::test_support::TimedValues {
-                        timestamp: crate::test_support::UnixMillis(now - 3 * hour),
-                        values: &[b"stale-0", b"stale-1"],
-                    },
-                    crate::share_partition::manager::test_support::TimedValues {
-                        timestamp: crate::test_support::UnixMillis(now - hour - hour / 2),
-                        values: &[b"recent-0", b"recent-1"],
-                    },
-                ],
-                high_watermark: Offset(4),
-                ..Default::default()
-            },
-        )
+        open_data_partition(&reg, dir.path(), DataPartitionSetup {
+            batches: vec![
+                crate::share_partition::manager::test_support::TimedValues {
+                    timestamp: crate::test_support::UnixMillis(now - 3 * hour),
+                    values: &[b"stale-0", b"stale-1"],
+                },
+                crate::share_partition::manager::test_support::TimedValues {
+                    timestamp: crate::test_support::UnixMillis(now - hour - hour / 2),
+                    values: &[b"recent-0", b"recent-1"],
+                },
+            ],
+            high_watermark: Offset(4),
+            ..Default::default()
+        })
         .await;
 
         // `default` carries no override at all, so the broker default decides.
@@ -575,14 +572,10 @@ mod tests {
         let now = now_ms();
         let hour = 60 * 60 * 1_000;
         let reg = Arc::new(PartitionRegistry::new());
-        open_data_partition(
-            &reg,
-            dir.path(),
-            DataPartitionSetup {
-                high_watermark: Offset(2),
-                ..Default::default()
-            },
-        )
+        open_data_partition(&reg, dir.path(), DataPartitionSetup {
+            high_watermark: Offset(2),
+            ..Default::default()
+        })
         .await;
         let partition = reg
             .get("t", krabka_ids::PartitionIndex(0))
@@ -602,13 +595,10 @@ mod tests {
             append_partition_batch(&partition, &mut batch);
         }
         let mgr = manager_with_image_and_partitions(
-            image_with_strategies(
-                tid,
-                [
-                    ("two-hours", "by_duration:PT2H"),
-                    ("four-hours", "by_duration:PT4H"),
-                ],
-            ),
+            image_with_strategies(tid, [
+                ("two-hours", "by_duration:PT2H"),
+                ("four-hours", "by_duration:PT4H"),
+            ]),
             reg,
         );
 

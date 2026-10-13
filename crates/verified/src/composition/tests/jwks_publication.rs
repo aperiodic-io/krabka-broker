@@ -1,5 +1,7 @@
-use super::*;
-use crate::{jwks::*, oauth::*};
+use {
+    super::*,
+    crate::{jwks::*, oauth::*},
+};
 
 // A wide integer closed-form oracle, independent of the incremental publisher.
 pub(super) fn expected_trace(initial: u64, fetches: &[bool]) -> (u64, u64) {

@@ -1,37 +1,35 @@
 //! Fixtures the partition-writer unit tests share: batch builders, a log
 //! opener, and the stub sequencer and WAL the diskless tests drive.
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicI64, AtomicUsize, Ordering},
-};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig, Offset};
-use krabka_protocol::records::RecordBatch;
-use tokio::sync::{Notify, mpsc, oneshot};
-
-use super::{run_with_sequencer, writer_macros::run_writer};
-use crate::{
-    config::BrokerConfig,
-    delivery::DeliveryHandles,
-    diskless::hot_tail::HotTailCache,
-    error::BrokerError,
-    log_dir_status::LogDirRegistry,
-    partition::{AppendedBatch, ProduceData, ProduceJob, WriterMessage},
-    producer_state::ProducerState,
-    replica_state::ReplicaState,
-    test_support::{EmptyPayloadBatchSetup, RecordCount},
-    wal::{OffsetSequencer, SharedWal, WalStore},
+use {
+    super::{run_with_sequencer, writer_macros::run_writer},
+    crate::{
+        config::BrokerConfig,
+        delivery::DeliveryHandles,
+        diskless::hot_tail::HotTailCache,
+        error::BrokerError,
+        log_dir_status::LogDirRegistry,
+        partition::{AppendedBatch, ProduceData, ProduceJob, WriterMessage},
+        producer_state::ProducerState,
+        replica_state::ReplicaState,
+        test_support::{EmptyPayloadBatchSetup, RecordCount},
+        wal::{OffsetSequencer, SharedWal, WalStore},
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig, Offset},
+    krabka_protocol::records::RecordBatch,
+    std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicI64, AtomicUsize, Ordering},
+    },
+    tokio::sync::{Notify, mpsc, oneshot},
 };
 
 #[derive(Debug)]
 pub(super) struct FixedStamp(pub(super) u64);
 
 impl krabka_log::StampSource for FixedStamp {
-    fn next_stamp(&self) -> u64 {
-        self.0
-    }
+    fn next_stamp(&self) -> u64 { self.0 }
 }
 
 struct TestSequencer {
@@ -237,15 +235,10 @@ pub(super) fn default_writer() -> DefaultWriter {
     let log = open_default_log(dir.path());
     let (sender, receiver) = mpsc::channel(1);
     let notify = Arc::new(Notify::new());
-    let writer = spawn_writer(
-        dir.path(),
-        log.clone(),
-        receiver,
-        WriterOptions {
-            append_notify: notify.clone(),
-            ..Default::default()
-        },
-    );
+    let writer = spawn_writer(dir.path(), log.clone(), receiver, WriterOptions {
+        append_notify: notify.clone(),
+        ..Default::default()
+    });
     DefaultWriter {
         dir,
         log,

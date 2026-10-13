@@ -39,9 +39,7 @@ impl PeerApi {
 
     /// The Kafka api key.
     #[must_use]
-    pub const fn api_key(self) -> i16 {
-        self as i16
-    }
+    pub const fn api_key(self) -> i16 { self as i16 }
 
     /// The version the engine encodes this api's body at, the newest it
     /// speaks.

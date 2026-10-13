@@ -116,11 +116,12 @@ pub fn group_migration_record_plan(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::{
-        GroupMigrationDirection, GroupMigrationRecordAction, GroupMigrationRecordPlan,
-        classic_upgrade_epoch, consumer_downgrade_epoch, group_migration_record_plan,
+    use {
+        super::{
+            GroupMigrationDirection, GroupMigrationRecordAction, GroupMigrationRecordPlan,
+            classic_upgrade_epoch, consumer_downgrade_epoch, group_migration_record_plan,
+        },
+        assert2::{assert, check},
     };
 
     #[test]

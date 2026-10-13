@@ -2,27 +2,27 @@
 //! connection, and the per-mechanism authentication counters those two
 //! sessions tick on the `/metrics` scrape.
 
-use std::{io, net::SocketAddr};
-
-use assert2::assert;
-
-use crate::{
-    harness::{
-        alice_password, alice_plain_config, common_imports::*, metadata_probe, round_trip,
-        start_alice_plain, start_reauth_broker, wrong_scram_password,
+use {
+    crate::{
+        harness::{
+            alice_password, alice_plain_config, common_imports::*, metadata_probe, round_trip,
+            start_alice_plain, start_reauth_broker, wrong_scram_password,
+        },
+        kafka_wire::{
+            PlainAuthenticationSetup, sasl_plain_authenticate_on, sasl_plain_reauthenticate_on,
+        },
+        reauth_cases::{
+            capped_session_closes, different_principal_closes, repeated_expired_reauth,
+            same_principal_reopens,
+        },
+        support::{
+            client::scrape_metrics as scrape_metrics_client,
+            sasl::plain_authentication_body,
+            wire::{CorrelationId, HeaderEncoding as RequestHeaderEncoding, SocketExchangeSetup},
+        },
     },
-    kafka_wire::{
-        PlainAuthenticationSetup, sasl_plain_authenticate_on, sasl_plain_reauthenticate_on,
-    },
-    reauth_cases::{
-        capped_session_closes, different_principal_closes, repeated_expired_reauth,
-        same_principal_reopens,
-    },
-    support::{
-        client::scrape_metrics as scrape_metrics_client,
-        sasl::plain_authentication_body,
-        wire::{CorrelationId, HeaderEncoding as RequestHeaderEncoding, SocketExchangeSetup},
-    },
+    assert2::assert,
+    std::{io, net::SocketAddr},
 };
 
 /// Happy-path drive of a SASL/PLAIN session: `ApiVersions` → `SaslHandshake`
@@ -85,9 +85,7 @@ async fn sasl_plain_authentication_metrics_tick_for_success_and_failure() {
 /// Send an HTTP GET `/metrics` to `addr` and return the response body.
 ///
 /// The returned body holds no HTTP head.
-async fn scrape_metrics(addr: SocketAddr) -> String {
-    scrape_metrics_client(addr).await
-}
+async fn scrape_metrics(addr: SocketAddr) -> String { scrape_metrics_client(addr).await }
 
 /// Negative path: with a wrong password, `SaslAuthenticate` responds with
 /// `error_code = SASL_AUTHENTICATION_FAILED` (58) and the broker closes the
@@ -132,14 +130,11 @@ async fn drive_sasl_plain_session(
     password: &[u8],
 ) -> Result<(), io::Error> {
     let mut stream = TcpStream::connect(addr).await?;
-    sasl_plain_authenticate_on(
-        &mut stream,
-        &PlainAuthenticationSetup {
-            client_id: "krabka-sasl-test",
-            user,
-            password: (password).to_vec(),
-        },
-    )
+    sasl_plain_authenticate_on(&mut stream, &PlainAuthenticationSetup {
+        client_id: "krabka-sasl-test",
+        user,
+        password: (password).to_vec(),
+    })
     .await?;
     metadata_probe(&mut stream, 4).await
 }

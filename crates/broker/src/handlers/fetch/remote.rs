@@ -2,24 +2,25 @@
 //! longer holds, and the KFC-1 activation check that keeps a batch the
 //! tier returns from going out before it is due.
 
-use krabka_log::{DeliveryPolicy, LeaderEpoch, Offset};
-use krabka_protocol::{
-    Encode,
-    owned::fetch_response::{AbortedTransaction, PartitionData},
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-use krabka_units::convert::TimeExt as _;
-
-use super::{
-    plan::{PendingRead, refused_read},
-    read::LiveOffsets,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    metrics::{BrokerMetrics, RemoteTierPath},
-    partition::Partition,
+use {
+    super::{
+        plan::{PendingRead, refused_read},
+        read::LiveOffsets,
+    },
+    crate::{
+        broker::Broker,
+        codes,
+        metrics::{BrokerMetrics, RemoteTierPath},
+        partition::Partition,
+    },
+    krabka_log::{DeliveryPolicy, LeaderEpoch, Offset},
+    krabka_protocol::{
+        Encode,
+        owned::fetch_response::{AbortedTransaction, PartitionData},
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
+    },
+    krabka_units::convert::TimeExt as _,
 };
 
 /// Whether a batch the remote tier returned may go out to a consumer now.
@@ -436,17 +437,18 @@ pub(super) async fn try_remote_read(
 mod tests {
     mod aborts;
 
-    use assert2::{assert, check};
-    use krabka_log::{DeliveryPolicy, Log, LogConfig};
-    use krabka_units::prelude::millis;
-
-    use crate::{
-        broker::{Broker, BrokerHandle, spawn_partition},
-        codes::OFFSET_OUT_OF_RANGE,
-        config::{BrokerConfig, RemoteStorageBackend, RlmmKind},
-        delivery::test_support::batch_at,
-        metrics::BrokerMetrics,
-        partition::Partition,
+    use {
+        crate::{
+            broker::{Broker, BrokerHandle, spawn_partition},
+            codes::OFFSET_OUT_OF_RANGE,
+            config::{BrokerConfig, RemoteStorageBackend, RlmmKind},
+            delivery::test_support::batch_at,
+            metrics::BrokerMetrics,
+            partition::Partition,
+        },
+        assert2::{assert, check},
+        krabka_log::{DeliveryPolicy, Log, LogConfig},
+        krabka_units::prelude::millis,
     };
 
     /// KIP-405 splits the floors, and only the global one bounds the remote
@@ -489,9 +491,7 @@ mod tests {
     }
 
     /// The topic id every tiered-read case below uses.
-    fn tiered_topic_id() -> uuid::Uuid {
-        uuid::Uuid::from_u128(0x7157)
-    }
+    fn tiered_topic_id() -> uuid::Uuid { uuid::Uuid::from_u128(0x7157) }
 
     /// A partition whose sealed segments are all in the archive and none of
     /// them on local disk any more: exactly the shape the remote read path
@@ -507,9 +507,10 @@ mod tests {
         dir: &std::path::Path,
         reopen: bool,
     ) -> std::sync::Arc<Partition> {
-        use krabka_ids::{LeaderEpoch, PartitionIndex};
-
-        use crate::remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier};
+        use {
+            crate::remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier},
+            krabka_ids::{LeaderEpoch, PartitionIndex},
+        };
 
         /// A batch wide enough that a 256-byte segment rolls every few
         /// appends, so the log seals segments the copy pass can tier.
@@ -623,9 +624,7 @@ mod tests {
     /// A `PendingRead` for offset 0 that the local log has already answered
     /// `OFFSET_OUT_OF_RANGE`, with the all -1 row `do_read` leaves behind.
     fn out_of_range_at(part: &std::sync::Arc<Partition>, fetch_offset: i64) -> super::PendingRead {
-        use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-        use crate::codes;
+        use {crate::codes, krabka_protocol::primitives::uuid::Uuid as WireUuid};
 
         super::PendingRead {
             topic_name: TIERED_TOPIC.into(),
@@ -656,9 +655,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_fetch_below_the_global_log_start_never_reaches_the_remote_tier() {
-        use krabka_log::Offset;
-
-        use crate::codes;
+        use {crate::codes, krabka_log::Offset};
 
         committed_tiered_fixture!((broker_handle, dir, _remote_dir, broker, part));
 
@@ -717,10 +714,9 @@ mod tests {
     /// `DelayedRemoteFetch.onComplete` copies them off the local read result.
     #[tokio::test]
     async fn a_follower_below_the_local_log_start_is_redirected_and_a_consumer_is_served() {
-        use krabka_log::Offset;
-        use krabka_protocol::owned::fetch_response::PartitionData;
-
-        use crate::codes;
+        use {
+            crate::codes, krabka_log::Offset, krabka_protocol::owned::fetch_response::PartitionData,
+        };
 
         committed_tiered_fixture!((broker_handle, dir, _remote_dir, broker, part));
 

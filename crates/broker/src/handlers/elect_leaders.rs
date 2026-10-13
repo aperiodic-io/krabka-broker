@@ -26,39 +26,39 @@
 //! `[break_glass]` names an approver set, so a stock cluster elects exactly as
 //! it does today.
 
-use std::{future::Future, sync::Arc, time::Duration};
-
-use bytes::Bytes;
-use krabka_audit::AuditError;
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_protocol::owned::{
-    elect_leaders_request::{self, ElectLeadersRequest},
-    elect_leaders_response::{ElectLeadersResponse, ReplicaElectionResult},
-};
-use krabka_raft::RaftError;
-
-use self::{
-    batch::ElectionBatch, env::ElectionEnv, partition::elect_one, response::whole_request_error,
-    targets::resolve_targets,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    config_keys::witness_node_ids,
-    elr::ElrPublisher,
-    error::BrokerError,
-    handlers::{
-        RequestContext, audit_admin_success, audit_resource, cluster_alter_denied, decode_request,
-        encode_response,
-        forward_to_controller::{
-            controller_listener_dispatch, guarded_operation_on_source, is_active_controller,
-            to_active_controller,
-        },
-        offline_replicas::live_brokers,
-        stamp_unset, submit_failure_code,
+use {
+    self::{
+        batch::ElectionBatch, env::ElectionEnv, partition::elect_one,
+        response::whole_request_error, targets::resolve_targets,
     },
-    leader_election::ElectionType,
-    metadata_source::MetadataSource,
+    crate::{
+        broker::Broker,
+        codes,
+        config_keys::witness_node_ids,
+        elr::ElrPublisher,
+        error::BrokerError,
+        handlers::{
+            RequestContext, audit_admin_success, audit_resource, cluster_alter_denied,
+            decode_request, encode_response,
+            forward_to_controller::{
+                controller_listener_dispatch, guarded_operation_on_source, is_active_controller,
+                to_active_controller,
+            },
+            offline_replicas::live_brokers,
+            stamp_unset, submit_failure_code,
+        },
+        leader_election::ElectionType,
+        metadata_source::MetadataSource,
+    },
+    bytes::Bytes,
+    krabka_audit::AuditError,
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    krabka_protocol::owned::{
+        elect_leaders_request::{self, ElectLeadersRequest},
+        elect_leaders_response::{ElectLeadersResponse, ReplicaElectionResult},
+    },
+    krabka_raft::RaftError,
+    std::{future::Future, sync::Arc, time::Duration},
 };
 
 mod batch;

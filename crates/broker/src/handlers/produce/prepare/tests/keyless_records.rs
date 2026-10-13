@@ -2,22 +2,22 @@
 //! owned path, and Kafka's rule that the key check comes before the timestamp
 //! check of the same record.
 
-use std::sync::Arc;
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_compression::{CompressionType, RecordDecompressionPolicy};
-use krabka_protocol::records::{Record, RecordBatch};
-
-use crate::{
-    handlers::produce::{
-        framing::PartitionPayload,
-        prepare::{DecodeEnv, prepare_batch},
-        test_support::{encode_batch, image_with_topic},
-        topic_settings::{kafka_stock_broker_default, resolve_timestamp_policy},
+use {
+    crate::{
+        handlers::produce::{
+            framing::PartitionPayload,
+            prepare::{DecodeEnv, prepare_batch},
+            test_support::{encode_batch, image_with_topic},
+            topic_settings::{kafka_stock_broker_default, resolve_timestamp_policy},
+        },
+        metrics::BrokerMetrics,
+        time_util::now_ms,
     },
-    metrics::BrokerMetrics,
-    time_util::now_ms,
+    assert2::check,
+    bytes::Bytes,
+    krabka_compression::{CompressionType, RecordDecompressionPolicy},
+    krabka_protocol::records::{Record, RecordBatch},
+    std::sync::Arc,
 };
 
 /// A batch with one record per `(key, timestamp_ms)` pair.

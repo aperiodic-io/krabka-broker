@@ -7,12 +7,14 @@
 //! feature-gate, session, or membership failure instead answers with a
 //! top-level error code and no rows at all.
 
-use krabka_protocol::owned::share_fetch_response::{
-    LeaderIdAndEpoch, NodeEndpoint, PartitionData, ShareFetchResponse, ShareFetchableTopicResponse,
+use {
+    super::pending::PendingPartition,
+    crate::codes,
+    krabka_protocol::owned::share_fetch_response::{
+        LeaderIdAndEpoch, NodeEndpoint, PartitionData, ShareFetchResponse,
+        ShareFetchableTopicResponse,
+    },
 };
-
-use super::pending::PendingPartition;
-use crate::codes;
 
 pub(super) fn partition_response(partition_index: i32) -> PartitionData {
     PartitionData {
@@ -79,12 +81,13 @@ pub(super) fn success_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::{
-        owned::share_fetch_response::AcquiredRecords, primitives::uuid::Uuid as ProtoUuid,
+    use {
+        super::*,
+        assert2::assert,
+        krabka_protocol::{
+            owned::share_fetch_response::AcquiredRecords, primitives::uuid::Uuid as ProtoUuid,
+        },
     };
-
-    use super::*;
 
     #[test]
     fn partition_response_helpers_preserve_routing_fields() {

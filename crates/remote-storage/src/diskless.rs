@@ -1,16 +1,17 @@
 //! Shared diskless-WAL object, index, and disaster-recovery capture codecs.
 
-use std::collections::{BTreeMap, HashMap};
-
-use bytes::{BufMut, Bytes, BytesMut};
-use krabka_audit::FileEd25519Signer;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-use crate::worm::{
-    ChainHead, ChainStamp, EpochId, HexBytes, MANIFEST_FORMAT_VERSION, ManifestBody, ManifestSeq,
-    ManifestSignature, ObjectEntry, SegmentIdentity, SegmentManifest, Sha256Digest,
-    TrustedManifestKeys, manifest_head, manifest_signing_bytes, verify_manifest_signature,
+use {
+    crate::worm::{
+        ChainHead, ChainStamp, EpochId, HexBytes, MANIFEST_FORMAT_VERSION, ManifestBody,
+        ManifestSeq, ManifestSignature, ObjectEntry, SegmentIdentity, SegmentManifest,
+        Sha256Digest, TrustedManifestKeys, manifest_head, manifest_signing_bytes,
+        verify_manifest_signature,
+    },
+    bytes::{BufMut, Bytes, BytesMut},
+    krabka_audit::FileEd25519Signer,
+    serde::{Deserialize, Serialize},
+    std::collections::{BTreeMap, HashMap},
+    uuid::Uuid,
 };
 
 const MAGIC: [u8; 4] = *b"CKWL";
@@ -335,9 +336,7 @@ impl WalFlushRecord {
 
     /// [`Self::FORMAT_VERSION`] as the `i16` the value leads with. The
     /// version is far below `i16::MAX`, so the conversion keeps its value.
-    const fn wire_version() -> i16 {
-        Self::FORMAT_VERSION.cast_signed()
-    }
+    const fn wire_version() -> i16 { Self::FORMAT_VERSION.cast_signed() }
 }
 
 /// One live capture range and its authoritative object.
@@ -890,17 +889,14 @@ pub struct WalObjectBuilder {
 
 impl WalObjectBuilder {
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
+
     #[must_use]
-    pub fn body_len(&self) -> usize {
-        self.body.len()
-    }
+    pub fn body_len(&self) -> usize { self.body.len() }
+
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+
     /// Append one contiguous partition run.
     ///
     /// # Panics
@@ -1040,9 +1036,7 @@ pub fn parse_wal_object(object: &Bytes) -> Result<Vec<WalObjectEntry>, WalObject
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     const TOPIC_ID: Uuid = Uuid::from_u128(0x0011_2233_4455_6677_8899_aabb_ccdd_eeff);
 

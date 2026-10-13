@@ -13,19 +13,20 @@
 //! `Prepare*`. Recovery and the failed request queue the transactional id
 //! here, and [`crate::txn::completion`] retries it until it completes.
 
-use krabka_log::ProducerId;
-use krabka_verified::transaction::{
-    TransactionReaperCompletionDecision as CompletionDecision, TransactionSnapshot,
-};
-use tracing::{info, warn};
-
-use super::TxnCoordinator;
-use crate::txn::{
-    handlers::end_txn::completion_producer_identity,
-    marker::{MarkerType, classify_marker_failure},
-    state::{TxnEntry, TxnState},
-    util::now_millis,
-    version::TxnVersion,
+use {
+    super::TxnCoordinator,
+    crate::txn::{
+        handlers::end_txn::completion_producer_identity,
+        marker::{MarkerType, classify_marker_failure},
+        state::{TxnEntry, TxnState},
+        util::now_millis,
+        version::TxnVersion,
+    },
+    krabka_log::ProducerId,
+    krabka_verified::transaction::{
+        TransactionReaperCompletionDecision as CompletionDecision, TransactionSnapshot,
+    },
+    tracing::{info, warn},
 };
 
 /// The result of one attempt to complete a prepared transaction.
@@ -126,9 +127,7 @@ impl TxnCoordinator {
 
     /// Wait until a caller requests a completion. A request that arrives while
     /// nothing waits is kept, so the next wait returns at once.
-    pub(crate) async fn completion_requested(&self) {
-        self.completion_requested.notified().await;
-    }
+    pub(crate) async fn completion_requested(&self) { self.completion_requested.notified().await; }
 
     /// Take every queued transactional id, in order.
     pub(crate) fn take_completion_requests(&self) -> Vec<String> {

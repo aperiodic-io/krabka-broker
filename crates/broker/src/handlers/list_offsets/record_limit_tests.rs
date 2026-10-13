@@ -10,25 +10,25 @@
 //! The records go straight into the partition's log, past `Produce`'s own
 //! check, the way a record that predates a lowered limit is already there.
 
-use std::sync::atomic::Ordering;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_compression::CompressionType;
-use krabka_ids::PartitionIndex;
-use krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord};
-use krabka_protocol::{
-    owned::list_offsets_response::ListOffsetsPartitionResponse,
-    records::{Attributes, Record, RecordBatch},
-};
-
-use super::{
-    sentinels::{MAX_TIMESTAMP, UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
-    test_support::{client_for, create_topic, list_one},
-};
-use crate::{
-    api_catalog::UnstableApiVersions, broker::BrokerHandle, codes,
-    test_support::start_broker_no_audit_with,
+use {
+    super::{
+        sentinels::{MAX_TIMESTAMP, UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
+        test_support::{client_for, create_topic, list_one},
+    },
+    crate::{
+        api_catalog::UnstableApiVersions, broker::BrokerHandle, codes,
+        test_support::start_broker_no_audit_with,
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_compression::CompressionType,
+    krabka_ids::PartitionIndex,
+    krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord},
+    krabka_protocol::{
+        owned::list_offsets_response::ListOffsetsPartitionResponse,
+        records::{Attributes, Record, RecordBatch},
+    },
+    std::sync::atomic::Ordering,
 };
 
 const TOPIC: &str = "list-offsets-record-limit";

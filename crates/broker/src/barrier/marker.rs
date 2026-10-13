@@ -27,18 +27,19 @@
 //! values are what keep the marker out of the log's producer and transaction
 //! bookkeeping, and what make compaction keep it.
 
-use bytes::Bytes;
-use krabka_log::{BARRIER_CONTROL_TYPE, Offset};
-use krabka_protocol::{
-    ProtocolError,
-    primitives::{
-        fixed::{get_i16, get_i64, put_i16, put_i64},
-        string_bytes::get_string_owned,
+use {
+    crate::{coordinator::unified::persistence::put_string, error::BrokerError},
+    bytes::Bytes,
+    krabka_log::{BARRIER_CONTROL_TYPE, Offset},
+    krabka_protocol::{
+        ProtocolError,
+        primitives::{
+            fixed::{get_i16, get_i64, put_i16, put_i64},
+            string_bytes::get_string_owned,
+        },
+        records::{Attributes, Record, RecordBatch},
     },
-    records::{Attributes, Record, RecordBatch},
 };
-
-use crate::{coordinator::unified::persistence::put_string, error::BrokerError};
 
 /// The control-record key version. Kafka writes 0.
 const CONTROL_KEY_VERSION: i16 = 0;
@@ -159,12 +160,13 @@ pub fn parse_barrier_marker(record: &Record) -> Result<BarrierMarker, ProtocolEr
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        coordinator::unified::persistence::MAX_STRING_BYTES,
-        txn::marker::{MarkerType, build_marker_batch},
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::persistence::MAX_STRING_BYTES,
+            txn::marker::{MarkerType, build_marker_batch},
+        },
+        assert2::assert,
     };
 
     fn sample() -> BarrierMarker {
@@ -175,9 +177,7 @@ mod tests {
         }
     }
 
-    fn batch() -> RecordBatch {
-        build_barrier_batch(&sample(), Offset(42), 3).expect("builds")
-    }
+    fn batch() -> RecordBatch { build_barrier_batch(&sample(), Offset(42), 3).expect("builds") }
 
     #[test]
     fn a_marker_round_trips_through_its_record() {

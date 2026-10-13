@@ -5,9 +5,7 @@
 //! purely diagnostic. It lives apart from the loop so the code-to-outcome table
 //! can be unit tested without a running broker.
 
-use krabka_protocol::owned::add_raft_voter_response::AddRaftVoterResponse;
-
-use crate::codes;
+use {crate::codes, krabka_protocol::owned::add_raft_voter_response::AddRaftVoterResponse};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum JoinOutcome {
@@ -86,9 +84,7 @@ pub(super) fn log_join_outcome(
 
 #[cfg(test)]
 mod tests {
-    use krabka_raft::NodeId;
-
-    use super::*;
+    use {super::*, krabka_raft::NodeId};
 
     #[test]
     fn log_join_outcome_classifies_response_codes() {

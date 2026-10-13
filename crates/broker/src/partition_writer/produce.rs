@@ -5,28 +5,28 @@
 //! mutation and the only one that has to reconcile a diskless offset
 //! assignment with the durable watermark, so it gets its own module.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-
-use arc_swap::ArcSwap;
-use krabka_ids::PartitionIndex;
-use krabka_log::Log;
-use krabka_raft::RaftError;
-use tokio::sync::{Notify, mpsc};
-
-use super::{
-    append::{run_produce_append_batch, run_produce_append_batch_at},
-    storage::{flag_storage_failure, storage_failure_error},
-};
-use crate::{
-    error::BrokerError,
-    log_dir_status::LogDirRegistry,
-    partition::{ProduceData, ProduceJob, WriterMessage},
-    producer_state::ProducerState,
-    replica_state::ReplicaState,
-    wal::{OffsetSequencer, SharedWal},
+use {
+    super::{
+        append::{run_produce_append_batch, run_produce_append_batch_at},
+        storage::{flag_storage_failure, storage_failure_error},
+    },
+    crate::{
+        error::BrokerError,
+        log_dir_status::LogDirRegistry,
+        partition::{ProduceData, ProduceJob, WriterMessage},
+        producer_state::ProducerState,
+        replica_state::ReplicaState,
+        wal::{OffsetSequencer, SharedWal},
+    },
+    arc_swap::ArcSwap,
+    krabka_ids::PartitionIndex,
+    krabka_log::Log,
+    krabka_raft::RaftError,
+    std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
+    tokio::sync::{Notify, mpsc},
 };
 
 pub(super) async fn handle_produce(

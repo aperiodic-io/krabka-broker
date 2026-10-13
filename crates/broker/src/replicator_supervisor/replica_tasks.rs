@@ -8,17 +8,17 @@
 //! reassignment or a leadership change on one partition does not disturb the
 //! thousands sharing its connection.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
-use tracing::warn;
-
-use super::{
-    FetcherKey, FetcherTask, ReplicatorSupervisor, TopicPartition, desired_follower_set,
-    resolve_leader_endpoint,
+use {
+    super::{
+        FetcherKey, FetcherTask, ReplicatorSupervisor, TopicPartition, desired_follower_set,
+        resolve_leader_endpoint,
+    },
+    crate::replicator::{self, FollowedKey},
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
+    std::{collections::BTreeMap, sync::Arc},
+    tracing::warn,
 };
-use crate::replicator::{self, FollowedKey};
 
 /// One leader's worth of desired follower state.
 struct DesiredFetcher {
@@ -75,15 +75,12 @@ impl ReplicatorSupervisor {
                 connection: self.connection_config(),
                 followed: Arc::clone(&followed),
             }));
-            self.tasks.insert(
-                key,
-                FetcherTask {
-                    shutdown: token,
-                    handle,
-                    followed,
-                    endpoint: wanted.endpoint,
-                },
-            );
+            self.tasks.insert(key, FetcherTask {
+                shutdown: token,
+                handle,
+                followed,
+                endpoint: wanted.endpoint,
+            });
         }
     }
 
@@ -232,20 +229,22 @@ impl ReplicatorSupervisor {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord};
-    use krabka_raft::NodeId;
-    use krabka_units::{bytes, millis};
-    use tokio_util::sync::CancellationToken;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        replicator_supervisor::test_support::{
-            SupervisorPartitionSetup, SupervisorTopicSetup, await_until, broker_record, image_with,
-            partition_record, reconciled_supervisor, supervisor_fixture, topic_record,
+    use {
+        super::*,
+        crate::{
+            replicator_supervisor::test_support::{
+                SupervisorPartitionSetup, SupervisorTopicSetup, await_until, broker_record,
+                image_with, partition_record, reconciled_supervisor, supervisor_fixture,
+                topic_record,
+            },
+            test_support::PartitionCount,
         },
-        test_support::PartitionCount,
+        assert2::{assert, check},
+        krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord},
+        krabka_raft::NodeId,
+        krabka_units::{bytes, millis},
+        tokio_util::sync::CancellationToken,
+        uuid::Uuid,
     };
 
     /// The `(topic, partition)` keys one fetcher follows, in key order.
@@ -509,15 +508,12 @@ mod tests {
         let img = followed_image(1, &[0], 8);
         let (supervisor, _partitions, _reporter, _dir) = supervisor_fixture(img.clone());
         let stale_shutdown = CancellationToken::new();
-        supervisor.tasks.insert(
-            (NodeId(1), 0),
-            FetcherTask {
-                shutdown: stale_shutdown.clone(),
-                handle: tokio::spawn(async {}),
-                followed: Arc::new(replicator::FollowedPartitionsState::default()),
-                endpoint: leader_endpoint(&img, NodeId(1)),
-            },
-        );
+        supervisor.tasks.insert((NodeId(1), 0), FetcherTask {
+            shutdown: stale_shutdown.clone(),
+            handle: tokio::spawn(async {}),
+            followed: Arc::new(replicator::FollowedPartitionsState::default()),
+            endpoint: leader_endpoint(&img, NodeId(1)),
+        });
         await_until("old fetcher exits", || {
             supervisor
                 .tasks

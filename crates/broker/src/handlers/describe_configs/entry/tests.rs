@@ -2,19 +2,20 @@
 //! precedence chain resolves to, the synonyms the chain becomes, the typed
 //! metadata the registry supplies, and the redaction a sensitive key gets.
 
-use assert2::{assert, check};
-use krabka_protocol::UnknownTaggedFields;
-
-use super::{
-    super::wire::{
-        CONFIG_SOURCE_DYNAMIC_BROKER, CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
-        CONFIG_SOURCE_DYNAMIC_TOPIC, CONFIG_SOURCE_STATIC_BROKER,
+use {
+    super::{
+        super::wire::{
+            CONFIG_SOURCE_DYNAMIC_BROKER, CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER,
+            CONFIG_SOURCE_DYNAMIC_TOPIC, CONFIG_SOURCE_STATIC_BROKER,
+        },
+        *,
     },
-    *,
-};
-use crate::config_keys::{
-    BROKER_WITNESS, DISKLESS, RETENTION_MS, WRITE_FREEZE,
-    registry::{self, ConfigScope, ConfigType, NODE_ID, ValueCheck},
+    crate::config_keys::{
+        BROKER_WITNESS, DISKLESS, RETENTION_MS, WRITE_FREEZE,
+        registry::{self, ConfigScope, ConfigType, NODE_ID, ValueCheck},
+    },
+    assert2::{assert, check},
+    krabka_protocol::UnknownTaggedFields,
 };
 
 const BOTH: EntryOptions = EntryOptions {

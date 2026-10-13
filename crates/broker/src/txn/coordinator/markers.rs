@@ -7,21 +7,25 @@
 //! marker transport is configured. Both count a marker as written only once
 //! it is committed on its partition.
 
-use super::TxnCoordinator;
-use crate::{
-    error::BrokerError,
-    txn::{
-        bootstrap,
-        handlers::{
-            end_txn::{MarkerDispatchContext, MarkerFanOut, dispatch_markers, write_local_markers},
-            write_txn_markers::MarkerAppend,
-        },
-        marker::MarkerType,
-        state::{TopicPartition, TxnEntry, TxnState},
-    },
-};
 #[cfg(test)]
 use crate::{log_dir_status::LogDirRegistry, producer_state::ProducerState};
+use {
+    super::TxnCoordinator,
+    crate::{
+        error::BrokerError,
+        txn::{
+            bootstrap,
+            handlers::{
+                end_txn::{
+                    MarkerDispatchContext, MarkerFanOut, dispatch_markers, write_local_markers,
+                },
+                write_txn_markers::MarkerAppend,
+            },
+            marker::MarkerType,
+            state::{TopicPartition, TxnEntry, TxnState},
+        },
+    },
+};
 
 const UNKNOWN_COORDINATOR_EPOCH: i32 = -1;
 
@@ -155,13 +159,14 @@ fn remove_marked_partitions_from(entry: &mut TxnEntry, written: &[TopicPartition
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::{
-        broker::spawn_partition,
-        log_dir::partition_dir,
-        txn::coordinator::test_support::{test_coordinator, test_prelude::*},
+    use {
+        super::*,
+        crate::{
+            broker::spawn_partition,
+            log_dir::partition_dir,
+            txn::coordinator::test_support::{test_coordinator, test_prelude::*},
+        },
+        assert2::{assert, check},
     };
 
     #[test]

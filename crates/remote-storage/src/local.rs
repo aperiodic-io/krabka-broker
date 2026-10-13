@@ -5,15 +5,16 @@
 //! It is useful for tests and single-node setups. Production deployments use
 //! an object-store-backed implementation behind the same trait.
 
-use std::{fs, path::PathBuf};
-
-use crate::{
-    error::RemoteStorageError,
-    metadata::RemoteLogSegmentMetadata,
-    storage_manager::{
-        ArtifactBody, IndexType, RemoteStorageManager, partition_dir_name, remote_operation,
-        segment_file_name, segment_suffixes,
+use {
+    crate::{
+        error::RemoteStorageError,
+        metadata::RemoteLogSegmentMetadata,
+        storage_manager::{
+            ArtifactBody, IndexType, RemoteStorageManager, partition_dir_name, remote_operation,
+            segment_file_name, segment_suffixes,
+        },
     },
+    std::{fs, path::PathBuf},
 };
 
 /// A [`RemoteStorageManager`] that keeps offloaded segments on a local
@@ -43,9 +44,7 @@ impl LocalTieredStorage {
     /// configured parent directory. To share a tier with it, pass
     /// `<remote.log.storage.local.dir>/kafka-tiered-storage` here.
     #[must_use]
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
-    }
+    pub fn new(root: impl Into<PathBuf>) -> Self { Self { root: root.into() } }
 
     /// The directory that holds every remote segment for one partition.
     fn partition_dir(&self, metadata: &RemoteLogSegmentMetadata) -> PathBuf {
@@ -147,11 +146,12 @@ impl RemoteStorageManager for LocalTieredStorage {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::test_support::{
-        TransactionIndex, check_sample_indexes, sample_data, sample_metadata as metadata,
+    use {
+        super::*,
+        crate::test_support::{
+            TransactionIndex, check_sample_indexes, sample_data, sample_metadata as metadata,
+        },
+        assert2::{assert, check},
     };
 
     type LocalFixture = (

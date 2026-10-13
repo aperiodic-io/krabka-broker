@@ -1,9 +1,10 @@
 //! Kafka quota-entity precedence and quota bucket debt accounting.
 
-use creusot_std::prelude::*;
-
-use crate::throttle::{
-    AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume,
+use {
+    crate::throttle::{
+        AvailableTokens, BurstCapacity, RefillTokens, RequestedTokens, plan_consume,
+    },
+    creusot_std::prelude::*,
 };
 
 mod refill;

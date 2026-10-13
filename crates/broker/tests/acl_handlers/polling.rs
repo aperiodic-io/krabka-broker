@@ -4,26 +4,26 @@
 //! asserts on the decision immediately after the seed would race that gap;
 //! these helpers absorb it and return the final response.
 
-use std::{io, net::SocketAddr};
-
-use krabka_protocol::owned::{
-    join_group_response::JoinGroupResponse, metadata_response::MetadataResponse,
-    produce_response::ProduceResponse,
-};
-
-use crate::{
-    ERR_GROUP_AUTHORIZATION_FAILED, ERR_TOPIC_AUTHORIZATION_FAILED,
-    client_api::{
-        drive_join_group_as_plain, drive_metadata_as_plain, drive_produce_as_plain,
-        join_group_request, single_record_produce_request,
+use {
+    crate::{
+        ERR_GROUP_AUTHORIZATION_FAILED, ERR_TOPIC_AUTHORIZATION_FAILED,
+        client_api::{
+            drive_join_group_as_plain, drive_metadata_as_plain, drive_produce_as_plain,
+            join_group_request, single_record_produce_request,
+        },
+        framing::CLIENT_ID,
+        kafka_wire::PlainAuthenticationSetup,
+        support::{
+            discovery::topic_metadata_request,
+            poll::{RetrySetup, retry_response},
+            topics::metadata_topic,
+        },
     },
-    framing::CLIENT_ID,
-    kafka_wire::PlainAuthenticationSetup,
-    support::{
-        discovery::topic_metadata_request,
-        poll::{RetrySetup, retry_response},
-        topics::metadata_topic,
+    krabka_protocol::owned::{
+        join_group_response::JoinGroupResponse, metadata_response::MetadataResponse,
+        produce_response::ProduceResponse,
     },
+    std::{io, net::SocketAddr},
 };
 
 /// Retry `drive_produce_as_plain` against `topic`/partition-0 until the
@@ -88,15 +88,11 @@ pub async fn retry_metadata_until_topic_visible(
     retry_response(
         RetrySetup::default(),
         || async {
-            drive_metadata_as_plain(
-                addr,
-                req.clone(),
-                &PlainAuthenticationSetup {
-                    client_id: CLIENT_ID,
-                    user,
-                    password: (password).to_vec(),
-                },
-            )
+            drive_metadata_as_plain(addr, req.clone(), &PlainAuthenticationSetup {
+                client_id: CLIENT_ID,
+                user,
+                password: (password).to_vec(),
+            })
             .await
         },
         |response| {

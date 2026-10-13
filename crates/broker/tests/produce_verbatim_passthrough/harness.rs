@@ -6,27 +6,28 @@
 //! every scenario needs the same batch shape; only the codec, the record count,
 //! and the producer identity differ between them.
 
-use assert2::assert;
-use bytes::Bytes;
-use krabka_compression::CompressionType;
-use krabka_protocol::{
-    owned::{
-        create_topics_request::{CreatableTopicConfig, CreateTopicsRequest},
-        fetch_request::FetchRequest,
-    },
-    primitives::uuid::Uuid as WireUuid,
-    records::{RecordBatch, RecordsPayload},
-};
-
 pub use crate::support::topic_id_for;
-use crate::support::{
-    client::connect_client,
-    fetch::{
-        FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
-        SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+use {
+    crate::support::{
+        client::connect_client,
+        fetch::{
+            FetchByteLimit, FetchLimits, FetchPartitionSetup, RequestWaitMillis,
+            SinglePartitionFetchSetup, fetch_partition, single_partition_fetch,
+        },
+        produce::{SinglePartitionProduceSetup, single_partition_produce},
+        records::value_record,
     },
-    produce::{SinglePartitionProduceSetup, single_partition_produce},
-    records::value_record,
+    assert2::assert,
+    bytes::Bytes,
+    krabka_compression::CompressionType,
+    krabka_protocol::{
+        owned::{
+            create_topics_request::{CreatableTopicConfig, CreateTopicsRequest},
+            fetch_request::FetchRequest,
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::{RecordBatch, RecordsPayload},
+    },
 };
 
 /// Build a single v2 `RecordBatch` that carries `n` copies of `value`, with the

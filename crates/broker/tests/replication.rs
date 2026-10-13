@@ -8,25 +8,26 @@
 // Test-file pragmatism: casts turn 1-based `i` into broker ids.
 // Hoisting these into named helpers would obscure the per-test narrative.
 
-use assert2::assert;
-use krabka_broker::{BrokerConfig, BrokerHandle};
-use krabka_protocol::{
-    owned::create_topics_request::{CreatableTopic, CreatableTopicConfig},
-    records::{Record, RecordBatch},
-};
-use support::{client::scrape_metrics as scrape, cluster_lock};
-use tempfile::TempDir;
-
-use crate::support::{
-    client::{ValueBatchSetup, ValueRecordCount, connect_client},
-    offsets::{delete_records_partition, delete_records_request, delete_records_topic},
-    produce::{SinglePartitionProduceSetup, batch_request},
-    records::{batch_from_records, value_record},
-    registered_cluster, shutdown_cluster,
-    topics::{
-        AssignedTopicSetup, CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor,
-        create_topic_request,
+use {
+    crate::support::{
+        client::{ValueBatchSetup, ValueRecordCount, connect_client},
+        offsets::{delete_records_partition, delete_records_request, delete_records_topic},
+        produce::{SinglePartitionProduceSetup, batch_request},
+        records::{batch_from_records, value_record},
+        registered_cluster, shutdown_cluster,
+        topics::{
+            AssignedTopicSetup, CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor,
+            create_topic_request,
+        },
     },
+    assert2::assert,
+    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_protocol::{
+        owned::create_topics_request::{CreatableTopic, CreatableTopicConfig},
+        records::{Record, RecordBatch},
+    },
+    support::{client::scrape_metrics as scrape, cluster_lock},
+    tempfile::TempDir,
 };
 
 mod support;
@@ -68,15 +69,12 @@ async fn metrics_cluster(topic: &str) -> (Cluster, std::net::SocketAddr) {
     .expect("3-broker cluster");
     support::wait_for_all_brokers_registered(&cluster, 3).await;
     let admin = connect_client(cluster[0].1.listen_addr.to_string(), None).await;
-    support::client::create_topic_with(
-        &admin,
-        CreateTopicSetup {
-            topic,
-            num_partitions: TopicPartitionCount(12),
-            replication_factor: TopicReplicationFactor(3),
-            ..Default::default()
-        },
-    )
+    support::client::create_topic_with(&admin, CreateTopicSetup {
+        topic,
+        num_partitions: TopicPartitionCount(12),
+        replication_factor: TopicReplicationFactor(3),
+        ..Default::default()
+    })
     .await;
     for (handle, _, _) in &cluster {
         for partition in 0..12 {
@@ -188,17 +186,14 @@ async fn a_follower_that_catches_up_across_segments_copies_every_batch() {
         handle.wait_until_brokers_registered(3).await;
     }
 
-    let (leader_addr, topic_id) = create_replicated_partition(
-        &cluster,
-        CreatableTopic {
-            configs: vec![CreatableTopicConfig {
-                name: "segment.bytes".into(),
-                value: Some("1048576".into()),
-                ..Default::default()
-            }],
-            ..support::topic_on("seams", &[&[1, 2]])
-        },
-    )
+    let (leader_addr, topic_id) = create_replicated_partition(&cluster, CreatableTopic {
+        configs: vec![CreatableTopicConfig {
+            name: "segment.bytes".into(),
+            value: Some("1048576".into()),
+            ..Default::default()
+        }],
+        ..support::topic_on("seams", &[&[1, 2]])
+    })
     .await;
 
     let producer = connect_client(leader_addr, None).await;
@@ -268,10 +263,9 @@ async fn delete_records_moves_every_replica_log_start_before_it_answers() {
 
     let deleted = client
         .send(delete_records_request(
-            vec![delete_records_topic(
-                "trimmed",
-                vec![delete_records_partition(0, 10)],
-            )],
+            vec![delete_records_topic("trimmed", vec![
+                delete_records_partition(0, 10),
+            ])],
             30_000,
         ))
         .await
@@ -397,14 +391,11 @@ async fn produce_replicated(
     batch: RecordBatch,
 ) {
     let response = client
-        .send(batch_request(
-            batch,
-            SinglePartitionProduceSetup {
-                topic: (topic).into(),
-                topic_id,
-                ..SinglePartitionProduceSetup::replicated()
-            },
-        ))
+        .send(batch_request(batch, SinglePartitionProduceSetup {
+            topic: (topic).into(),
+            topic_id,
+            ..SinglePartitionProduceSetup::replicated()
+        }))
         .await
         .unwrap();
     assert!(response.responses[0].partition_responses[0].error_code == 0);

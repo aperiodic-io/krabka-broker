@@ -1,26 +1,31 @@
 //! KIP-516: `OffsetCommit` v10 and `OffsetFetch` v8+ keyed by `topic_id`.
-use assert2::{assert, check};
-
-use crate::support::{
-    offsets::{offset_commit_topic, offset_fetch_group, offset_fetch_request, offset_fetch_topic},
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        offsets::{
+            offset_commit_topic, offset_fetch_group, offset_fetch_request, offset_fetch_topic,
+        },
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    assert2::{assert, check},
 };
 mod support;
 
-use krabka_protocol::{
-    owned::{
-        offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
-        offset_commit_response::{
-            OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
+use {
+    krabka_protocol::{
+        owned::{
+            offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
+            offset_commit_response::{
+                OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
+            },
+            offset_fetch_response::{
+                OffsetFetchResponse, OffsetFetchResponseGroup, OffsetFetchResponsePartitions,
+                OffsetFetchResponseTopics,
+            },
         },
-        offset_fetch_response::{
-            OffsetFetchResponse, OffsetFetchResponseGroup, OffsetFetchResponsePartitions,
-            OffsetFetchResponseTopics,
-        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
+    support::topic_id_for,
 };
-use support::topic_id_for;
 
 /// Kafka's `UNKNOWN_TOPIC_ID` error code.
 const UNKNOWN_TOPIC_ID: i16 = 100;
@@ -46,15 +51,13 @@ async fn offset_commit_and_fetch_by_topic_id_round_trip() {
     p.client
         .send(OffsetCommitRequest {
             group_id: "g1".into(),
-            topics: vec![offset_commit_topic(
-                String::new(),
-                id,
-                vec![OffsetCommitRequestPartition {
+            topics: vec![offset_commit_topic(String::new(), id, vec![
+                OffsetCommitRequestPartition {
                     partition_index: 0,
                     committed_offset: 42,
                     ..Default::default()
-                }],
-            )],
+                },
+            ])],
             ..Default::default()
         })
         .await
@@ -108,29 +111,26 @@ async fn offset_fetch_unresolved_topic_id_returns_unknown_topic_id() {
             .await
             .expect("offset fetch");
         actual.push((label, resp));
-        expected.push((
-            label,
-            OffsetFetchResponse {
-                groups: vec![OffsetFetchResponseGroup {
-                    group_id: "g2".into(),
-                    topics: vec![OffsetFetchResponseTopics {
-                        name: String::new(),
-                        topic_id,
-                        partitions: vec![OffsetFetchResponsePartitions {
-                            partition_index: 0,
-                            committed_offset: -1,
-                            committed_leader_epoch: -1,
-                            metadata: Some(String::new()),
-                            error_code: UNKNOWN_TOPIC_ID,
-                            ..Default::default()
-                        }],
+        expected.push((label, OffsetFetchResponse {
+            groups: vec![OffsetFetchResponseGroup {
+                group_id: "g2".into(),
+                topics: vec![OffsetFetchResponseTopics {
+                    name: String::new(),
+                    topic_id,
+                    partitions: vec![OffsetFetchResponsePartitions {
+                        partition_index: 0,
+                        committed_offset: -1,
+                        committed_leader_epoch: -1,
+                        metadata: Some(String::new()),
+                        error_code: UNKNOWN_TOPIC_ID,
                         ..Default::default()
                     }],
                     ..Default::default()
                 }],
                 ..Default::default()
-            },
-        ));
+            }],
+            ..Default::default()
+        }));
     }
     assert!(actual == expected);
 }
@@ -162,15 +162,13 @@ async fn offset_commit_unresolved_topic_id_returns_unknown_topic_id() {
         ("zero id", WireUuid::ZERO),
     ];
     let row = |topic_id, committed_offset| {
-        offset_commit_topic(
-            String::new(),
-            topic_id,
-            vec![OffsetCommitRequestPartition {
+        offset_commit_topic(String::new(), topic_id, vec![
+            OffsetCommitRequestPartition {
                 partition_index: 0,
                 committed_offset,
                 ..Default::default()
-            }],
-        )
+            },
+        ])
     };
     let answer = |topic_id, error_code| OffsetCommitResponseTopic {
         name: String::new(),
@@ -195,13 +193,10 @@ async fn offset_commit_unresolved_topic_id_returns_unknown_topic_id() {
             .await
             .expect("offset commit");
         actual.push((label, resp));
-        expected.push((
-            label,
-            OffsetCommitResponse {
-                topics: vec![answer(unresolved, UNKNOWN_TOPIC_ID), answer(known, 0)],
-                ..Default::default()
-            },
-        ));
+        expected.push((label, OffsetCommitResponse {
+            topics: vec![answer(unresolved, UNKNOWN_TOPIC_ID), answer(known, 0)],
+            ..Default::default()
+        }));
     }
     assert!(actual == expected);
 }
@@ -225,15 +220,13 @@ async fn offset_fetch_all_echoes_topic_id() {
     p.client
         .send(OffsetCommitRequest {
             group_id: "g3".into(),
-            topics: vec![offset_commit_topic(
-                String::new(),
-                id,
-                vec![OffsetCommitRequestPartition {
+            topics: vec![offset_commit_topic(String::new(), id, vec![
+                OffsetCommitRequestPartition {
                     partition_index: 0,
                     committed_offset: 7,
                     ..Default::default()
-                }],
-            )],
+                },
+            ])],
             ..Default::default()
         })
         .await

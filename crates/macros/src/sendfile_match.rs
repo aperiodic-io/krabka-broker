@@ -1,12 +1,13 @@
 //! Network operation and records-payload matches share one file-region platform policy.
 
-use std::ops::Range;
-
-use moxy::{
-    ast::{Expr, ExprMatch, MatchArm, Parse as _, ParseError, Parser, Pattern},
-    token::{Spanner as _, ToTokenStream as _, TokenStream, TokenTree},
+use {
+    moxy::{
+        ast::{Expr, ExprMatch, MatchArm, Parse as _, ParseError, Parser, Pattern},
+        token::{Spanner as _, ToTokenStream as _, TokenStream, TokenTree},
+    },
+    proc_macro::{TokenStream as NativeTokenStream, TokenTree as NativeTokenTree},
+    std::ops::Range,
 };
-use proc_macro::{TokenStream as NativeTokenStream, TokenTree as NativeTokenTree};
 
 #[derive(Clone, Copy)]
 enum MatchKind {

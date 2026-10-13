@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::{
-    FetchVisibility, FetchWatermarks, PreferredLeaderChange, ReplicaFetchFacts,
-    ReplicaFetchMutation,
+use {
+    super::{
+        FetchVisibility, FetchWatermarks, PreferredLeaderChange, ReplicaFetchFacts,
+        ReplicaFetchMutation,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

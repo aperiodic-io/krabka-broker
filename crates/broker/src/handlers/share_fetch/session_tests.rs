@@ -8,37 +8,37 @@
 //! only after `MaxWaitMs`. An incremental response leaves out the session
 //! partitions that have nothing new.
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use krabka_metadata::{GroupConfigRecord, MetadataRecord};
-use krabka_protocol::{
-    owned::{
-        share_fetch_request::{
-            AcknowledgementBatch, FetchPartition, FetchTopic, ForgottenTopic, ShareFetchRequest,
+use {
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::BrokerHandle,
+        codes,
+        handlers::test_support::{
+            ClientTopicSetup, ProduceRecordsSetup, ShareWireSetup, TopicPartitionCount,
+            acquired_share_records, create_topic as create_topic_from_test_support,
+            initialize_earliest_share, produce_records, share_fetch_topics, share_fetch_wire,
+            share_record_states,
         },
-        share_fetch_response::ShareFetchResponse,
+        share_partition::state::RecordState::{self, Acquired, Available},
+        test_support::{
+            decode_response, encode_request, peer, principal, start_broker_no_audit_with,
+            try_dispatch_context,
+        },
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::BrokerHandle,
-    codes,
-    handlers::test_support::{
-        ClientTopicSetup, ProduceRecordsSetup, ShareWireSetup, TopicPartitionCount,
-        acquired_share_records, create_topic as create_topic_from_test_support,
-        initialize_earliest_share, produce_records, share_fetch_topics, share_fetch_wire,
-        share_record_states,
+    assert2::assert,
+    krabka_metadata::{GroupConfigRecord, MetadataRecord},
+    krabka_protocol::{
+        owned::{
+            share_fetch_request::{
+                AcknowledgementBatch, FetchPartition, FetchTopic, ForgottenTopic, ShareFetchRequest,
+            },
+            share_fetch_response::ShareFetchResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    share_partition::state::RecordState::{self, Acquired, Available},
-    test_support::{
-        decode_response, encode_request, peer, principal, start_broker_no_audit_with,
-        try_dispatch_context,
+    std::{
+        sync::Arc,
+        time::{Duration, Instant},
     },
 };
 
@@ -55,27 +55,21 @@ async fn start(session_max: usize) -> (BrokerHandle, tempfile::TempDir) {
 
 /// Creates `topic` with `partitions` partitions and returns its id.
 async fn create_topic(broker: &BrokerHandle, topic: &str, partitions: i32) -> WireUuid {
-    create_topic_from_test_support(
-        broker,
-        ClientTopicSetup {
-            client_id: "share-session-test",
-            name: topic,
-            partitions: TopicPartitionCount(partitions),
-        },
-    )
+    create_topic_from_test_support(broker, ClientTopicSetup {
+        client_id: "share-session-test",
+        name: topic,
+        partitions: TopicPartitionCount(partitions),
+    })
     .await
 }
 
 /// Appends three records to `partition` of `topic`.
 async fn produce(broker: &BrokerHandle, topic: &str, partition: i32) {
-    produce_records(
-        broker,
-        ProduceRecordsSetup {
-            topic,
-            partition_index: krabka_ids::PartitionIndex(partition),
-            ..Default::default()
-        },
-    )
+    produce_records(broker, ProduceRecordsSetup {
+        topic,
+        partition_index: krabka_ids::PartitionIndex(partition),
+        ..Default::default()
+    })
     .await;
 }
 
@@ -141,14 +135,10 @@ async fn share_fetch(broker: &BrokerHandle, fetch: &Fetch<'_>) -> ShareFetchResp
         },
         ..Default::default()
     };
-    share_fetch_wire(
-        broker,
-        &request,
-        ShareWireSetup {
-            version: krabka_ids::ApiVersion(VERSION),
-            ..Default::default()
-        },
-    )
+    share_fetch_wire(broker, &request, ShareWireSetup {
+        version: krabka_ids::ApiVersion(VERSION),
+        ..Default::default()
+    })
     .await
 }
 
@@ -215,10 +205,9 @@ async fn reopening_keeps_records_and_a_final_fetch_fetches_nothing() {
             (closed.error_code, rows(&closed)),
             after_close,
         ) == (
-            (
-                codes::NONE,
-                vec![(0, codes::NONE, codes::NONE, vec![(0, 2)])]
-            ),
+            (codes::NONE, vec![(0, codes::NONE, codes::NONE, vec![(
+                0, 2
+            )])]),
             (codes::NONE, vec![(0, codes::NONE, codes::NONE, Vec::new())]),
             HELD.to_vec(),
             (codes::NONE, vec![(0, codes::NONE, codes::NONE, Vec::new())]),
@@ -235,30 +224,24 @@ async fn reopening_keeps_records_and_a_final_fetch_fetches_nothing() {
 async fn a_full_session_cache_answers_after_max_wait() {
     let (broker, _dir) = start(1).await;
     let topic_id = create_topic(&broker, "full", 1).await;
-    let first = share_fetch(
-        &broker,
-        &Fetch {
-            group: "first",
-            epoch: 0,
-            topic_id,
-            rows: &[],
-            forgotten: &[],
-            max_wait_ms: 0,
-        },
-    )
+    let first = share_fetch(&broker, &Fetch {
+        group: "first",
+        epoch: 0,
+        topic_id,
+        rows: &[],
+        forgotten: &[],
+        max_wait_ms: 0,
+    })
     .await;
     let started = Instant::now();
-    let refused = share_fetch(
-        &broker,
-        &Fetch {
-            group: "second",
-            epoch: 0,
-            topic_id,
-            rows: &[],
-            forgotten: &[],
-            max_wait_ms: 300,
-        },
-    )
+    let refused = share_fetch(&broker, &Fetch {
+        group: "second",
+        epoch: 0,
+        topic_id,
+        rows: &[],
+        forgotten: &[],
+        max_wait_ms: 300,
+    })
     .await;
     let waited = started.elapsed();
 
@@ -413,14 +396,10 @@ async fn the_acquire_mode_and_batch_size_shape_the_acquired_rows() {
             }],
             ..Default::default()
         };
-        let response = share_fetch_wire(
-            &broker,
-            &request,
-            ShareWireSetup {
-                version: krabka_ids::ApiVersion(version),
-                ..Default::default()
-            },
-        )
+        let response = share_fetch_wire(&broker, &request, ShareWireSetup {
+            version: krabka_ids::ApiVersion(version),
+            ..Default::default()
+        })
         .await;
         let acquired: Vec<(i64, i64)> = response
             .responses
@@ -505,10 +484,10 @@ async fn max_bytes_is_split_across_the_partitions() {
 
     assert!(
         (tight, roomy)
-            == (
-                vec![(0, vec![(0, 2)]), (1, Vec::new())],
-                vec![(0, vec![(0, 5)]), (1, vec![(0, 5)])],
-            )
+            == (vec![(0, vec![(0, 2)]), (1, Vec::new())], vec![
+                (0, vec![(0, 5)]),
+                (1, vec![(0, 5)])
+            ],)
     );
     broker.shutdown().await;
 }

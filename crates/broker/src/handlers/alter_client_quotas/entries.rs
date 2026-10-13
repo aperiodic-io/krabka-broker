@@ -6,12 +6,12 @@
 //! messages. The quota keys and the entity types are the vocabulary of that
 //! validation, so they live here beside the checks that use them.
 
-use std::collections::{BTreeMap, HashMap};
-
-use krabka_metadata::{ClientQuotaRecord, EntityKey, MetadataRecord, QuotaEntity};
-use krabka_protocol::owned::alter_client_quotas_request::EntryData;
-
-use crate::codes::INVALID_REQUEST;
+use {
+    crate::codes::INVALID_REQUEST,
+    krabka_metadata::{ClientQuotaRecord, EntityKey, MetadataRecord, QuotaEntity},
+    krabka_protocol::owned::alter_client_quotas_request::EntryData,
+    std::collections::{BTreeMap, HashMap},
+};
 
 /// Quota key: produce-side bandwidth cap in bytes/sec (KIP-13).
 const PRODUCER_BYTE_RATE_KEY: &str = "producer_byte_rate";
@@ -101,9 +101,7 @@ fn describe_entity(entity: &[(String, Option<String>)]) -> String {
     format!("ClientQuotaEntity(entries={{{entries}}})")
 }
 
-fn invalid(message: String) -> EntityError {
-    (INVALID_REQUEST, message)
-}
+fn invalid(message: String) -> EntityError { (INVALID_REQUEST, message) }
 
 /// Validates every entry and builds the records they write, as Kafka's
 /// `ClientQuotaControlManager.alterClientQuotas` does.
@@ -278,7 +276,7 @@ fn validate_quota_key_value(
             "Proposed value for {key} is too large for a LONG."
         ))),
         QuotaValueType::Int | QuotaValueType::Long => {
-            if (value % 1.0).abs() > 1e-6 {
+            if (value % 1.0).abs() > 1.0e-6 {
                 Err(invalid(format!("{key} cannot be a fractional value.")))
             } else {
                 Ok(())
@@ -289,10 +287,7 @@ fn validate_quota_key_value(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::handlers::alter_client_quotas::test_support::entry;
+    use {super::*, crate::handlers::alter_client_quotas::test_support::entry, assert2::check};
 
     type Entity = Vec<(&'static str, Option<&'static str>)>;
     type Ops = Vec<(&'static str, f64, bool)>;
@@ -314,9 +309,7 @@ mod tests {
         record(&key(entity), quota, None)
     }
 
-    fn err(message: &str) -> Result<(), EntityError> {
-        Err((INVALID_REQUEST, message.to_owned()))
-    }
+    fn err(message: &str) -> Result<(), EntityError> { Err((INVALID_REQUEST, message.to_owned())) }
 
     /// Resolves IP literals and the name `localhost`, as the handler's
     /// resolver would.
@@ -377,10 +370,11 @@ mod tests {
             ),
             (
                 "removal of a set key writes a removal",
-                vec![(
-                    vec![("user", Some("carol"))],
-                    vec![("producer_byte_rate", 0.0, true)],
-                )],
+                vec![(vec![("user", Some("carol"))], vec![(
+                    "producer_byte_rate",
+                    0.0,
+                    true,
+                )])],
                 Alteration {
                     results: vec![(key(&[("user", Some("carol"))]), Ok(()))],
                     records: vec![remove(&[("user", Some("carol"))], "producer_byte_rate")],
@@ -388,10 +382,11 @@ mod tests {
             ),
             (
                 "an unchanged value writes nothing",
-                vec![(
-                    vec![("user", Some("carol"))],
-                    vec![("producer_byte_rate", 1024.0, false)],
-                )],
+                vec![(vec![("user", Some("carol"))], vec![(
+                    "producer_byte_rate",
+                    1024.0,
+                    false,
+                )])],
                 Alteration {
                     results: vec![(key(&[("user", Some("carol"))]), Ok(()))],
                     records: vec![],
@@ -432,10 +427,11 @@ mod tests {
             ),
             (
                 "LONG past Long.MAX_VALUE",
-                vec![(
-                    alice.clone(),
-                    vec![("consumer_byte_rate", f64::INFINITY, false)],
-                )],
+                vec![(alice.clone(), vec![(
+                    "consumer_byte_rate",
+                    f64::INFINITY,
+                    false,
+                )])],
                 Alteration {
                     results: vec![(
                         key(&alice),
@@ -457,7 +453,7 @@ mod tests {
             ),
             (
                 "INT past Integer.MAX_VALUE",
-                vec![(ip.clone(), vec![("connection_creation_rate", 3e9, false)])],
+                vec![(ip.clone(), vec![("connection_creation_rate", 3.0e9, false)])],
                 Alteration {
                     results: vec![(
                         key(&ip),
@@ -476,10 +472,11 @@ mod tests {
             ),
             (
                 "infinity on a DOUBLE key",
-                vec![(
-                    alice.clone(),
-                    vec![("controller_mutation_rate", f64::INFINITY, false)],
-                )],
+                vec![(alice.clone(), vec![(
+                    "controller_mutation_rate",
+                    f64::INFINITY,
+                    false,
+                )])],
                 Alteration {
                     results: vec![(key(&alice), Ok(()))],
                     records: vec![set(&alice, "controller_mutation_rate", f64::INFINITY)],
@@ -487,10 +484,11 @@ mod tests {
             ),
             (
                 "ip key on a user entity",
-                vec![(
-                    alice.clone(),
-                    vec![("connection_creation_rate", 1.0, false)],
-                )],
+                vec![(alice.clone(), vec![(
+                    "connection_creation_rate",
+                    1.0,
+                    false,
+                )])],
                 Alteration {
                     results: vec![(
                         key(&alice),
@@ -539,14 +537,16 @@ mod tests {
             (
                 "IPv6 and a resolvable host name are valid ip names",
                 vec![
-                    (
-                        vec![("ip", Some("::1"))],
-                        vec![("connection_creation_rate", 5.0, false)],
-                    ),
-                    (
-                        vec![("ip", Some("localhost"))],
-                        vec![("connection_creation_rate", 6.0, false)],
-                    ),
+                    (vec![("ip", Some("::1"))], vec![(
+                        "connection_creation_rate",
+                        5.0,
+                        false,
+                    )]),
+                    (vec![("ip", Some("localhost"))], vec![(
+                        "connection_creation_rate",
+                        6.0,
+                        false,
+                    )]),
                 ],
                 Alteration {
                     results: vec![
@@ -565,10 +565,11 @@ mod tests {
             ),
             (
                 "unresolvable ip name",
-                vec![(
-                    vec![("ip", Some("not-an-ip"))],
-                    vec![("connection_creation_rate", 1.0, false)],
-                )],
+                vec![(vec![("ip", Some("not-an-ip"))], vec![(
+                    "connection_creation_rate",
+                    1.0,
+                    false,
+                )])],
                 Alteration {
                     results: vec![(
                         key(&[("ip", Some("not-an-ip"))]),
@@ -579,10 +580,11 @@ mod tests {
             ),
             (
                 "empty user name",
-                vec![(
-                    vec![("user", Some(""))],
-                    vec![("producer_byte_rate", 1.0, false)],
-                )],
+                vec![(vec![("user", Some(""))], vec![(
+                    "producer_byte_rate",
+                    1.0,
+                    false,
+                )])],
                 Alteration {
                     results: vec![(key(&[("user", Some(""))]), err("Empty user not supported"))],
                     records: vec![],
@@ -590,10 +592,11 @@ mod tests {
             ),
             (
                 "unknown entity type",
-                vec![(
-                    vec![("group", Some("g1"))],
-                    vec![("producer_byte_rate", 1.0, false)],
-                )],
+                vec![(vec![("group", Some("g1"))], vec![(
+                    "producer_byte_rate",
+                    1.0,
+                    false,
+                )])],
                 Alteration {
                     results: vec![(
                         key(&[("group", Some("g1"))]),
@@ -612,13 +615,10 @@ mod tests {
             ),
             (
                 "the same key twice",
-                vec![(
-                    vec![("client-id", None), ("user", Some("alice"))],
-                    vec![
-                        ("producer_byte_rate", 1.0, false),
-                        ("producer_byte_rate", 2.0, false),
-                    ],
-                )],
+                vec![(vec![("client-id", None), ("user", Some("alice"))], vec![
+                    ("producer_byte_rate", 1.0, false),
+                    ("producer_byte_rate", 2.0, false),
+                ])],
                 Alteration {
                     results: vec![(
                         key(&[("client-id", None), ("user", Some("alice"))]),
@@ -646,10 +646,11 @@ mod tests {
             ),
             (
                 "a repeated entity type keeps the last name",
-                vec![(
-                    vec![("user", Some("a")), ("user", Some("b"))],
-                    vec![("producer_byte_rate", 1.0, false)],
-                )],
+                vec![(vec![("user", Some("a")), ("user", Some("b"))], vec![(
+                    "producer_byte_rate",
+                    1.0,
+                    false,
+                )])],
                 Alteration {
                     results: vec![(key(&[("user", Some("b"))]), Ok(()))],
                     records: vec![set(&[("user", Some("b"))], "producer_byte_rate", 1.0)],

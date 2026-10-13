@@ -9,23 +9,24 @@
 //! because that is the simplest model for "a client doing one admin
 //! action"; reuse is unnecessary for these tests.
 
-use std::net::SocketAddr;
-
-use krabka_protocol::owned::{
-    create_acls_request::{AclCreation, CreateAclsRequest},
-    create_acls_response::CreateAclsResponse,
-    delete_acls_request::DeleteAclsRequest,
-    delete_acls_response::DeleteAclsResponse,
-    describe_acls_request::DescribeAclsRequest,
-    describe_acls_response::DescribeAclsResponse,
-};
-
-use crate::{
-    CREATE_ACLS_VERSION, DELETE_ACLS_VERSION, DESCRIBE_ACLS_VERSION, OPERATION_ANY,
-    PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PERMISSION_ALLOW, PERMISSION_ANY, RESOURCE_TYPE_TOPIC,
-    framing::CLIENT_ID,
-    kafka_wire::{AutomaticTopicSetup, create_topic_as_super_user},
-    support::topics::{ConfiguredTopicSetup, TopicPartitionCount},
+use {
+    crate::{
+        CREATE_ACLS_VERSION, DELETE_ACLS_VERSION, DESCRIBE_ACLS_VERSION, OPERATION_ANY,
+        PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL, PERMISSION_ALLOW, PERMISSION_ANY,
+        RESOURCE_TYPE_TOPIC,
+        framing::CLIENT_ID,
+        kafka_wire::{AutomaticTopicSetup, create_topic_as_super_user},
+        support::topics::{ConfiguredTopicSetup, TopicPartitionCount},
+    },
+    krabka_protocol::owned::{
+        create_acls_request::{AclCreation, CreateAclsRequest},
+        create_acls_response::CreateAclsResponse,
+        delete_acls_request::DeleteAclsRequest,
+        delete_acls_response::DeleteAclsResponse,
+        describe_acls_request::DescribeAclsRequest,
+        describe_acls_response::DescribeAclsResponse,
+    },
+    std::net::SocketAddr,
 };
 
 /// Shorthand for `Allow <op> on Topic LITERAL <name> for <principal> from *`.
@@ -64,17 +65,14 @@ pub fn describe_all_topic_acls() -> DescribeAclsRequest {
 /// for the requested topic. The T23 tests use it to materialise a
 /// partition before they produce to it or fetch from it.
 pub async fn create_topic_as_admin(addr: SocketAddr, name: &str, partitions: i32) {
-    create_topic_as_super_user(
-        addr,
-        AutomaticTopicSetup {
-            client_id: CLIENT_ID,
-            topic: ConfiguredTopicSetup {
-                name: name.to_string(),
-                partitions: TopicPartitionCount(partitions),
-                ..Default::default()
-            },
+    create_topic_as_super_user(addr, AutomaticTopicSetup {
+        client_id: CLIENT_ID,
+        topic: ConfiguredTopicSetup {
+            name: name.to_string(),
+            partitions: TopicPartitionCount(partitions),
+            ..Default::default()
         },
-    )
+    })
     .await;
 }
 

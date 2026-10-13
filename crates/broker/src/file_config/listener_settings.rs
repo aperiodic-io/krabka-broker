@@ -6,19 +6,20 @@
 //! controller listener's protocol and TLS material. `apply_listener_settings`
 //! writes them under the fill-or-replace rules the file config uses.
 
-use krabka_security::ListenerProtocol;
-use krabka_units::Time;
-
-use super::{FileClientAuthMode, FileConfigError, FileListener, FileTlsConfig};
-use crate::{
-    SslPrincipalMapper,
-    config::BrokerConfig,
-    config_keys::{
-        AUTO_CREATE_TOPICS_ENABLE, DEFAULT_REPLICATION_FACTOR, DELETE_TOPIC_ENABLE,
-        INTER_BROKER_LISTENER_NAME, LOG_ROLL_MS, NUM_PARTITIONS,
+use {
+    super::{FileClientAuthMode, FileConfigError, FileListener, FileTlsConfig},
+    crate::{
+        SslPrincipalMapper,
+        config::BrokerConfig,
+        config_keys::{
+            AUTO_CREATE_TOPICS_ENABLE, DEFAULT_REPLICATION_FACTOR, DELETE_TOPIC_ENABLE,
+            INTER_BROKER_LISTENER_NAME, LOG_ROLL_MS, NUM_PARTITIONS,
+        },
+        cordoned_log_dirs::CORDONED_LOG_DIRS,
+        txn::coordinator::produce_verification::PARTITION_VERIFICATION_ENABLE,
     },
-    cordoned_log_dirs::CORDONED_LOG_DIRS,
-    txn::coordinator::produce_verification::PARTITION_VERIFICATION_ENABLE,
+    krabka_security::ListenerProtocol,
+    krabka_units::Time,
 };
 
 pub(super) struct ListenerSettings {
@@ -358,14 +359,15 @@ pub(super) fn apply_listener_settings(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use crate::{
-        config::BrokerConfig,
-        file_config::{
-            FileConfig, FileConfigError,
-            test_support::{configured, configured_feature, configured_unwrap_parse},
+    use {
+        crate::{
+            config::BrokerConfig,
+            file_config::{
+                FileConfig, FileConfigError,
+                test_support::{configured, configured_feature, configured_unwrap_parse},
+            },
         },
+        assert2::{assert, check},
     };
 
     fn file_outcome<T>(source: &str, read: impl FnOnce(&BrokerConfig) -> T) -> Result<T, String> {
@@ -440,9 +442,7 @@ max_connections_per_ip = 8
     /// and a per-listener key that wins for the listener that carries it.
     #[test]
     fn apply_to_maps_the_idle_window_and_its_per_listener_override() {
-        use std::time::Duration;
-
-        use crate::config::BrokerConfig;
+        use {crate::config::BrokerConfig, std::time::Duration};
 
         let src = r#"
 inter_broker_listener_name = "INTERNAL"
@@ -492,27 +492,19 @@ connections_max_idle = "5s"
                 "both as properties",
                 "[server_properties]\n\"num.partitions\" = \"6\"\n\
                  \"default.replication.factor\" = \"3\"\n",
-                Ok((
-                    6,
-                    3,
-                    TopicCreationOrigins {
-                        num_partitions: true,
-                        default_replication_factor: true,
-                    },
-                )),
+                Ok((6, 3, TopicCreationOrigins {
+                    num_partitions: true,
+                    default_replication_factor: true,
+                })),
             ),
             (
                 "a dedicated key wins over the property",
                 "[runtime]\nnum_partitions = 4\n\
                  [server_properties]\n\"num.partitions\" = \"6\"\n",
-                Ok((
-                    4,
-                    1,
-                    TopicCreationOrigins {
-                        num_partitions: true,
-                        default_replication_factor: false,
-                    },
-                )),
+                Ok((4, 1, TopicCreationOrigins {
+                    num_partitions: true,
+                    default_replication_factor: false,
+                })),
             ),
             (
                 "a zero is refused",

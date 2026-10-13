@@ -7,13 +7,14 @@
 //! `count_acquired_batches`. Both directions of the mapping are stated once,
 //! here, so a change to the persisted delivery-state codes touches one file.
 
-use krabka_log::Offset;
-
-use super::{
-    AcquisitionState, DS_ACKNOWLEDGED, DS_ARCHIVED, DS_ARCHIVING, DS_AVAILABLE, InFlightBatch,
-    RecordState, clamp_i32, dlq::DlqRange,
+use {
+    super::{
+        AcquisitionState, DS_ACKNOWLEDGED, DS_ARCHIVED, DS_ARCHIVING, DS_AVAILABLE, InFlightBatch,
+        RecordState, clamp_i32, dlq::DlqRange,
+    },
+    crate::share_coordinator::persistence::StateBatch,
+    krabka_log::Offset,
 };
-use crate::share_coordinator::persistence::StateBatch;
 
 impl AcquisitionState {
     /// Projects the live window into persistable batches.
@@ -56,9 +57,7 @@ impl AcquisitionState {
     /// leaves through [`Self::to_persist_batches`].
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn delivery_complete_count(&self) -> i32 {
-        self.delivery_complete_count
-    }
+    pub(crate) fn delivery_complete_count(&self) -> i32 { self.delivery_complete_count }
 
     /// Number of in-flight batches currently in `Acquired` state. Test-only.
     #[cfg(any(test, feature = "test-helpers"))]
@@ -150,17 +149,19 @@ impl AcquisitionState {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::{
-        share_coordinator::coordinator::test_support::{
-            DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch as persisted,
+    use {
+        super::*,
+        crate::{
+            share_coordinator::coordinator::test_support::{
+                DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup,
+                state_batch as persisted,
+            },
+            share_partition::state::{
+                AckType, AcquiredRange,
+                test_support::{LOCK, t0},
+            },
         },
-        share_partition::state::{
-            AckType, AcquiredRange,
-            test_support::{LOCK, t0},
-        },
+        assert2::{assert, check},
     };
 
     #[test]
@@ -326,70 +327,55 @@ mod tests {
             (
                 "initialization counts the persisted terminal batches",
                 |s| {
-                    s.load_from(
-                        Offset(2),
-                        1,
-                        0,
-                        &[
-                            persisted(StateBatchSetup {
-                                bounds: Offset(2)..=Offset(3),
-                                ..Default::default()
-                            }),
-                            persisted(StateBatchSetup {
-                                bounds: Offset(4)..=Offset(5),
-                                delivery: FixtureDeliveryState::Acknowledged,
-                                ..Default::default()
-                            }),
-                            persisted(StateBatchSetup {
-                                bounds: Offset(6)..=Offset(6),
-                                delivery: FixtureDeliveryState::Archived,
-                                attempts: DeliveryAttemptCount(2),
-                            }),
-                        ],
-                    );
+                    s.load_from(Offset(2), 1, 0, &[
+                        persisted(StateBatchSetup {
+                            bounds: Offset(2)..=Offset(3),
+                            ..Default::default()
+                        }),
+                        persisted(StateBatchSetup {
+                            bounds: Offset(4)..=Offset(5),
+                            delivery: FixtureDeliveryState::Acknowledged,
+                            ..Default::default()
+                        }),
+                        persisted(StateBatchSetup {
+                            bounds: Offset(6)..=Offset(6),
+                            delivery: FixtureDeliveryState::Archived,
+                            attempts: DeliveryAttemptCount(2),
+                        }),
+                    ]);
                 },
                 (2, 7, 3),
             ),
             (
                 "initialization moves the SPSO past a terminal prefix",
                 |s| {
-                    s.load_from(
-                        Offset(0),
-                        1,
-                        0,
-                        &[
-                            persisted(StateBatchSetup {
-                                bounds: Offset(0)..=Offset(1),
-                                delivery: FixtureDeliveryState::Acknowledged,
-                                ..Default::default()
-                            }),
-                            persisted(StateBatchSetup {
-                                bounds: Offset(2)..=Offset(3),
-                                ..Default::default()
-                            }),
-                            persisted(StateBatchSetup {
-                                bounds: Offset(4)..=Offset(4),
-                                delivery: FixtureDeliveryState::Archived,
-                                ..Default::default()
-                            }),
-                        ],
-                    );
+                    s.load_from(Offset(0), 1, 0, &[
+                        persisted(StateBatchSetup {
+                            bounds: Offset(0)..=Offset(1),
+                            delivery: FixtureDeliveryState::Acknowledged,
+                            ..Default::default()
+                        }),
+                        persisted(StateBatchSetup {
+                            bounds: Offset(2)..=Offset(3),
+                            ..Default::default()
+                        }),
+                        persisted(StateBatchSetup {
+                            bounds: Offset(4)..=Offset(4),
+                            delivery: FixtureDeliveryState::Archived,
+                            ..Default::default()
+                        }),
+                    ]);
                 },
                 (2, 5, 1),
             ),
             (
                 "initialization of an all-terminal window empties it",
                 |s| {
-                    s.load_from(
-                        Offset(0),
-                        1,
-                        0,
-                        &[persisted(StateBatchSetup {
-                            bounds: Offset(0)..=Offset(3),
-                            delivery: FixtureDeliveryState::Acknowledged,
-                            ..Default::default()
-                        })],
-                    );
+                    s.load_from(Offset(0), 1, 0, &[persisted(StateBatchSetup {
+                        bounds: Offset(0)..=Offset(3),
+                        delivery: FixtureDeliveryState::Acknowledged,
+                        ..Default::default()
+                    })]);
                 },
                 (4, 4, 0),
             ),

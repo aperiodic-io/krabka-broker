@@ -1,7 +1,9 @@
 //! Validated scalar values accepted at broker configuration boundaries.
 
-use krabka_macros::RefinedNewtype;
-use refined_type::rule::{GreaterI16, GreaterI32, GreaterI64, GreaterUsize, MinMaxU32};
+use {
+    krabka_macros::RefinedNewtype,
+    refined_type::rule::{GreaterI16, GreaterI32, GreaterI64, GreaterUsize, MinMaxU32},
+};
 
 /// A 32-bit signed integer greater than zero.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, RefinedNewtype)]
@@ -30,9 +32,7 @@ pub struct Percentage(u32);
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn refined_scalar_boundaries() {

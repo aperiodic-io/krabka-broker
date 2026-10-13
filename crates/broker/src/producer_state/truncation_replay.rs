@@ -1,16 +1,17 @@
-use assert2::assert;
-
-use super::{
-    Decision, RetainedBatch,
-    snapshot_tail::{check, check_duplicate, rebuilt},
-    test_support::{
-        ProducerBatchSetup, ProducerEpoch, ProducerSequence, RecordOffsets, SequenceDelta,
-        producer_batch,
+use {
+    super::{
+        Decision, RetainedBatch,
+        snapshot_tail::{check, check_duplicate, rebuilt},
+        test_support::{
+            ProducerBatchSetup, ProducerEpoch, ProducerSequence, RecordOffsets, SequenceDelta,
+            producer_batch,
+        },
     },
-};
-use crate::{
-    producer_state::test_support::opened_log,
-    test_support::{EmptyPayloadBatchSetup, default_records_batch},
+    crate::{
+        producer_state::test_support::opened_log,
+        test_support::{EmptyPayloadBatchSetup, default_records_batch},
+    },
+    assert2::assert,
 };
 
 #[tokio::test]

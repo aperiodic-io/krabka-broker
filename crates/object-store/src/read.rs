@@ -4,13 +4,13 @@
 //! byte cap, then does a conditional, streaming GET. It centralises the OOM guard that runs before
 //! the code buffers a whole object, such as an index snapshot, into memory.
 
-use std::sync::Arc;
-
-use bytes::{Bytes, BytesMut};
-use futures_util::TryStreamExt as _;
-use object_store::{GetOptions, ObjectStoreExt as _, path::Path};
-
-use super::{error::ObjectStoreError, object_store_api as object_store};
+use {
+    super::{error::ObjectStoreError, object_store_api as object_store},
+    bytes::{Bytes, BytesMut},
+    futures_util::TryStreamExt as _,
+    object_store::{GetOptions, ObjectStoreExt as _, path::Path},
+    std::sync::Arc,
+};
 
 /// Read a whole object, and reject it if its size exceeds `max_bytes`.
 ///
@@ -40,14 +40,11 @@ pub async fn read_capped(
         });
     }
     let result = store
-        .get_opts(
-            key,
-            GetOptions {
-                version: meta.version,
-                if_match: meta.e_tag,
-                ..GetOptions::default()
-            },
-        )
+        .get_opts(key, GetOptions {
+            version: meta.version,
+            if_match: meta.e_tag,
+            ..GetOptions::default()
+        })
         .await?;
     if result.meta.size > max_bytes {
         return Err(ObjectStoreError::TooLarge {
@@ -76,13 +73,13 @@ pub async fn read_capped(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, atomic::Ordering::SeqCst};
-
-    use assert2::assert;
-    use futures_util::StreamExt as _;
-    use object_store::{PutPayload, path::Path};
-
-    use super::{object_store, *};
+    use {
+        super::{object_store, *},
+        assert2::assert,
+        futures_util::StreamExt as _,
+        object_store::{PutPayload, path::Path},
+        std::sync::{Arc, atomic::Ordering::SeqCst},
+    };
 
     async fn store_with(key: &str, bytes: &'static [u8]) -> Arc<dyn object_store::ObjectStore> {
         let store: Arc<dyn object_store::ObjectStore> =
@@ -105,14 +102,11 @@ mod tests {
     async fn over_cap_returns_too_large() {
         let store = store_with("k", b"hello world").await;
         let err = read_capped(&store, &Path::from("k"), 4).await.unwrap_err();
-        assert!(matches!(
-            err,
-            ObjectStoreError::TooLarge {
-                size: 11,
-                max_bytes: 4,
-                ..
-            }
-        ));
+        assert!(matches!(err, ObjectStoreError::TooLarge {
+            size: 11,
+            max_bytes: 4,
+            ..
+        }));
     }
 
     #[tokio::test]
@@ -182,13 +176,10 @@ mod tests {
                 assert!(options.version.as_deref() == Some("original"));
                 let original = self
                     .inner
-                    .get_opts(
-                        location,
-                        GetOptions {
-                            version: None,
-                            ..options
-                        },
-                    )
+                    .get_opts(location, GetOptions {
+                        version: None,
+                        ..options
+                    })
                     .await?;
                 self.inner
                     .put(location, PutPayload::from_static(b"123456789"))

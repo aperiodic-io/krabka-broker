@@ -1,9 +1,9 @@
-use std::collections::HashSet;
-
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{constructed_wal_placement_is_installable, wal_placement_survives_one_rack_loss};
+use {
+    super::{constructed_wal_placement_is_installable, wal_placement_survives_one_rack_loss},
+    assert2::assert,
+    proptest::prelude::*,
+    std::collections::HashSet,
+};
 
 fn placement_oracle(candidates: &[(u64, u64)], local: u64, requested: usize) -> Vec<(u64, u64)> {
     if requested == 0 {

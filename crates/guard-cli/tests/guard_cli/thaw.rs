@@ -5,11 +5,12 @@
 //! runbook branches on: a missing approval and a signature the broker will not
 //! act on are told apart, and neither reaches the operator as a plain refusal.
 
-use assert2::{assert, check};
-
-use crate::support::{
-    BAD_SIGNATURE, KEY_ID, NO_APPROVAL, PRINCIPAL, TOPIC, cli, cluster,
-    frozen_cluster_with_stranger, set_signed_freeze, signed_as,
+use {
+    crate::support::{
+        BAD_SIGNATURE, KEY_ID, NO_APPROVAL, PRINCIPAL, TOPIC, cli, cluster,
+        frozen_cluster_with_stranger, set_signed_freeze, signed_as,
+    },
+    assert2::{assert, check},
 };
 
 /// A thaw is the dangerous direction. A signed one that names no approved

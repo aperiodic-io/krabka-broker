@@ -1,11 +1,12 @@
 //! `dispatch_table!`: see the crate documentation.
 
-use moxy::{
-    ast::ParseError,
-    token::{Ident, LitStr, TokenStream},
+use {
+    crate::api_names::{Entry, Section, Suffixed, parse_sections, section},
+    moxy::{
+        ast::ParseError,
+        token::{Ident, LitStr, TokenStream},
+    },
 };
-
-use crate::api_names::{Entry, Section, Suffixed, parse_sections, section};
 
 /// What the adapter of a section does with the request before it reaches the
 /// handler.
@@ -333,11 +334,12 @@ pub(crate) fn expand(tokens: TokenStream) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use moxy::token::TokenStream;
-
-    use super::expand;
-    use crate::meta::compact;
+    use {
+        super::expand,
+        crate::meta::compact,
+        assert2::{assert, check},
+        moxy::token::TokenStream,
+    };
 
     fn expanded(table: &str) -> Result<String, String> {
         let table: TokenStream = table.parse().expect("table tokenizes");

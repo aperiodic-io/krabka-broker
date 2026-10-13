@@ -4,10 +4,11 @@
 //! `kafka-reassign-partitions` tools move a leader off a live node, so the
 //! suites that drive those tools boot the cluster here.
 
-use krabka_broker::{Broker, BrokerConfig};
-
-use crate::support::{
-    JvmBrokerSetup, JvmListeners, controller_voters, init_jvm_tracing, jvm_broker_config,
+use {
+    crate::support::{
+        JvmBrokerSetup, JvmListeners, controller_voters, init_jvm_tracing, jvm_broker_config,
+    },
+    krabka_broker::{Broker, BrokerConfig},
 };
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -75,8 +76,10 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
     [BrokerConfig; N],
     [tempfile::TempDir; N],
 ) {
-    use krabka_broker::config::{InterBrokerCredentials, ListenerSpec};
-    use krabka_security::{ListenerProtocol, SaslMechanism};
+    use {
+        krabka_broker::config::{InterBrokerCredentials, ListenerSpec},
+        krabka_security::{ListenerProtocol, SaslMechanism},
+    };
 
     let SaslClusterSetup {
         admin,
@@ -99,16 +102,13 @@ pub(crate) async fn start_sasl_cluster<const N: usize>(
         .collect();
     let configs: [BrokerConfig; N] = std::array::from_fn(|index| {
         let listener = &listeners[index];
-        let mut config = jvm_broker_config(
-            dirs[index].path().to_path_buf(),
-            JvmBrokerSetup {
-                node: krabka_broker::NodeId(voters[index].0),
-                listen: listener.listen.parse().expect("client address"),
-                controller: voters[index].1,
-                advertised: listener.advertised.clone(),
-                voters: controller_voters(&voters),
-            },
-        );
+        let mut config = jvm_broker_config(dirs[index].path().to_path_buf(), JvmBrokerSetup {
+            node: krabka_broker::NodeId(voters[index].0),
+            listen: listener.listen.parse().expect("client address"),
+            controller: voters[index].1,
+            advertised: listener.advertised.clone(),
+            voters: controller_voters(&voters),
+        });
         config.listeners = vec![ListenerSpec {
             advertised: listener.advertised.clone(),
             ..crate::support::listeners::listener(

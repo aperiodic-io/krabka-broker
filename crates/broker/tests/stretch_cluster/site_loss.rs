@@ -6,17 +6,17 @@
 //! unreachable-site half, where every broker stays up, is in
 //! `unreachable_site`.
 
-use std::{collections::BTreeSet, time::Duration};
-
-use assert2::{assert, check};
-use krabka_broker::codes;
-
-use crate::{
-    NODE_A, NODE_B, NODE_C, SITE_B, WITNESS,
-    cluster::cluster_with_topic,
-    cluster_lock,
-    produce::{client_at, produce_once, produce_until_committed},
-    view::{PartitionView, partition_view, wait_for_leader_and_isr, witness_never_leads},
+use {
+    crate::{
+        NODE_A, NODE_B, NODE_C, SITE_B, WITNESS,
+        cluster::cluster_with_topic,
+        cluster_lock,
+        produce::{client_at, produce_once, produce_until_committed},
+        view::{PartitionView, partition_view, wait_for_leader_and_isr, witness_never_leads},
+    },
+    assert2::{assert, check},
+    krabka_broker::codes,
+    std::{collections::BTreeSet, time::Duration},
 };
 
 #[bon::builder]

@@ -5,30 +5,30 @@
 //! open. It runs once at startup, and nothing on the request path calls it,
 //! so it is separate from the group edits and the injection protocol.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_metadata::MetadataImage;
-use krabka_protocol::records::Record;
-use krabka_verified::{
-    BarrierRecoveryFinalizeDecision, ReplayCursorDecision, barrier_recovery_finalize_decision,
-    replay_batch_cursor_decision,
-};
-use tokio::sync::Mutex;
-use tracing::{info, warn};
-
-use super::BarrierCoordinator;
-use crate::{
-    barrier::{
-        STATE_TOPIC,
-        error::BarrierError,
-        persistence::{
-            CutStatus, RecordKind, decode_cut, decode_group, decode_injection_start, decode_key,
+use {
+    super::BarrierCoordinator,
+    crate::{
+        barrier::{
+            STATE_TOPIC,
+            error::BarrierError,
+            persistence::{
+                CutStatus, RecordKind, decode_cut, decode_group, decode_injection_start, decode_key,
+            },
+            state::{GroupEntry, StateRecord, apply_record, build_cut, schedule_next},
         },
-        state::{GroupEntry, StateRecord, apply_record, build_cut, schedule_next},
+        time_util::now_ms,
     },
-    time_util::now_ms,
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::records::Record,
+    krabka_verified::{
+        BarrierRecoveryFinalizeDecision, ReplayCursorDecision, barrier_recovery_finalize_decision,
+        replay_batch_cursor_decision,
+    },
+    std::{collections::BTreeMap, sync::Arc},
+    tokio::sync::Mutex,
+    tracing::{info, warn},
 };
 
 impl BarrierCoordinator {
@@ -279,26 +279,26 @@ fn keep_decoded<T>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_ids::PartitionIndex;
-    use tokio::sync::Mutex;
-
-    use crate::{
-        barrier::{
-            STATE_TOPIC,
-            coordinator::{
-                BarrierCoordinator, GroupDescription, RetainedCut,
-                test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
+    use {
+        crate::{
+            barrier::{
+                STATE_TOPIC,
+                coordinator::{
+                    BarrierCoordinator, GroupDescription, RetainedCut,
+                    test_support::{Fixture, GROUP, GroupSpecSetup, RetainedCutCount, spec},
+                },
+                error::BarrierError,
+                persistence::{
+                    CutStatus, GroupValue, InjectionStartValue, MissingPartition, RecordKey,
+                    encode_injection_start,
+                },
             },
-            error::BarrierError,
-            persistence::{
-                CutStatus, GroupValue, InjectionStartValue, MissingPartition, RecordKey,
-                encode_injection_start,
-            },
+            metadata_source::MetadataSource,
         },
-        metadata_source::MetadataSource,
+        assert2::assert,
+        krabka_ids::PartitionIndex,
+        std::sync::Arc,
+        tokio::sync::Mutex,
     };
 
     #[tokio::test]
@@ -385,13 +385,10 @@ mod tests {
         context: &str,
     ) {
         coordinator
-            .append_records(
-                GROUP,
-                vec![(
-                    RecordKey::injection_start(GROUP, epoch.0),
-                    Some(encode_injection_start(start).expect("encodes").into()),
-                )],
-            )
+            .append_records(GROUP, vec![(
+                RecordKey::injection_start(GROUP, epoch.0),
+                Some(encode_injection_start(start).expect("encodes").into()),
+            )])
             .await
             .expect(context);
     }
@@ -458,38 +455,29 @@ mod tests {
     #[tokio::test]
     async fn recovery_leaves_malformed_and_stale_injections_fenced_open() {
         for (group, start) in [
-            (
-                "malformed-cut",
-                InjectionStartValue {
-                    coordinator_epoch: 3,
-                    triggered_at: 1_000,
-                    targets: Vec::new(),
-                },
-            ),
-            (
-                "stale-cut",
-                InjectionStartValue {
-                    coordinator_epoch: 4,
-                    triggered_at: 1_000,
-                    targets: vec![crate::barrier::persistence::TopicTarget {
-                        topic: "orders".to_owned(),
-                        partition_count: 2,
-                    }],
-                },
-            ),
+            ("malformed-cut", InjectionStartValue {
+                coordinator_epoch: 3,
+                triggered_at: 1_000,
+                targets: Vec::new(),
+            }),
+            ("stale-cut", InjectionStartValue {
+                coordinator_epoch: 4,
+                triggered_at: 1_000,
+                targets: vec![crate::barrier::persistence::TopicTarget {
+                    topic: "orders".to_owned(),
+                    partition_count: 2,
+                }],
+            }),
         ] {
             let fixture = Fixture::new();
             let coordinator = fixture
                 .coordinator_with_group(group, spec(GroupSpecSetup::default()))
                 .await;
             coordinator
-                .append_records(
-                    group,
-                    vec![(
-                        RecordKey::injection_start(group, 1),
-                        Some(encode_injection_start(&start).expect("encodes").into()),
-                    )],
-                )
+                .append_records(group, vec![(
+                    RecordKey::injection_start(group, 1),
+                    Some(encode_injection_start(&start).expect("encodes").into()),
+                )])
                 .await
                 .expect("the injection-start record lands");
 

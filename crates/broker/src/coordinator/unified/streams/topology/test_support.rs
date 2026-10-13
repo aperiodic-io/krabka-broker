@@ -4,11 +4,12 @@
 //! their partition records, and an empty [`StoredSubtopology`] that a test then
 //! fills in with only the fields the scenario needs.
 
-use krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord};
-use uuid::Uuid;
-
-use crate::coordinator::unified::streams::persistence::{
-    StoredCopartitionGroup, StoredSubtopology, StoredTopicInfo,
+use {
+    crate::coordinator::unified::streams::persistence::{
+        StoredCopartitionGroup, StoredSubtopology, StoredTopicInfo,
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord},
+    uuid::Uuid,
 };
 
 krabka_macros::single_replica_partition_fixture!(partition_record);
@@ -54,9 +55,7 @@ pub fn sub(id: &str) -> StoredSubtopology {
 }
 
 /// The two named sources used by the independent wire and persisted topology fixtures.
-pub fn example_source_topics() -> Vec<String> {
-    vec!["in-a".into(), "in-b".into()]
-}
+pub fn example_source_topics() -> Vec<String> { vec!["in-a".into(), "in-b".into()] }
 
 /// A persisted topology fixture, independent of the wire-to-stored mapper.
 pub fn example_subtopology() -> StoredSubtopology {

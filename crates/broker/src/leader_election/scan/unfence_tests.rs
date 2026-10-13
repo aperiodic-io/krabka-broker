@@ -8,9 +8,7 @@
 //! last leader in the ELR as well (`0:1,2,3:1`), and an unclean restart keeps
 //! it out (`0::1`).
 
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 /// The image of a partition `t-0` with replicas `[1, 2, 3]`, led by broker 1
 /// alone in its record, and with `published` as its ELR state.

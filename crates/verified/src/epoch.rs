@@ -25,9 +25,7 @@ pub const fn exact_epoch_successor(current: i64, maximum: i64) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::exact_epoch_successor;
+    use {super::exact_epoch_successor, assert2::assert};
 
     #[test]
     fn returns_the_exact_successor() {

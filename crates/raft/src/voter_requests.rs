@@ -8,18 +8,19 @@
 //! answers `None` when the request passes, so the caller goes on to the
 //! reconfiguration itself.
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use krabka_protocol::{
-    owned::{
-        add_raft_voter_request::AddRaftVoterRequest,
-        remove_raft_voter_request::RemoveRaftVoterRequest,
-        update_raft_voter_request::UpdateRaftVoterRequest,
-        update_raft_voter_response::CurrentLeader,
+use {
+    crate::{RaftError, kraft::transport::QuorumStateSnapshot, reconfig::ReconfigOutcome},
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    krabka_protocol::{
+        owned::{
+            add_raft_voter_request::AddRaftVoterRequest,
+            remove_raft_voter_request::RemoveRaftVoterRequest,
+            update_raft_voter_request::UpdateRaftVoterRequest,
+            update_raft_voter_response::CurrentLeader,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
 };
-
-use crate::{RaftError, kraft::transport::QuorumStateSnapshot, reconfig::ReconfigOutcome};
 
 /// Kafka's `NOT_LEADER_OR_FOLLOWER`.
 pub const NOT_LEADER_OR_FOLLOWER: i16 = 6;
@@ -393,16 +394,16 @@ pub fn reconfiguration_refusal(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::check;
-    use krabka_protocol::owned::{
-        add_raft_voter_request::Listener as AddListener,
-        update_raft_voter_request::{KRaftVersionFeature, Listener as UpdateListener},
+    use {
+        super::*,
+        crate::NodeId,
+        assert2::check,
+        krabka_protocol::owned::{
+            add_raft_voter_request::Listener as AddListener,
+            update_raft_voter_request::{KRaftVersionFeature, Listener as UpdateListener},
+        },
+        std::collections::BTreeMap,
     };
-
-    use super::*;
-    use crate::NodeId;
 
     const CLUSTER: &str = "cluster-a";
     const DIRECTORY: WireUuid = WireUuid([9; 16]);
@@ -692,26 +693,18 @@ mod tests {
         let mut unknown = quorum(false);
         unknown.leader_id = None;
         let rows = [
-            (
-                "a known leader",
-                quorum(false),
-                CurrentLeader {
-                    leader_id: 1,
-                    leader_epoch: 7,
-                    host: "controller-1".into(),
-                    port: 9093,
-                    ..Default::default()
-                },
-            ),
-            (
-                "no leader",
-                unknown,
-                CurrentLeader {
-                    leader_id: -1,
-                    leader_epoch: 7,
-                    ..Default::default()
-                },
-            ),
+            ("a known leader", quorum(false), CurrentLeader {
+                leader_id: 1,
+                leader_epoch: 7,
+                host: "controller-1".into(),
+                port: 9093,
+                ..Default::default()
+            }),
+            ("no leader", unknown, CurrentLeader {
+                leader_id: -1,
+                leader_epoch: 7,
+                ..Default::default()
+            }),
         ];
         for (label, quorum, expected) in rows {
             check!(update_voter_current_leader(&quorum) == expected, "{label}");

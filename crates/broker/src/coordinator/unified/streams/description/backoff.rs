@@ -45,9 +45,7 @@ impl Jitter {
 
     /// A fixed factor of `per_mille` thousandths.
     #[cfg(test)]
-    pub(crate) const fn per_mille(per_mille: u64) -> Self {
-        Self(per_mille)
-    }
+    pub(crate) const fn per_mille(per_mille: u64) -> Self { Self(per_mille) }
 }
 
 /// The window of Kafka's `ExponentialBackoff(30 s, 2, 1 h, 0.2)` for the
@@ -113,9 +111,7 @@ impl SolicitationBackoff {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// The windows of the chain at the neutral factor, its end points at
     /// the extreme factors, and the cap that the jitter cannot pass.

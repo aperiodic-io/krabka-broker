@@ -1,7 +1,4 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::*;
+use {super::*, assert2::assert, proptest::prelude::*};
 
 proptest! {
     #[test]

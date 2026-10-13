@@ -2,18 +2,19 @@
 //! becomes the response session id here, and the per-partition state the
 //! response just carried is snapshotted, filtered and written back.
 
-use krabka_protocol::{
-    owned::fetch_response::{AbortedTransaction, FetchableTopicResponse},
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use super::request::{EffectivePartition, EffectiveTopic};
-use crate::{
-    broker::Broker,
-    codes,
-    fetch_session::{
-        CachedPartitionState, FIRST_TOPIC_ID_FETCH_VERSION, FetchSessionKey, INVALID_SESSION_ID,
-        SessionDecision,
+use {
+    super::request::{EffectivePartition, EffectiveTopic},
+    crate::{
+        broker::Broker,
+        codes,
+        fetch_session::{
+            CachedPartitionState, FIRST_TOPIC_ID_FETCH_VERSION, FetchSessionKey,
+            INVALID_SESSION_ID, SessionDecision,
+        },
+    },
+    krabka_protocol::{
+        owned::fetch_response::{AbortedTransaction, FetchableTopicResponse},
+        primitives::uuid::Uuid as WireUuid,
     },
 };
 
@@ -296,18 +297,15 @@ fn filter_incremental_response(
                     },
                     |(key, _)| key.clone(),
                 );
-                sent.push((
-                    key,
-                    CachedPartitionState {
-                        last_high_watermark: p.high_watermark,
-                        last_last_stable_offset: p.last_stable_offset,
-                        last_log_start_offset: p.log_start_offset,
-                        last_preferred_read_replica: p.preferred_read_replica,
-                        last_aborted_txns_hash: aborted_hash,
-                        last_error_code: p.error_code,
-                        ..Default::default()
-                    },
-                ));
+                sent.push((key, CachedPartitionState {
+                    last_high_watermark: p.high_watermark,
+                    last_last_stable_offset: p.last_stable_offset,
+                    last_log_start_offset: p.log_start_offset,
+                    last_preferred_read_replica: p.preferred_read_replica,
+                    last_aborted_txns_hash: aborted_hash,
+                    last_error_code: p.error_code,
+                    ..Default::default()
+                }));
             }
             changed
         });
@@ -342,10 +340,11 @@ fn hash_aborted_transactions(list: Option<&Vec<AbortedTransaction>>) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::owned::fetch_response::{EpochEndOffset, PartitionData};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_protocol::owned::fetch_response::{EpochEndOffset, PartitionData},
+    };
 
     fn cached_entry(
         topic_name: &str,
@@ -404,7 +403,10 @@ mod tests {
     }
 
     macro_rules! filter_single_topic {
-        (($cached:ident, $responses:ident, $sent:ident), ($name:expr, $id:expr, $watermark:expr), $response_watermark:expr) => {
+        (
+            ($cached:ident, $responses:ident, $sent:ident),($name:expr, $id:expr, $watermark:expr),
+            $response_watermark:expr
+        ) => {
             let $cached: std::collections::HashMap<_, _> =
                 [cached_entry($name, $id, 0, $watermark)]
                     .into_iter()

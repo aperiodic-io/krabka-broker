@@ -1,13 +1,14 @@
 //! Shared command-line entry points and independent parser/filesystem fixtures.
 
-use moxy::{
-    ast::ParseError,
-    token::{Span, Spanner, TokenStream, TokenTree},
-};
-
-use crate::{
-    fixtures::{name, named_arguments},
-    meta::{arguments, item_body, named_body},
+use {
+    crate::{
+        fixtures::{name, named_arguments},
+        meta::{arguments, item_body, named_body},
+    },
+    moxy::{
+        ast::ParseError,
+        token::{Span, Spanner, TokenStream, TokenTree},
+    },
 };
 
 pub(crate) fn flag_metadata_fixture(input: TokenStream) -> Result<TokenStream, ParseError> {

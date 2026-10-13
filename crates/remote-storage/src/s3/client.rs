@@ -9,20 +9,20 @@
 //! [`S3RemoteStorage::with_worm`] then set the upload tuning and the archive
 //! posture.
 
-use std::sync::Arc;
-
-use krabka_object_store::{
-    DEFAULT_MULTIPART_CHUNK_SIZE, DEFAULT_MULTIPART_THRESHOLD, ObjectStoreClient,
-    ObjectStoreConfig, ObjectStoreError, S3Config, build_object_store, verify_gcs_worm_bucket,
-    verify_s3_worm_bucket,
-};
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-use object_store::ObjectStore;
-
-use super::{S3RemoteStorage, WormBucket, WormMode, size_from_usize};
-use crate::{
-    error::RemoteStorageError,
-    worm::{WormArchiver, WormConfig},
+use {
+    super::{S3RemoteStorage, WormBucket, WormMode, size_from_usize},
+    crate::{
+        error::RemoteStorageError,
+        worm::{WormArchiver, WormConfig},
+    },
+    krabka_object_store::{
+        DEFAULT_MULTIPART_CHUNK_SIZE, DEFAULT_MULTIPART_THRESHOLD, ObjectStoreClient,
+        ObjectStoreConfig, ObjectStoreError, S3Config, build_object_store, verify_gcs_worm_bucket,
+        verify_s3_worm_bucket,
+    },
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
+    object_store::ObjectStore,
+    std::sync::Arc,
 };
 
 impl S3RemoteStorage {
@@ -192,20 +192,20 @@ fn verify_worm_bucket(bucket: &WormBucket) -> Result<(), RemoteStorageError> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::check;
-    use krabka_object_store::{
-        DEFAULT_MULTIPART_CHUNK_SIZE, DEFAULT_MULTIPART_THRESHOLD, S3Config,
-    };
-    use krabka_units::prelude::{ByteSizeExt as _, kibibytes, mebibytes};
-    use object_store::memory::InMemory;
-    use tempfile::TempDir;
-
-    use super::S3RemoteStorage;
-    use crate::{
-        s3::test_support::{WormAccess, worm_config},
-        worm::WormConfig,
+    use {
+        super::S3RemoteStorage,
+        crate::{
+            s3::test_support::{WormAccess, worm_config},
+            worm::WormConfig,
+        },
+        assert2::check,
+        krabka_object_store::{
+            DEFAULT_MULTIPART_CHUNK_SIZE, DEFAULT_MULTIPART_THRESHOLD, S3Config,
+        },
+        krabka_units::prelude::{ByteSizeExt as _, kibibytes, mebibytes},
+        object_store::memory::InMemory,
+        std::sync::Arc,
+        tempfile::TempDir,
     };
 
     /// The multipart tunables cross two seams: in from

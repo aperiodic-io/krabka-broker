@@ -13,23 +13,23 @@
 //! which the handler already checked for `ClusterAction`, so every topic is
 //! authorized.
 
-use std::net::SocketAddr;
-
-use krabka_metadata::{AclOperation, MetadataImage};
-use krabka_protocol::owned::common::{
-    add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
-    add_partitions_to_txn_response::{
-        add_partitions_to_txn_partition_result::AddPartitionsToTxnPartitionResult,
-        add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
+use {
+    crate::{
+        authorizer::{AuthorizationResult, Authorizer, authorize_topics},
+        codes,
+        config::BrokerConfig,
+        internal_topics::is_internal_topic,
     },
-};
-use krabka_security::Principal;
-
-use crate::{
-    authorizer::{AuthorizationResult, Authorizer, authorize_topics},
-    codes,
-    config::BrokerConfig,
-    internal_topics::is_internal_topic,
+    krabka_metadata::{AclOperation, MetadataImage},
+    krabka_protocol::owned::common::{
+        add_partitions_to_txn_request::add_partitions_to_txn_topic::AddPartitionsToTxnTopic,
+        add_partitions_to_txn_response::{
+            add_partitions_to_txn_partition_result::AddPartitionsToTxnPartitionResult,
+            add_partitions_to_txn_topic_result::AddPartitionsToTxnTopicResult,
+        },
+    },
+    krabka_security::Principal,
+    std::net::SocketAddr,
 };
 
 /// Who sent the request, and so which topics need a `Write` check.

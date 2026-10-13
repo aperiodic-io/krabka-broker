@@ -6,12 +6,14 @@
 //! the per-partition fetch loops, and the validation that keeps every tunable
 //! inside the `int32` millisecond and byte ranges the Kafka wire carries.
 
-use krabka_client_core::{ClientFrameMax, ConnectionDispatchQueueCapacity};
-use krabka_macros::RefinedNewtype;
-use krabka_units::prelude::{
-    ByteSize, ByteSizeExt as _, Time, TimeExt as _, mebibytes, millis, secs,
+use {
+    krabka_client_core::{ClientFrameMax, ConnectionDispatchQueueCapacity},
+    krabka_macros::RefinedNewtype,
+    krabka_units::prelude::{
+        ByteSize, ByteSizeExt as _, Time, TimeExt as _, mebibytes, millis, secs,
+    },
+    refined_type::rule::GreaterUsize,
 };
-use refined_type::rule::GreaterUsize;
 
 /// Default name of the internal metadata topic.
 pub const METADATA_TOPIC: &str = "__remote_log_metadata";
@@ -193,9 +195,10 @@ fn validate_positive_duration(name: &str, value: Time) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn config_defaults_match_kafka() {
@@ -378,8 +381,10 @@ mod tests {
 
     #[test]
     fn config_carries_security() {
-        use krabka_client_core::security::{ClientSecurity, SaslCredentials};
-        use krabka_security::ListenerProtocol;
+        use {
+            krabka_client_core::security::{ClientSecurity, SaslCredentials},
+            krabka_security::ListenerProtocol,
+        };
         let cfg = KafkaMetadataLogConfig {
             bootstrap: "127.0.0.1:9092".into(),
             topic: METADATA_TOPIC.into(),

@@ -1,23 +1,23 @@
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    broker::{
-        Broker,
+use {
+    super::*,
+    crate::{
+        broker::{
+            Broker,
+            test_support::{
+                LocalPartitionSetup, MetadataPartitionSetup, local_partition_with_records,
+                submit_metadata_topic_partition,
+            },
+        },
+        config::BrokerConfig,
+        partition::{Partition, WriterMessage},
         test_support::{
-            LocalPartitionSetup, MetadataPartitionSetup, local_partition_with_records,
-            submit_metadata_topic_partition,
+            UNSUPPORTED_LEVEL_FAULT, broker_registration, finalize_unstable_metadata_version,
+            write_bootstrap_records,
         },
     },
-    config::BrokerConfig,
-    partition::{Partition, WriterMessage},
-    test_support::{
-        UNSUPPORTED_LEVEL_FAULT, broker_registration, finalize_unstable_metadata_version,
-        write_bootstrap_records,
-    },
+    assert2::{assert, check},
+    std::sync::Arc,
+    tempfile::tempdir,
 };
 
 async fn assert_listener_stops_accepting(addr: SocketAddr) {
@@ -137,25 +137,22 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
     let topic = "handle-mutant-topic";
     let partition_leader = handle.node_id() + 1;
     let partition_isr = [partition_leader, handle.node_id()];
-    submit_metadata_topic_partition(
-        &handle,
-        MetadataPartitionSetup {
-            topic,
-            topic_id: uuid::Uuid::from_u128(0xCAFE),
-            leader: krabka_ids::NodeId(partition_leader),
-            replicas: partition_isr
-                .iter()
-                .copied()
-                .map(krabka_ids::NodeId)
-                .collect(),
-            isr: partition_isr
-                .iter()
-                .copied()
-                .map(krabka_ids::NodeId)
-                .collect(),
-            ..Default::default()
-        },
-    )
+    submit_metadata_topic_partition(&handle, MetadataPartitionSetup {
+        topic,
+        topic_id: uuid::Uuid::from_u128(0xCAFE),
+        leader: krabka_ids::NodeId(partition_leader),
+        replicas: partition_isr
+            .iter()
+            .copied()
+            .map(krabka_ids::NodeId)
+            .collect(),
+        isr: partition_isr
+            .iter()
+            .copied()
+            .map(krabka_ids::NodeId)
+            .collect(),
+        ..Default::default()
+    })
     .await;
     handle.wait_until_partition_present(topic, 0).await;
     check!(handle.has_partition(topic, 0));
@@ -220,14 +217,11 @@ async fn single_broker_handle_helpers_observe_real_state_and_errors() {
     assert!(!snapshot.bytes.is_empty());
 
     let local_topic = "handle-local-log-mutant-topic";
-    let local_part = local_partition_with_records(
-        dir.path(),
-        LocalPartitionSetup {
-            topic: local_topic,
-            values: &[b"a", b"b"],
-            ..Default::default()
-        },
-    );
+    let local_part = local_partition_with_records(dir.path(), LocalPartitionSetup {
+        topic: local_topic,
+        values: &[b"a", b"b"],
+        ..Default::default()
+    });
     assert!(!handle.partition_exists_for_test(local_topic, 0));
     broker.partitions.insert(
         local_topic.into(),
@@ -293,13 +287,10 @@ async fn start_and_shutdown_clean() {
         broker,
         addr,
         partition,
-    } = shutdown_fixture(
-        dir.path(),
-        LocalPartitionSetup {
-            topic: "shutdown",
-            ..Default::default()
-        },
-    )
+    } = shutdown_fixture(dir.path(), LocalPartitionSetup {
+        topic: "shutdown",
+        ..Default::default()
+    })
     .await;
     assert!(addr.port() != 0);
     let stream = tokio::net::TcpStream::connect(addr)
@@ -331,13 +322,10 @@ async fn dropping_handle_stops_idle_connections_and_partition_writers() {
         broker,
         addr,
         partition,
-    } = shutdown_fixture(
-        dir.path(),
-        LocalPartitionSetup {
-            topic: "drop-shutdown",
-            ..Default::default()
-        },
-    )
+    } = shutdown_fixture(dir.path(), LocalPartitionSetup {
+        topic: "drop-shutdown",
+        ..Default::default()
+    })
     .await;
     let stream = tokio::net::TcpStream::connect(addr)
         .await

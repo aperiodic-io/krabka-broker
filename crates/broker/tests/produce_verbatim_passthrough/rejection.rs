@@ -5,18 +5,19 @@
 //! Both cases assert `INVALID_RECORD` (87) and a log end offset that is still
 //! 0, which is what proves the rejection happened ahead of the append.
 
-use assert2::check;
-use bytes::Bytes;
-use krabka_compression::CompressionType;
-use krabka_protocol::records::{
-    Attributes, CRC_COVERAGE_START, HEADER_LEN, Record, RecordBatch, RecordsPayload,
-};
-
-use crate::{
-    harness::{
-        batch, boot, create_topic, encode_batch, produce_one, produce_payload, topic_id_for,
+use {
+    crate::{
+        harness::{
+            batch, boot, create_topic, encode_batch, produce_one, produce_payload, topic_id_for,
+        },
+        support::{client::connect_client, records::value_record},
     },
-    support::{client::connect_client, records::value_record},
+    assert2::check,
+    bytes::Bytes,
+    krabka_compression::CompressionType,
+    krabka_protocol::records::{
+        Attributes, CRC_COVERAGE_START, HEADER_LEN, Record, RecordBatch, RecordsPayload,
+    },
 };
 
 /// Control batches are broker-internal transaction markers. A client-authored

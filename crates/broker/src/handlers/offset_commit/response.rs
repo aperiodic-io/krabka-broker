@@ -8,16 +8,17 @@
 //! same key when one exists, and at the end when none does. When the handler
 //! refused no row, the coordinator's rows are the whole response, unchanged.
 
-use std::collections::HashMap;
-
-use krabka_protocol::{
-    owned::{
-        offset_commit_request::OffsetCommitRequestTopic,
-        offset_commit_response::{
-            OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
+use {
+    krabka_protocol::{
+        owned::{
+            offset_commit_request::OffsetCommitRequestTopic,
+            offset_commit_response::{
+                OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
+            },
         },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
+    std::collections::HashMap,
 };
 
 /// The key of one response topic row.
@@ -139,11 +140,10 @@ impl ResponseBuilder {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::owned::offset_commit_request::OffsetCommitRequestPartition;
-
-    use super::*;
-    use crate::codes;
+    use {
+        super::*, crate::codes, assert2::assert,
+        krabka_protocol::owned::offset_commit_request::OffsetCommitRequestPartition,
+    };
 
     const ID_A: WireUuid = WireUuid([0x0a; 16]);
     const ID_B: WireUuid = WireUuid([0x0b; 16]);
@@ -231,11 +231,10 @@ mod tests {
                 ],
                 committed: vec![response_topic("a", ID_A, &[(0, codes::NONE)])],
                 expected: vec![
-                    response_topic(
-                        "",
-                        WireUuid::ZERO,
-                        &[(0, codes::UNKNOWN_TOPIC_ID), (1, codes::UNKNOWN_TOPIC_ID)],
-                    ),
+                    response_topic("", WireUuid::ZERO, &[
+                        (0, codes::UNKNOWN_TOPIC_ID),
+                        (1, codes::UNKNOWN_TOPIC_ID),
+                    ]),
                     response_topic("", ID_B, &[(0, codes::UNKNOWN_TOPIC_ID)]),
                     response_topic("a", ID_A, &[(0, codes::NONE)]),
                 ],
@@ -252,11 +251,10 @@ mod tests {
                     response_topic("a", WireUuid::ZERO, &[(1, codes::NONE)]),
                 ],
                 expected: vec![
-                    response_topic(
-                        "a",
-                        WireUuid::ZERO,
-                        &[(0, codes::TOPIC_AUTHORIZATION_FAILED), (1, codes::NONE)],
-                    ),
+                    response_topic("a", WireUuid::ZERO, &[
+                        (0, codes::TOPIC_AUTHORIZATION_FAILED),
+                        (1, codes::NONE),
+                    ]),
                     response_topic("b", WireUuid::ZERO, &[(0, codes::NONE)]),
                 ],
             },
@@ -271,14 +269,11 @@ mod tests {
             }
             builder.merge(case.committed);
             actual.push((case.label, builder.build()));
-            expected.push((
-                case.label,
-                OffsetCommitResponse {
-                    topics: case.expected,
-                    throttle_time_ms: 0,
-                    ..Default::default()
-                },
-            ));
+            expected.push((case.label, OffsetCommitResponse {
+                topics: case.expected,
+                throttle_time_ms: 0,
+                ..Default::default()
+            }));
         }
         assert!(actual == expected);
     }

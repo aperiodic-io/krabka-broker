@@ -4,7 +4,6 @@
 //! sets can never disagree. The behavioral gating helper `require_feature`
 //! lives here because it returns broker error codes.
 
-use krabka_metadata::MetadataImage;
 /// The `eligible.leader.replicas.version` feature name (KIP-966). It gates the
 /// controller's ELR bookkeeping, which `ElrPublisher::extend` reads with
 /// `feature_enabled`, and `UpdateFeatures` clears the published state when it
@@ -24,8 +23,7 @@ pub(crate) use krabka_metadata::metadata_version::SHARE_VERSION_FEATURE as SHARE
 /// `StreamsGroupHeartbeat` and `StreamsGroupDescribe`. Those handlers read it
 /// with `feature_enabled`.
 pub(crate) use krabka_metadata::metadata_version::STREAMS_VERSION_FEATURE as STREAMS_VERSION;
-
-use crate::codes::UNSUPPORTED_VERSION;
+use {crate::codes::UNSUPPORTED_VERSION, krabka_metadata::MetadataImage};
 
 /// The `metadata.version` a self-bootstrapped cluster finalizes: Kafka 4.3's
 /// `MetadataVersion.LATEST_PRODUCTION`, `4.3-IV0`. It is the level
@@ -165,10 +163,7 @@ pub(crate) fn share_dlq_supported(image: &krabka_metadata::MetadataImage) -> boo
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::codes::UNSUPPORTED_VERSION;
+    use {super::*, crate::codes::UNSUPPORTED_VERSION, assert2::assert};
 
     #[test]
     fn feature_enabled_treats_absence_as_disabled() {

@@ -6,44 +6,44 @@
 //! The startup phases, the handle's methods, and the accept path live in the
 //! child modules declared below.
 
-use std::{
-    net::SocketAddr,
-    sync::{Arc, atomic::AtomicBool},
-};
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use krabka_raft::ConnectionLimiter;
-use krabka_security::ListenerProtocol;
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-
-use crate::{
-    auto_topic_creation::AutoTopicCreation,
-    barrier::coordinator::BarrierCoordinator,
-    client_metrics::ClientMetrics,
-    config::BrokerConfig,
-    coordinator::GroupCoordinator,
-    diskless::{hot_tail::HotTailCache, read::DisklessReadHandle},
-    fetch_session::FetchSessionCache,
-    future_log::FutureLogState,
-    handlers::DispatchRegistry,
-    heartbeat::controller_state::ControllerLivenessState,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::{client::InterBrokerClient, dispatch::RequestByteBudget},
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    producer_state::ProducerState,
-    quota::QuotaBuckets,
-    remote_reader::RemoteReader,
-    share_coordinator::coordinator::ShareCoordinator,
-    share_partition::manager::SharePartitionLeaderManager,
-    throttle::ThrottleState,
-    txn::coordinator::TxnCoordinator,
-    unclean_recovery::UncleanRecoveryHandle,
-    wal::quorum::registry::WalShardRegistry,
+use {
+    crate::{
+        auto_topic_creation::AutoTopicCreation,
+        barrier::coordinator::BarrierCoordinator,
+        client_metrics::ClientMetrics,
+        config::BrokerConfig,
+        coordinator::GroupCoordinator,
+        diskless::{hot_tail::HotTailCache, read::DisklessReadHandle},
+        fetch_session::FetchSessionCache,
+        future_log::FutureLogState,
+        handlers::DispatchRegistry,
+        heartbeat::controller_state::ControllerLivenessState,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::{client::InterBrokerClient, dispatch::RequestByteBudget},
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        producer_state::ProducerState,
+        quota::QuotaBuckets,
+        remote_reader::RemoteReader,
+        share_coordinator::coordinator::ShareCoordinator,
+        share_partition::manager::SharePartitionLeaderManager,
+        throttle::ThrottleState,
+        txn::coordinator::TxnCoordinator,
+        unclean_recovery::UncleanRecoveryHandle,
+        wal::quorum::registry::WalShardRegistry,
+    },
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    krabka_raft::ConnectionLimiter,
+    krabka_security::ListenerProtocol,
+    std::{
+        net::SocketAddr,
+        sync::{Arc, atomic::AtomicBool},
+    },
+    tokio::task::JoinHandle,
+    tokio_util::sync::CancellationToken,
 };
 
 mod accept;
@@ -278,9 +278,7 @@ impl DisklessRuntime {
 }
 
 impl Broker {
-    pub(crate) fn handlers(&self) -> &DispatchRegistry {
-        &self.handlers
-    }
+    pub(crate) fn handlers(&self) -> &DispatchRegistry { &self.handlers }
 
     pub(crate) fn audit_product() -> krabka_audit::ProductInfo {
         krabka_audit::ProductInfo {
@@ -293,9 +291,7 @@ impl Broker {
     /// Test-only: clone the controller handle so the `auto_join` unit test can
     /// build `AutoJoinParams` without access to private fields.
     #[cfg(test)]
-    pub(crate) fn controller_for_test(&self) -> Arc<dyn MetadataSource> {
-        self.controller.clone()
-    }
+    pub(crate) fn controller_for_test(&self) -> Arc<dyn MetadataSource> { self.controller.clone() }
 
     /// Test-only: clone the shared inter-broker client (same reason).
     #[cfg(test)]

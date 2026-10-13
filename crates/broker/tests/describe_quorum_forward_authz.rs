@@ -16,17 +16,18 @@
 
 mod support;
 
-use assert2::check;
-use krabka_broker::{
-    BrokerConfig,
-    authorizer::{AclSource, AuthorizationRequest, AuthorizationResult, Authorizer},
-};
-use krabka_metadata::AclOperation;
-use krabka_security::{ListenerProtocol, SaslMechanism};
-
-use crate::support::{
-    quorum::{follower_config, two_node_leader},
-    sasl_client, shutdown_cluster, start_n_node_with,
+use {
+    crate::support::{
+        quorum::{follower_config, two_node_leader},
+        sasl_client, shutdown_cluster, start_n_node_with,
+    },
+    assert2::check,
+    krabka_broker::{
+        BrokerConfig,
+        authorizer::{AclSource, AuthorizationRequest, AuthorizationResult, Authorizer},
+    },
+    krabka_metadata::AclOperation,
+    krabka_security::{ListenerProtocol, SaslMechanism},
 };
 
 const ALICE: &str = "alice";

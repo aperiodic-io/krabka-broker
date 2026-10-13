@@ -4,11 +4,12 @@
 //! sits here with the methods that delegate to it, so that the divergence
 //! contract is stated once.
 
-use krabka_ids::{LeaderEpoch, Offset};
-
 #[cfg(test)]
 use super::UNDEFINED_EPOCH;
-use super::{LeaderEpochCheckpoint, UNDEFINED_OFFSET, epoch_and_offset_for_entries};
+use {
+    super::{LeaderEpochCheckpoint, UNDEFINED_OFFSET, epoch_and_offset_for_entries},
+    krabka_ids::{LeaderEpoch, Offset},
+};
 
 impl LeaderEpochCheckpoint {
     /// End offset of a *recorded* `epoch`. It is the `start_offset` of the
@@ -90,10 +91,11 @@ impl LeaderEpochCheckpoint {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::leader_epoch_checkpoint::test_support::{checkpoint, fresh};
+    use {
+        super::*,
+        crate::leader_epoch_checkpoint::test_support::{checkpoint, fresh},
+        assert2::check,
+    };
 
     #[test]
     fn end_offset_for_current_epoch_returns_log_end_offset() {

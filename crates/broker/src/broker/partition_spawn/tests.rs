@@ -1,16 +1,17 @@
-use assert2::assert;
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    config::BrokerConfig,
-    log_dir::partition_dir,
-    log_dir_status::LogDirRegistry,
-    producer_state::ProducerState,
-    wal::quorum::{
-        registry::{ShardId, WalShardRegistry},
-        wire::{QuorumGroup, fetch_request},
+use {
+    super::*,
+    crate::{
+        config::BrokerConfig,
+        log_dir::partition_dir,
+        log_dir_status::LogDirRegistry,
+        producer_state::ProducerState,
+        wal::quorum::{
+            registry::{ShardId, WalShardRegistry},
+            wire::{QuorumGroup, fetch_request},
+        },
     },
+    assert2::assert,
+    tempfile::tempdir,
 };
 
 #[tokio::test]

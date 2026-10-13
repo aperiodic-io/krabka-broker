@@ -1,12 +1,13 @@
 //! Behaviour tests for the runtime-scalar checks: which value each rejection
 //! names, and the message it reports.
 
-use assert2::assert;
-use krabka_units::{gibibytes, millis, nanos};
-
-use super::*;
-use crate::config::test_support::{
-    RuntimeInvalidator, assert_invalid_runtime, assert_invalid_runtime_cases, base,
+use {
+    super::*,
+    crate::config::test_support::{
+        RuntimeInvalidator, assert_invalid_runtime, assert_invalid_runtime_cases, base,
+    },
+    assert2::assert,
+    krabka_units::{gibibytes, millis, nanos},
 };
 
 #[test]

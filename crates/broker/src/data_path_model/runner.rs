@@ -5,10 +5,11 @@
 //! the depth cap, the generated-state cap or the unique-state bound proves
 //! nothing, and the two must be tuned together.
 
-use stateright::Checker;
-
-use super::model::DpModel;
-use crate::model_check::{assert_pinned_count, run_bfs};
+use {
+    super::model::DpModel,
+    crate::model_check::{assert_pinned_count, run_bfs},
+    stateright::Checker,
+};
 
 const TARGET_STATE_COUNT: usize = 60_000_000;
 const MAX_UNIQUE_STATES: usize = 8_000_000;

@@ -6,18 +6,19 @@
 //! producer, because Kafka forbids a client from producing a control batch
 //! directly.
 
-use assert2::assert;
-use bytes::Bytes;
-use krabka_client_producer::Producer;
-use krabka_protocol::{
-    Decode, kafka_3_6_2::owned::fetch_response::FetchResponse as LegacyFetchResponse,
-};
-
-use crate::{
-    harness::{create_topic, fetch_legacy_raw_at},
-    support::{
-        self,
-        producer::{ProducerRecordSetup, producer_record},
+use {
+    crate::{
+        harness::{create_topic, fetch_legacy_raw_at},
+        support::{
+            self,
+            producer::{ProducerRecordSetup, producer_record},
+        },
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_client_producer::Producer,
+    krabka_protocol::{
+        Decode, kafka_3_6_2::owned::fetch_response::FetchResponse as LegacyFetchResponse,
     },
 };
 

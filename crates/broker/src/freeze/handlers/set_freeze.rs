@@ -34,22 +34,23 @@
 //! broker's clock is the honest stamp, and a client then cannot park an entry
 //! in the far future where no later record replaces it.
 
-use krabka_protocol::krabka::freeze::SetTopicFreezeRequest;
-use uuid::Uuid;
-
-use self::{
-    checks::{FreezeEnv, prepare},
-    commit::submit,
-    outcome::Refusal,
-    response::{FREEZE_ACTION, THAW_ACTION, respond},
-};
-use crate::{
-    codes,
-    freeze::{
-        freeze_target,
-        handlers::{FreezeAudit, pattern_type_concrete, require_freeze},
+use {
+    self::{
+        checks::{FreezeEnv, prepare},
+        commit::submit,
+        outcome::Refusal,
+        response::{FREEZE_ACTION, THAW_ACTION, respond},
     },
-    handlers::encode_response,
+    crate::{
+        codes,
+        freeze::{
+            freeze_target,
+            handlers::{FreezeAudit, pattern_type_concrete, require_freeze},
+        },
+        handlers::encode_response,
+    },
+    krabka_protocol::krabka::freeze::SetTopicFreezeRequest,
+    uuid::Uuid,
 };
 
 mod checks;

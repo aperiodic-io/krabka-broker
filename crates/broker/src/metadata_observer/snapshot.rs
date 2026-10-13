@@ -31,25 +31,25 @@
 //! the frame budget therefore fails cleanly, with a warning, instead of
 //! stalling.
 
-use std::sync::Arc;
-
-use krabka_client_core::Connection;
-use krabka_metadata::MetadataImage;
-use krabka_raft::{
-    NodeId,
-    kraft::{
-        snapshot_fetch::{SnapshotFetchState, SnapshotFetchStep},
-        transport::{
-            api_key,
-            wire::{FETCH_SNAPSHOT_VERSION, PeerRequest, PeerResponse},
+use {
+    super::{ObserverConfig, store::ObserverStore},
+    krabka_client_core::Connection,
+    krabka_metadata::MetadataImage,
+    krabka_raft::{
+        NodeId,
+        kraft::{
+            snapshot_fetch::{SnapshotFetchState, SnapshotFetchStep},
+            transport::{
+                api_key,
+                wire::{FETCH_SNAPSHOT_VERSION, PeerRequest, PeerResponse},
+            },
         },
     },
+    krabka_units::{ByteSize, convert::ByteSizeExt as _, kibibytes},
+    std::sync::Arc,
+    tokio::sync::watch,
+    tracing::{debug, info, warn},
 };
-use krabka_units::{ByteSize, convert::ByteSizeExt as _, kibibytes};
-use tokio::sync::watch;
-use tracing::{debug, info, warn};
-
-use super::{ObserverConfig, store::ObserverStore};
 
 /// Room left inside the connection's frame budget for everything wrapping the
 /// snapshot bytes: the response header and the `FetchSnapshot` envelope around
@@ -192,19 +192,20 @@ async fn transfer(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::MetadataRecord;
-    use krabka_protocol::owned::api_versions_request;
-    use krabka_raft::kraft::transport::wire::decode_fetch_snapshot;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        metadata_observer::{
-            fetch::{FetchOutcome, fetch_once},
-            test_support::{api_versions_response_v0, observer_config},
+    use {
+        super::*,
+        crate::{
+            metadata_observer::{
+                fetch::{FetchOutcome, fetch_once},
+                test_support::{api_versions_response_v0, observer_config},
+            },
+            test_support::single_partition_topic,
         },
-        test_support::single_partition_topic,
+        assert2::assert,
+        krabka_metadata::MetadataRecord,
+        krabka_protocol::owned::api_versions_request,
+        krabka_raft::kraft::transport::wire::decode_fetch_snapshot,
+        uuid::Uuid,
     };
 
     struct SnapshotFixture {

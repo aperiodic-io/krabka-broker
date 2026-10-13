@@ -51,15 +51,11 @@ pub fn next_epoch(prev: FetchSessionEpoch) -> FetchSessionEpoch {
     if n <= 0 { 1 } else { n }
 }
 
-pub(super) fn session_id_is_reserved(candidate: FetchSessionId) -> bool {
-    candidate <= 0
-}
+pub(super) fn session_id_is_reserved(candidate: FetchSessionId) -> bool { candidate <= 0 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn next_epoch_wraps_skipping_sentinels() {

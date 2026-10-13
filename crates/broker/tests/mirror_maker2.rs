@@ -99,15 +99,16 @@
 mod jvm_acceptance;
 mod support;
 
-use std::{
-    path::PathBuf,
-    process::{Command, Output, Stdio},
-    time::Duration,
+use {
+    assert2::assert,
+    jvm_acceptance::{broker0_listen, host_port, start_host_broker_with},
+    std::{
+        path::PathBuf,
+        process::{Command, Output, Stdio},
+        time::Duration,
+    },
+    support::bridge_gateway,
 };
-
-use assert2::assert;
-use jvm_acceptance::{broker0_listen, host_port, start_host_broker_with};
-use support::bridge_gateway;
 
 /// The release both clusters and every tool come from: the source broker is
 /// this image, MM2 is its `connect-mirror-maker.sh`, and the admin tools aimed
@@ -201,9 +202,7 @@ impl Record {
     /// `parse.key=true`, whose delimiters both default to a tab, and
     /// `kafka-console-consumer` writes it under `print.headers=true` and
     /// `print.key=true`, whose separator defaults to the same tab.
-    fn line(&self) -> String {
-        format!("{}\t{}\t{}", self.headers, self.key, self.value)
-    }
+    fn line(&self) -> String { format!("{}\t{}\t{}", self.headers, self.key, self.value) }
 
     /// One consumed line back into a record, or `None` when the line is not a
     /// record at all -- the console consumer's trailing
@@ -559,10 +558,11 @@ impl SourceKafka {
             self.bootstrap,
         );
         loop {
-            let out = tool_allowing_failure(
-                "kafka-topics",
-                &["--bootstrap-server", &self.bootstrap, "--list"],
-            );
+            let out = tool_allowing_failure("kafka-topics", &[
+                "--bootstrap-server",
+                &self.bootstrap,
+                "--list",
+            ]);
             if out.status.success() {
                 eprintln!(
                     "KRABKA[test] reached: the source Kafka answers, after {:.1}s",
@@ -672,17 +672,13 @@ impl MirrorMaker {
 
     /// Everything MM2 has printed, for the one assertion that searches it
     /// rather than printing it.
-    fn logs(&self) -> String {
-        container_logs(&self.container)
-    }
+    fn logs(&self) -> String { container_logs(&self.container) }
 
     /// MM2's log, cut to what explains a failure. Every wait below ends with
     /// this, because MM2's own log is where a refused topic creation, a failed
     /// `alterConsumerGroupOffsets` or an ACL sync that could not run is
     /// written down.
-    fn diagnostics(&self) -> String {
-        container_excerpt(&self.container)
-    }
+    fn diagnostics(&self) -> String { container_excerpt(&self.container) }
 
     /// How MM2 stopped, or `None` while it is still running.
     ///
@@ -801,16 +797,13 @@ fn list_topics(bootstrap: &str) -> Vec<String> {
 
 /// The partition count `kafka-topics --describe` reports for one topic.
 fn partition_count(bootstrap: &str, topic: &str) -> u32 {
-    let out = tool(
-        "kafka-topics",
-        &[
-            "--bootstrap-server",
-            bootstrap,
-            "--describe",
-            "--topic",
-            topic,
-        ],
-    );
+    let out = tool("kafka-topics", &[
+        "--bootstrap-server",
+        bootstrap,
+        "--describe",
+        "--topic",
+        topic,
+    ]);
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     described_partitions(&text)
         .unwrap_or_else(|| panic!("no partition count in the description of {topic}:\n{text}"))
@@ -832,18 +825,15 @@ fn described_partitions(text: &str) -> Option<u32> {
 /// One explicitly-set topic config, as `kafka-configs --describe` prints it,
 /// or `None` when the topic does not carry it.
 fn topic_config(bootstrap: &str, topic: &str, key: &str) -> Option<String> {
-    let out = tool_allowing_failure(
-        "kafka-configs",
-        &[
-            "--bootstrap-server",
-            bootstrap,
-            "--describe",
-            "--entity-type",
-            "topics",
-            "--entity-name",
-            topic,
-        ],
-    );
+    let out = tool_allowing_failure("kafka-configs", &[
+        "--bootstrap-server",
+        bootstrap,
+        "--describe",
+        "--entity-type",
+        "topics",
+        "--entity-name",
+        topic,
+    ]);
     if !out.status.success() {
         return None;
     }
@@ -866,16 +856,13 @@ fn described_config(text: &str, key: &str) -> Option<String> {
 /// A group's committed offset for partition zero of `topic`, or `None` when
 /// the group has no position there yet.
 fn committed_offset(bootstrap: &str, group: &str, topic: &str) -> Option<i64> {
-    let out = tool_allowing_failure(
-        "kafka-consumer-groups",
-        &[
-            "--bootstrap-server",
-            bootstrap,
-            "--describe",
-            "--group",
-            group,
-        ],
-    );
+    let out = tool_allowing_failure("kafka-consumer-groups", &[
+        "--bootstrap-server",
+        bootstrap,
+        "--describe",
+        "--group",
+        group,
+    ]);
     if !out.status.success() {
         return None;
     }
@@ -903,20 +890,17 @@ fn described_offset(text: &str, group: &str, topic: &str) -> Option<i64> {
 
 /// Create the topic being migrated and seed it with `records`.
 fn seed_source(bootstrap: &str, records: &[Record]) {
-    tool(
-        "kafka-topics",
-        &[
-            "--bootstrap-server",
-            bootstrap,
-            "--create",
-            "--topic",
-            TOPIC,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-        ],
-    );
+    tool("kafka-topics", &[
+        "--bootstrap-server",
+        bootstrap,
+        "--create",
+        "--topic",
+        TOPIC,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+    ]);
     let lines: Vec<String> = records.iter().map(Record::line).collect();
     let stdin = format!("{}\n", lines.join("\n"));
     let out = tool_with_stdin(
@@ -963,21 +947,18 @@ async fn commit_source_group(bootstrap: &str) {
     let offset = target_offset.to_string();
     let deadline = tokio::time::Instant::now() + SOURCE_BUDGET;
     loop {
-        let out = tool_allowing_failure(
-            "kafka-consumer-groups",
-            &[
-                "--bootstrap-server",
-                bootstrap,
-                "--group",
-                GROUP,
-                "--topic",
-                TOPIC,
-                "--reset-offsets",
-                "--to-offset",
-                &offset,
-                "--execute",
-            ],
-        );
+        let out = tool_allowing_failure("kafka-consumer-groups", &[
+            "--bootstrap-server",
+            bootstrap,
+            "--group",
+            GROUP,
+            "--topic",
+            TOPIC,
+            "--reset-offsets",
+            "--to-offset",
+            &offset,
+            "--execute",
+        ]);
         if out.status.success() && committed_offset(bootstrap, GROUP, TOPIC) == Some(target_offset)
         {
             return;
@@ -1141,20 +1122,17 @@ async fn assert_translated_offsets(
 /// Set [`RETENTION_MS`] on the source topic, which mirroring is by now live
 /// over, so `sync.topic.configs` has a change to carry.
 fn alter_source_retention(source: &str) {
-    tool(
-        "kafka-configs",
-        &[
-            "--bootstrap-server",
-            source,
-            "--alter",
-            "--entity-type",
-            "topics",
-            "--entity-name",
-            TOPIC,
-            "--add-config",
-            &format!("retention.ms={RETENTION_MS}"),
-        ],
-    );
+    tool("kafka-configs", &[
+        "--bootstrap-server",
+        source,
+        "--alter",
+        "--entity-type",
+        "topics",
+        "--entity-name",
+        TOPIC,
+        "--add-config",
+        &format!("retention.ms={RETENTION_MS}"),
+    ]);
 }
 
 /// The `retention.ms` [`alter_source_retention`] set on the source topic
@@ -1189,20 +1167,17 @@ fn assert_acl_sync(target: &str, mm2: &MirrorMaker) {
         mm2.diagnostics(),
     );
 
-    let out = tool_allowing_failure(
-        "kafka-acls",
-        &[
-            "--bootstrap-server",
-            target,
-            "--add",
-            "--allow-principal",
-            "User:krabka-mm2",
-            "--operation",
-            "Read",
-            "--topic",
-            TOPIC,
-        ],
-    );
+    let out = tool_allowing_failure("kafka-acls", &[
+        "--bootstrap-server",
+        target,
+        "--add",
+        "--allow-principal",
+        "User:krabka-mm2",
+        "--operation",
+        "Read",
+        "--topic",
+        TOPIC,
+    ]);
     let text = both_streams(&out);
     // `kafka-acls --add` first asks DescribeAcls whether the binding exists
     // (`AclCommand.addAcls`), so the refusal it prints is DescribeAcls's and not
@@ -1222,12 +1197,13 @@ fn assert_acl_sync(target: &str, mm2: &MirrorMaker) {
 /// stops understanding a tool fails there rather than only under `--ignored`.
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::{
-        ContainerState, LOG_PROBLEM_LINES, LOG_TAIL_LINES, Record, Role, bridge_gateway,
-        described_config, described_offset, described_partitions, log_excerpt,
-        parse_container_state, role_of, seeded_records,
+    use {
+        super::{
+            ContainerState, LOG_PROBLEM_LINES, LOG_TAIL_LINES, Record, Role, bridge_gateway,
+            described_config, described_offset, described_partitions, log_excerpt,
+            parse_container_state, role_of, seeded_records,
+        },
+        assert2::assert,
     };
 
     #[test]

@@ -1,13 +1,15 @@
-use creusot_std::prelude::*;
-
-use crate::{
-    authz::{
-        RequestAuthState, request_auth_admission, sasl_session_expiry, session_expired_for_request,
+use {
+    crate::{
+        authz::{
+            RequestAuthState, request_auth_admission, sasl_session_expiry,
+            session_expired_for_request,
+        },
+        delegation_token::{
+            ScramCredentialSource, TokenApi, TokenApiAdmission, TokenCreateDecision,
+            create_token_deadlines, scram_credential_source, token_api_admission, token_is_active,
+        },
     },
-    delegation_token::{
-        ScramCredentialSource, TokenApi, TokenApiAdmission, TokenCreateDecision,
-        create_token_deadlines, scram_credential_source, token_api_admission, token_is_active,
-    },
+    creusot_std::prelude::*,
 };
 
 // Stored expiry, maximum lifetime, session deadline, advertised lifetime,

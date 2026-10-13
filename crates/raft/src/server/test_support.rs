@@ -2,17 +2,18 @@
 //! [`KraftController`] over a temporary directory, the voter records it is
 //! opened with, and the waits that let a test observe an elected leader.
 
-use krabka_metadata::NodeId;
-use krabka_units::prelude::{Time, TimeExt as _, millis, secs};
-use tokio::io::AsyncReadExt;
-use uuid::Uuid;
-
-use crate::{
-    ControllerFetchMissLimit, MetadataLogConfig, MetadataRaftCommandQueueCapacity,
-    MetadataRaftFetchMax,
-    error::RaftError,
-    kraft::{Activation, KraftController, NullPeerSender},
-    test_support::single_partition_topic,
+use {
+    crate::{
+        ControllerFetchMissLimit, MetadataLogConfig, MetadataRaftCommandQueueCapacity,
+        MetadataRaftFetchMax,
+        error::RaftError,
+        kraft::{Activation, KraftController, NullPeerSender},
+        test_support::single_partition_topic,
+    },
+    krabka_metadata::NodeId,
+    krabka_units::prelude::{Time, TimeExt as _, millis, secs},
+    tokio::io::AsyncReadExt,
+    uuid::Uuid,
 };
 
 /// Read a complete length-prefixed listener response.
@@ -83,10 +84,10 @@ pub(super) fn test_engine_with_voters(
 }
 
 pub(super) fn single_voter_engine() -> (KraftController, tempfile::TempDir) {
-    test_engine_with_voters(
-        1,
-        [voter(1, vec![controller_endpoint("controller-1", 9093)])],
-    )
+    test_engine_with_voters(1, [voter(1, vec![controller_endpoint(
+        "controller-1",
+        9093,
+    )])])
 }
 
 pub(super) async fn wait_for_leader(engine: &KraftController) {

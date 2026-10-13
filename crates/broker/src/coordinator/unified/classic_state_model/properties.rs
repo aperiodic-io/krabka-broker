@@ -7,49 +7,22 @@
 //! together. The invariants the transitions assert live in the sibling
 //! `invariants` module, which the properties below restate.
 
-use std::time::Duration;
-
-use bytes::Bytes;
-use stateright::{Model, Property};
-
-use super::{
-    config::ClassicModel,
-    fixtures::{at, mk_member},
-    invariants::{index_coherent, single_owner},
-    state::{Act, GrpState},
+use {
+    super::{
+        config::ClassicModel,
+        fixtures::{at, mk_member},
+        invariants::{index_coherent, single_owner},
+        state::{Act, GrpState},
+    },
+    crate::coordinator::unified::classic_state::{ClassicGroup, GroupState},
+    bytes::Bytes,
+    stateright::{Model, Property},
+    std::time::Duration,
 };
-use crate::coordinator::unified::classic_state::{ClassicGroup, GroupState};
 
 impl Model for ClassicModel {
-    type State = GrpState;
     type Action = Act;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        vec![GrpState {
-            g: ClassicGroup::new("g"),
-            clock: 0,
-        }]
-    }
-
-    fn actions(&self, s: &Self::State, actions: &mut Vec<Self::Action>) {
-        for &mid in &self.members {
-            actions.push(Act::JoinDynamic(mid));
-            actions.push(Act::Heartbeat(mid));
-            actions.push(Act::Leave(mid));
-            for &iid in &self.instances {
-                actions.push(Act::JoinStatic(iid, mid));
-            }
-        }
-        if matches!(s.g.state, GroupState::PreparingRebalance) && !s.g.members.is_empty() {
-            actions.push(Act::CompleteRebalance);
-        }
-        if matches!(s.g.state, GroupState::CompletingRebalance) {
-            actions.push(Act::Sync);
-        }
-        if s.clock < self.max_clock {
-            actions.push(Act::ExpireTick);
-        }
-    }
+    type State = GrpState;
 
     krabka_macros::model_transition! { last, action, s; {
         match action {
@@ -145,6 +118,33 @@ impl Model for ClassicModel {
         assert2::assert!(single_owner(&s.g), "single-owner violated: {:?}", s.g);
         Some(s)
     }}
+
+    fn init_states(&self) -> Vec<Self::State> {
+        vec![GrpState {
+            g: ClassicGroup::new("g"),
+            clock: 0,
+        }]
+    }
+
+    fn actions(&self, s: &Self::State, actions: &mut Vec<Self::Action>) {
+        for &mid in &self.members {
+            actions.push(Act::JoinDynamic(mid));
+            actions.push(Act::Heartbeat(mid));
+            actions.push(Act::Leave(mid));
+            for &iid in &self.instances {
+                actions.push(Act::JoinStatic(iid, mid));
+            }
+        }
+        if matches!(s.g.state, GroupState::PreparingRebalance) && !s.g.members.is_empty() {
+            actions.push(Act::CompleteRebalance);
+        }
+        if matches!(s.g.state, GroupState::CompletingRebalance) {
+            actions.push(Act::Sync);
+        }
+        if s.clock < self.max_clock {
+            actions.push(Act::ExpireTick);
+        }
+    }
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![

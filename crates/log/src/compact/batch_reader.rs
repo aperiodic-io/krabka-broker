@@ -2,10 +2,11 @@
 //! The offset-map pass and the rewrite pass both need it, so it sits beside
 //! them instead of inside either one.
 
-use krabka_protocol::records::RecordBatch;
-use krabka_verified::compaction::{CompactionDecodeStep, compaction_decode_step};
-
-use crate::{error::LogError, name, segment::Segment};
+use {
+    crate::{error::LogError, name, segment::Segment},
+    krabka_protocol::records::RecordBatch,
+    krabka_verified::compaction::{CompactionDecodeStep, compaction_decode_step},
+};
 
 /// Read every `RecordBatch` from a sealed segment. This function streams the
 /// whole `.log` file directly.

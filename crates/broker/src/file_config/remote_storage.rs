@@ -5,21 +5,22 @@
 //! `apply_remote_storage` resolves that choice, layers WORM archive mode over
 //! an object store, and builds the remote-log metadata manager's policy.
 
-use krabka_units::{
-    ByteSize, Time,
-    convert::{ByteSizeExt as _, TimeExt},
-};
-use schemars::JsonSchema;
-use serde::Deserialize;
-
-use super::{
-    FileConfigError,
-    object_store::{FileRemoteStorageGcsConfig, FileRemoteStorageS3Config, FileWormConfig},
-    validate::invalid_runtime_value,
-};
-use crate::config::{
-    BrokerConfig, DEFAULT_RLMM_TOPIC_MIN_ISR, DEFAULT_RLMM_TOPIC_NUM_PARTITIONS,
-    DEFAULT_RLMM_TOPIC_REPLICATION_FACTOR, KafkaRlmmConfig, RemoteStorageBackend, RlmmKind,
+use {
+    super::{
+        FileConfigError,
+        object_store::{FileRemoteStorageGcsConfig, FileRemoteStorageS3Config, FileWormConfig},
+        validate::invalid_runtime_value,
+    },
+    crate::config::{
+        BrokerConfig, DEFAULT_RLMM_TOPIC_MIN_ISR, DEFAULT_RLMM_TOPIC_NUM_PARTITIONS,
+        DEFAULT_RLMM_TOPIC_REPLICATION_FACTOR, KafkaRlmmConfig, RemoteStorageBackend, RlmmKind,
+    },
+    krabka_units::{
+        ByteSize, Time,
+        convert::{ByteSizeExt as _, TimeExt},
+    },
+    schemars::JsonSchema,
+    serde::Deserialize,
 };
 
 /// TOML shape of `[remote_storage]`. Maps to
@@ -383,15 +384,16 @@ pub(super) fn apply_remote_storage(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::{gibibytes, mebibytes, millis, secs};
-
-    use crate::{
-        config::{
-            BrokerConfig, DEFAULT_REMOTE_COPY_TIMEOUT, KafkaRlmmConfig, RemoteStorageBackend,
-            RlmmKind,
+    use {
+        crate::{
+            config::{
+                BrokerConfig, DEFAULT_REMOTE_COPY_TIMEOUT, KafkaRlmmConfig, RemoteStorageBackend,
+                RlmmKind,
+            },
+            file_config::{FileConfig, test_support::configured_unwrap_parse},
         },
-        file_config::{FileConfig, test_support::configured_unwrap_parse},
+        assert2::{assert, check},
+        krabka_units::{gibibytes, mebibytes, millis, secs},
     };
 
     #[test]

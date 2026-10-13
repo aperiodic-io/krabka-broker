@@ -34,37 +34,37 @@
 //! because the helper commits and aborts and then exits: nothing in it can be
 //! made to hold a transaction open while a container runs beside it.
 
-use std::{
-    net::SocketAddr,
-    process::Output,
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_broker::BrokerHandle;
-use krabka_client_core::Client;
-use krabka_client_producer::{Producer, ProducerRecord};
-use krabka_protocol::owned::{
-    api_versions_request::ApiVersionsRequest,
-    describe_producers_request::{DescribeProducersRequest, TopicRequest},
-    describe_producers_response::ProducerState,
-    describe_transactions_request::DescribeTransactionsRequest,
-    list_transactions_request::ListTransactionsRequest,
-};
-use tokio::{
-    io::{AsyncReadExt as _, AsyncWriteExt as _},
-    net::TcpStream,
-};
-
-use crate::{
-    jvm_acceptance::{
-        KAFKA_IMAGE_ELR, KAFKA_IMAGE_TXN, TRANSACTIONAL_PRODUCER_JAVA, broker0_advertised,
-        docker_run_kafka_tool_with_image, docker_run_kafka_tool_with_image_and_mount,
-        nc_check_connectivity, start_host_broker_with, tool_output,
+use {
+    crate::{
+        jvm_acceptance::{
+            KAFKA_IMAGE_ELR, KAFKA_IMAGE_TXN, TRANSACTIONAL_PRODUCER_JAVA, broker0_advertised,
+            docker_run_kafka_tool_with_image, docker_run_kafka_tool_with_image_and_mount,
+            nc_check_connectivity, start_host_broker_with, tool_output,
+        },
+        support::client::connect_owned,
     },
-    support::client::connect_owned,
+    assert2::assert,
+    bytes::Bytes,
+    krabka_broker::BrokerHandle,
+    krabka_client_core::Client,
+    krabka_client_producer::{Producer, ProducerRecord},
+    krabka_protocol::owned::{
+        api_versions_request::ApiVersionsRequest,
+        describe_producers_request::{DescribeProducersRequest, TopicRequest},
+        describe_producers_response::ProducerState,
+        describe_transactions_request::DescribeTransactionsRequest,
+        list_transactions_request::ListTransactionsRequest,
+    },
+    std::{
+        net::SocketAddr,
+        process::Output,
+        sync::Arc,
+        time::{Duration, Instant},
+    },
+    tokio::{
+        io::{AsyncReadExt as _, AsyncWriteExt as _},
+        net::TcpStream,
+    },
 };
 
 /// The topic the JVM helper commits to and aborts on.
@@ -151,22 +151,19 @@ async fn harness(client_id: &str, topics: &[&str]) -> Harness {
     assert_transaction_version_2(&admin).await;
 
     for topic in topics {
-        docker_run_kafka_tool_with_image(
-            KAFKA_IMAGE_ELR,
-            &[
-                KAFKA_TOPICS,
-                "--bootstrap-server",
-                bootstrap,
-                "--create",
-                "--if-not-exists",
-                "--topic",
-                topic,
-                "--partitions",
-                "1",
-                "--replication-factor",
-                "1",
-            ],
-        );
+        docker_run_kafka_tool_with_image(KAFKA_IMAGE_ELR, &[
+            KAFKA_TOPICS,
+            "--bootstrap-server",
+            bootstrap,
+            "--create",
+            "--if-not-exists",
+            "--topic",
+            topic,
+            "--partitions",
+            "1",
+            "--replication-factor",
+            "1",
+        ]);
     }
 
     Harness {
@@ -364,19 +361,16 @@ async fn assert_the_tool_agrees_with_the_broker(bootstrap: &str, admin: &Client)
     //    would mean the broker's DescribeTransactions dropped the partition
     //    that DescribeProducers still shows an open transaction on.
     let hanging = kafka_transactions(bootstrap, &["find-hanging", "--broker-id", "1"]);
-    let rows = tool_rows(
-        &hanging,
-        &[
-            "Topic",
-            "Partition",
-            "ProducerId",
-            "ProducerEpoch",
-            "CoordinatorEpoch",
-            "StartOffset",
-            "LastTimestamp",
-            "Duration(min)",
-        ],
-    );
+    let rows = tool_rows(&hanging, &[
+        "Topic",
+        "Partition",
+        "ProducerId",
+        "ProducerEpoch",
+        "CoordinatorEpoch",
+        "StartOffset",
+        "LastTimestamp",
+        "Duration(min)",
+    ]);
     assert!(
         rows.is_empty(),
         "a transaction the coordinator still owns is not hanging: {rows:?}",
@@ -442,18 +436,15 @@ async fn the_transactions_tool_agrees_with_the_broker_and_can_abort() {
     //    marker straight to the partition and, exactly as in Kafka, leaves the
     //    coordinator's own state alone -- so the partition stops showing an
     //    open transaction while `describe` still reads `Ongoing`.
-    kafka_transactions(
-        bootstrap,
-        &[
-            "abort",
-            "--topic",
-            HANGING_TOPIC,
-            "--partition",
-            "0",
-            "--start-offset",
-            &open_producer_state.current_txn_start_offset.to_string(),
-        ],
-    );
+    kafka_transactions(bootstrap, &[
+        "abort",
+        "--topic",
+        HANGING_TOPIC,
+        "--partition",
+        "0",
+        "--start-offset",
+        &open_producer_state.current_txn_start_offset.to_string(),
+    ]);
     let row = describe_open_producer_row(bootstrap, open_producer_state.producer_id);
     assert!(
         row[5] == "None",
@@ -604,23 +595,20 @@ fn kafka_transactions(bootstrap: &str, args: &[&str]) -> Output {
 
 /// Consume `count` records at `isolation` and return their values in log order.
 fn consume(bootstrap: &str, topic: &str, isolation: &str, count: usize) -> Vec<String> {
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_ELR,
-        &[
-            KAFKA_CONSOLE_CONSUMER,
-            "--bootstrap-server",
-            bootstrap,
-            "--topic",
-            topic,
-            "--isolation-level",
-            isolation,
-            "--from-beginning",
-            "--max-messages",
-            &count.to_string(),
-            "--timeout-ms",
-            "30000",
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_ELR, &[
+        KAFKA_CONSOLE_CONSUMER,
+        "--bootstrap-server",
+        bootstrap,
+        "--topic",
+        topic,
+        "--isolation-level",
+        isolation,
+        "--from-beginning",
+        "--max-messages",
+        &count.to_string(),
+        "--timeout-ms",
+        "30000",
+    ]);
     String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -825,16 +813,13 @@ fn describe_open_transaction_row(bootstrap: &str) -> Vec<String> {
 
 fn describe_open_producer_row(bootstrap: &str, producer_id: i64) -> Vec<String> {
     tool_row(
-        &kafka_transactions(
-            bootstrap,
-            &[
-                "describe-producers",
-                "--topic",
-                HANGING_TOPIC,
-                "--partition",
-                "0",
-            ],
-        ),
+        &kafka_transactions(bootstrap, &[
+            "describe-producers",
+            "--topic",
+            HANGING_TOPIC,
+            "--partition",
+            "0",
+        ]),
         &DESCRIBE_PRODUCERS_HEADERS,
         &producer_id.to_string(),
     )

@@ -4,20 +4,21 @@
 //! keeps the stored state epoch and leader epoch. A key with no state returns
 //! `INVALID_REQUEST`, and epoch fencing returns the per-partition error code.
 
-use krabka_log::Offset;
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::{
-    write_share_group_state_request::WriteShareGroupStateRequest,
-    write_share_group_state_response::{
-        PartitionResult, WriteShareGroupStateResponse, WriteStateResult,
+use {
+    crate::{
+        codes,
+        share_coordinator::{
+            coordinator::{ShareCoordinator, ShareWrite},
+            persistence::StateBatch,
+        },
     },
-};
-
-use crate::{
-    codes,
-    share_coordinator::{
-        coordinator::{ShareCoordinator, ShareWrite},
-        persistence::StateBatch,
+    krabka_log::Offset,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::{
+        write_share_group_state_request::WriteShareGroupStateRequest,
+        write_share_group_state_response::{
+            PartitionResult, WriteShareGroupStateResponse, WriteStateResult,
+        },
     },
 };
 
@@ -77,17 +78,18 @@ async fn write_state(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::{
-        UnknownTaggedFields,
-        owned::write_share_group_state_request::{
-            PartitionData, StateBatch as WireStateBatch, WriteStateData,
+    use {
+        super::*,
+        crate::test_support::PartitionCount,
+        assert2::check,
+        krabka_protocol::{
+            UnknownTaggedFields,
+            owned::write_share_group_state_request::{
+                PartitionData, StateBatch as WireStateBatch, WriteStateData,
+            },
+            primitives::uuid::Uuid as ProtoUuid,
         },
-        primitives::uuid::Uuid as ProtoUuid,
     };
-
-    use super::*;
-    use crate::test_support::PartitionCount;
 
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([51; 16]);
     const WIRE_TOPIC: ProtoUuid = ProtoUuid([51; 16]);

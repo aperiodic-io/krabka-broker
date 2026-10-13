@@ -1,36 +1,36 @@
 //! The tests for the handler entry point: the per-topic `Describe` gate and
 //! the response a denied topic receives.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
-        list_offsets_response::{
-            self, ListOffsetsPartitionResponse, ListOffsetsResponse, ListOffsetsTopicResponse,
+use {
+    super::{
+        handle,
+        sentinels::{EARLIEST_TIMESTAMP, LATEST_TIMESTAMP},
+        test_support::{decode_response, encode_request},
+    },
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        codes,
+        handlers::{
+            list_offsets::test_support::test_context,
+            test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+        },
+        test_support::{
+            DenyAll, peer, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
         },
     },
-};
-
-use super::{
-    handle,
-    sentinels::{EARLIEST_TIMESTAMP, LATEST_TIMESTAMP},
-    test_support::{decode_response, encode_request},
-};
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    codes,
-    handlers::{
-        list_offsets::test_support::test_context,
-        test_support::{CreateTopicSetup, TopicPartitionCount, configured_topic_request},
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            list_offsets_request::{ListOffsetsPartition, ListOffsetsRequest, ListOffsetsTopic},
+            list_offsets_response::{
+                self, ListOffsetsPartitionResponse, ListOffsetsResponse, ListOffsetsTopicResponse,
+            },
+        },
     },
-    test_support::{
-        DenyAll, peer, start_broker_with_authorizer_no_audit as start_broker, test_ctx,
-    },
+    std::sync::Arc,
 };
 
 #[test]
@@ -82,7 +82,9 @@ fn topic_describe_denied_yields_topic_authorization_failed_rows() {
 }
 
 macro_rules! answer_request {
-    (($request:ident, $bytes:ident, $response:ident), $broker:ident, $version:ident, $ctx:ident) => {
+    (
+        ($request:ident, $bytes:ident, $response:ident), $broker:ident, $version:ident, $ctx:ident
+    ) => {
         let $request = encode_request(&$request, $version);
         let $bytes = handle(&$broker, $version, &$request, &$ctx)
             .await
@@ -305,16 +307,14 @@ async fn duplicate_partitions_get_invalid_request_on_every_row() {
     };
 
     let cases: Vec<(&str, Vec<i32>, Vec<ListOffsetsPartitionResponse>)> = vec![
-        (
-            "no duplicates",
-            vec![0, 1],
-            vec![resolved0.clone(), resolved1.clone()],
-        ),
-        (
-            "one partition duplicated",
-            vec![0, 0],
-            vec![invalid(0), invalid(0)],
-        ),
+        ("no duplicates", vec![0, 1], vec![
+            resolved0.clone(),
+            resolved1.clone(),
+        ]),
+        ("one partition duplicated", vec![0, 0], vec![
+            invalid(0),
+            invalid(0),
+        ]),
         (
             "mixed: one partition duplicated, one resolved normally",
             vec![0, 0, 1],

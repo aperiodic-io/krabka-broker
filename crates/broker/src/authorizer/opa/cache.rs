@@ -3,10 +3,11 @@
 //! that identifies one authorization question, and the entry is the answer
 //! plus the monotonic-clock stamp, in milliseconds, at which it goes stale.
 
-use std::net::IpAddr;
-
-use krabka_authz::AuthorizationResult;
-use krabka_metadata::{AclOperation, ResourceType};
+use {
+    krabka_authz::AuthorizationResult,
+    krabka_metadata::{AclOperation, ResourceType},
+    std::net::IpAddr,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, std::hash::Hash)]
 pub(super) struct CacheKey {
@@ -25,11 +26,11 @@ pub(super) struct CachedDecision {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr};
-
-    use krabka_metadata::{AclOperation, ResourceType};
-
-    use super::CacheKey;
+    use {
+        super::CacheKey,
+        krabka_metadata::{AclOperation, ResourceType},
+        std::net::{IpAddr, Ipv4Addr},
+    };
 
     fn key() -> CacheKey {
         CacheKey {

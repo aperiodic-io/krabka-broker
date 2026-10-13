@@ -4,18 +4,20 @@
 //! it repeats, and it is rejected when its sequence skips ahead, so both cases
 //! drive the produce path with a producer-stamped batch.
 
-use assert2::assert;
-
-use crate::{
-    harness::{create_topic, topic_id_for},
-    support::{
-        self,
-        produce::{SinglePartitionProduceSetup, batch_request},
-        records::{
-            ProducerSequence, ProducerValuesSetup, producer_values_batch as one_batch_with_producer,
+use {
+    crate::{
+        harness::{create_topic, topic_id_for},
+        support::{
+            self,
+            produce::{SinglePartitionProduceSetup, batch_request},
+            records::{
+                ProducerSequence, ProducerValuesSetup,
+                producer_values_batch as one_batch_with_producer,
+            },
+            transactions::claim_idempotent_producer,
         },
-        transactions::claim_idempotent_producer,
     },
+    assert2::assert,
 };
 
 #[tokio::test]

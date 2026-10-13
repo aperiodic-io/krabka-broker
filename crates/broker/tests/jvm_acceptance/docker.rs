@@ -4,14 +4,14 @@
 //! failed tool reports its captured output, and builds the host-side files that
 //! those containers bind-mount.
 
-use std::process::Stdio;
-
-use assert2::assert;
-
-use super::ports::host_port;
-use crate::support::{
-    ContainerInput, JvmDockerSetup, combined_output, docker_tool_command, jvm_docker_command,
-    jvm_stdin_output, jvm_tool_output,
+use {
+    super::ports::host_port,
+    crate::support::{
+        ContainerInput, JvmDockerSetup, combined_output, docker_tool_command, jvm_docker_command,
+        jvm_stdin_output, jvm_tool_output,
+    },
+    assert2::assert,
+    std::process::Stdio,
 };
 
 /// Create a topic through the JVM admin client, optionally with client properties.
@@ -45,19 +45,16 @@ pub(crate) fn create_console_topic(
 
 /// Describe the topic overrides submitted by an application.
 pub(crate) fn describe_console_topic_configs(bootstrap: &str, topic: &str) -> String {
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-configs",
-            "--describe",
-            "--entity-type",
-            "topics",
-            "--entity-name",
-            topic,
-            "--bootstrap-server",
-            bootstrap,
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-configs",
+        "--describe",
+        "--entity-type",
+        "topics",
+        "--entity-name",
+        topic,
+        "--bootstrap-server",
+        bootstrap,
+    ]);
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     eprintln!("KRABKA[test] kafka-configs --describe {topic}:\n{text}");
     text
@@ -65,22 +62,19 @@ pub(crate) fn describe_console_topic_configs(bootstrap: &str, topic: &str) -> St
 
 /// Create an application's single-partition topic at its own bootstrap endpoint.
 pub(crate) fn create_console_topic_at(bootstrap: &str, topic: &str) {
-    docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-topics",
-            "--create",
-            "--if-not-exists",
-            "--topic",
-            topic,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-            "--bootstrap-server",
-            bootstrap,
-        ],
-    );
+    docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-topics",
+        "--create",
+        "--if-not-exists",
+        "--topic",
+        topic,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+        "--bootstrap-server",
+        bootstrap,
+    ]);
 }
 
 /// Produce the supplied console records, with the listener's optional client properties.
@@ -557,9 +551,7 @@ pub(crate) fn docker_run_kafka_tool_allowing_failure_with_image(
 /// The JVM tools split a failure across the two streams in ways that differ
 /// per tool -- `kafka-configs` prints its own summary line on stdout and the
 /// exception on stderr -- so a case about a refusal searches both.
-pub(crate) fn tool_output(out: &std::process::Output) -> String {
-    combined_output(out)
-}
+pub(crate) fn tool_output(out: &std::process::Output) -> String { combined_output(out) }
 
 pub(crate) const TRANSACTIONAL_PRODUCER_JAVA: &str = krabka_macros::java_string_producer_source!(
     r#"
@@ -812,10 +804,11 @@ pub(crate) fn docker_run_kafka_tool_with_image_and_mount(
     mount: &str,
     args: &[&str],
 ) -> std::process::Output {
-    let out = docker_tool_command(
-        image,
-        &["-v", mount, "--add-host=host.docker.internal:host-gateway"],
-    )
+    let out = docker_tool_command(image, &[
+        "-v",
+        mount,
+        "--add-host=host.docker.internal:host-gateway",
+    ])
     .args(args)
     .output()
     .expect("spawn docker run");
@@ -876,9 +869,7 @@ pub(crate) struct TempFileMount {
 impl TempFileMount {
     /// `<host_path>:<container_path>`. The caller appends `:ro` if it wants
     /// a read-only mount.
-    pub(crate) fn host_path(&self) -> String {
-        self.tmp.path().display().to_string()
-    }
+    pub(crate) fn host_path(&self) -> String { self.tmp.path().display().to_string() }
 }
 
 pub(crate) fn write_temp_file(filename: &str, contents: &str) -> TempFileMount {
@@ -901,20 +892,16 @@ pub(crate) fn verify_console_reassignment(
     admin_mount: &str,
     json_mount: &str,
 ) -> std::process::Output {
-    docker_run_kafka_tool_with_image_and_mounts(
-        KAFKA_IMAGE_TXN,
-        &[admin_mount, json_mount],
-        &[
-            "kafka-reassign-partitions",
-            "--verify",
-            "--reassignment-json-file",
-            "/reassignment.json",
-            "--bootstrap-server",
-            super::ports::broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-        ],
-    )
+    docker_run_kafka_tool_with_image_and_mounts(KAFKA_IMAGE_TXN, &[admin_mount, json_mount], &[
+        "kafka-reassign-partitions",
+        "--verify",
+        "--reassignment-json-file",
+        "/reassignment.json",
+        "--bootstrap-server",
+        super::ports::broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+    ])
 }
 
 /// PLAIN client configuration, also used by oracle-owned mounted files.
@@ -931,22 +918,18 @@ pub(crate) fn describe_console_entity(
     entity: &str,
     name: &str,
 ) -> std::process::Output {
-    let desc = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        mount,
-        &[
-            "kafka-configs",
-            "--describe",
-            "--entity-type",
-            entity,
-            "--entity-name",
-            name,
-            "--bootstrap-server",
-            super::ports::broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-        ],
-    );
+    let desc = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, mount, &[
+        "kafka-configs",
+        "--describe",
+        "--entity-type",
+        entity,
+        "--entity-name",
+        name,
+        "--bootstrap-server",
+        super::ports::broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+    ]);
     assert!(
         desc.status.success(),
         "describe failed: {}",

@@ -6,23 +6,23 @@
 //! that once per topic beside the freeze and refuses each partition row
 //! before it parses the batch.
 
-use std::{path::PathBuf, sync::Arc};
-
-use assert2::check;
-use krabka_protocol::owned::produce_response::PartitionProduceResponse;
-
-use super::{
-    super::{PartitionInput, process_partition},
-    seed_batch,
-};
-use crate::{
-    codes::{INVALID_TOPIC_EXCEPTION, NONE},
-    config::BrokerConfig,
-    handlers::produce::{
-        framing::PartitionPayload,
-        test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
+use {
+    super::{
+        super::{PartitionInput, process_partition},
+        seed_batch,
     },
-    internal_topics::{is_internal_topic, produce_internal_topics_allowed},
+    crate::{
+        codes::{INVALID_TOPIC_EXCEPTION, NONE},
+        config::BrokerConfig,
+        handlers::produce::{
+            framing::PartitionPayload,
+            test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
+        },
+        internal_topics::{is_internal_topic, produce_internal_topics_allowed},
+    },
+    assert2::check,
+    krabka_protocol::owned::produce_response::PartitionProduceResponse,
+    std::{path::PathBuf, sync::Arc},
 };
 
 // The same resolve the produce handler runs once per topic, spelled out for

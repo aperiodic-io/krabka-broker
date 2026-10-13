@@ -8,29 +8,29 @@
 //! transaction through the broker that is elected next, and reads the records
 //! with `read_committed`.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_broker::{BrokerConfig, BrokerHandle, NodeId};
-use krabka_client_core::Client;
-use krabka_protocol::owned::end_txn_response::EndTxnResponse;
-use tempfile::TempDir;
-
-use crate::{
-    support::{
-        client::connect_owned,
-        discovery::{coordinator_lookup_request, topic_metadata_request},
-        shutdown_cluster,
-        topics::{AssignedTopicSetup, metadata_topic},
-        transaction_wire::{
-            AssignedTransactionTopicSetup, TransactionProduceSetup, add_partition_request,
-            coordinator_loading, create_assigned_topic, init_producer_request,
-            initialized_identity, partition_added, partition_leader, produce_fixture,
-            read_committed_through, retry_coordinator,
+use {
+    crate::{
+        support::{
+            client::connect_owned,
+            discovery::{coordinator_lookup_request, topic_metadata_request},
+            shutdown_cluster,
+            topics::{AssignedTopicSetup, metadata_topic},
+            transaction_wire::{
+                AssignedTransactionTopicSetup, TransactionProduceSetup, add_partition_request,
+                coordinator_loading, create_assigned_topic, init_producer_request,
+                initialized_identity, partition_added, partition_leader, produce_fixture,
+                read_committed_through, retry_coordinator,
+            },
+            transactions::{EndTransactionSetup, ProducerIdentity, end_transaction_request},
         },
-        transactions::{EndTransactionSetup, ProducerIdentity, end_transaction_request},
+        txn_harness::registered_transaction_cluster,
     },
-    txn_harness::registered_transaction_cluster,
+    assert2::assert,
+    krabka_broker::{BrokerConfig, BrokerHandle, NodeId},
+    krabka_client_core::Client,
+    krabka_protocol::owned::end_txn_response::EndTxnResponse,
+    std::time::{Duration, Instant},
+    tempfile::TempDir,
 };
 
 const TID: &str = "txn-coordinator-failover";
@@ -44,9 +44,7 @@ const SETTLE: Duration = Duration::from_secs(60);
 
 type Cluster = Vec<(BrokerHandle, BrokerConfig, TempDir)>;
 
-fn retriable(code: i16) -> bool {
-    coordinator_loading(code)
-}
+fn retriable(code: i16) -> bool { coordinator_loading(code) }
 
 async fn client(address: &str) -> Client {
     connect_owned(address, "txn-coordinator-failover", "client").await
@@ -147,13 +145,10 @@ async fn end_txn(client: &Client, (producer_id, epoch): (i64, i16)) -> EndTxnRes
     retry_coordinator(
         || async {
             client
-                .send(end_transaction_request(
-                    TID,
-                    EndTransactionSetup {
-                        producer: ProducerIdentity::from_wire((producer_id, epoch)),
-                        ..Default::default()
-                    },
-                ))
+                .send(end_transaction_request(TID, EndTransactionSetup {
+                    producer: ProducerIdentity::from_wire((producer_id, epoch)),
+                    ..Default::default()
+                }))
                 .await
                 .expect("EndTxn")
         },
@@ -178,13 +173,10 @@ async fn a_transaction_commits_through_the_next_coordinator() {
     let admin = client(&cluster[0].0.listen_addr().to_string()).await;
     find_coordinator(&admin).await;
     let coordinator = leader_of(&cluster[0].0, STATE_TOPIC).await;
-    create_assigned_topic(
-        &admin,
-        AssignedTransactionTopicSetup {
-            topic: AssignedTopicSetup::leader_first(TOPIC, krabka_metadata::NodeId(coordinator)),
-            context: Some("CreateTopics"),
-        },
-    )
+    create_assigned_topic(&admin, AssignedTransactionTopicSetup {
+        topic: AssignedTopicSetup::leader_first(TOPIC, krabka_metadata::NodeId(coordinator)),
+        context: Some("CreateTopics"),
+    })
     .await;
     cluster[0].0.wait_until_isr_len(STATE_TOPIC, 0, 3).await;
     cluster[0].0.wait_until_isr_len(TOPIC, 0, 3).await;

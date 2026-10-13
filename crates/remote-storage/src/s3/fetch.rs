@@ -5,13 +5,14 @@
 //! first, which refuses the read before a key is derived or a request leaves
 //! the process.
 
-use krabka_object_store::{ObjectOps, ObjectStoreError};
-use object_store::GetRange;
-
-use super::S3RemoteStorage;
-use crate::{
-    error::RemoteStorageError, metadata::RemoteLogSegmentMetadata, storage_manager::IndexType,
-    worm::WormError,
+use {
+    super::S3RemoteStorage,
+    crate::{
+        error::RemoteStorageError, metadata::RemoteLogSegmentMetadata, storage_manager::IndexType,
+        worm::WormError,
+    },
+    krabka_object_store::{ObjectOps, ObjectStoreError},
+    object_store::GetRange,
 };
 
 fn object_bytes(
@@ -85,21 +86,21 @@ impl S3RemoteStorage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use krabka_object_store::{ObjectOps as _, PutRequest, fault::StoreOp};
-    use object_store::{ObjectStore, memory::InMemory};
-    use tempfile::TempDir;
-
-    use super::{IndexType, RemoteStorageError, S3RemoteStorage, WormError};
-    use crate::{
-        s3::test_support::{
-            SeededCopySetup, StampedMetadataSetup, WormAccess, counting_rsm, rsm, sample_metadata,
-            seeded_blocking, stamped_metadata, worm_rsm,
+    use {
+        super::{IndexType, RemoteStorageError, S3RemoteStorage, WormError},
+        crate::{
+            s3::test_support::{
+                SeededCopySetup, StampedMetadataSetup, WormAccess, counting_rsm, rsm,
+                sample_metadata, seeded_blocking, stamped_metadata, worm_rsm,
+            },
+            storage_manager::RemoteStorageManager,
+            test_support::{TransactionIndex, check_sample_indexes},
         },
-        storage_manager::RemoteStorageManager,
-        test_support::{TransactionIndex, check_sample_indexes},
+        assert2::{assert, check},
+        krabka_object_store::{ObjectOps as _, PutRequest, fault::StoreOp},
+        object_store::{ObjectStore, memory::InMemory},
+        std::sync::Arc,
+        tempfile::TempDir,
     };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

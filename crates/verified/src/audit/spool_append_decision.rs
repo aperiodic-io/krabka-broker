@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{AuditCheckpointAdmission, AuditLossMarkerAdmission, AuditLosses, SpoolAppendDecision};
+use {
+    super::{AuditCheckpointAdmission, AuditLossMarkerAdmission, AuditLosses, SpoolAppendDecision},
+    creusot_std::prelude::*,
+};
 
 /// Bind a verified checkpoint to the exact nonempty chain position and head.
 #[ensures((result == AuditCheckpointAdmission::Admit) == (

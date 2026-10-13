@@ -36,9 +36,10 @@
 //! the last level of each feature, so a record that a later record superseded
 //! is not named. Kafka would name it, and refuses the same logs.
 
-use krabka_metadata::MetadataImage;
-
-use crate::{config::UnstableFeatureVersions, supported_feature_range};
+use {
+    crate::{config::UnstableFeatureVersions, supported_feature_range},
+    krabka_metadata::MetadataImage,
+};
 
 /// Kafka's `VersionRange.toString()`: a single level as itself, and a span as
 /// `min-max`.
@@ -79,11 +80,12 @@ pub(super) fn unsupported_feature_level(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-    use uuid::Uuid;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_metadata::{FeatureLevelRecord, MetadataRecord},
+        uuid::Uuid,
+    };
 
     /// An image that finalized each of `levels`.
     fn image_at(levels: &[(&str, i16)]) -> MetadataImage {

@@ -20,19 +20,19 @@
 //! (`push_topic_configs`), and the produce handler for the keys it checks
 //! before a batch reaches the log.
 
-use std::collections::BTreeMap;
-
-use krabka_compression::CompressionType;
-use krabka_log::{CleanupPolicy, LogConfig};
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_protocol::records::TimestampType;
-use krabka_units::ByteSize;
-
-use super::{
-    MESSAGE_TIMESTAMP_AFTER_MAX_MS, MESSAGE_TIMESTAMP_BEFORE_MAX_MS,
-    broker_dynamic::TOPIC_DEFAULT_SYNONYMS, log_config::apply_to_log_config, parse::long_value,
+use {
+    super::{
+        MESSAGE_TIMESTAMP_AFTER_MAX_MS, MESSAGE_TIMESTAMP_BEFORE_MAX_MS,
+        broker_dynamic::TOPIC_DEFAULT_SYNONYMS, log_config::apply_to_log_config, parse::long_value,
+    },
+    crate::config::BrokerConfig,
+    krabka_compression::CompressionType,
+    krabka_log::{CleanupPolicy, LogConfig},
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_protocol::records::TimestampType,
+    krabka_units::ByteSize,
+    std::collections::BTreeMap,
 };
-use crate::config::BrokerConfig;
 
 /// The dynamic broker-wide defaults for `node`, by the topic key each one is
 /// the default of: this node's own value where it has one, else the

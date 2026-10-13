@@ -3,20 +3,21 @@
 //! override adds over the retained `DEFAULT_CONFIG` synonym, the typed
 //! metadata the registry supplies, and the request's key filter.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::describe_configs_response::DescribeConfigsSynonym;
-
-use super::{
+use {
     super::{
-        super::wire::CONFIG_SOURCE_DEFAULT,
-        tests::{
-            ConfigMutability, ConfigSourceCode, ConfigTypeCode, ExpectedConfigSetup,
-            expected_config_entry, synonym as expected_synonym,
+        super::{
+            super::wire::CONFIG_SOURCE_DEFAULT,
+            tests::{
+                ConfigMutability, ConfigSourceCode, ConfigTypeCode, ExpectedConfigSetup,
+                expected_config_entry, synonym as expected_synonym,
+            },
         },
+        *,
     },
-    *,
+    crate::{api_catalog::UnstableApiVersions, config::BrokerConfig, file_config::FileConfig},
+    assert2::{assert, check},
+    krabka_protocol::owned::describe_configs_response::DescribeConfigsSynonym,
 };
-use crate::{api_catalog::UnstableApiVersions, config::BrokerConfig, file_config::FileConfig};
 
 const BOTH: EntryOptions = EntryOptions {
     include_synonyms: true,
@@ -266,24 +267,14 @@ fn topic_creation_defaults_report_their_provenance() {
     };
 
     for (label, num_partitions, default_replication_factor, expected) in [
-        (
-            "neither named",
-            None,
-            None,
-            vec![
-                entry(config_keys::NUM_PARTITIONS, None),
-                entry(config_keys::DEFAULT_REPLICATION_FACTOR, None),
-            ],
-        ),
-        (
-            "both named",
-            Some(4),
-            Some(3),
-            vec![
-                entry(config_keys::NUM_PARTITIONS, Some("4")),
-                entry(config_keys::DEFAULT_REPLICATION_FACTOR, Some("3")),
-            ],
-        ),
+        ("neither named", None, None, vec![
+            entry(config_keys::NUM_PARTITIONS, None),
+            entry(config_keys::DEFAULT_REPLICATION_FACTOR, None),
+        ]),
+        ("both named", Some(4), Some(3), vec![
+            entry(config_keys::NUM_PARTITIONS, Some("4")),
+            entry(config_keys::DEFAULT_REPLICATION_FACTOR, Some("3")),
+        ]),
     ] {
         let configs = StaticBrokerConfigs {
             num_partitions,
@@ -314,23 +305,17 @@ fn static_boolean_keys_report_their_provenance() {
         })
     };
     let not_named = |key: &'static str| {
-        vec![entry(
+        vec![entry(key, "true", CONFIG_SOURCE_DEFAULT, vec![synonym(
             key,
             "true",
             CONFIG_SOURCE_DEFAULT,
-            vec![synonym(key, "true", CONFIG_SOURCE_DEFAULT)],
-        )]
+        )])]
     };
     let named_false = |key: &'static str| {
-        vec![entry(
-            key,
-            "false",
-            CONFIG_SOURCE_STATIC_BROKER,
-            vec![
-                synonym(key, "false", CONFIG_SOURCE_STATIC_BROKER),
-                synonym(key, "true", CONFIG_SOURCE_DEFAULT),
-            ],
-        )]
+        vec![entry(key, "false", CONFIG_SOURCE_STATIC_BROKER, vec![
+            synonym(key, "false", CONFIG_SOURCE_STATIC_BROKER),
+            synonym(key, "true", CONFIG_SOURCE_DEFAULT),
+        ])]
     };
     let delete = config_keys::DELETE_TOPIC_ENABLE;
     let auto_create = config_keys::AUTO_CREATE_TOPICS_ENABLE;

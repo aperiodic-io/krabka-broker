@@ -7,25 +7,26 @@
 //! requests; the JVM tools turn error 44 plus the message into the
 //! `PolicyViolationException` they print.
 
-use assert2::{assert, check};
-use krabka_broker::topic_policy::TopicPolicy;
-use krabka_protocol::owned::{
-    create_topics_request::CreateTopicsRequest,
-    incremental_alter_configs_request::IncrementalAlterConfigsRequest,
-};
-
-use crate::{
-    RESOURCE_TYPE_TOPIC,
-    admin_harness::{build_client, create_topic_helper},
-    support::{
-        configs::{
-            ConfigOperation, IncrementalConfigsSetup, incremental_config, incremental_request,
-            incremental_resource,
+use {
+    crate::{
+        RESOURCE_TYPE_TOPIC,
+        admin_harness::{build_client, create_topic_helper},
+        support::{
+            configs::{
+                ConfigOperation, IncrementalConfigsSetup, incremental_config, incremental_request,
+                incremental_resource,
+            },
+            start_n_node_with,
+            topics::{
+                ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, create_topic_request,
+            },
         },
-        start_n_node_with,
-        topics::{
-            ConfiguredTopicSetup, TopicReplicationFactor, creatable_topic, create_topic_request,
-        },
+    },
+    assert2::{assert, check},
+    krabka_broker::topic_policy::TopicPolicy,
+    krabka_protocol::owned::{
+        create_topics_request::CreateTopicsRequest,
+        incremental_alter_configs_request::IncrementalAlterConfigsRequest,
     },
 };
 
@@ -193,15 +194,13 @@ async fn altering_a_topic_to_a_forbidden_config_is_a_policy_violation() {
 
 fn alter_request(topic: &str, value: &str) -> IncrementalAlterConfigsRequest {
     incremental_request(IncrementalConfigsSetup {
-        resources: vec![incremental_resource(
-            RESOURCE_TYPE_TOPIC,
-            topic,
-            vec![incremental_config(
+        resources: vec![incremental_resource(RESOURCE_TYPE_TOPIC, topic, vec![
+            incremental_config(
                 "unclean.leader.election.enable",
                 Some(value.into()),
                 ConfigOperation::Set,
-            )],
-        )],
+            ),
+        ])],
         ..Default::default()
     })
 }

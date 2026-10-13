@@ -4,11 +4,10 @@
 //! It is a pure function over the decoded request and the current metadata
 //! image, so the handler stays a straight line of decisions.
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::broker_heartbeat_request::BrokerHeartbeatRequest;
-use krabka_raft::NodeId;
-
-use crate::codes;
+use {
+    crate::codes, krabka_metadata::MetadataImage,
+    krabka_protocol::owned::broker_heartbeat_request::BrokerHeartbeatRequest, krabka_raft::NodeId,
+};
 
 /// A heartbeat whose broker epoch matches the broker's registration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,10 +41,7 @@ pub(super) fn validate_registration(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::handlers::test_support::registered_broker_image;
+    use {super::*, crate::handlers::test_support::registered_broker_image, assert2::assert};
 
     #[test]
     fn registration_validation_rejects_unknown_and_stale_brokers() {

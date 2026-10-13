@@ -2,24 +2,25 @@
 //! listener owns outright, the match that turns an API key into an [`Inbound`]
 //! command, and the oneshot round-trip that waits for the encoded reply.
 
-use bytes::Bytes;
-use krabka_ids::ApiKey;
-use tokio::sync::oneshot;
-
-use super::metadata_rpc::{
-    dispatch_delegation_token_mutation, dispatch_metadata_fetch, dispatch_submit_change,
-};
-use crate::{
-    RaftShardRouter,
-    error::RaftError,
-    kraft::{
-        KraftController,
-        transport::{Inbound, PeerApi},
+use {
+    super::metadata_rpc::{
+        dispatch_delegation_token_mutation, dispatch_metadata_fetch, dispatch_submit_change,
     },
-    wire::{
-        API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
-        unsupported_version_response,
+    crate::{
+        RaftShardRouter,
+        error::RaftError,
+        kraft::{
+            KraftController,
+            transport::{Inbound, PeerApi},
+        },
+        wire::{
+            API_KEY_DELEGATION_TOKEN_MUTATION, API_KEY_METADATA_FETCH, API_KEY_SUBMIT_CHANGE,
+            unsupported_version_response,
+        },
     },
+    bytes::Bytes,
+    krabka_ids::ApiKey,
+    tokio::sync::oneshot,
 };
 
 /// APIs owned by the Raft listener itself rather than its KIP-919 Admin
@@ -95,19 +96,20 @@ pub(super) async fn dispatch_with_router(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::NodeId;
-    use krabka_protocol::owned::{
-        begin_quorum_epoch_request, end_quorum_epoch_request, fetch_request,
-        fetch_snapshot_request, vote_request,
-    };
-
-    use super::*;
-    use crate::{
-        kraft::transport::{api_key, wire::METADATA_TOPIC_ID},
-        server::{
-            api_versions::table::CONTROLLER_LISTENER_APIS,
-            test_support::{encoded, single_voter_engine, wait_for_leader},
+    use {
+        super::*,
+        crate::{
+            kraft::transport::{api_key, wire::METADATA_TOPIC_ID},
+            server::{
+                api_versions::table::CONTROLLER_LISTENER_APIS,
+                test_support::{encoded, single_voter_engine, wait_for_leader},
+            },
+        },
+        assert2::check,
+        krabka_metadata::NodeId,
+        krabka_protocol::owned::{
+            begin_quorum_epoch_request, end_quorum_epoch_request, fetch_request,
+            fetch_snapshot_request, vote_request,
         },
     };
 

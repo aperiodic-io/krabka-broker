@@ -4,12 +4,12 @@
 //! which is what a suite needs when it only drives the JVM tools against a
 //! single node.
 
-use std::path::Path;
-
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig};
-
-use super::ports::{broker0_advertised, broker0_listen, controller_addr_0};
-use crate::support::{JvmBrokerSetup, controller_voters, init_jvm_tracing, jvm_broker_config};
+use {
+    super::ports::{broker0_advertised, broker0_listen, controller_addr_0},
+    crate::support::{JvmBrokerSetup, controller_voters, init_jvm_tracing, jvm_broker_config},
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig},
+    std::path::Path,
+};
 
 pub(crate) type HostBroker = (krabka_broker::BrokerHandle, tempfile::TempDir);
 
@@ -17,16 +17,13 @@ pub(crate) type HostBroker = (krabka_broker::BrokerHandle, tempfile::TempDir);
 pub(crate) fn host_broker_config(dir: &Path, client_context: &str) -> BrokerConfig {
     let listen = broker0_listen().parse().expect(client_context);
     let controller = controller_addr_0().parse().expect("allocated addr");
-    jvm_broker_config(
-        dir.to_path_buf(),
-        JvmBrokerSetup {
-            listen,
-            controller,
-            advertised: (broker0_advertised()).to_owned(),
-            voters: controller_voters(&[(1, controller)]),
-            ..Default::default()
-        },
-    )
+    jvm_broker_config(dir.to_path_buf(), JvmBrokerSetup {
+        listen,
+        controller,
+        advertised: (broker0_advertised()).to_owned(),
+        voters: controller_voters(&[(1, controller)]),
+        ..Default::default()
+    })
 }
 
 /// A plain broker and one topic created by the stock JVM admin client.
@@ -48,9 +45,7 @@ pub(crate) async fn start_legacy_console_broker(topic: &str) -> HostBroker {
 /// Spawn the broker on `broker0_listen()`. The advertised listener is
 /// an allocated port. Inside the cp-kafka containers, the test
 /// adds a hosts entry that points that name at the bridge gateway.
-pub(crate) async fn start_host_broker() -> HostBroker {
-    start_host_broker_with(|_| {}).await
-}
+pub(crate) async fn start_host_broker() -> HostBroker { start_host_broker_with(|_| {}).await }
 
 /// [`start_host_broker`] with krabka's legacy request versions enabled
 /// (`[runtime] legacy_request_versions_enable`). The pre-4.0 clients of the

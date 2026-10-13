@@ -6,14 +6,14 @@
 //! disk. Both readings live here, next to the launcher that gives them the two
 //! `log.dirs` they compare.
 
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
+use {
+    crate::{support::storage::count_partition_dirs, wire::describe_log_dirs},
+    assert2::assert,
+    std::{
+        net::SocketAddr,
+        time::{Duration, Instant},
+    },
 };
-
-use assert2::assert;
-
-use crate::{support::storage::count_partition_dirs, wire::describe_log_dirs};
 
 pub(crate) fn count_topic_dirs(dir: &std::path::Path, topic: &str) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {

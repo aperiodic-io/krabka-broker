@@ -4,11 +4,13 @@
 //! puts on the wire, so the key derivation that turns it into `stored_key`
 //! and `server_key` lives beside the record it fills in.
 
-use krabka_metadata::{DeleteScramCredentialRecord, MetadataRecord, ScramCredentialRecord};
-use krabka_protocol::owned::alter_user_scram_credentials_request::{
-    ScramCredentialDeletion, ScramCredentialUpsertion,
+use {
+    krabka_metadata::{DeleteScramCredentialRecord, MetadataRecord, ScramCredentialRecord},
+    krabka_protocol::owned::alter_user_scram_credentials_request::{
+        ScramCredentialDeletion, ScramCredentialUpsertion,
+    },
+    krabka_security::SaslMechanism,
 };
-use krabka_security::SaslMechanism;
 
 pub(super) fn delete_record(
     deletion: &ScramCredentialDeletion,
@@ -42,12 +44,13 @@ pub(super) fn upsertion_record(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::Bytes;
-
-    use super::*;
-    use crate::handlers::alter_user_scram_credentials::test_support::{
-        expected_result, process_upsertion, valid_upsertion,
+    use {
+        super::*,
+        crate::handlers::alter_user_scram_credentials::test_support::{
+            expected_result, process_upsertion, valid_upsertion,
+        },
+        assert2::assert,
+        bytes::Bytes,
     };
 
     #[test]

@@ -107,9 +107,7 @@ pub const fn reserve_offsets(next: i64, count: i64) -> Option<(i64, i64)> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn reserve_offsets_admits_exactly_representable_ranges() {

@@ -15,23 +15,24 @@
 //! and the local materialization, and `response` for the response and the
 //! throttle.
 
-use std::{
-    collections::HashSet,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
+use {
+    krabka_metadata::{AclOperation, MetadataImage, TopicRecord},
+    krabka_protocol::owned::{
+        create_partitions_request::{self, CreatePartitionsRequest, CreatePartitionsTopic},
+        create_partitions_response::{CreatePartitionsResponse, CreatePartitionsTopicResult},
     },
-    time::Duration,
+    krabka_raft::{NodeId, RaftError},
+    krabka_units::Time,
+    std::{
+        collections::HashSet,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::Duration,
+    },
+    tokio::sync::Mutex,
 };
-
-use krabka_metadata::{AclOperation, MetadataImage, TopicRecord};
-use krabka_protocol::owned::{
-    create_partitions_request::{self, CreatePartitionsRequest, CreatePartitionsTopic},
-    create_partitions_response::{CreatePartitionsResponse, CreatePartitionsTopicResult},
-};
-use krabka_raft::{NodeId, RaftError};
-use krabka_units::Time;
-use tokio::sync::Mutex;
 
 mod admission;
 mod apply;
@@ -43,29 +44,32 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    admission::duplicate_names, apply::partition_records,
-    assignment::resolve_new_partition_assignments, response::finish_response,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    config_keys::{resolve_diskless, resolve_preferred_leader_site, witness_node_ids},
-    handlers::{
-        RequestContext,
-        create_topics::{
-            InitialLeadership, automatic_leaderships, automatic_placement_exclusions,
-            diskless_wal_placement_error, inactive_brokers, manual_leaderships, site_broker_views,
-        },
-        denied_topics, encode_response,
-        forward_to_controller::{
-            forward_if_not_controller, guarded_operation_on_source, is_active_controller,
-        },
-        offline_replicas::unavailable_brokers,
-        partition_materialization::PartitionMaterialization,
+use {
+    self::{
+        admission::duplicate_names, apply::partition_records,
+        assignment::resolve_new_partition_assignments, response::finish_response,
     },
-    quota::ControllerMutationQuota,
-    site_placement::PlacementRng,
+    crate::{
+        broker::Broker,
+        codes,
+        config_keys::{resolve_diskless, resolve_preferred_leader_site, witness_node_ids},
+        handlers::{
+            RequestContext,
+            create_topics::{
+                InitialLeadership, automatic_leaderships, automatic_placement_exclusions,
+                diskless_wal_placement_error, inactive_brokers, manual_leaderships,
+                site_broker_views,
+            },
+            denied_topics, encode_response,
+            forward_to_controller::{
+                forward_if_not_controller, guarded_operation_on_source, is_active_controller,
+            },
+            offline_replicas::unavailable_brokers,
+            partition_materialization::PartitionMaterialization,
+        },
+        quota::ControllerMutationQuota,
+        site_placement::PlacementRng,
+    },
 };
 
 raw_dispatch! {

@@ -2,13 +2,14 @@
 //! timeout, plus the small role predicates that decide which timer is armed and
 //! when a leadership change invalidates parked work.
 
-use krabka_units::prelude::{Time, TimeExt as _};
-use tokio::time::{Duration, Instant};
-
-use crate::kraft::{
-    core::{QuorumStateMachine, election_jitter_ms},
-    role::Role,
-    types::{Epoch, NodeId, SimInstant},
+use {
+    crate::kraft::{
+        core::{QuorumStateMachine, election_jitter_ms},
+        role::Role,
+        types::{Epoch, NodeId, SimInstant},
+    },
+    krabka_units::prelude::{Time, TimeExt as _},
+    tokio::time::{Duration, Instant},
 };
 
 /// Leader heartbeat interval as a fraction of the election timeout. The leader

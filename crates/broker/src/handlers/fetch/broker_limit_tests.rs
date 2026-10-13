@@ -1,17 +1,18 @@
-use assert2::assert;
-use krabka_protocol::{
-    owned::fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-    records::RecordsPayload,
-};
-use krabka_units::bytes;
-
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
-    handlers::test_support::{
-        ClientTopicSetup, ProduceRecordsSetup, RecordCount, create_topic, produce_records,
-        start_broker_with,
+use {
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
+        handlers::test_support::{
+            ClientTopicSetup, ProduceRecordsSetup, RecordCount, create_topic, produce_records,
+            start_broker_with,
+        },
     },
+    assert2::assert,
+    krabka_protocol::{
+        owned::fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+        records::RecordsPayload,
+    },
+    krabka_units::bytes,
 };
 
 #[tokio::test]
@@ -22,24 +23,18 @@ async fn broker_fetch_cap_bounds_consumer_fetch_and_keeps_first_batch_progress()
     })
     .await;
     let topic = "broker-fetch-cap";
-    let topic_id = create_topic(
-        &broker,
-        ClientTopicSetup {
-            client_id: "fetch-cap-test",
-            name: topic,
-            ..Default::default()
-        },
-    )
+    let topic_id = create_topic(&broker, ClientTopicSetup {
+        client_id: "fetch-cap-test",
+        name: topic,
+        ..Default::default()
+    })
     .await;
     for _ in 0..2 {
-        produce_records(
-            &broker,
-            ProduceRecordsSetup {
-                topic,
-                count: RecordCount(2),
-                ..Default::default()
-            },
-        )
+        produce_records(&broker, ProduceRecordsSetup {
+            topic,
+            count: RecordCount(2),
+            ..Default::default()
+        })
         .await;
     }
 

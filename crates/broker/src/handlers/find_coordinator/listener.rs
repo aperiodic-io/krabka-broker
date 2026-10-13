@@ -34,12 +34,13 @@ pub(super) fn local_advertised_for_listener(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        SslPrincipalMapper,
-        config::{BrokerConfig, ListenerSpec},
+    use {
+        super::*,
+        crate::{
+            SslPrincipalMapper,
+            config::{BrokerConfig, ListenerSpec},
+        },
+        assert2::assert,
     };
 
     fn listener(name: &str, advertised: &str) -> ListenerSpec {

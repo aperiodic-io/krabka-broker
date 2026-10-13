@@ -31,21 +31,22 @@
 mod jvm_acceptance;
 mod support;
 
-use std::collections::BTreeMap;
-
-use assert2::{assert, check};
-use jvm_acceptance::{
-    KAFKA_IMAGE_TXN, docker_run_kafka_tool_with_image, rlmm_broker0_advertised,
-    start_host_broker_with,
+use {
+    crate::support::jvm_parse_offset,
+    assert2::{assert, check},
+    jvm_acceptance::{
+        KAFKA_IMAGE_TXN, docker_run_kafka_tool_with_image, rlmm_broker0_advertised,
+        start_host_broker_with,
+    },
+    krabka_client_admin::{AdminClient, CreateTopicSpec},
+    krabka_client_core::Client,
+    krabka_client_producer::{Producer, ProducerRecord},
+    krabka_protocol::krabka::barrier::{
+        AlterBarrierGroupsRequest, AlterableBarrierGroup, CUT_STATUS_COMPLETE,
+        TriggerBarrierRequest,
+    },
+    std::collections::BTreeMap,
 };
-use krabka_client_admin::{AdminClient, CreateTopicSpec};
-use krabka_client_core::Client;
-use krabka_client_producer::{Producer, ProducerRecord};
-use krabka_protocol::krabka::barrier::{
-    AlterBarrierGroupsRequest, AlterableBarrierGroup, CUT_STATUS_COMPLETE, TriggerBarrierRequest,
-};
-
-use crate::support::jvm_parse_offset;
 
 const TOPIC: &str = "barrier-invisibility";
 const BARRIER_GROUP: &str = "invisibility-cut";
@@ -62,9 +63,7 @@ const CUTS: i64 = 2;
 ///
 /// The value carries both coordinates, so a record served from the wrong
 /// partition fails the comparison rather than passing by luck.
-fn value_of(partition: i32, index: i32) -> String {
-    format!("p{partition}-r{index}")
-}
+fn value_of(partition: i32, index: i32) -> String { format!("p{partition}-r{index}") }
 
 /// Produce one round of records into every partition.
 async fn produce_round(producer: &Producer, round: i32) {
@@ -183,26 +182,23 @@ async fn inject_cut(client: &Client) -> BTreeMap<i32, i64> {
 /// has that many rather than waiting out the timeout. A marker delivered as a
 /// record would push a marker's bytes into this list and fail the comparison.
 fn jvm_consume(partition: i32, expected: usize, isolation: &str) -> Vec<String> {
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-console-consumer",
-            "--bootstrap-server",
-            &format!("host.docker.internal:{}", jvm_acceptance::host_port()),
-            "--topic",
-            TOPIC,
-            "--partition",
-            &partition.to_string(),
-            "--offset",
-            "earliest",
-            "--max-messages",
-            &expected.to_string(),
-            "--consumer-property",
-            &format!("isolation.level={isolation}"),
-            "--timeout-ms",
-            "30000",
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-console-consumer",
+        "--bootstrap-server",
+        &format!("host.docker.internal:{}", jvm_acceptance::host_port()),
+        "--topic",
+        TOPIC,
+        "--partition",
+        &partition.to_string(),
+        "--offset",
+        "earliest",
+        "--max-messages",
+        &expected.to_string(),
+        "--consumer-property",
+        &format!("isolation.level={isolation}"),
+        "--timeout-ms",
+        "30000",
+    ]);
     support::jvm_output_lines(&out)
 }
 
@@ -212,16 +208,13 @@ fn jvm_consume(partition: i32, expected: usize, isolation: &str) -> Vec<String> 
 /// wrapper script rather than the class, because `GetOffsetShell` changed
 /// package in Kafka 3.4 and the script did not.
 fn jvm_log_end_offset(partition: i32) -> i64 {
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-get-offsets",
-            "--bootstrap-server",
-            &format!("host.docker.internal:{}", jvm_acceptance::host_port()),
-            "--topic-partitions",
-            &format!("{TOPIC}:{partition}"),
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-get-offsets",
+        "--bootstrap-server",
+        &format!("host.docker.internal:{}", jvm_acceptance::host_port()),
+        "--topic-partitions",
+        &format!("{TOPIC}:{partition}"),
+    ]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let line = stdout
         .lines()

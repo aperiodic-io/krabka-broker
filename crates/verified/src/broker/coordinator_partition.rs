@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use super::FindCoordinatorAdmission;
+use {super::FindCoordinatorAdmission, creusot_std::prelude::*};
 
 /// Decide whether one `FindCoordinator` key may proceed to coordinator lookup.
 ///

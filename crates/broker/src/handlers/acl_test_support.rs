@@ -1,14 +1,14 @@
 //! Shared independent ACL wire models and live-handler metadata fixtures.
 
-use std::sync::Arc;
-
-use krabka_metadata::{AclEntry, MetadataRecord};
-
-use crate::{
-    authorizer::{Authorizer, SimpleAclAuthorizer},
-    broker::BrokerHandle,
-    handlers::acl_wire::binding_filter::AclBindingFilter,
-    test_support::{AllowAclSetup, allow_acl},
+use {
+    crate::{
+        authorizer::{Authorizer, SimpleAclAuthorizer},
+        broker::BrokerHandle,
+        handlers::acl_wire::binding_filter::AclBindingFilter,
+        test_support::{AllowAclSetup, allow_acl},
+    },
+    krabka_metadata::{AclEntry, MetadataRecord},
+    std::sync::Arc,
 };
 
 pub(super) const RESOURCE_TYPE_TOPIC: i8 = 2;
@@ -30,9 +30,7 @@ pub(super) fn configured_authorizer() -> Arc<dyn Authorizer> {
 }
 
 /// The matching orders ACL shared by live ACL handler fixtures.
-pub(super) fn alice_orders_acl() -> AclEntry {
-    allow_acl(AllowAclSetup::default())
-}
+pub(super) fn alice_orders_acl() -> AclEntry { allow_acl(AllowAclSetup::default()) }
 
 /// Independent wire oracle for a successful deletion of the standard orders ACL.
 pub(super) fn expected_deleted_orders_acl()
@@ -134,7 +132,12 @@ pub(super) fn expected_empty_match_filter() -> AclBindingFilter {
 
 /// Keep seeded ACLs visible before acquiring the handler's broker and context.
 macro_rules! seeded_acl_fixture {
-    (($handle:ident, $directory:ident, $broker:ident, $context:ident), $start:expr, $entries:expr, $user:expr) => {
+    (
+        ($handle:ident, $directory:ident, $broker:ident, $context:ident),
+        $start:expr,
+        $entries:expr,
+        $user:expr
+    ) => {
         let ($handle, $directory) = $start.await;
         crate::handlers::acl_test_support::seed_acls(&$handle, $entries).await;
         let $broker = $handle.broker_arc_for_test();

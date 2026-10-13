@@ -6,9 +6,10 @@
 //! and a frame whose `message_size` disagrees with the bytes written is
 //! unparseable.
 
-use bytes::{BufMut, Bytes};
-
-use super::{Magic, Message};
+use {
+    super::{Magic, Message},
+    bytes::{BufMut, Bytes},
+};
 
 impl Message {
     /// Number of bytes that the message occupies inside the per-entry frame.
@@ -51,9 +52,7 @@ impl Message {
     }
 }
 
-fn nullable_bytes_len(b: Option<&Bytes>) -> usize {
-    4 + b.map_or(0, Bytes::len)
-}
+fn nullable_bytes_len(b: Option<&Bytes>) -> usize { 4 + b.map_or(0, Bytes::len) }
 
 fn put_nullable_bytes(buf: &mut Vec<u8>, b: Option<&Bytes>) {
     match b {
@@ -69,8 +68,10 @@ fn put_nullable_bytes(buf: &mut Vec<u8>, b: Option<&Bytes>) {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-    use crate::message::test_support::{fixture_v0, fixture_v1, fixture_v1_null, round_trip};
+    use {
+        super::*,
+        crate::message::test_support::{fixture_v0, fixture_v1, fixture_v1_null, round_trip},
+    };
 
     #[test]
     fn message_roundtrips() {

@@ -3,9 +3,7 @@
 //! `throttled` probe sets the sentinel, an `unthrottled` one cannot, and a
 //! `legacy_split` probe switches schema at its canonical version.
 
-use std::collections::BTreeMap;
-
-use assert2::assert;
+use {assert2::assert, std::collections::BTreeMap};
 
 type ApiVersion = i16;
 type Probe = fn(ApiVersion) -> ThrottlePosition;

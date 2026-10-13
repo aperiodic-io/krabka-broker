@@ -16,11 +16,12 @@
 //! - `ResourceType.fromCode` and its siblings: any other byte Kafka does not
 //!   define becomes `UNKNOWN` after parsing and matches no binding.
 
-use krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType};
-
-use super::{
-    WIRE_ANY, WIRE_PATTERN_MATCH, WIRE_UNKNOWN, operation_concrete, pattern_type_concrete,
-    permission_concrete, resource_type_concrete,
+use {
+    super::{
+        WIRE_ANY, WIRE_PATTERN_MATCH, WIRE_UNKNOWN, operation_concrete, pattern_type_concrete,
+        permission_concrete, resource_type_concrete,
+    },
+    krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType},
 };
 
 /// Kafka's `ResourcePattern.WILDCARD_RESOURCE`, the `LITERAL` name that
@@ -54,9 +55,7 @@ impl<T: PartialEq> AxisFilter<T> {
         }
     }
 
-    fn is_unknown(&self) -> bool {
-        matches!(self, Self::Unknown)
-    }
+    fn is_unknown(&self) -> bool { matches!(self, Self::Unknown) }
 }
 
 /// The pattern-type axis of a filter, which has the extra `MATCH` value.

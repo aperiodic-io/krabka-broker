@@ -1,7 +1,4 @@
-use assert2::assert;
-
-use super::*;
-use crate::producer_snapshot::ProducerSnapshotEntryFacts;
+use {super::*, crate::producer_snapshot::ProducerSnapshotEntryFacts, assert2::assert};
 
 #[test]
 fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
@@ -22,12 +19,9 @@ fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
             == DeleteRecordsTrimApplication::TrimLocal { frontier: 8 }
     );
     for (requested, wal, local) in [(5, 0, 0), (5, 8, 3), (5, 3, 8), (i64::MAX, 0, 0)] {
-        for applied in [
-            &[][..],
-            &[false, false],
-            &[true],
-            &[false, true, false, true, true],
-        ] {
+        for applied in [&[][..], &[false, false], &[true], &[
+            false, true, false, true, true,
+        ]] {
             let frontier = requested.max(wal).max(local);
             let result = trim_steps_converge(requested, wal, local, applied);
             assert!(result.0 >= wal && result.1 >= local);
@@ -35,12 +29,9 @@ fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
         }
     }
     for requested in [-2, -1, 0, 3, 5, 6] {
-        trim_witnesses::check_logical(
-            DeleteRecordsTrimFacts { requested, ..facts },
-            3,
-            2,
-            &[0, 3, 5, 10, 11],
-        );
+        trim_witnesses::check_logical(DeleteRecordsTrimFacts { requested, ..facts }, 3, 2, &[
+            0, 3, 5, 10, 11,
+        ]);
     }
     // Snapshot validity preserves historical producer state, even when
     // its last batch is below the new logical start. It is not a data read.

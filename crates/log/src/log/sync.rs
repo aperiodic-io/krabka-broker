@@ -6,22 +6,20 @@
 //! every site that creates a segment.
 
 #[cfg(unix)]
-use std::path::Path;
-
-use krabka_ids::Offset;
-
-use super::Log;
-#[cfg(unix)]
 use crate::io::LogIo;
-use crate::{error::LogError, segment::Segment};
+#[cfg(unix)]
+use std::path::Path;
+use {
+    super::Log,
+    crate::{error::LogError, segment::Segment},
+    krabka_ids::Offset,
+};
 
 #[cfg(test)]
 pub(crate) mod sync_observer {
-    use std::cell::RefCell;
     #[cfg(unix)]
     use std::path::PathBuf;
-
-    use krabka_ids::Offset;
+    use {krabka_ids::Offset, std::cell::RefCell};
 
     #[cfg(unix)]
     thread_local! {
@@ -33,13 +31,9 @@ pub(crate) mod sync_observer {
     }
 
     #[cfg(unix)]
-    pub(super) fn take_dir_syncs() -> Vec<PathBuf> {
-        DIR_SYNCS.take()
-    }
+    pub(super) fn take_dir_syncs() -> Vec<PathBuf> { DIR_SYNCS.take() }
 
-    pub(crate) fn take_segment_flushes() -> Vec<Offset> {
-        SEGMENT_FLUSHES.take()
-    }
+    pub(crate) fn take_segment_flushes() -> Vec<Offset> { SEGMENT_FLUSHES.take() }
 
     #[cfg(unix)]
     pub(super) fn record_dir_sync(dir: PathBuf) {
@@ -115,12 +109,13 @@ impl Log {
 
 #[cfg(test)]
 mod tests {
-    use krabka_ids::Offset;
-
-    use super::*;
-    use crate::{
-        log::test_support::{rolling_test_log, sample_batch},
-        test_support::open_log,
+    use {
+        super::*,
+        crate::{
+            log::test_support::{rolling_test_log, sample_batch},
+            test_support::open_log,
+        },
+        krabka_ids::Offset,
     };
 
     #[test]

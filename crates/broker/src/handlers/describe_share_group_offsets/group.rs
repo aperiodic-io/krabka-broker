@@ -6,25 +6,26 @@
 //! decides: authorization, coordinator routing, and whether a persister is
 //! installed at all. Once those hold, it hands the group's topics to `rows`.
 
-use krabka_metadata::AclOperation;
-use krabka_protocol::owned::{
-    describe_share_group_offsets_request::{
-        DescribeShareGroupOffsetsRequestGroup, DescribeShareGroupOffsetsRequestTopic,
+use {
+    super::{
+        end_offsets::NetworkLatestOffsets,
+        rows::{describe_topics, unauthorized_topic},
+        topics::initialized_topics,
     },
-    describe_share_group_offsets_response::DescribeShareGroupOffsetsResponseGroup,
-};
-
-use super::{
-    end_offsets::NetworkLatestOffsets,
-    rows::{describe_topics, unauthorized_topic},
-    topics::initialized_topics,
-};
-use crate::{
-    authorizer::{AuthorizationResult, authorize_topics},
-    broker::Broker,
-    codes,
-    coordinator::GroupCoordinator,
-    handlers::{RequestContext, group_coordinator_error, group_describe_denied},
+    crate::{
+        authorizer::{AuthorizationResult, authorize_topics},
+        broker::Broker,
+        codes,
+        coordinator::GroupCoordinator,
+        handlers::{RequestContext, group_coordinator_error, group_describe_denied},
+    },
+    krabka_metadata::AclOperation,
+    krabka_protocol::owned::{
+        describe_share_group_offsets_request::{
+            DescribeShareGroupOffsetsRequestGroup, DescribeShareGroupOffsetsRequestTopic,
+        },
+        describe_share_group_offsets_response::DescribeShareGroupOffsetsResponseGroup,
+    },
 };
 
 /// Resolve one requested group into its response row.
@@ -153,30 +154,30 @@ fn allowed_topics(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::Offset;
-    use krabka_metadata::{MetadataRecord, ResourceType, TopicRecord};
-    use krabka_protocol::{
-        owned::describe_share_group_offsets_response::{
-            DescribeShareGroupOffsetsResponsePartition, DescribeShareGroupOffsetsResponseTopic,
+    use {
+        super::*,
+        crate::{
+            authorizer::{AuthorizationResult, Authorizer},
+            coordinator::unified::share::persistence::{
+                ShareGroupMetadataValue, ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
+            },
+            handlers::{
+                RequestContext,
+                describe_share_group_offsets::test_support::{image_with_topic, register_topic},
+            },
+            test_support::peer,
         },
-        primitives::uuid::Uuid as WireUuid,
-    };
-
-    use super::*;
-    use crate::{
-        authorizer::{AuthorizationResult, Authorizer},
-        coordinator::unified::share::persistence::{
-            ShareGroupMetadataValue, ShareGroupStatePartitionMetadataValue, TopicPartitionsInfo,
+        assert2::assert,
+        krabka_ids::PartitionIndex,
+        krabka_log::Offset,
+        krabka_metadata::{MetadataRecord, ResourceType, TopicRecord},
+        krabka_protocol::{
+            owned::describe_share_group_offsets_response::{
+                DescribeShareGroupOffsetsResponsePartition, DescribeShareGroupOffsetsResponseTopic,
+            },
+            primitives::uuid::Uuid as WireUuid,
         },
-        handlers::{
-            RequestContext,
-            describe_share_group_offsets::test_support::{image_with_topic, register_topic},
-        },
-        test_support::peer,
+        std::sync::Arc,
     };
 
     /// Denies topic `Describe` on one named topic, and allows every other
@@ -236,38 +237,29 @@ mod tests {
         } = setup;
         broker
             .group_coordinator
-            .replay_share_group_metadata(
-                group,
-                ShareGroupMetadataValue {
-                    epoch: 1,
-                    metadata_hash: 0,
-                },
-            )
+            .replay_share_group_metadata(group, ShareGroupMetadataValue {
+                epoch: 1,
+                metadata_hash: 0,
+            })
             .unwrap();
         broker
             .group_coordinator
-            .replay_share_state_partition_metadata(
-                group,
-                ShareGroupStatePartitionMetadataValue {
-                    initializing: Vec::new(),
-                    initialized: vec![
-                        TopicPartitionsInfo {
-                            topic_id: orders,
-                            topic_name: "orders".into(),
-                            partitions: vec![0],
-                        },
-                        TopicPartitionsInfo {
-                            topic_id: secret,
-                            topic_name: "secret".into(),
-                            partitions: secret_partitions
-                                .into_iter()
-                                .map(|index| index.0)
-                                .collect(),
-                        },
-                    ],
-                    deleting: Vec::new(),
-                },
-            )
+            .replay_share_state_partition_metadata(group, ShareGroupStatePartitionMetadataValue {
+                initializing: Vec::new(),
+                initialized: vec![
+                    TopicPartitionsInfo {
+                        topic_id: orders,
+                        topic_name: "orders".into(),
+                        partitions: vec![0],
+                    },
+                    TopicPartitionsInfo {
+                        topic_id: secret,
+                        topic_name: "secret".into(),
+                        partitions: secret_partitions.into_iter().map(|index| index.0).collect(),
+                    },
+                ],
+                deleting: Vec::new(),
+            })
             .unwrap();
     }
 
@@ -368,14 +360,11 @@ mod tests {
             .await
             .expect("seed orders state");
 
-        replay_initialized_group(
-            &broker,
-            InitializedGroupSetup {
-                orders: orders_id,
-                secret: secret_id,
-                ..Default::default()
-            },
-        );
+        replay_initialized_group(&broker, InitializedGroupSetup {
+            orders: orders_id,
+            secret: secret_id,
+            ..Default::default()
+        });
 
         let result = describe_initialized_as_alice(
             &broker,
@@ -536,15 +525,12 @@ mod tests {
                 .await
                 .expect("seed secret state");
 
-            replay_initialized_group(
-                &broker,
-                InitializedGroupSetup {
-                    group: "g2",
-                    orders: orders_id,
-                    secret: secret_id,
-                    secret_partitions: vec![PartitionIndex(0)],
-                },
-            );
+            replay_initialized_group(&broker, InitializedGroupSetup {
+                group: "g2",
+                orders: orders_id,
+                secret: secret_id,
+                secret_partitions: vec![PartitionIndex(0)],
+            });
 
             let result =
                 describe_initialized_as_alice(&broker, &image, request_group("g2", None)).await;

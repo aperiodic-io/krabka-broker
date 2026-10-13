@@ -7,14 +7,15 @@
 //! goes on into the next segment only after it reads the segment before it
 //! to the end. Only the first batch of a read can be larger than its budget.
 
-use bytes::{Bytes, BytesMut};
-use krabka_ids::Offset;
-use krabka_protocol::records::{HEADER_LEN, RecordBatch};
-use krabka_units::prelude::{ByteSize, ByteSizeExt, bytes};
-use tracing::instrument;
-
-use super::Log;
-use crate::{error::LogError, segment::Segment};
+use {
+    super::Log,
+    crate::{error::LogError, segment::Segment},
+    bytes::{Bytes, BytesMut},
+    krabka_ids::Offset,
+    krabka_protocol::records::{HEADER_LEN, RecordBatch},
+    krabka_units::prelude::{ByteSize, ByteSizeExt, bytes},
+    tracing::instrument,
+};
 
 /// A `usize` byte length as a quantity.
 ///
@@ -30,9 +31,7 @@ fn size_from_len(len: usize) -> ByteSize {
 /// walk that finds batch boundaries always has a header to read. This is
 /// Kafka's anti-stall rule. The value comes from [`HEADER_LEN`] rather than a
 /// restated constant, so the floor cannot drift from the protocol.
-fn batch_header() -> ByteSize {
-    size_from_len(HEADER_LEN)
-}
+fn batch_header() -> ByteSize { size_from_len(HEADER_LEN) }
 
 /// Whether a read that took a run out of `segment` can go on into the next
 /// segment.
@@ -44,9 +43,7 @@ fn batch_header() -> ByteSize {
 /// first batch of the next segment after the run, and skip every offset
 /// between them. Kafka's `LocalLog.read` never leaves the segment that it
 /// found data in.
-fn emptied(segment: &Segment, next: Offset) -> bool {
-    next > segment.last_offset()
-}
+fn emptied(segment: &Segment, next: Offset) -> bool { next > segment.last_offset() }
 
 /// Whether a run of `len` bytes fits the `remaining` budget of a read that
 /// already has its first batch.
@@ -55,9 +52,7 @@ fn emptied(segment: &Segment, next: Offset) -> bool {
 /// That is Kafka's anti-stall rule, and KIP-74 applies it only to the first
 /// batch of a read. A later run that is larger than the remaining budget
 /// waits for the next read.
-fn fits_after_first(len: ByteSize, remaining: ByteSize) -> bool {
-    len <= remaining
-}
+fn fits_after_first(len: ByteSize, remaining: ByteSize) -> bool { len <= remaining }
 
 /// Shared progress for verbatim bytes and file regions, including the first-batch exception.
 struct RawReadCursor {
@@ -77,9 +72,7 @@ impl RawReadCursor {
         }
     }
 
-    fn budget(&self) -> ByteSize {
-        self.remaining.max(batch_header())
-    }
+    fn budget(&self) -> ByteSize { self.remaining.max(batch_header()) }
 
     fn accept(&mut self, start: Offset, last: Offset, bytes: usize) -> bool {
         let len = size_from_len(bytes);
@@ -183,6 +176,68 @@ crate::sendfile_cfg! {
 }
 
 impl Log {
+    crate::sendfile_cfg! {
+    /// Descriptor variant of [`Log::read_raw`] for the zero-copy `sendfile`
+    /// fetch path.
+    ///
+    /// This method walks sealed segments and then the active segment exactly
+    /// as `read_raw` does. It collects one [`krabka_protocol::records::FileRegion`] for each contributing segment
+    /// through `Segment::read_raw_desc`, instead of owned `Bytes`.
+    /// Multi-segment fetches are **not** coalesced. Each region goes out in
+    /// its own `sendfile` call, so the cross-segment copy disappears.
+    ///
+    /// The selected byte ranges are byte-identical to what `read_raw` would
+    /// have returned for the same `(fetch_offset, limit_offset, max_size)`.
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(regions = tracing::field::Empty, total = tracing::field::Empty),
+        err,
+    )]
+    /// # Errors
+    /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
+    /// # Panics
+    /// Panics if the log's config lock is poisoned.
+    pub fn read_raw_desc(
+        &self,
+        fetch_offset: Offset,
+        limit_offset: Offset,
+        max_size: ByteSize,
+    ) -> Result<RawReadDesc, LogError> {
+        let read_ahead_max = self.config.read().unwrap().read_ahead_max;
+        self.check_locally_readable(fetch_offset)?;
+        if fetch_offset >= limit_offset {
+            return Ok(RawReadDesc::empty(fetch_offset));
+        }
+
+        let (cursor, regions) = self.raw_chunks(
+            fetch_offset,
+            limit_offset,
+            max_size,
+            |segment, next, budget| {
+                let read =
+                    segment.read_raw_desc_with_policy(next, limit_offset, budget, read_ahead_max)?;
+                Ok(read.region.map(|region| RawChunk {
+                    len: region.len,
+                    data: region,
+                    start: read.start_offset,
+                    last: read.last_offset,
+                }))
+            },
+        )?;
+
+        let total: usize = regions.iter().map(|r| r.len).sum();
+        let span = tracing::Span::current();
+        span.record("regions", regions.len());
+        span.record("total", total);
+        Ok(RawReadDesc {
+            start_offset: cursor.start,
+            regions,
+            total,
+        })
+    }
+    }
+
     /// Reject an offset no local segment can answer.
     ///
     /// Below the global log start there is nothing anywhere, and the error
@@ -368,68 +423,6 @@ impl Log {
             total,
             last_offset: cursor.last,
         })
-    }
-
-    crate::sendfile_cfg! {
-    /// Descriptor variant of [`Log::read_raw`] for the zero-copy `sendfile`
-    /// fetch path.
-    ///
-    /// This method walks sealed segments and then the active segment exactly
-    /// as `read_raw` does. It collects one [`krabka_protocol::records::FileRegion`] for each contributing segment
-    /// through `Segment::read_raw_desc`, instead of owned `Bytes`.
-    /// Multi-segment fetches are **not** coalesced. Each region goes out in
-    /// its own `sendfile` call, so the cross-segment copy disappears.
-    ///
-    /// The selected byte ranges are byte-identical to what `read_raw` would
-    /// have returned for the same `(fetch_offset, limit_offset, max_size)`.
-    #[instrument(
-        level = "debug",
-        skip(self),
-        fields(regions = tracing::field::Empty, total = tracing::field::Empty),
-        err,
-    )]
-    /// # Errors
-    /// Returns an error when log I/O fails, a record or index is corrupt, or the requested offset violates the segment state.
-    /// # Panics
-    /// Panics if the log's config lock is poisoned.
-    pub fn read_raw_desc(
-        &self,
-        fetch_offset: Offset,
-        limit_offset: Offset,
-        max_size: ByteSize,
-    ) -> Result<RawReadDesc, LogError> {
-        let read_ahead_max = self.config.read().unwrap().read_ahead_max;
-        self.check_locally_readable(fetch_offset)?;
-        if fetch_offset >= limit_offset {
-            return Ok(RawReadDesc::empty(fetch_offset));
-        }
-
-        let (cursor, regions) = self.raw_chunks(
-            fetch_offset,
-            limit_offset,
-            max_size,
-            |segment, next, budget| {
-                let read =
-                    segment.read_raw_desc_with_policy(next, limit_offset, budget, read_ahead_max)?;
-                Ok(read.region.map(|region| RawChunk {
-                    len: region.len,
-                    data: region,
-                    start: read.start_offset,
-                    last: read.last_offset,
-                }))
-            },
-        )?;
-
-        let total: usize = regions.iter().map(|r| r.len).sum();
-        let span = tracing::Span::current();
-        span.record("regions", regions.len());
-        span.record("total", total);
-        Ok(RawReadDesc {
-            start_offset: cursor.start,
-            regions,
-            total,
-        })
-    }
     }
 }
 

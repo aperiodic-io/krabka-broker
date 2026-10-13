@@ -22,11 +22,12 @@
 //! stay on their own key. The handler fills both the legacy single-coordinator
 //! form, v0-v3, and the per-key `coordinators` array, v4+.
 
-use std::sync::Arc;
-
-use krabka_protocol::owned::{
-    find_coordinator_request::FindCoordinatorRequest,
-    find_coordinator_response::{Coordinator, FindCoordinatorResponse},
+use {
+    krabka_protocol::owned::{
+        find_coordinator_request::FindCoordinatorRequest,
+        find_coordinator_response::{Coordinator, FindCoordinatorResponse},
+    },
+    std::sync::Arc,
 };
 
 mod authz;
@@ -37,16 +38,18 @@ mod response;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    authz::{KeySlot, authorize_keys, cluster_action_allowed},
-    listener::local_advertised_for_listener,
-    resolve::{
-        ResolveTarget, parse_share_key, resolve_partition_coordinator, resolve_transaction_keys,
-        unavailable_coordinator,
+use {
+    self::{
+        authz::{KeySlot, authorize_keys, cluster_action_allowed},
+        listener::local_advertised_for_listener,
+        resolve::{
+            ResolveTarget, parse_share_key, resolve_partition_coordinator,
+            resolve_transaction_keys, unavailable_coordinator,
+        },
+        response::{coordinators_response, request_error_response},
     },
-    response::{coordinators_response, request_error_response},
+    crate::codes,
 };
-use crate::codes;
 
 const KEY_TYPE_GROUP: i8 = 0;
 const KEY_TYPE_TRANSACTION: i8 = 1;

@@ -8,11 +8,12 @@
 //! `ListConfigResources` for a `CLIENT_METRICS` subscription over the real
 //! in-process broker, and it asserts the full operator-facing round-trip.
 
-use assert2::{assert, check};
-
-use crate::support::{
-    configs::{ClientMetricsSubscriptionSetup, client_metrics_subscription},
-    start_n_node_client,
+use {
+    crate::support::{
+        configs::{ClientMetricsSubscriptionSetup, client_metrics_subscription},
+        start_n_node_client,
+    },
+    assert2::{assert, check},
 };
 mod support;
 

@@ -16,12 +16,12 @@
 //! [`PartitionRegistry::shared_topic_name`] instead of allocating and copying
 //! its own.
 
-use std::sync::Arc;
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-
-use crate::{cordoned_log_dirs::CordonedLogDirs, partition::Partition};
+use {
+    crate::{cordoned_log_dirs::CordonedLogDirs, partition::Partition},
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    std::sync::Arc,
+};
 
 /// Concurrent registry of locally-hosted partitions, keyed by
 /// (topic, partition).
@@ -44,9 +44,7 @@ pub(crate) struct PartitionRegistry {
 impl PartitionRegistry {
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
+    pub(crate) fn new() -> Self { Self::default() }
 
     /// Build a registry whose partitions share one internal timestamp source.
     #[must_use]
@@ -70,9 +68,7 @@ impl PartitionRegistry {
 
     /// The log directories this broker holds cordoned.
     #[must_use]
-    pub(crate) fn cordoned_log_dirs(&self) -> &CordonedLogDirs {
-        &self.cordoned_log_dirs
-    }
+    pub(crate) fn cordoned_log_dirs(&self) -> &CordonedLogDirs { &self.cordoned_log_dirs }
 
     /// Return the source to install on a newly opened partition log.
     #[must_use]
@@ -241,25 +237,23 @@ impl PartitionRegistry {
 
     /// Total number of hosted partitions across all topics.
     #[must_use]
-    pub(crate) fn len(&self) -> usize {
-        self.inner.iter().map(|m| m.value().len()).sum()
-    }
+    pub(crate) fn len(&self) -> usize { self.inner.iter().map(|m| m.value().len()).sum() }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Arc};
-
-    use assert2::{assert, check};
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{Log, LogConfig};
-    use tempfile::tempdir;
-
-    use super::PartitionRegistry;
-    use crate::{
-        log_dir::partition_dir,
-        partition::Partition,
-        test_support::{StandalonePartitionSetup, spawn_standalone_partition},
+    use {
+        super::PartitionRegistry,
+        crate::{
+            log_dir::partition_dir,
+            partition::Partition,
+            test_support::{StandalonePartitionSetup, spawn_standalone_partition},
+        },
+        assert2::{assert, check},
+        krabka_ids::PartitionIndex,
+        krabka_log::{Log, LogConfig},
+        std::{path::Path, sync::Arc},
+        tempfile::tempdir,
     };
 
     /// Builds a `Partition` rooted at `<log_dir>/<topic>-<partition>` through
@@ -269,15 +263,11 @@ mod tests {
         let part_dir = partition_dir(log_dir, topic, partition.get());
         std::fs::create_dir_all(&part_dir).unwrap();
         let log = Log::open(&part_dir, LogConfig::default()).unwrap();
-        spawn_standalone_partition(
-            log_dir,
-            log,
-            StandalonePartitionSetup {
-                topic,
-                partition,
-                ..Default::default()
-            },
-        )
+        spawn_standalone_partition(log_dir, log, StandalonePartitionSetup {
+            topic,
+            partition,
+            ..Default::default()
+        })
     }
 
     #[tokio::test]

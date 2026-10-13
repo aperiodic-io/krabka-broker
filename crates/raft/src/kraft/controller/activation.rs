@@ -10,14 +10,15 @@
 //! the log. A controller that cannot write them stops over a fatal fault, as
 //! Kafka's `fatalFaultHandler` halts the process.
 
-use krabka_metadata::{
-    BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord,
-    metadata_version::{ELR_VERSION_FEATURE, METADATA_VERSION_FEATURE},
+use {
+    super::Engine,
+    crate::error::RaftError,
+    krabka_metadata::{
+        BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord,
+        metadata_version::{ELR_VERSION_FEATURE, METADATA_VERSION_FEATURE},
+    },
+    tokio::sync::oneshot,
 };
-use tokio::sync::oneshot;
-
-use super::Engine;
-use crate::error::RaftError;
 
 /// Kafka's `TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG`.
 const MIN_IN_SYNC_REPLICAS_CONFIG: &str = "min.insync.replicas";

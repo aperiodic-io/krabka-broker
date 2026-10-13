@@ -7,10 +7,10 @@
 //! where they conflict. The rules and the validation `kafka-storage format`
 //! performs live here, apart from the flag definitions they read.
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE;
-use krabka_raft::UnstableFeatureVersions;
+use {
+    krabka_metadata::metadata_version::KRAFT_VERSION_FEATURE, krabka_raft::UnstableFeatureVersions,
+    std::collections::BTreeMap,
+};
 
 /// The highest `metadata.version` this format accepts under `unstable`:
 /// Kafka 4.3's latest production level, or with unstable feature versions the
@@ -249,10 +249,7 @@ pub(super) fn resolve_format_features(
 #[cfg(test)]
 mod tests {
 
-    use assert2::check;
-    use krabka_metadata::MetadataRecord;
-
-    use super::*;
+    use {super::*, assert2::check, krabka_metadata::MetadataRecord};
 
     /// `unstable.feature.versions.enable` at Kafka's default.
     const STRICT: UnstableFeatureVersions = UnstableFeatureVersions::Disabled;

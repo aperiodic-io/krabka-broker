@@ -4,21 +4,22 @@
 //! refusal reports the stored counts. The audit phase follows the outcome and
 //! the withdraw flag.
 
-use assert2::check;
-use krabka_audit::PrivilegedPhase;
-use krabka_metadata::BreakGlassProposalRecord;
-
-use super::pending;
-use crate::{
-    break_glass::{
-        config::BreakGlassPolicy,
-        gate::tests::{approval, config},
-        handlers::{
-            Refusal, UNKNOWN_ACTION,
-            approve::report::{Report, phase_of},
+use {
+    super::pending,
+    crate::{
+        break_glass::{
+            config::BreakGlassPolicy,
+            gate::tests::{approval, config},
+            handlers::{
+                Refusal, UNKNOWN_ACTION,
+                approve::report::{Report, phase_of},
+            },
         },
+        codes,
     },
-    codes,
+    assert2::check,
+    krabka_audit::PrivilegedPhase,
+    krabka_metadata::BreakGlassProposalRecord,
 };
 
 #[test]

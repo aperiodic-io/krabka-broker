@@ -1,14 +1,15 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::time_index::sparse_timestamp_window_valid;
 #[cfg(creusot)]
 use super::trim::{trim_cursor_bounded, trim_store_frontiers_valid, trim_well_formed};
 #[cfg(creusot)]
 use super::trim::{trim_has_no_snapshot, trim_rejection};
-use super::{
-    DeleteRecordsTrimDecision, DeleteRecordsTrimFacts, SparseTimestampWindow,
-    admitted_trim_bounds_reload_and_retry, constructed_index_retained_candidate,
+use {
+    super::{
+        DeleteRecordsTrimDecision, DeleteRecordsTrimFacts, SparseTimestampWindow,
+        admitted_trim_bounds_reload_and_retry, constructed_index_retained_candidate,
+    },
+    creusot_std::prelude::*,
 };
 
 type TrimTimestampWitness = (i64, Option<usize>, i64, Option<usize>);

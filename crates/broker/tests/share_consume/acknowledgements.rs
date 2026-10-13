@@ -4,22 +4,23 @@
 //! Release re-delivers the same offsets at a higher `delivery_count`. Reject
 //! archives them, so the start offset moves past the poison record.
 
-use assert2::{assert, check};
-
-use crate::{
-    harness::{
-        ConsumptionFixture, broker_config, broker_test_permit, consumption_fixture,
-        initialize_consumption, join, produce_n,
+use {
+    crate::{
+        harness::{
+            ConsumptionFixture, broker_config, broker_test_permit, consumption_fixture,
+            initialize_consumption, join, produce_n,
+        },
+        share_rpc::{
+            AcquiredRecordCount, acquired_count, fetch_count, fetch_empty, fetch_until_acquired,
+            share_fetch,
+        },
+        support::share::{
+            ConsumptionSetup, RefetchSetup, RetryEpochs, ShareAck, ShareRecordCount,
+            ShareRecordSeedSetup, ShareRecordsSetup, ShareSessionEpoch, ShareSessionSetup,
+            ShareTopicSetup, acknowledge_success, refetch_while_empty, rejoin_group, start_topic,
+        },
     },
-    share_rpc::{
-        AcquiredRecordCount, acquired_count, fetch_count, fetch_empty, fetch_until_acquired,
-        share_fetch,
-    },
-    support::share::{
-        ConsumptionSetup, RefetchSetup, RetryEpochs, ShareAck, ShareRecordCount,
-        ShareRecordSeedSetup, ShareRecordsSetup, ShareSessionEpoch, ShareSessionSetup,
-        ShareTopicSetup, acknowledge_success, refetch_while_empty, rejoin_group, start_topic,
-    },
+    assert2::{assert, check},
 };
 
 /// Acquire 3 records, Accept them all, and observe the SPSO advance. The test
@@ -36,14 +37,10 @@ async fn consume_accept_restart() {
         let (broker, client, topic) =
             start_topic(broker_config(log_dir.clone()), ShareTopicSetup::default()).await;
         tid = topic;
-        let (member, _) = initialize_consumption(
-            &broker,
-            &client,
-            ConsumptionSetup {
-                topic_id: tid,
-                ..Default::default()
-            },
-        )
+        let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
+            topic_id: tid,
+            ..Default::default()
+        })
         .await;
         let session = ShareSessionSetup::joined(&member, tid);
 
@@ -149,30 +146,23 @@ async fn reject_archives() {
 
     // Produce one more (offset 2). The SPSO advanced past the rejected pair, so
     // only the new offset is acquired — proving the rejected ones were skipped.
-    produce_n(
-        &fixture.client,
-        ShareRecordsSetup {
+    produce_n(&fixture.client, ShareRecordsSetup {
+        topic_id: fixture.tid,
+        ..Default::default()
+    })
+    .await;
+    let row3 = share_fetch(&fixture.client, session.fetch_at(ShareSessionEpoch(3))).await;
+    let row3 = refetch_while_empty(&fixture.client, row3, RefetchSetup {
+        session: ShareSessionSetup {
+            member: &fixture.member,
             topic_id: fixture.tid,
             ..Default::default()
         },
-    )
-    .await;
-    let row3 = share_fetch(&fixture.client, session.fetch_at(ShareSessionEpoch(3))).await;
-    let row3 = refetch_while_empty(
-        &fixture.client,
-        row3,
-        RefetchSetup {
-            session: ShareSessionSetup {
-                member: &fixture.member,
-                topic_id: fixture.tid,
-                ..Default::default()
-            },
-            epochs: RetryEpochs {
-                start: ShareSessionEpoch(4),
-                ..Default::default()
-            },
+        epochs: RetryEpochs {
+            start: ShareSessionEpoch(4),
+            ..Default::default()
         },
-    )
+    })
     .await;
     assert!(
         acquired_count(&row3) == 1,

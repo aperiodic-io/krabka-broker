@@ -28,28 +28,31 @@
 //! [`token_describe_visible`] are the two verified kernels this handler
 //! drives; see their doc comments for the exact contracts.
 
-use std::net::SocketAddr;
-
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    describe_delegation_token_request::DescribeDelegationTokenRequest,
-    describe_delegation_token_response::DescribeDelegationTokenResponse,
+use {
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        describe_delegation_token_request::DescribeDelegationTokenRequest,
+        describe_delegation_token_response::DescribeDelegationTokenResponse,
+    },
+    krabka_security::{KafkaPrincipal, SecretBytes},
+    krabka_verified::delegation_token::{TokenApi, TokenApiAdmission, token_describe_visible},
+    std::net::SocketAddr,
 };
-use krabka_security::{KafkaPrincipal, SecretBytes};
-use krabka_verified::delegation_token::{TokenApi, TokenApiAdmission, token_describe_visible};
 
 mod response;
 
 #[cfg(test)]
 mod tests;
 
-use self::response::{describe_token, empty_response};
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
-    codes::{DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_REQUEST_NOT_ALLOWED},
-    handlers::ErrorCodeResponse as _,
-    metadata_source::MetadataSource,
-    network::auth::ConnectionAuth,
+use {
+    self::response::{describe_token, empty_response},
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+        codes::{DELEGATION_TOKEN_AUTH_DISABLED, DELEGATION_TOKEN_REQUEST_NOT_ALLOWED},
+        handlers::ErrorCodeResponse as _,
+        metadata_source::MetadataSource,
+        network::auth::ConnectionAuth,
+    },
 };
 
 // `async` matches the call-site shape used by every other
@@ -115,16 +118,13 @@ pub(crate) fn handle(
             let caller_is_requester = t.requester == caller;
             let caller_is_renewer = t.renewers.contains(&caller);
             let allowed = |resource_type, resource_name: &str, operation| {
-                authorizer.authorize(
-                    &*image,
-                    &AuthorizationRequest {
-                        principal,
-                        host: peer,
-                        resource_type,
-                        resource_name,
-                        operation,
-                    },
-                ) == AuthorizationResult::Allow
+                authorizer.authorize(&*image, &AuthorizationRequest {
+                    principal,
+                    host: peer,
+                    resource_type,
+                    resource_name,
+                    operation,
+                }) == AuthorizationResult::Allow
             };
             // Kafka's `authorizeToken` then `authorizeRequester`: `Describe`
             // on `DelegationToken:<token id>` grants this one token, and

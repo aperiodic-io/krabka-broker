@@ -2,27 +2,27 @@
 //! Both the supervisor reconcile pass and the first-touch handler path open a
 //! partition through this one helper, so a key can never be opened twice.
 
-use std::{path::PathBuf, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig};
-
 #[cfg(test)]
 use crate::diskless::hot_tail::HotTailCache;
 #[cfg(test)]
 use crate::wal::quorum::registry::WalShardRegistry;
-use crate::{
-    broker::{
-        PartitionSpawnConfig, try_spawn_partition_with_replication_target,
-        try_spawn_partition_with_sequencer,
+use {
+    crate::{
+        broker::{
+            PartitionSpawnConfig, try_spawn_partition_with_replication_target,
+            try_spawn_partition_with_sequencer,
+        },
+        diskless::recovery::open_config,
+        log_dir::{partition_dir, place_partition_dir_avoiding},
+        log_dir_status::LogDirRegistry,
+        partition::{PartitionRuntimeConfig, ReplicationTarget},
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        wal::quorum::{follower::hydrate_on_promotion, registry::ShardId},
     },
-    diskless::recovery::open_config,
-    log_dir::{partition_dir, place_partition_dir_avoiding},
-    log_dir_status::LogDirRegistry,
-    partition::{PartitionRuntimeConfig, ReplicationTarget},
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    wal::quorum::{follower::hydrate_on_promotion, registry::ShardId},
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig},
+    std::{path::PathBuf, sync::Arc},
 };
 
 /// Open (or recover) the on-disk `Partition` for `(topic, partition)` and
@@ -164,26 +164,24 @@ pub(super) fn materialize_partition_with_replication_target(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        log_dir::partition_dir,
-        partition::{Partition, test_support::install_three_replica_isr},
-        replicator_supervisor::test_support::{
-            MaterializeFixture, MaterializeSetup, materialized_partition,
+    use {
+        super::*,
+        crate::{
+            log_dir::partition_dir,
+            partition::{Partition, test_support::install_three_replica_isr},
+            replicator_supervisor::test_support::{
+                MaterializeFixture, MaterializeSetup, materialized_partition,
+            },
         },
+        assert2::assert,
+        std::sync::atomic::{AtomicU64, Ordering},
     };
 
     #[derive(Debug)]
     struct TestStampSource(AtomicU64);
 
     impl krabka_log::StampSource for TestStampSource {
-        fn next_stamp(&self) -> u64 {
-            self.0.fetch_add(1, Ordering::Relaxed)
-        }
+        fn next_stamp(&self) -> u64 { self.0.fetch_add(1, Ordering::Relaxed) }
     }
 
     fn materialize_test_partition(
@@ -191,15 +189,12 @@ mod tests {
         log_dir: &std::path::Path,
         topic: &str,
     ) {
-        MaterializeFixture::default().materialize(
-            partitions,
-            MaterializeSetup {
-                topic,
-                log_dirs: &[log_dir.to_path_buf()],
-                context: "materialize partition",
-                ..Default::default()
-            },
-        );
+        MaterializeFixture::default().materialize(partitions, MaterializeSetup {
+            topic,
+            log_dirs: &[log_dir.to_path_buf()],
+            context: "materialize partition",
+            ..Default::default()
+        });
     }
 
     fn append_one(partition: &Partition) -> krabka_log::Offset {
@@ -285,13 +280,10 @@ mod tests {
 
         materialize_partition(MaterializePartitionConfig {
             topic_id: Some(topic_id),
-            ..MaterializeFixture::default().config(
-                &partitions,
-                MaterializeSetup {
-                    log_dirs: &[first.path().to_path_buf(), preferred.path().to_path_buf()],
-                    ..Default::default()
-                },
-            )
+            ..MaterializeFixture::default().config(&partitions, MaterializeSetup {
+                log_dirs: &[first.path().to_path_buf(), preferred.path().to_path_buf()],
+                ..Default::default()
+            })
         })
         .expect("materialize");
 
@@ -379,14 +371,11 @@ mod tests {
                 true,
                 (Some(hot_tail), Some(wal_shards.clone()), None),
             ),
-            ..MaterializeFixture::default().config(
-                &partitions,
-                MaterializeSetup {
-                    topic: "diskless",
-                    log_dirs: &[dir.path().to_path_buf()],
-                    ..Default::default()
-                },
-            )
+            ..MaterializeFixture::default().config(&partitions, MaterializeSetup {
+                topic: "diskless",
+                log_dirs: &[dir.path().to_path_buf()],
+                ..Default::default()
+            })
         })
         .expect("materialize");
 

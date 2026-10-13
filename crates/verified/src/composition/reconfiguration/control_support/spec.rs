@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
-use super::super::spec::{expected_member, grant_count, has_node, membership_matches_change};
-use crate::reconfiguration::{
-    CurrentVoterSet, ReconfigurationState, TargetVoter, VoterChangeKind, VoterChangeRequest,
+use {
+    super::super::spec::{expected_member, grant_count, has_node, membership_matches_change},
+    crate::reconfiguration::{
+        CurrentVoterSet, ReconfigurationState, TargetVoter, VoterChangeKind, VoterChangeRequest,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {

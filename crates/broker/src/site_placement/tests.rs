@@ -9,11 +9,7 @@
 //! on the seed, so most tests run a range of seeds and check what holds for
 //! every one of them.
 
-use std::collections::BTreeSet;
-
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert, std::collections::BTreeSet};
 
 /// The seeds that a test runs the placement with.
 const SEEDS: std::ops::Range<u64> = 0..64;
@@ -27,13 +23,9 @@ fn broker(node_id: u64, site: Option<&str>, is_witness: bool) -> SiteBrokerView 
     }
 }
 
-fn replica(node_id: u64, site: &str) -> SiteBrokerView {
-    broker(node_id, Some(site), false)
-}
+fn replica(node_id: u64, site: &str) -> SiteBrokerView { broker(node_id, Some(site), false) }
 
-fn witness(node_id: u64, site: &str) -> SiteBrokerView {
-    broker(node_id, Some(site), true)
-}
+fn witness(node_id: u64, site: &str) -> SiteBrokerView { broker(node_id, Some(site), true) }
 
 fn fenced(mut view: SiteBrokerView) -> SiteBrokerView {
     view.fenced = true;

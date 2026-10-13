@@ -1,11 +1,14 @@
 //! `#[krabka_env]`: see the crate documentation.
 
-use moxy::{
-    ast::{Attribute, Fields, FromMeta as _, ItemStruct, List, Meta, ParseError, Parser, Token},
-    token::{LitStr, Spanner, ToTokenStream, TokenStream},
+use {
+    crate::meta::compact,
+    moxy::{
+        ast::{
+            Attribute, Fields, FromMeta as _, ItemStruct, List, Meta, ParseError, Parser, Token,
+        },
+        token::{LitStr, Spanner, ToTokenStream, TokenStream},
+    },
 };
-
-use crate::meta::compact;
 
 /// The prefix of every environment variable when the attribute names none.
 const DEFAULT_PREFIX: &str = "KRABKA_";
@@ -105,11 +108,12 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use moxy::token::TokenStream;
-
-    use super::{env_name, expand, type_arguments};
-    use crate::meta::compact;
+    use {
+        super::{env_name, expand, type_arguments},
+        crate::meta::compact,
+        assert2::assert,
+        moxy::token::TokenStream,
+    };
 
     /// `#[krabka_env($meta)]` on `item`, expanded and printed without
     /// whitespace, or the message of the error it raises.

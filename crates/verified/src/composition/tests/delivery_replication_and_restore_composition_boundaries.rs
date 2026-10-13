@@ -1,16 +1,15 @@
-use assert2::assert;
-
-use super::*;
-use crate::restore::{RestoreContentExclusions, RestoreTimestampType};
+use {
+    super::*,
+    crate::restore::{RestoreContentExclusions, RestoreTimestampType},
+    assert2::assert,
+};
 
 #[test]
 fn delivery_replication_and_restore_composition_boundaries() {
-    for activations in [
-        &[][..],
-        &[10, 20, 5],
-        &[i64::MIN],
-        &[i64::MAX - 1, i64::MAX],
-    ] {
+    for activations in [&[][..], &[10, 20, 5], &[i64::MIN], &[
+        i64::MAX - 1,
+        i64::MAX,
+    ]] {
         for uncertainty in [-1, 0, 2, i64::MAX] {
             for now in [i64::MIN, 19, 20, i64::MAX] {
                 let all_due = activations.iter().all(|activation| {
@@ -123,17 +122,10 @@ fn delivery_replication_and_restore_composition_boundaries() {
         base_timestamp: 10,
         max_timestamp: 11,
     };
-    for records in [
-        &[][..],
-        &records,
-        &[(
-            records[0].0,
-            RestoreExclusions {
-                producer: true,
-                ..exclusions
-            },
-        )],
-    ] {
+    for records in [&[][..], &records, &[(records[0].0, RestoreExclusions {
+        producer: true,
+        ..exclusions
+    })]] {
         for offset_bound in [None, Some(3), Some(4), Some(5)] {
             for timestamp_bound in [None, Some(10), Some(11), Some(12)] {
                 assert!(restore_selection_matches_oracle(

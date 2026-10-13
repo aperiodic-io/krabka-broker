@@ -5,23 +5,23 @@
 //! through the transport seam, and repeats until every target is marked or the
 //! deadline passes. The offsets it collects are the cut.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_log::Offset;
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_units::{Time, convert::TimeExt as _};
-use krabka_verified::{BarrierPlacementDecision, barrier_placement_decision};
-use tokio::time::Instant;
-use tracing::warn;
-
-use super::{RemoteMarkerWriter, append_marker, backoff_for, group_by_leader};
-use crate::{
-    barrier::{
-        config::BarrierConfig, marker::BarrierMarker, metrics::BrokerBarrierMetrics,
-        state::TargetPartition,
+use {
+    super::{RemoteMarkerWriter, append_marker, backoff_for, group_by_leader},
+    crate::{
+        barrier::{
+            config::BarrierConfig, marker::BarrierMarker, metrics::BrokerBarrierMetrics,
+            state::TargetPartition,
+        },
+        metadata_source::MetadataSource,
+        partition_registry::PartitionRegistry,
     },
-    metadata_source::MetadataSource,
-    partition_registry::PartitionRegistry,
+    krabka_log::Offset,
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_units::{Time, convert::TimeExt as _},
+    krabka_verified::{BarrierPlacementDecision, barrier_placement_decision},
+    std::{collections::BTreeMap, sync::Arc},
+    tokio::time::Instant,
+    tracing::warn,
 };
 
 /// The leader of `target` in `image`.
@@ -191,32 +191,32 @@ impl MarkerFanout<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
-
-    use assert2::assert;
-    use krabka_ids::PartitionIndex;
-    use krabka_log::Offset;
-    use krabka_metadata::NodeId;
-    use krabka_units::{millis, secs};
-    use tempfile::tempdir;
-
-    use super::{MarkerFanout, RemoteMarkerWriter};
-    use crate::{
-        barrier::{
-            config::BarrierConfig,
-            injection::{
-                MarkerPlacement, MockRemoteMarkerWriter,
-                test_support::{at, fast_config, marker, source},
+    use {
+        super::{MarkerFanout, RemoteMarkerWriter},
+        crate::{
+            barrier::{
+                config::BarrierConfig,
+                injection::{
+                    MarkerPlacement, MockRemoteMarkerWriter,
+                    test_support::{at, fast_config, marker, source},
+                },
+                metrics::BrokerBarrierMetrics,
+                state::TargetPartition,
+                test_support::{check_control_marker, open_partition, topic_records},
             },
-            metrics::BrokerBarrierMetrics,
-            state::TargetPartition,
-            test_support::{check_control_marker, open_partition, topic_records},
+            error::BrokerError,
+            metadata_source::MetadataSource,
+            metrics::BrokerMetrics,
+            partition_registry::PartitionRegistry,
+            test_support::StandalonePartitionSetup,
         },
-        error::BrokerError,
-        metadata_source::MetadataSource,
-        metrics::BrokerMetrics,
-        partition_registry::PartitionRegistry,
-        test_support::StandalonePartitionSetup,
+        assert2::assert,
+        krabka_ids::PartitionIndex,
+        krabka_log::Offset,
+        krabka_metadata::NodeId,
+        krabka_units::{millis, secs},
+        std::{collections::BTreeMap, sync::Arc},
+        tempfile::tempdir,
     };
 
     fn test_fanout<'a>(
@@ -274,7 +274,9 @@ mod tests {
     }
 
     macro_rules! remote_fixture {
-        ($registry:ident, $controller:ident, $metrics:ident, $config:ident = $configuration:expr) => {
+        (
+            $registry:ident, $controller:ident, $metrics:ident, $config:ident = $configuration:expr
+        ) => {
             let $registry = PartitionRegistry::new();
             let $controller = source(&topic_records("orders", 1, NodeId(2)));
             let $metrics = BrokerBarrierMetrics::new(BrokerMetrics::new());
@@ -297,14 +299,10 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let registry = PartitionRegistry::new();
         for p in 0..2 {
-            open_partition(
-                &registry,
-                dir.path(),
-                StandalonePartitionSetup {
-                    partition: krabka_ids::PartitionIndex(p),
-                    ..Default::default()
-                },
-            );
+            open_partition(&registry, dir.path(), StandalonePartitionSetup {
+                partition: krabka_ids::PartitionIndex(p),
+                ..Default::default()
+            });
             registry
                 .get("orders", PartitionIndex(p))
                 .expect("the partition is open")

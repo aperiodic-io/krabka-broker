@@ -1,7 +1,9 @@
 //! Independent wire expectations and input metadata for configuration tests.
 
-use krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord};
-use krabka_protocol::owned::describe_configs_response::DescribeConfigsSynonym;
+use {
+    krabka_metadata::{MetadataImage, MetadataRecord, TopicConfigRecord},
+    krabka_protocol::owned::describe_configs_response::DescribeConfigsSynonym,
+};
 
 pub(super) fn synonym(name: &str, value: &str, source: i8) -> DescribeConfigsSynonym {
     tagged_wire!(DescribeConfigsSynonym {

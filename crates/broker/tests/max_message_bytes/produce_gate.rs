@@ -1,15 +1,16 @@
 //! The gate itself: a batch at the cap appends, a batch one byte over it is
 //! refused with `MESSAGE_TOO_LARGE` (10) and appends nothing.
 
-use assert2::check;
-
-use crate::{
-    support,
-    wire::{
-        COMPRESSION_TYPE, KAFKA_DEFAULT, MAX_MESSAGE_BYTES, SEGMENT_BYTES, accepted, create_topic,
-        gzip_batch, orders_fixture, produce_batch, produce_batch_of_wire_len,
-        record_list_too_large, too_large, wire_len,
+use {
+    crate::{
+        support,
+        wire::{
+            COMPRESSION_TYPE, KAFKA_DEFAULT, MAX_MESSAGE_BYTES, SEGMENT_BYTES, accepted,
+            create_topic, gzip_batch, orders_fixture, produce_batch, produce_batch_of_wire_len,
+            record_list_too_large, too_large, wire_len,
+        },
     },
+    assert2::check,
 };
 
 /// A per-topic cap of 2048 bytes, the value the boundary was settled at
@@ -69,15 +70,10 @@ async fn a_batch_larger_than_segment_bytes_is_refused_even_when_the_message_cap_
     const SEGMENT: usize = 1_048_576;
 
     let p = support::start().await;
-    let topic = create_topic(
-        &p.broker,
-        &p.client,
-        "orders",
-        &[
-            (MAX_MESSAGE_BYTES, &(SEGMENT * 2).to_string()),
-            (SEGMENT_BYTES, &SEGMENT.to_string()),
-        ],
-    )
+    let topic = create_topic(&p.broker, &p.client, "orders", &[
+        (MAX_MESSAGE_BYTES, &(SEGMENT * 2).to_string()),
+        (SEGMENT_BYTES, &SEGMENT.to_string()),
+    ])
     .await;
 
     check_exact_limit(&p, topic, SEGMENT, record_list_too_large()).await;
@@ -120,19 +116,15 @@ async fn a_topic_with_no_override_inherits_the_brokers_message_max_bytes() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_topic_override_binds_below_and_above_the_broker_default() {
     let p = support::start().await;
-    let tight = create_topic(
-        &p.broker,
-        &p.client,
-        "tight",
-        &[(MAX_MESSAGE_BYTES, &CAP.to_string())],
-    )
+    let tight = create_topic(&p.broker, &p.client, "tight", &[(
+        MAX_MESSAGE_BYTES,
+        &CAP.to_string(),
+    )])
     .await;
-    let loose = create_topic(
-        &p.broker,
-        &p.client,
-        "loose",
-        &[(MAX_MESSAGE_BYTES, &(KAFKA_DEFAULT * 2).to_string())],
-    )
+    let loose = create_topic(&p.broker, &p.client, "loose", &[(
+        MAX_MESSAGE_BYTES,
+        &(KAFKA_DEFAULT * 2).to_string(),
+    )])
     .await;
 
     check!(produce_batch_of_wire_len(&p.client, "tight", tight, CAP + 1).await == too_large());
@@ -175,15 +167,10 @@ async fn a_batch_the_topic_expands_is_measured_after_the_broker_re_encodes_it() 
     const FITS_EITHER_WAY: usize = 100;
 
     let p = support::start().await;
-    let topic = create_topic(
-        &p.broker,
-        &p.client,
-        "orders",
-        &[
-            (MAX_MESSAGE_BYTES, &CAP.to_string()),
-            (COMPRESSION_TYPE, "uncompressed"),
-        ],
-    )
+    let topic = create_topic(&p.broker, &p.client, "orders", &[
+        (MAX_MESSAGE_BYTES, &CAP.to_string()),
+        (COMPRESSION_TYPE, "uncompressed"),
+    ])
     .await;
 
     let oversized = gzip_batch(EXPANDS_PAST_THE_CAP);

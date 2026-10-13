@@ -5,13 +5,13 @@
 //! `trim_to_offset` moves the log start forward without touching the
 //! active segment.
 
-use std::collections::HashSet;
-
-use krabka_ids::Offset;
-use tracing::instrument;
-
-use super::Log;
-use crate::{error::LogError, producer_snapshot, segment::Segment, txn_index::TxnIndex};
+use {
+    super::Log,
+    crate::{error::LogError, producer_snapshot, segment::Segment, txn_index::TxnIndex},
+    krabka_ids::Offset,
+    std::collections::HashSet,
+    tracing::instrument,
+};
 
 impl Log {
     /// Remove sealed segments, their cached indexes, and their producer snapshots.
@@ -36,11 +36,13 @@ impl Log {
         // Producer snapshots are pruned separately by retain_reload_range:
         // the snapshot exactly at the cut must survive deleting its segment.
         let now = std::time::SystemTime::now();
-        self.retire_files(
-            base,
-            now,
-            &["log", "index", "timeindex", "txnindex", "stampindex"],
-        )
+        self.retire_files(base, now, &[
+            "log",
+            "index",
+            "timeindex",
+            "txnindex",
+            "stampindex",
+        ])
     }
 
     /// Truncate the log so that no record at offset `>= offset` remains.

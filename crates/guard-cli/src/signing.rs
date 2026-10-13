@@ -49,10 +49,8 @@
 //! outside the signed bytes on purpose: every approver signs the same payload,
 //! and a payload that grew with each approval could never verify twice.
 
-use std::path::Path;
-
-use krabka_audit::FileEd25519Signer;
 pub use krabka_broker::operator_keys::FreezeSigningInput;
+use {krabka_audit::FileEd25519Signer, std::path::Path};
 
 /// Domain separator for a freeze record signature (KFC-9).
 ///
@@ -160,9 +158,7 @@ fn put_len_prefixed(bytes: &mut Vec<u8>, field: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     krabka_macros::break_glass_golden_id!(PROPOSAL_ID);
 
@@ -246,62 +242,38 @@ mod tests {
     fn a_change_to_any_signed_freeze_field_changes_the_bytes() {
         let baseline = freeze_signing_bytes(&freeze_input());
         let cases: [(&'static str, FreezeSigningInput<'static>); 8] = [
-            (
-                "another cluster",
-                FreezeSigningInput {
-                    cluster_id: "other-cluster",
-                    ..freeze_input()
-                },
-            ),
-            (
-                "a prefixed scope",
-                FreezeSigningInput {
-                    pattern_type: 4,
-                    ..freeze_input()
-                },
-            ),
-            (
-                "another scope",
-                FreezeSigningInput {
-                    scope: "payments",
-                    ..freeze_input()
-                },
-            ),
-            (
-                "the thaw of the same scope",
-                FreezeSigningInput {
-                    frozen: false,
-                    ..freeze_input()
-                },
-            ),
-            (
-                "another reason",
-                FreezeSigningInput {
-                    reason: "tenant offboarding",
-                    ..freeze_input()
-                },
-            ),
-            (
-                "another author",
-                FreezeSigningInput {
-                    set_by: "User:mallory",
-                    ..freeze_input()
-                },
-            ),
-            (
-                "another timestamp",
-                FreezeSigningInput {
-                    set_at_ms: 1_770_000_000_001,
-                    ..freeze_input()
-                },
-            ),
-            (
-                "another proposal",
-                FreezeSigningInput {
-                    proposal_id: PROPOSAL_ID,
-                    ..freeze_input()
-                },
-            ),
+            ("another cluster", FreezeSigningInput {
+                cluster_id: "other-cluster",
+                ..freeze_input()
+            }),
+            ("a prefixed scope", FreezeSigningInput {
+                pattern_type: 4,
+                ..freeze_input()
+            }),
+            ("another scope", FreezeSigningInput {
+                scope: "payments",
+                ..freeze_input()
+            }),
+            ("the thaw of the same scope", FreezeSigningInput {
+                frozen: false,
+                ..freeze_input()
+            }),
+            ("another reason", FreezeSigningInput {
+                reason: "tenant offboarding",
+                ..freeze_input()
+            }),
+            ("another author", FreezeSigningInput {
+                set_by: "User:mallory",
+                ..freeze_input()
+            }),
+            ("another timestamp", FreezeSigningInput {
+                set_at_ms: 1_770_000_000_001,
+                ..freeze_input()
+            }),
+            ("another proposal", FreezeSigningInput {
+                proposal_id: PROPOSAL_ID,
+                ..freeze_input()
+            }),
         ];
         for (case, input) in cases {
             check!(freeze_signing_bytes(&input) != baseline, "{case}");
@@ -312,48 +284,30 @@ mod tests {
     fn a_change_to_any_signed_approval_field_changes_the_bytes() {
         let baseline = approval_signing_bytes(&approval_input());
         let cases: [(&'static str, ApprovalSigningInput<'static>); 6] = [
-            (
-                "another proposal",
-                ApprovalSigningInput {
-                    proposal_id: [0; 16],
-                    ..approval_input()
-                },
-            ),
-            (
-                "another action",
-                ApprovalSigningInput {
-                    action: 7,
-                    ..approval_input()
-                },
-            ),
-            (
-                "another target",
-                ApprovalSigningInput {
-                    target: "orders",
-                    ..approval_input()
-                },
-            ),
-            (
-                "another proposer",
-                ApprovalSigningInput {
-                    proposer: "User:mallory",
-                    ..approval_input()
-                },
-            ),
-            (
-                "another creation time",
-                ApprovalSigningInput {
-                    created_at_ms: 1_770_000_000_001,
-                    ..approval_input()
-                },
-            ),
-            (
-                "another expiry",
-                ApprovalSigningInput {
-                    expires_at_ms: 1_770_000_180_001,
-                    ..approval_input()
-                },
-            ),
+            ("another proposal", ApprovalSigningInput {
+                proposal_id: [0; 16],
+                ..approval_input()
+            }),
+            ("another action", ApprovalSigningInput {
+                action: 7,
+                ..approval_input()
+            }),
+            ("another target", ApprovalSigningInput {
+                target: "orders",
+                ..approval_input()
+            }),
+            ("another proposer", ApprovalSigningInput {
+                proposer: "User:mallory",
+                ..approval_input()
+            }),
+            ("another creation time", ApprovalSigningInput {
+                created_at_ms: 1_770_000_000_001,
+                ..approval_input()
+            }),
+            ("another expiry", ApprovalSigningInput {
+                expires_at_ms: 1_770_000_180_001,
+                ..approval_input()
+            }),
         ];
         for (case, input) in cases {
             check!(approval_signing_bytes(&input) != baseline, "{case}");

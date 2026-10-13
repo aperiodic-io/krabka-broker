@@ -133,11 +133,12 @@ fn snapshot_chunk_shape_valid(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::{
-        SnapshotChunkDecision, SnapshotInstallDecision, snapshot_chunk_admission,
-        snapshot_install_decision, snapshot_prune_admission,
+    use {
+        super::{
+            SnapshotChunkDecision, SnapshotInstallDecision, snapshot_chunk_admission,
+            snapshot_install_decision, snapshot_prune_admission,
+        },
+        assert2::check,
     };
 
     #[test]

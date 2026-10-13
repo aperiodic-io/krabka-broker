@@ -1,14 +1,14 @@
 //! Authorizer decorator that counts every Deny decision and records it as an
 //! audit event.
 
-use std::sync::Arc;
-
-use krabka_audit::{AuditEndpoint, AuditEvent, AuditLog, AuditPrincipal};
-
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
-    metrics::BrokerMetrics,
-    time_util::now_ms,
+use {
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult, Authorizer},
+        metrics::BrokerMetrics,
+        time_util::now_ms,
+    },
+    krabka_audit::{AuditEndpoint, AuditEvent, AuditLog, AuditPrincipal},
+    std::sync::Arc,
 };
 
 /// Wraps an [`Authorizer`]. It forwards decisions, bumps
@@ -87,16 +87,12 @@ impl Authorizer for AuditingAuthorizer {
     /// Forward the wrapped authorizer's answer: the decorator adds auditing,
     /// not a decision point, so a broker with no authorizer configured must
     /// still report itself as having none.
-    fn is_configured(&self) -> bool {
-        self.inner.is_configured()
-    }
+    fn is_configured(&self) -> bool { self.inner.is_configured() }
 
     /// Forward the wrapped authorizer's answer, for the same reason as
     /// `is_configured`: this decorator adds auditing around a decision, it
     /// does not change how long that decision stays fresh.
-    fn decision_ttl(&self) -> Option<std::time::Duration> {
-        self.inner.decision_ttl()
-    }
+    fn decision_ttl(&self) -> Option<std::time::Duration> { self.inner.decision_ttl() }
 
     /// Forward the wrapped authorizer's answer. This resource-type-wide check
     /// is not per-resource, so `authorize` above (which audits Deny) never
@@ -117,16 +113,18 @@ impl Authorizer for AuditingAuthorizer {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::SocketAddr, sync::Arc};
-
-    use assert2::check;
-    use krabka_metadata::{AclOperation, ResourceType};
-
-    use super::*;
-    use crate::{
-        authorizer::{AllowAllAuthorizer, AuthorizationRequest, AuthorizationResult, Authorizer},
-        metrics::{AuthorizationDeniedLabel, BrokerMetrics},
-        test_support::{DenyAll, principal},
+    use {
+        super::*,
+        crate::{
+            authorizer::{
+                AllowAllAuthorizer, AuthorizationRequest, AuthorizationResult, Authorizer,
+            },
+            metrics::{AuthorizationDeniedLabel, BrokerMetrics},
+            test_support::{DenyAll, principal},
+        },
+        assert2::check,
+        krabka_metadata::{AclOperation, ResourceType},
+        std::{net::SocketAddr, sync::Arc},
     };
 
     // Expand the setup in the caller so receiver and metrics keep their scopes.
@@ -147,16 +145,13 @@ mod tests {
         principal: &krabka_security::Principal,
         host: &SocketAddr,
     ) -> AuthorizationResult {
-        authz.authorize(
-            image,
-            &AuthorizationRequest {
-                principal,
-                host,
-                resource_type: ResourceType::Topic,
-                resource_name: "secrets",
-                operation: AclOperation::Write,
-            },
-        )
+        authz.authorize(image, &AuthorizationRequest {
+            principal,
+            host,
+            resource_type: ResourceType::Topic,
+            resource_name: "secrets",
+            operation: AclOperation::Write,
+        })
     }
 
     fn denied_label() -> AuthorizationDeniedLabel {
@@ -250,9 +245,7 @@ mod tests {
             AuthorizationResult::Allow
         }
 
-        fn decision_ttl(&self) -> Option<std::time::Duration> {
-            Some(self.0)
-        }
+        fn decision_ttl(&self) -> Option<std::time::Duration> { Some(self.0) }
     }
 
     /// This decorator adds auditing around a decision, not a cache; it must

@@ -1,11 +1,12 @@
 //! Tests for the overlay of the command line onto a `BrokerConfig`.
 
-use assert2::assert;
-use clap::Parser;
-use krabka_units::{convert::TimeExt as _, secs};
-
-use super::*;
-use crate::test_support::env_guard;
+use {
+    super::*,
+    crate::test_support::env_guard,
+    assert2::assert,
+    clap::Parser,
+    krabka_units::{convert::TimeExt as _, secs},
+};
 
 #[test]
 fn runtime_policy_cli_rejects_invalid_and_accepts_valid_values() {

@@ -6,13 +6,14 @@
 //! rules, as Kafka's `validateOffsetCommit` does with its `isTransactional`
 //! flag, and [`CommitFence`] says which rule a `ValidateCommit` runs.
 
-use krabka_protocol::primitives::uuid::Uuid;
-
-use super::{ErrorCode, GroupActorHandle, GroupActorMessage};
-use crate::{
-    codes,
-    coordinator::unified::{classic_ops, group::CoordinatorGroup},
-    task_util::ask,
+use {
+    super::{ErrorCode, GroupActorHandle, GroupActorMessage},
+    crate::{
+        codes,
+        coordinator::unified::{classic_ops, group::CoordinatorGroup},
+        task_util::ask,
+    },
+    krabka_protocol::primitives::uuid::Uuid,
 };
 
 /// The request whose rule a `ValidateCommit` runs.
@@ -117,19 +118,20 @@ pub(crate) async fn validate_commit(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_log::Offset;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        actor::{
-            GroupKindTag,
-            test_support::{
-                BidirectionalClassicSetup, bidirectional_coordinator, join_native_consumer,
-                make_coordinator, rpc, seeded_bidirectional_coordinator, spawn_and_downgrade,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            actor::{
+                GroupKindTag,
+                test_support::{
+                    BidirectionalClassicSetup, bidirectional_coordinator, join_native_consumer,
+                    make_coordinator, rpc, seeded_bidirectional_coordinator, spawn_and_downgrade,
+                },
             },
+            classic_state::OffsetEntry,
         },
-        classic_state::OffsetEntry,
+        assert2::assert,
+        krabka_log::Offset,
     };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -141,17 +143,14 @@ mod tests {
 
         // UpdateCommitted then FetchOffsets round-trips on the kind-agnostic Group.
         let rx = rpc::begin(&handle, |tx| GroupActorMessage::UpdateCommitted {
-            entries: vec![(
-                ("t".to_string(), 0),
-                OffsetEntry {
-                    offset: Offset(42),
-                    leader_epoch: 1,
-                    metadata: String::new(),
-                    commit_timestamp_ms: 0,
-                    expire_timestamp_ms: None,
-                    topic_id: None,
-                },
-            )],
+            entries: vec![(("t".to_string(), 0), OffsetEntry {
+                offset: Offset(42),
+                leader_epoch: 1,
+                metadata: String::new(),
+                commit_timestamp_ms: 0,
+                expire_timestamp_ms: None,
+                topic_id: None,
+            })],
             reply: tx,
         })
         .await;

@@ -22,9 +22,10 @@
 //! | `PROFILE_DATA_DIR` | `/tmp/krabka-profile-data` | The log directory. It is erased at start. |
 //! | `PROFILE_FLUSH` | unset | `1` calls `fsync` on every append. |
 
-use std::path::PathBuf;
-
-use krabka_broker::{Broker, BrokerConfig};
+use {
+    krabka_broker::{Broker, BrokerConfig},
+    std::path::PathBuf,
+};
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {

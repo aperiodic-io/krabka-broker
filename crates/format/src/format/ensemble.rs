@@ -16,15 +16,16 @@
 //! so a directory with only those files is one that a run did not finish, and
 //! the next run removes them and starts again.
 
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
-
-use super::output::ZERO_CHECKPOINT_NAME;
-use crate::{
-    ids::ClusterId,
-    meta_properties::{META_PROPERTIES, META_PROPERTIES_TMP, MetaProperties, verify_ensemble},
+use {
+    super::output::ZERO_CHECKPOINT_NAME,
+    crate::{
+        ids::ClusterId,
+        meta_properties::{META_PROPERTIES, META_PROPERTIES_TMP, MetaProperties, verify_ensemble},
+    },
+    std::{
+        io,
+        path::{Path, PathBuf},
+    },
 };
 
 /// The directory that holds the metadata log, under the metadata log
@@ -164,11 +165,12 @@ pub(super) fn remove_partial_output(dir: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{ids::DirectoryId, meta_properties::node_id_mismatch_message};
+    use {
+        super::*,
+        crate::{ids::DirectoryId, meta_properties::node_id_mismatch_message},
+        assert2::check,
+        uuid::Uuid,
+    };
 
     fn meta(cluster: u128, node_id: i32, directory: u128) -> MetaProperties {
         MetaProperties {

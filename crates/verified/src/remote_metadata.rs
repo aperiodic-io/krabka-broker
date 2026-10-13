@@ -19,9 +19,7 @@ fn java_long_hash_model(bits: u64) -> u32 {
 }
 
 #[cfg_attr(creusot, ensures(result == java_long_hash_model(bits)))]
-fn java_long_hash(bits: u64) -> u32 {
-    ((bits ^ (bits >> 32)) & 0xffff_ffff) as u32
-}
+fn java_long_hash(bits: u64) -> u32 { ((bits ^ (bits >> 32)) & 0xffff_ffff) as u32 }
 
 /// The `u32` image of a Java `int`: the value itself, or the value plus 2^32
 /// (`u32::MAX - (-1 - value)`) when it is negative. Both casts stay in range.
@@ -143,9 +141,7 @@ fn kafka_to_positive_model(hash: u32) -> Int {
 #[cfg_attr(creusot, ensures(result@ == kafka_to_positive_model(hash)))]
 #[ensures(0 <= result@)]
 #[ensures(result@ <= i32::MAX@)]
-fn kafka_to_positive(hash: u32) -> i32 {
-    (u64::from(hash) % 0x8000_0000) as i32
-}
+fn kafka_to_positive(hash: u32) -> i32 { (u64::from(hash) % 0x8000_0000) as i32 }
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
@@ -227,9 +223,7 @@ pub const fn remote_metadata_resume_cursor(committed: i64) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn matches_jvm_remote_metadata_partitioner_goldens() {

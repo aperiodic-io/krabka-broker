@@ -5,13 +5,12 @@
 //! than one of the sibling test modules, so they live here rather than being
 //! repeated in each.
 
-use krabka_protocol::owned::delete_acls_request::{DeleteAclsFilter, DeleteAclsRequest};
-
 pub(super) use crate::handlers::acl_test_support::{
     OPERATION_ANY, OPERATION_READ, OPERATION_WRITE, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL,
     PATTERN_TYPE_MATCH, PATTERN_TYPE_PREFIXED, PERMISSION_ALLOW, PERMISSION_ANY,
     RESOURCE_TYPE_TOPIC,
 };
+use krabka_protocol::owned::delete_acls_request::{DeleteAclsFilter, DeleteAclsRequest};
 pub(super) const VERSION: i16 = 3;
 
 pub(super) use crate::test_support::allow_acl as acl;

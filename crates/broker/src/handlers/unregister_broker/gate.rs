@@ -6,14 +6,15 @@
 //! append carries both -- spells the target that a proposal must name, and
 //! reads back the proposal that list spends.
 
-use krabka_metadata::{
-    BreakGlassAction, MetadataImage, MetadataRecord, NodeId, UnregisterBrokerRecord,
-};
-
 pub(super) use crate::break_glass::gate::consumed_proposal_id;
-use crate::{
-    break_glass::gate::{self, BreakGlassDenial},
-    config::BreakGlassConfig,
+use {
+    crate::{
+        break_glass::gate::{self, BreakGlassDenial},
+        config::BreakGlassConfig,
+    },
+    krabka_metadata::{
+        BreakGlassAction, MetadataImage, MetadataRecord, NodeId, UnregisterBrokerRecord,
+    },
 };
 
 /// The records one unregistration appends.
@@ -82,6 +83,4 @@ pub(super) fn with_leaves(
 ///
 /// `UnregisterBroker` names no partition, so the gate takes this target
 /// exactly and no wider proposal covers it.
-pub(super) fn broker_target(node_id: NodeId) -> String {
-    node_id.0.to_string()
-}
+pub(super) fn broker_target(node_id: NodeId) -> String { node_id.0.to_string() }

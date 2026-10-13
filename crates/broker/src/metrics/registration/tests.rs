@@ -2,18 +2,18 @@
 //! registry under the `krabka_broker` prefix, and that the families with no
 //! recorder method of their own start at their documented default.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_metadata::BreakGlassAction as GatedAction;
-use krabka_units::{convert::TimeExt as _, millis, secs};
-
-use crate::{
-    break_glass::ALL_ACTIONS,
-    metrics::{
-        BarrierGroupLabel, BreakGlassAction, BreakGlassState, BrokerMetrics, DirectoryLabel,
-        PartitionLabel, RemoteTierPath, ShareGroupLabel, TopicLabel,
+use {
+    crate::{
+        break_glass::ALL_ACTIONS,
+        metrics::{
+            BarrierGroupLabel, BreakGlassAction, BreakGlassState, BrokerMetrics, DirectoryLabel,
+            PartitionLabel, RemoteTierPath, ShareGroupLabel, TopicLabel,
+        },
     },
+    assert2::assert,
+    krabka_metadata::BreakGlassAction as GatedAction,
+    krabka_units::{convert::TimeExt as _, millis, secs},
+    std::sync::Arc,
 };
 
 /// The gauge exists so an alert can read the bound the broker relies on

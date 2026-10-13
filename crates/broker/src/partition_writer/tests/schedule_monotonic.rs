@@ -6,16 +6,17 @@
 //! a rule two jobs of one group can walk straight past. These tests drive that
 //! exact shape: two produces, one group, descending delivery times.
 
-use assert2::check;
-use krabka_log::{LogConfig, Offset};
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    codes,
-    delivery::test_support::{NOW_MS, batch_at},
-    error::BrokerError,
-    partition_writer::test_support::{ProduceAck, spawn_writer as spawn_test_writer},
+use {
+    super::*,
+    crate::{
+        codes,
+        delivery::test_support::{NOW_MS, batch_at},
+        error::BrokerError,
+        partition_writer::test_support::{ProduceAck, spawn_writer as spawn_test_writer},
+    },
+    assert2::check,
+    krabka_log::{LogConfig, Offset},
+    tempfile::tempdir,
 };
 
 /// A scheduled, monotonic log.
@@ -36,15 +37,10 @@ fn spawn_writer(
     log: &Arc<Mutex<Log>>,
     rx: mpsc::Receiver<WriterMessage>,
 ) -> tokio::task::JoinHandle<()> {
-    spawn_test_writer(
-        dir,
-        log.clone(),
-        rx,
-        WriterOptions {
-            topic: "scheduled".to_string(),
-            ..Default::default()
-        },
-    )
+    spawn_test_writer(dir, log.clone(), rx, WriterOptions {
+        topic: "scheduled".to_string(),
+        ..Default::default()
+    })
 }
 
 async fn queued_descending_batches(tx: &mpsc::Sender<WriterMessage>) -> (ProduceAck, ProduceAck) {
@@ -112,13 +108,10 @@ async fn a_backwards_delivery_time_in_one_writer_group_is_refused() {
 async fn a_backwards_delivery_time_is_admitted_without_the_setting() {
     let dir = tempdir().expect("tempdir");
     let log = Arc::new(Mutex::new(
-        Log::open(
-            dir.path(),
-            LogConfig {
-                schedule_order: krabka_log::ScheduleOrder::Unordered,
-                ..monotonic_config()
-            },
-        )
+        Log::open(dir.path(), LogConfig {
+            schedule_order: krabka_log::ScheduleOrder::Unordered,
+            ..monotonic_config()
+        })
         .expect("open the scheduled log"),
     ));
 

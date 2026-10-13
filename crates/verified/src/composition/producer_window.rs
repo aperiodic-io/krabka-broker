@@ -1,15 +1,16 @@
-use creusot_std::prelude::*;
-
-use super::{
-    ProducerDecision, ProducerSnapshotEntryFacts, producer_decision,
-    replayed_window_preserves_first_retry_coordinates,
-};
 #[cfg(creusot)]
 use crate::producer_snapshot::{
     nonduplicate_snapshot_decision, recovered_batch_coordinates, retained_producer_row,
     snapshot_sequence_matches,
 };
-use crate::raft::frontier_reaches;
+use {
+    super::{
+        ProducerDecision, ProducerSnapshotEntryFacts, producer_decision,
+        replayed_window_preserves_first_retry_coordinates,
+    },
+    crate::raft::frontier_reaches,
+    creusot_std::prelude::*,
+};
 
 open_logic! {
 pub(super) fn retry_row_matches(

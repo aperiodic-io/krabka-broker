@@ -4,9 +4,10 @@
 //! bytes that same fixture produces, so the fixtures sit beside the two modules
 //! rather than inside either one.
 
-use bytes::Bytes;
-
-use super::{Magic, Message};
+use {
+    super::{Magic, Message},
+    bytes::Bytes,
+};
 
 pub(super) fn fixture_v0() -> Message {
     Message {

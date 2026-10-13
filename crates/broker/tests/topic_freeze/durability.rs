@@ -5,13 +5,14 @@
 //! suite and fail this one in the worst possible way: the topic would start
 //! accepting writes during the incident the freeze was declared for.
 
-use assert2::check;
-use krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL;
-
-use crate::{
-    control_plane::wait_for_registry_len,
-    support,
-    wire::{CONTROL, accepted, frozen_topic_with_record, refused, wait_controlled_partitions},
+use {
+    crate::{
+        control_plane::wait_for_registry_len,
+        support,
+        wire::{CONTROL, accepted, frozen_topic_with_record, refused, wait_controlled_partitions},
+    },
+    assert2::check,
+    krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL,
 };
 
 /// A freeze survives a controller restart.

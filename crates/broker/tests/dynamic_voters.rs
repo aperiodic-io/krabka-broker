@@ -10,18 +10,19 @@
 //! openraft's debug assertions race on the hosted Windows scheduler, so these
 //! tests are gated off Windows, like the other multi-node suites.
 
-use std::{
-    collections::BTreeSet,
-    time::{Duration, Instant},
+use {
+    assert2::assert,
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, NodeId},
+    krabka_raft::{
+        RaftError,
+        reconfig::{ReconfigOutcome, RemoveVoter},
+    },
+    std::{
+        collections::BTreeSet,
+        time::{Duration, Instant},
+    },
+    tempfile::TempDir,
 };
-
-use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, NodeId};
-use krabka_raft::{
-    RaftError,
-    reconfig::{ReconfigOutcome, RemoveVoter},
-};
-use tempfile::TempDir;
 
 async fn start_dynamic_cluster(n: u64) -> Vec<(BrokerHandle, TempDir)> {
     let cluster_id = uuid::Uuid::from_u128(853);

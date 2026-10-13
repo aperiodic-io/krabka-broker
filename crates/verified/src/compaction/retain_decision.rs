@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{BatchMeta, CompactionDecodeStep, RecordMeta, RetainDecision, TxnDataState};
+use {
+    super::{BatchMeta, CompactionDecodeStep, RecordMeta, RetainDecision, TxnDataState},
+    creusot_std::prelude::*,
+};
 
 /// Classify one compaction batch-stream decode step.
 ///

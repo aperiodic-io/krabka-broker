@@ -5,18 +5,14 @@
 //! it dials a peer. Both name a keytab and a Kerberos service name, so they
 //! share the protocol default for `sasl.kerberos.service.name`.
 
-use krabka_units::Time;
-use schemars::JsonSchema;
-use serde::Deserialize;
+use {krabka_units::Time, schemars::JsonSchema, serde::Deserialize};
 
 /// Kafka protocol default for `sasl.kerberos.service.name`.
 pub(super) const DEFAULT_KERBEROS_SERVICE_NAME: &str = "kafka";
 
 /// Kafka's default `sasl.kerberos.principal.to.local.rules`, which is
 /// `KerberosShortNamer.fromUnparsedRules`'s answer to no rules at all.
-fn default_principal_to_local_rules() -> Vec<String> {
-    vec!["DEFAULT".to_owned()]
-}
+fn default_principal_to_local_rules() -> Vec<String> { vec!["DEFAULT".to_owned()] }
 
 /// TOML shape of `[gssapi]`. Maps to
 /// [`crate::network::auth::GssapiConfig`]. `principal_to_local_rules`
@@ -74,17 +70,18 @@ pub enum FileInterBrokerCredentials {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::secs;
-
-    use crate::{
-        config::{BrokerConfig, InterBrokerCredentials},
-        file_config::{
-            FileConfig, FileConfigError,
-            test_support::{configured, configured_unwrap_parse},
+    use {
+        crate::{
+            config::{BrokerConfig, InterBrokerCredentials},
+            file_config::{
+                FileConfig, FileConfigError,
+                test_support::{configured, configured_unwrap_parse},
+            },
+            network::auth::KerberosRule,
+            test_support::{OAuthTokenContents, oauth_token_file},
         },
-        network::auth::KerberosRule,
-        test_support::{OAuthTokenContents, oauth_token_file},
+        assert2::{assert, check},
+        krabka_units::secs,
     };
 
     #[test]

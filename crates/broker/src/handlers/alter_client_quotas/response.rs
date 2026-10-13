@@ -6,20 +6,21 @@
 //! submit fails, and the whole-request error body an authorization denial
 //! produces.
 
-use krabka_metadata::EntityKey;
-use krabka_protocol::{
-    UnknownTaggedFields,
-    owned::{
-        alter_client_quotas_request::AlterClientQuotasRequest,
-        alter_client_quotas_response::{
-            AlterClientQuotasResponse, EntityData as RespEntity, EntryData as RespEntry,
+use {
+    crate::{
+        codes::{COORDINATOR_NOT_AVAILABLE, NONE},
+        handlers::stamp_unset,
+    },
+    krabka_metadata::EntityKey,
+    krabka_protocol::{
+        UnknownTaggedFields,
+        owned::{
+            alter_client_quotas_request::AlterClientQuotasRequest,
+            alter_client_quotas_response::{
+                AlterClientQuotasResponse, EntityData as RespEntity, EntryData as RespEntry,
+            },
         },
     },
-};
-
-use crate::{
-    codes::{COORDINATOR_NOT_AVAILABLE, NONE},
-    handlers::stamp_unset,
 };
 
 fn entity_rows(entity: &[(String, Option<String>)]) -> Vec<RespEntity> {
@@ -87,10 +88,7 @@ pub(super) fn whole_request_error(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::codes::INVALID_REQUEST;
+    use {super::*, crate::codes::INVALID_REQUEST, assert2::assert};
 
     #[test]
     fn entry_helpers_preserve_wire_fields() {

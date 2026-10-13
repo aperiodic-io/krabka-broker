@@ -1,18 +1,18 @@
 //! Close a response writer that stops making progress, returning its queue permits.
 
-use std::{
-    io::{self, IoSlice},
-    pin::Pin,
-    task::{Context, Poll},
-    time::Duration,
+use {
+    crate::network::fetch_writer::SendfileSink,
+    std::{
+        io::{self, IoSlice},
+        pin::Pin,
+        task::{Context, Poll},
+        time::Duration,
+    },
+    tokio::{
+        io::{AsyncRead, AsyncWrite, ReadBuf},
+        time::Sleep,
+    },
 };
-
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    time::Sleep,
-};
-
-use crate::network::fetch_writer::SendfileSink;
 
 /// The listener's idle window applies to pending writes as well as reads.
 /// Each successful write starts a new window; handler and quota waits do not.
@@ -94,9 +94,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for WriteIdle<S> {
         this.poll_result(cx, result)
     }
 
-    fn is_write_vectored(&self) -> bool {
-        self.inner.is_write_vectored()
-    }
+    fn is_write_vectored(&self) -> bool { self.inner.is_write_vectored() }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
@@ -112,13 +110,6 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for WriteIdle<S> {
 }
 
 impl<S: SendfileSink> SendfileSink for WriteIdle<S> {
-    fn write_idle_is_enforced(&self) -> bool {
-        self.window.is_some() || self.inner.write_idle_is_enforced()
-    }
-    fn is_sendfile_capable(&self) -> bool {
-        self.inner.is_sendfile_capable()
-    }
-
     crate::sendfile_cfg! {
         fn write_idle_window(&self) -> Option<Duration> {
             self.window.or_else(|| self.inner.write_idle_window())
@@ -128,6 +119,12 @@ impl<S: SendfileSink> SendfileSink for WriteIdle<S> {
             self.inner.tcp_for_sendfile()
         }
     }
+
+    fn write_idle_is_enforced(&self) -> bool {
+        self.window.is_some() || self.inner.write_idle_is_enforced()
+    }
+
+    fn is_sendfile_capable(&self) -> bool { self.inner.is_sendfile_capable() }
 }
 
 impl<S: SendfileSink> WriteIdle<S> {

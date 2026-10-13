@@ -5,12 +5,13 @@
 //! Both boot the plain `start_broker_with_topic_rlmm` cluster, so they sit
 //! together and away from the `SASL_PLAINTEXT` and fail-closed variants.
 
-use assert2::assert;
-
-use crate::{
-    rlmm_cluster::{await_activation, build_client, start_broker_with_topic_rlmm},
-    rlmm_round_trip::copy_then_fetch_round_trip,
-    run_broker_test,
+use {
+    crate::{
+        rlmm_cluster::{await_activation, build_client, start_broker_with_topic_rlmm},
+        rlmm_round_trip::copy_then_fetch_round_trip,
+        run_broker_test,
+    },
+    assert2::assert,
 };
 
 const METADATA_TOPIC: &str = "__remote_log_metadata";

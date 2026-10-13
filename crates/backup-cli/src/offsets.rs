@@ -16,14 +16,14 @@
 //! the correct answer: an offset must not move under a consumer that is
 //! reading from it.
 
-use std::collections::BTreeMap;
-
-use krabka_protocol::owned::offset_commit_request::{
-    OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+use {
+    crate::{error::BackupError, manifest::decode_versioned},
+    krabka_protocol::owned::offset_commit_request::{
+        OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+    },
+    serde::{Deserialize, Serialize},
+    std::collections::BTreeMap,
 };
-use serde::{Deserialize, Serialize};
-
-use crate::{error::BackupError, manifest::decode_versioned};
 
 /// `OffsetCommitRequest.generationIdOrMemberEpoch` for a caller that is not a
 /// group member. Kafka's admin path sends this, and the coordinator skips
@@ -195,17 +195,17 @@ pub fn commit_refusals(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::check;
-    use krabka_protocol::{owned as wire, primitives::uuid::Uuid as WireUuid};
-
-    use super::{
-        CommittedOffset, GROUP_OFFSETS_VERSION, GroupOffsets, GroupOffsetsFile,
-        SIMPLE_CONSUMER_GENERATION, UNKNOWN_LEADER_EPOCH, commit_refusals, commit_request,
-        group_offsets,
+    use {
+        super::{
+            CommittedOffset, GROUP_OFFSETS_VERSION, GroupOffsets, GroupOffsetsFile,
+            SIMPLE_CONSUMER_GENERATION, UNKNOWN_LEADER_EPOCH, commit_refusals, commit_request,
+            group_offsets,
+        },
+        crate::error::BackupError,
+        assert2::check,
+        krabka_protocol::{owned as wire, primitives::uuid::Uuid as WireUuid},
+        std::collections::BTreeMap,
     };
-    use crate::error::BackupError;
 
     fn captured() -> GroupOffsets {
         GroupOffsets {
@@ -358,13 +358,10 @@ mod tests {
     fn the_offsets_file_counts_every_partition_of_every_group() {
         let file = GroupOffsetsFile {
             version: GROUP_OFFSETS_VERSION,
-            groups: vec![
-                captured(),
-                GroupOffsets {
-                    group: "empty".to_owned(),
-                    offsets: Vec::new(),
-                },
-            ],
+            groups: vec![captured(), GroupOffsets {
+                group: "empty".to_owned(),
+                offsets: Vec::new(),
+            }],
         };
         check!(file.offset_count() == 3);
     }

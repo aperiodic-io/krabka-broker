@@ -4,13 +4,13 @@
 //! validates the member and the generation, then answers by group state and
 //! refreshes the member's session in every state with members.
 
-use std::time::Instant;
-
-use krabka_protocol::owned::heartbeat_request::HeartbeatRequest;
-
-use crate::{
-    codes,
-    coordinator::unified::classic_state::{ClassicGroup as ClassicState, GroupState},
+use {
+    crate::{
+        codes,
+        coordinator::unified::classic_state::{ClassicGroup as ClassicState, GroupState},
+    },
+    krabka_protocol::owned::heartbeat_request::HeartbeatRequest,
+    std::time::Instant,
 };
 
 /// Kafka's `classicGroupHeartbeatToClassicGroup`. It returns the error code.
@@ -39,12 +39,10 @@ pub(crate) fn handle_heartbeat(state: &mut ClassicState, req: &HeartbeatRequest)
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::check;
-
-    use super::*;
-    use crate::coordinator::unified::classic_ops::test_support::stable_two_member_group;
+    use {
+        super::*, crate::coordinator::unified::classic_ops::test_support::stable_two_member_group,
+        assert2::check, std::time::Duration,
+    };
 
     /// #797: Kafka's `classicGroupHeartbeatToClassicGroup`, per group state
     /// and member check.

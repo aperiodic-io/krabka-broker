@@ -103,9 +103,7 @@ pub fn chain_step(expected_seq: u64, actual_seq: u64, head_matches: bool) -> Cha
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn chain_tip_uses_offset_then_sequence_and_ignores_ineligible_receipts() {

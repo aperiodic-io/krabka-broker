@@ -5,20 +5,20 @@
 //! state-partition-metadata record, so the topic stays out of the initialized
 //! set of the group across a restart.
 
-use std::time::Duration;
-
-use assert2::{assert, check};
-use krabka_protocol::owned::delete_share_group_offsets_request::{
-    DeleteShareGroupOffsetsRequest, DeleteShareGroupOffsetsRequestTopic,
-};
-
-use crate::{
-    describe::{describe_all_offsets, describe_until, initialized_partitions},
-    harness::{
-        InitializedRestartFixture, NONE, acquired_topic, fetch_until_acquired,
-        initialized_restart_fixture, leave,
+use {
+    crate::{
+        describe::{describe_all_offsets, describe_until, initialized_partitions},
+        harness::{
+            InitializedRestartFixture, NONE, acquired_topic, fetch_until_acquired,
+            initialized_restart_fixture, leave,
+        },
+        support::share::{ShareRecordSeedSetup, ShareSessionSetup, rejoin_group},
     },
-    support::share::{ShareRecordSeedSetup, ShareSessionSetup, rejoin_group},
+    assert2::{assert, check},
+    krabka_protocol::owned::delete_share_group_offsets_request::{
+        DeleteShareGroupOffsetsRequest, DeleteShareGroupOffsetsRequestTopic,
+    },
+    std::time::Duration,
 };
 
 fn delete_topic_request() -> DeleteShareGroupOffsetsRequest {

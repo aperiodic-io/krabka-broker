@@ -5,10 +5,11 @@
 //! rather than the share-group RPCs, and asserts on the `group_type` tagging
 //! and on the `types_filter` behaviour.
 
-use assert2::assert;
-use krabka_protocol::owned::list_groups_request::ListGroupsRequest;
-
-use crate::share_group_harness::{boot, connect, create_topic, heartbeat};
+use {
+    crate::share_group_harness::{boot, connect, create_topic, heartbeat},
+    assert2::assert,
+    krabka_protocol::owned::list_groups_request::ListGroupsRequest,
+};
 
 /// `kafka-share-groups.sh --list` sends `ListGroups` (`api_key` 16) with
 /// `types_filter = ["share"]`. A live share group must appear in that response

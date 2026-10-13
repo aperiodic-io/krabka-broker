@@ -40,11 +40,12 @@ pub(crate) fn put_len_prefixed(out: &mut Vec<u8>, field: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_audit::signing::CHECKPOINT_DOMAIN;
-    use krabka_remote_storage::{MANIFEST_BODY_DOMAIN, MANIFEST_DOMAIN};
-
-    use super::{BREAK_GLASS_DOMAIN, FREEZE_DOMAIN};
+    use {
+        super::{BREAK_GLASS_DOMAIN, FREEZE_DOMAIN},
+        assert2::check,
+        krabka_audit::signing::CHECKPOINT_DOMAIN,
+        krabka_remote_storage::{MANIFEST_BODY_DOMAIN, MANIFEST_DOMAIN},
+    };
 
     /// Every domain separator in the workspace, with the name a failure
     /// reports. Add a row here whenever a new signing scheme lands.

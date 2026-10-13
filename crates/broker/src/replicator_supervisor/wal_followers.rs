@@ -2,23 +2,23 @@
 //! follows for a given placement, and the start and stop of one follower task
 //! per shard.
 
-use std::collections::HashMap;
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::MetadataImage;
 #[cfg(test)]
 use krabka_raft::NodeId;
-use tracing::warn;
-
-use super::{ReplicatorSupervisor, WalFollowerSpec, WalFollowerTask, resolve_leader_endpoint};
-use crate::{
-    config_keys::resolve_diskless,
-    wal::quorum::{
-        ShardRemoval,
-        follower::{Config, run},
-        registry::{ShardId, WalPlacement},
-        remove_shard,
+use {
+    super::{ReplicatorSupervisor, WalFollowerSpec, WalFollowerTask, resolve_leader_endpoint},
+    crate::{
+        config_keys::resolve_diskless,
+        wal::quorum::{
+            ShardRemoval,
+            follower::{Config, run},
+            registry::{ShardId, WalPlacement},
+            remove_shard,
+        },
     },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::MetadataImage,
+    std::collections::HashMap,
+    tracing::warn,
 };
 
 impl ReplicatorSupervisor {
@@ -42,14 +42,11 @@ impl ReplicatorSupervisor {
                     && partition.leader != self.node_id
                     && placement.voters.contains(&self.node_id))
                 .then(|| {
-                    (
-                        shard,
-                        WalFollowerSpec {
-                            topic: partition.topic.clone(),
-                            leader: partition.leader,
-                            leader_epoch: partition.leader_epoch,
-                        },
-                    )
+                    (shard, WalFollowerSpec {
+                        topic: partition.topic.clone(),
+                        leader: partition.leader,
+                        leader_epoch: partition.leader_epoch,
+                    })
                 })
             })
             .collect()
@@ -148,35 +145,33 @@ impl ReplicatorSupervisor {
                 shutdown: token.clone(),
                 connection: self.connection_config(),
             }));
-            self.wal_tasks.insert(
-                shard,
-                WalFollowerTask {
-                    shutdown: token,
-                    handle,
-                },
-            );
+            self.wal_tasks.insert(shard, WalFollowerTask {
+                shutdown: token,
+                handle,
+            });
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::MetadataRecord;
-    use tokio_util::sync::CancellationToken;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        replicator_supervisor::test_support::{
-            SupervisorPartitionSetup, broker_record, image_with, partition_record,
-            supervisor_fixture,
+    use {
+        super::*,
+        crate::{
+            replicator_supervisor::test_support::{
+                SupervisorPartitionSetup, broker_record, image_with, partition_record,
+                supervisor_fixture,
+            },
+            test_support::single_partition_topic,
+            wal::quorum::{
+                registry::{ShardId, WalPlacement},
+                shard_dir,
+            },
         },
-        test_support::single_partition_topic,
-        wal::quorum::{
-            registry::{ShardId, WalPlacement},
-            shard_dir,
-        },
+        assert2::assert,
+        krabka_metadata::MetadataRecord,
+        tokio_util::sync::CancellationToken,
+        uuid::Uuid,
     };
 
     /// A three-voter epoch-seven placement, retaining the original discarded fixture guards.
@@ -270,13 +265,10 @@ mod tests {
         };
         let current = CancellationToken::new();
         let current_task = current.clone();
-        supervisor.wal_tasks.insert(
-            shard,
-            WalFollowerTask {
-                shutdown: current.clone(),
-                handle: tokio::spawn(async move { current_task.cancelled().await }),
-            },
-        );
+        supervisor.wal_tasks.insert(shard, WalFollowerTask {
+            shutdown: current.clone(),
+            handle: tokio::spawn(async move { current_task.cancelled().await }),
+        });
         supervisor.wal_task_targets.insert(shard, target);
 
         let desired = supervisor.desired_wal_followers(&image, &placements);
@@ -298,21 +290,15 @@ mod tests {
 
         let removed = CancellationToken::new();
         let removed_task = removed.clone();
-        supervisor.wal_tasks.insert(
-            shard,
-            WalFollowerTask {
-                shutdown: removed.clone(),
-                handle: tokio::spawn(async move { removed_task.cancelled().await }),
-            },
-        );
-        supervisor.wal_task_targets.insert(
-            shard,
-            WalFollowerSpec {
-                topic: "diskless".into(),
-                leader: NodeId(1),
-                leader_epoch: krabka_metadata::LeaderEpoch(8),
-            },
-        );
+        supervisor.wal_tasks.insert(shard, WalFollowerTask {
+            shutdown: removed.clone(),
+            handle: tokio::spawn(async move { removed_task.cancelled().await }),
+        });
+        supervisor.wal_task_targets.insert(shard, WalFollowerSpec {
+            topic: "diskless".into(),
+            leader: NodeId(1),
+            leader_epoch: krabka_metadata::LeaderEpoch(8),
+        });
         let follower_shard = shard_dir(
             &supervisor.log_dirs[0],
             "diskless",

@@ -17,11 +17,11 @@
 //! it lets a configuration name an ELR member that never answers, which is a
 //! case the election has to get right.
 
-use std::collections::{BTreeMap, HashSet};
-
-use krabka_raft::NodeId;
-
-use crate::unclean_recovery::ReplicaLogInfo;
+use {
+    crate::unclean_recovery::ReplicaLogInfo,
+    krabka_raft::NodeId,
+    std::collections::{BTreeMap, HashSet},
+};
 
 /// One replica's reported log state. This is a hashable mirror of
 /// `ReplicaLogInfo`, which isn't `Hash`.

@@ -5,27 +5,27 @@
 //! picks up a move that a crash interrupted. Both end in `spawn_move`, which
 //! registers the `FutureLogState` and spawns the replicator.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig};
-use tokio_util::sync::CancellationToken;
-
-use super::{
-    FutureLogState, MoveError, MovePolicy, canonicalize_or_self,
-    cleanup::cancel_move,
-    configured_log_dir, future_dir_name_too_long,
-    replicator::{ReplicatorTask, replicator_loop},
-};
 #[cfg(test)]
 use crate::future_log::test_support::FutureSourceSetup;
-use crate::{
-    error::BrokerError, log_dir, log_dir_status::LogDirRegistry, partition::Partition,
-    partition_registry::PartitionRegistry,
+use {
+    super::{
+        FutureLogState, MoveError, MovePolicy, canonicalize_or_self,
+        cleanup::cancel_move,
+        configured_log_dir, future_dir_name_too_long,
+        replicator::{ReplicatorTask, replicator_loop},
+    },
+    crate::{
+        error::BrokerError, log_dir, log_dir_status::LogDirRegistry, partition::Partition,
+        partition_registry::PartitionRegistry,
+    },
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig},
+    std::{
+        path::{Path, PathBuf},
+        sync::{Arc, Mutex},
+    },
+    tokio_util::sync::CancellationToken,
 };
 
 /// Start a move of `(topic, partition)` to `target_log_dir`, or confirm an
@@ -213,20 +213,27 @@ fn spawn_move(task: MoveTask) {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::future_log::test_support::{
-        PlantedFutureLog, fixture_partition, plant_future_log, registered_source_fixture,
-        test_policy,
+    use {
+        super::*,
+        crate::future_log::test_support::{
+            PlantedFutureLog, fixture_partition, plant_future_log, registered_source_fixture,
+            test_policy,
+        },
+        assert2::assert,
+        std::time::Duration,
+        tempfile::tempdir,
     };
 
     // Move t-0 using the common log config and policy, with caller-owned registries/status.
     macro_rules! move_with_defaults {
-        ($partitions:expr, $future_logs:expr, $dirs:expr, $status:expr, $topic_id:expr, $target:expr $(,)?) => {
+        (
+            $partitions:expr,
+            $future_logs:expr,
+            $dirs:expr,
+            $status:expr,
+            $topic_id:expr,
+            $target:expr $(,)?
+        ) => {
             start_move(
                 $partitions,
                 $future_logs,

@@ -23,9 +23,7 @@ impl GroupCoordinator {
 
     /// Remove a cached next-gen seed after its group-metadata tombstone is
     /// durable.
-    pub(crate) fn remove_cached_seed(&self, group_id: &str) {
-        self.seeds_cache.remove(group_id);
-    }
+    pub(crate) fn remove_cached_seed(&self, group_id: &str) { self.seeds_cache.remove(group_id); }
 
     /// Fetch the most recently cached seed for `group_id`, if any.
     #[must_use]
@@ -68,10 +66,11 @@ impl GroupCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::{GroupType, test_support::make_coord};
+    use {
+        super::*,
+        crate::coordinator::unified::{GroupType, test_support::make_coord},
+        assert2::{assert, check},
+    };
 
     #[test]
     fn cache_updates_and_forced_type_transitions_are_observable() {
@@ -88,13 +87,10 @@ mod tests {
         assert!(cached.group_epoch == 7);
         assert!(cached.target_epoch == 8);
 
-        coord.seeds.insert(
-            "g".into(),
-            GroupSeed {
-                group_epoch: 99,
-                ..GroupSeed::default()
-            },
-        );
+        coord.seeds.insert("g".into(), GroupSeed {
+            group_epoch: 99,
+            ..GroupSeed::default()
+        });
         coord.mark_next_gen("g");
         assert!(coord.group_type("g") == Some(GroupType::NextGen));
         coord.mark_classic_after_downgrade("g");
@@ -102,26 +98,20 @@ mod tests {
         check!(coord.seeds.get("g").is_none());
         check!(coord.cached_seed("g") == None);
 
-        coord.update_share_cache(
-            "sg",
-            ShareGroupSeed {
-                group_epoch: 17,
-                target_epoch: 18,
-                ..ShareGroupSeed::default()
-            },
-        );
+        coord.update_share_cache("sg", ShareGroupSeed {
+            group_epoch: 17,
+            target_epoch: 18,
+            ..ShareGroupSeed::default()
+        });
         let share_cached = coord.cached_share_seed("sg").unwrap();
         assert!(share_cached.group_epoch == 17);
         assert!(share_cached.target_epoch == 18);
 
-        coord.update_streams_cache(
-            "st",
-            StreamsGroupSeed {
-                group_epoch: 27,
-                assignment_epoch: 28,
-                ..StreamsGroupSeed::default()
-            },
-        );
+        coord.update_streams_cache("st", StreamsGroupSeed {
+            group_epoch: 27,
+            assignment_epoch: 28,
+            ..StreamsGroupSeed::default()
+        });
         let streams_cached = coord.cached_streams_seed("st").unwrap();
         assert!(streams_cached.group_epoch == 27);
         assert!(streams_cached.assignment_epoch == 28);

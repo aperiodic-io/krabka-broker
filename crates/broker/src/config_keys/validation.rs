@@ -9,31 +9,33 @@
 //! store that form. Every reader of a stored value therefore sees `true`, not
 //! ` TRUE `.
 
-use std::collections::BTreeMap;
-
-use krabka_log::CleanupPolicy;
-
-use super::{
-    CLEANUP_POLICY, COMPRESSION_GZIP_LEVEL, COMPRESSION_TYPE, LOCAL_RETENTION_BYTES,
-    LOCAL_RETENTION_INHERIT, LOCAL_RETENTION_MS, MAX_COMPACTION_LAG_MS, MESSAGE_TIMESTAMP_TYPE,
-    MESSAGE_TIMESTAMP_TYPE_LOG_APPEND, MIN_CLEANABLE_DIRTY_RATIO, MIN_COMPACTION_LAG_MS,
-    REMOTE_COPY_LAG_BYTES, REMOTE_COPY_LAG_MS, REMOTE_LOG_COPY_DISABLE,
-    REMOTE_LOG_DELETE_ON_DISABLE, REMOTE_STORAGE_ENABLE, RETENTION_BYTES, RETENTION_MS,
-    delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED},
-    diskless::validate_diskless_combination,
-    parse::{
-        bool_value, check_one_of, check_range, check_valid_list, invalid_value, java_double,
-        java_trim, list_value, long_value, parse_bool, parse_double, parse_int, parse_long,
+use {
+    super::{
+        CLEANUP_POLICY, COMPRESSION_GZIP_LEVEL, COMPRESSION_TYPE, LOCAL_RETENTION_BYTES,
+        LOCAL_RETENTION_INHERIT, LOCAL_RETENTION_MS, MAX_COMPACTION_LAG_MS, MESSAGE_TIMESTAMP_TYPE,
+        MESSAGE_TIMESTAMP_TYPE_LOG_APPEND, MIN_CLEANABLE_DIRTY_RATIO, MIN_COMPACTION_LAG_MS,
+        REMOTE_COPY_LAG_BYTES, REMOTE_COPY_LAG_MS, REMOTE_LOG_COPY_DISABLE,
+        REMOTE_LOG_DELETE_ON_DISABLE, REMOTE_STORAGE_ENABLE, RETENTION_BYTES, RETENTION_MS,
+        delivery::{DELIVERY_MODE, DELIVERY_MODE_SCHEDULED},
+        diskless::validate_diskless_combination,
+        parse::{
+            bool_value, check_one_of, check_range, check_valid_list, invalid_value, java_double,
+            java_trim, list_value, long_value, parse_bool, parse_double, parse_int, parse_long,
+        },
+        registry::{
+            self, CLEANUP_POLICY_VALUES, ConfigKey, ConfigScope, GZIP_DEFAULT_LEVEL,
+            GZIP_MAX_LEVEL, GZIP_MIN_LEVEL, ValueCheck,
+        },
+        serves_topic_key,
     },
-    registry::{
-        self, CLEANUP_POLICY_VALUES, ConfigKey, ConfigScope, GZIP_DEFAULT_LEVEL, GZIP_MAX_LEVEL,
-        GZIP_MIN_LEVEL, ValueCheck,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        throttle::{
+            FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_REPLICAS_KEY, ThrottledReplicas,
+        },
     },
-    serves_topic_key,
-};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    throttle::{FOLLOWER_THROTTLED_REPLICAS_KEY, LEADER_THROTTLED_REPLICAS_KEY, ThrottledReplicas},
+    krabka_log::CleanupPolicy,
+    std::collections::BTreeMap,
 };
 
 /// Kafka's `validateRemoteStorageOnlyIfSystemEnabled` refusal: a topic asks
@@ -313,9 +315,7 @@ impl TopicDefaults {
         )
     }
 
-    fn get(&self, key: &str) -> Option<&str> {
-        self.0.get(key).map(String::as_str)
-    }
+    fn get(&self, key: &str) -> Option<&str> { self.0.get(key).map(String::as_str) }
 }
 
 /// A broker synonym's `value` in the unit of `topic_key`: minutes and hours
@@ -602,11 +602,14 @@ pub(crate) fn parse_compression_type(
     value: &str,
 ) -> Result<Option<krabka_compression::CompressionType>, String> {
     use krabka_compression::CompressionType;
-    let name = check_one_of(
-        COMPRESSION_TYPE,
-        value,
-        &["uncompressed", "zstd", "lz4", "snappy", "gzip", "producer"],
-    )?;
+    let name = check_one_of(COMPRESSION_TYPE, value, &[
+        "uncompressed",
+        "zstd",
+        "lz4",
+        "snappy",
+        "gzip",
+        "producer",
+    ])?;
     Ok(match name {
         "uncompressed" => Some(CompressionType::None),
         "gzip" => Some(CompressionType::Gzip),

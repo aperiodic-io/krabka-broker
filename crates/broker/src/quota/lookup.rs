@@ -1,12 +1,13 @@
 //! Quota lookup with Kafka's 8-priority entity matching.
 
-use krabka_metadata::{EntityKey, MetadataImage};
-use krabka_verified::{
-    IpQuotaPrecedence, QuotaCandidatePresence, UserClientQuotaFacts, UserClientQuotaPrecedence,
-    ip_quota_precedence, user_client_quota_precedence,
+use {
+    super::IpNames,
+    krabka_metadata::{EntityKey, MetadataImage},
+    krabka_verified::{
+        IpQuotaPrecedence, QuotaCandidatePresence, UserClientQuotaFacts, UserClientQuotaPrecedence,
+        ip_quota_precedence, user_client_quota_precedence,
+    },
 };
-
-use super::IpNames;
 
 /// The value of the `name` entity type (`"user"`, `"client-id"`) in `key`, or
 /// `None` when `key` has no such entry or names its default entity.
@@ -160,13 +161,13 @@ impl Levels {
     /// picks its sensor by the highest level that is set, then resolves the
     /// limit from that sensor's tags, which is this precedence.
     const ALL: Self = Self([true; 8]);
+    /// `findClientQuota`: `client-id` and `<default>` client-id.
+    const CLIENT: Self = Self([false, false, false, false, false, false, true, true]);
     /// `findUserClientQuota`: `(user, client-id)`, `(user, <default>)`,
     /// `(<default>, client-id)` and `(<default>, <default>)`.
     const PAIR: Self = Self([true, true, false, true, true, false, false, false]);
     /// `findUserQuota`: `user` and `<default>` user.
     const USER: Self = Self([false, false, true, false, false, true, false, false]);
-    /// `findClientQuota`: `client-id` and `<default>` client-id.
-    const CLIENT: Self = Self([false, false, false, false, false, false, true, true]);
 }
 
 /// The highest-precedence level of `levels` that has `quota_key` set for
@@ -323,18 +324,17 @@ fn quota_for_key(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::{ClientQuotaRecord, MetadataImage};
-
-    use super::*;
-    use crate::quota::test_support::{
-        QuotaEntitySpec, QuotaRecordSetup, QuotaValue, alice_app1_producer_quota,
-        app1_producer_quota, image_with_quotas, producer_quota_image, quota_record as rec,
+    use {
+        super::*,
+        crate::quota::test_support::{
+            QuotaEntitySpec, QuotaRecordSetup, QuotaValue, alice_app1_producer_quota,
+            app1_producer_quota, image_with_quotas, producer_quota_image, quota_record as rec,
+        },
+        assert2::{assert, check},
+        krabka_metadata::{ClientQuotaRecord, MetadataImage},
     };
 
-    fn img_with(records: Vec<ClientQuotaRecord>) -> MetadataImage {
-        image_with_quotas(records)
-    }
+    fn img_with(records: Vec<ClientQuotaRecord>) -> MetadataImage { image_with_quotas(records) }
 
     /// Both identities must resolve the configured 1,024-byte producer quota.
     fn assert_alice_app1_entity(entity: QuotaEntitySpec<'_>) {
@@ -432,9 +432,7 @@ mod tests {
 
     type Level = Vec<(&'static str, Option<&'static str>)>;
 
-    fn user_key(user: &str) -> EntityKey {
-        vec![("user".into(), Some(user.into()))]
-    }
+    fn user_key(user: &str) -> EntityKey { vec![("user".into(), Some(user.into()))] }
 
     fn client_key(client_id: &str) -> EntityKey {
         vec![("client-id".into(), Some(client_id.into()))]
@@ -739,9 +737,7 @@ mod tests {
         })
     }
 
-    fn img_with_ip(records: Vec<ClientQuotaRecord>) -> MetadataImage {
-        image_with_quotas(records)
-    }
+    fn img_with_ip(records: Vec<ClientQuotaRecord>) -> MetadataImage { image_with_quotas(records) }
 
     #[test]
     fn ip_quotas_prefer_an_exact_address_and_fall_back_to_the_default() {

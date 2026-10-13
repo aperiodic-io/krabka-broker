@@ -1,8 +1,9 @@
 //! Dominating DENY patterns for Kafka's resource-type authorization scan.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{AclEntry, PatternType};
+use {
+    krabka_metadata::{AclEntry, PatternType},
+    std::collections::HashSet,
+};
 
 pub struct DeniedNames<'a> {
     wildcard: bool,

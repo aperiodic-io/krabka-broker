@@ -131,14 +131,15 @@ pub(super) fn dependency_error(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{
-        BrokerRegistrationRecord, ControllerRegistrationRecord, FeatureLevelRecord, MetadataImage,
-        MetadataRecord, NodeId,
+    use {
+        super::*,
+        crate::test_support::broker_registration,
+        assert2::assert,
+        krabka_metadata::{
+            BrokerRegistrationRecord, ControllerRegistrationRecord, FeatureLevelRecord,
+            MetadataImage, MetadataRecord, NodeId,
+        },
     };
-
-    use super::*;
-    use crate::test_support::broker_registration;
 
     const LOCAL: LocalController = LocalController {
         node_id: NodeId(1),

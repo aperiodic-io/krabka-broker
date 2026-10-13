@@ -1,25 +1,25 @@
 //! Unit tests for tombstoning the offsets of deleted topics.
 
-use std::collections::{HashMap, HashSet};
-
-use assert2::check;
-use bytes::Bytes;
-use tokio::sync::oneshot;
-
-use crate::coordinator::{
-    test_support::{
-        TopicDeletionTombstonesSetup, offset_entry, parsed_offset_records,
-        topic_deletion_tombstones,
-    },
-    unified::{
-        actor::{
-            GroupActorMessage,
-            test_support::{make_coordinator, rpc},
+use {
+    crate::coordinator::{
+        test_support::{
+            TopicDeletionTombstonesSetup, offset_entry, parsed_offset_records,
+            topic_deletion_tombstones,
         },
-        classic_state::{ClassicGroup, OffsetEntry},
-        group::{CoordinatorGroup, GroupKind},
-        persistence::Key,
+        unified::{
+            actor::{
+                GroupActorMessage,
+                test_support::{make_coordinator, rpc},
+            },
+            classic_state::{ClassicGroup, OffsetEntry},
+            group::{CoordinatorGroup, GroupKind},
+            persistence::Key,
+        },
     },
+    assert2::check,
+    bytes::Bytes,
+    std::collections::{HashMap, HashSet},
+    tokio::sync::oneshot,
 };
 
 /// The id of the deleted `orders` topic.
@@ -34,9 +34,7 @@ fn entry(offset: i64, topic_id: Option<uuid::Uuid>) -> OffsetEntry {
     }
 }
 
-fn key(topic: &str, partition: i32) -> (String, i32) {
-    (topic.to_string(), partition)
-}
+fn key(topic: &str, partition: i32) -> (String, i32) { (topic.to_string(), partition) }
 
 #[derive(Clone, Copy)]
 enum AppendResult {

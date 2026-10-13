@@ -3,11 +3,12 @@
 //! persists the file only when it actually changed the entry list. They wrap the pure cores in [`super`]
 //! and mirror Kafka's `LeaderEpochFileCache`.
 
-use krabka_ids::{LeaderEpoch, Offset};
-use tracing::instrument;
-
-use super::{EpochEntry, LeaderEpochCheckpoint, append_to, is_strict_successor, truncate_to};
-use crate::error::LogError;
+use {
+    super::{EpochEntry, LeaderEpochCheckpoint, append_to, is_strict_successor, truncate_to},
+    crate::error::LogError,
+    krabka_ids::{LeaderEpoch, Offset},
+    tracing::instrument,
+};
 
 impl LeaderEpochCheckpoint {
     /// Append `(epoch, start_offset)`. This method is idempotent. A second
@@ -179,21 +180,20 @@ fn truncate_start_of(entries: &mut Vec<EpochEntry>, start_offset: Offset) -> boo
         // The one entry at the new start is put back unchanged.
         return false;
     }
-    entries.splice(
-        ..removed,
-        [EpochEntry {
-            epoch: newest_removed,
-            start_offset,
-        }],
-    );
+    entries.splice(..removed, [EpochEntry {
+        epoch: newest_removed,
+        start_offset,
+    }]);
     true
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::leader_epoch_checkpoint::test_support::{
-        check_persisted, checkpoint, checkpoint_entries, entry, fresh,
+    use {
+        super::*,
+        crate::leader_epoch_checkpoint::test_support::{
+            check_persisted, checkpoint, checkpoint_entries, entry, fresh,
+        },
     };
 
     #[test]

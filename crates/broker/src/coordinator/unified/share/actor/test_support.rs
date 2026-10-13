@@ -2,25 +2,26 @@
 //! metadata provider, a coordinator wired to an in-memory offsets log, and a
 //! heartbeat round-trip helper.
 
-use std::sync::Arc;
-
-use krabka_ids::PartitionIndex;
-use krabka_protocol::{
-    owned::{
-        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
-        share_group_heartbeat_response::ShareGroupHeartbeatResponse,
+use {
+    super::{ShareGroupActorHandle, ShareGroupActorMessage},
+    crate::{
+        coordinator::unified::test_support::{
+            GroupCoordinator, InMemoryOffsetsLog, MemberEpoch, MetadataProvider, NextGenConfig,
+            ReconcileInput, ShareGroupConfig, StreamsGroupConfig, fixed_source,
+            make_share_persister,
+        },
+        test_support::PartitionCount,
     },
-    primitives::uuid::Uuid,
-};
-use tokio::sync::oneshot;
-
-use super::{ShareGroupActorHandle, ShareGroupActorMessage};
-use crate::{
-    coordinator::unified::test_support::{
-        GroupCoordinator, InMemoryOffsetsLog, MemberEpoch, MetadataProvider, NextGenConfig,
-        ReconcileInput, ShareGroupConfig, StreamsGroupConfig, fixed_source, make_share_persister,
+    krabka_ids::PartitionIndex,
+    krabka_protocol::{
+        owned::{
+            share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+            share_group_heartbeat_response::ShareGroupHeartbeatResponse,
+        },
+        primitives::uuid::Uuid,
     },
-    test_support::PartitionCount,
+    std::sync::Arc,
+    tokio::sync::oneshot,
 };
 
 #[derive(Debug)]
@@ -28,9 +29,7 @@ struct StaticMetadata {
     input: ReconcileInput,
 }
 impl MetadataProvider for StaticMetadata {
-    fn snapshot(&self) -> ReconcileInput {
-        self.input.clone()
-    }
+    fn snapshot(&self) -> ReconcileInput { self.input.clone() }
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

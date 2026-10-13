@@ -2,10 +2,10 @@
 //! broker endpoint, and the KIP-919 rejection of a controller projection asked
 //! for on that same endpoint.
 
-use assert2::check;
-use krabka_protocol::owned::describe_cluster_request::DescribeClusterRequest;
-
-use crate::support::start_n_node_client;
+use {
+    crate::support::start_n_node_client, assert2::check,
+    krabka_protocol::owned::describe_cluster_request::DescribeClusterRequest,
+};
 
 /// `DescribeCluster` on a 1-broker cluster returns `error_code == 0`, exactly
 /// one broker entry, and `controller_id == 1`.

@@ -5,11 +5,11 @@
 //! per proposal, so the consumed proposals and the leader changes gather here
 //! and reach the metadata log as a single raft append.
 
-use std::ops::{Deref, DerefMut};
-
-use krabka_metadata::BreakGlassAction;
-
-use crate::break_glass::handlers::batch::GatedBatch;
+use {
+    crate::break_glass::handlers::batch::GatedBatch,
+    krabka_metadata::BreakGlassAction,
+    std::ops::{Deref, DerefMut},
+};
 
 /// What one `ElectLeaders` request accumulates across its partitions.
 ///
@@ -31,13 +31,9 @@ impl Default for ElectionBatch {
 impl Deref for ElectionBatch {
     type Target = GatedBatch;
 
-    fn deref(&self) -> &GatedBatch {
-        &self.0
-    }
+    fn deref(&self) -> &GatedBatch { &self.0 }
 }
 
 impl DerefMut for ElectionBatch {
-    fn deref_mut(&mut self) -> &mut GatedBatch {
-        &mut self.0
-    }
+    fn deref_mut(&mut self) -> &mut GatedBatch { &mut self.0 }
 }

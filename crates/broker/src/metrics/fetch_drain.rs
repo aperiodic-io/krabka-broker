@@ -24,16 +24,12 @@ impl BrokerMetrics {
     /// Publish the result of the startup kTLS probe. Called once, during
     /// startup, with `Broker::ktls_enabled`. It is `false` on a broker with no
     /// TLS listener and on every non-Linux target.
-    pub fn set_ktls_enabled(&self, enabled: bool) {
-        self.ktls_enabled.set(i64::from(enabled));
-    }
+    pub fn set_ktls_enabled(&self, enabled: bool) { self.ktls_enabled.set(i64::from(enabled)); }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// Encode the registry to the Prometheus text format an operator scrapes.
     async fn scrape(metrics: &BrokerMetrics) -> String {

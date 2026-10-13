@@ -4,13 +4,14 @@
 //! more than one of the test modules under this module, so the builders live in
 //! one file instead of once per module.
 
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_units::{Time, convert::TimeExt};
-
-use super::{
-    CutStatus, CutValue, GroupValue, InjectionStartValue, MissingPartition, PartitionOffset,
-    TopicOffsets, TopicTarget,
+use {
+    super::{
+        CutStatus, CutValue, GroupValue, InjectionStartValue, MissingPartition, PartitionOffset,
+        TopicOffsets, TopicTarget,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_units::{Time, convert::TimeExt},
 };
 
 pub(super) fn sample_group() -> GroupValue {
@@ -44,16 +45,13 @@ pub(super) fn sample_cut() -> CutValue {
         triggered_at: 1_724_500_000_000,
         completed_at: 1_724_500_000_042,
         status: CutStatus::Partial,
-        topics: vec![
-            orders_offsets(),
-            TopicOffsets {
-                topic: "payments".to_owned(),
-                partitions: vec![PartitionOffset {
-                    partition: PartitionIndex(0),
-                    offset: Offset(9),
-                }],
-            },
-        ],
+        topics: vec![orders_offsets(), TopicOffsets {
+            topic: "payments".to_owned(),
+            partitions: vec![PartitionOffset {
+                partition: PartitionIndex(0),
+                offset: Offset(9),
+            }],
+        }],
         missing: vec![MissingPartition {
             topic: "orders".to_owned(),
             partition: PartitionIndex(2),

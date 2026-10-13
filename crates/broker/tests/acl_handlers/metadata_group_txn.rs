@@ -8,23 +8,27 @@
 //! shim off because at least one ACL exists), then alice authenticates
 //! separately and drives the typed request.
 
-use assert2::assert;
-
-use crate::{
-    ERR_GROUP_AUTHORIZATION_FAILED, ERR_MEMBER_ID_REQUIRED, ERR_TOPIC_AUTHORIZATION_FAILED,
-    ERR_TRANSACTIONAL_ID_AUTHORIZATION_FAILED,
-    acl_admin::create_topic_as_admin,
-    client_api::{drive_init_producer_id_as_plain, drive_join_group_as_plain, join_group_request},
-    framing::CLIENT_ID,
-    kafka_wire::PlainAuthenticationSetup,
-    polling::{
-        named_metadata_as_alice, retry_join_group_until_allowed, retry_metadata_until_topic_visible,
+use {
+    crate::{
+        ERR_GROUP_AUTHORIZATION_FAILED, ERR_MEMBER_ID_REQUIRED, ERR_TOPIC_AUTHORIZATION_FAILED,
+        ERR_TRANSACTIONAL_ID_AUTHORIZATION_FAILED,
+        acl_admin::create_topic_as_admin,
+        client_api::{
+            drive_init_producer_id_as_plain, drive_join_group_as_plain, join_group_request,
+        },
+        framing::CLIENT_ID,
+        kafka_wire::PlainAuthenticationSetup,
+        polling::{
+            named_metadata_as_alice, retry_join_group_until_allowed,
+            retry_metadata_until_topic_visible,
+        },
+        sasl_cluster::start_admin_alice,
+        support::{
+            acl::{TopicAclSetup, seed_dummy_acl, topic_acl_record},
+            transactions::{InitProducerSetup, init_producer_request},
+        },
     },
-    sasl_cluster::start_admin_alice,
-    support::{
-        acl::{TopicAclSetup, seed_dummy_acl, topic_acl_record},
-        transactions::{InitProducerSetup, init_producer_request},
-    },
+    assert2::assert,
 };
 
 /// Only t1 is visible to Alice, with a real ACL image disabling the compat shim.
@@ -158,14 +162,10 @@ async fn join_group_denied_without_group_read_acl() {
     // rebalance (single-member group) and return error_code=0.
     let mut req2 = join_group_request("cg-1");
     req2.member_id = bootstrap.member_id;
-    let joined = drive_join_group_as_plain(
-        addr,
-        req2,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            ..Default::default()
-        },
-    )
+    let joined = drive_join_group_as_plain(addr, req2, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        ..Default::default()
+    })
     .await
     .expect("second JoinGroup must round-trip");
     handle.shutdown().await;
@@ -188,14 +188,10 @@ async fn init_producer_id_denied_without_txn_acl() {
         transactional_id: Some("tx-1".to_string()),
         ..Default::default()
     });
-    let resp = drive_init_producer_id_as_plain(
-        addr,
-        req,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            ..Default::default()
-        },
-    )
+    let resp = drive_init_producer_id_as_plain(addr, req, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        ..Default::default()
+    })
     .await
     .expect("InitProducerId must round-trip");
     handle.shutdown().await;

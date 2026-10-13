@@ -5,14 +5,15 @@
 //! `UNKNOWN_TOPIC_OR_PARTITION`, while a partition the broker knows about but
 //! does not host reports `NOT_LEADER_OR_FOLLOWER`.
 
-use assert2::{assert, check};
-
-use crate::{
-    producers_harness::create_topic,
-    support::{
-        self, admin::describe_producers_request, client::connect_with_context, registered_cluster,
-        shutdown_cluster, topics::CreateTopicSetup,
+use {
+    crate::{
+        producers_harness::create_topic,
+        support::{
+            self, admin::describe_producers_request, client::connect_with_context,
+            registered_cluster, shutdown_cluster, topics::CreateTopicSetup,
+        },
     },
+    assert2::{assert, check},
 };
 
 #[tokio::test]
@@ -41,13 +42,10 @@ async fn unknown_topic_returns_unknown_topic_or_partition() {
 #[tokio::test]
 async fn out_of_range_partition_returns_unknown_topic_or_partition() {
     let p = support::start().await;
-    create_topic(
-        &p.client,
-        CreateTopicSetup {
-            topic: "small",
-            ..Default::default()
-        },
-    )
+    create_topic(&p.client, CreateTopicSetup {
+        topic: "small",
+        ..Default::default()
+    })
     .await;
 
     // Partition 5 doesn't exist (topic was created with 1 partition).
@@ -82,13 +80,10 @@ async fn metadata_known_partition_not_hosted_locally_returns_not_leader() {
 
     let admin =
         connect_with_context(cluster[0].0.listen_addr().to_string(), None, "admin client").await;
-    create_topic(
-        &admin,
-        CreateTopicSetup {
-            topic: "remote",
-            ..Default::default()
-        },
-    )
+    create_topic(&admin, CreateTopicSetup {
+        topic: "remote",
+        ..Default::default()
+    })
     .await;
     cluster[0].0.wait_until_partition_present("remote", 0).await;
 

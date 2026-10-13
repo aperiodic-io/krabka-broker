@@ -2,12 +2,13 @@
 //! router that picks a handler for one of them, the `DescribeQuorum` read, and
 //! the per-API refusal an unauthorized caller receives.
 
-use bytes::{Bytes, BytesMut};
-
-use super::voter_admin::{
-    add_raft_voter_response, remove_raft_voter_response, update_raft_voter_response,
+use {
+    super::voter_admin::{
+        add_raft_voter_response, remove_raft_voter_response, update_raft_voter_response,
+    },
+    crate::{error::RaftError, kraft::KraftController},
+    bytes::{Bytes, BytesMut},
 };
-use crate::{error::RaftError, kraft::KraftController};
 
 pub(super) const API_KEY_DESCRIBE_QUORUM: i16 = 55;
 pub(super) const API_KEY_ADD_RAFT_VOTER: i16 = 80;
@@ -45,21 +46,22 @@ async fn describe_quorum_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::Decode;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        NodeId,
-        kraft::transport::{
-            Inbound,
-            wire::{FETCH_VERSION, PeerRequest},
+    use {
+        super::*,
+        crate::{
+            NodeId,
+            kraft::transport::{
+                Inbound,
+                wire::{FETCH_VERSION, PeerRequest},
+            },
+            server::test_support::{
+                activate_dynamic_membership, decoded, quorum_request, single_voter_engine,
+                test_engine_with_voters, voter, wait_for_leader,
+            },
         },
-        server::test_support::{
-            activate_dynamic_membership, decoded, quorum_request, single_voter_engine,
-            test_engine_with_voters, voter, wait_for_leader,
-        },
+        assert2::check,
+        krabka_protocol::Decode,
+        uuid::Uuid,
     };
 
     /// The listener answers `DescribeQuorum` from the live engine: the
@@ -267,9 +269,10 @@ mod tests {
     /// snapshot; this test only checks the glue that reads the real engine.
     #[tokio::test]
     async fn describe_quorum_response_answers_the_elected_leader() {
-        use krabka_protocol::{Encode, owned::describe_quorum_response::DescribeQuorumResponse};
-
-        use crate::server::test_support::topic_record;
+        use {
+            crate::server::test_support::topic_record,
+            krabka_protocol::{Encode, owned::describe_quorum_response::DescribeQuorumResponse},
+        };
 
         let describe = quorum_request("__cluster_metadata", 0);
 

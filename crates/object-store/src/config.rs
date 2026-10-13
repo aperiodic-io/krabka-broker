@@ -106,9 +106,10 @@ pub struct GcsConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn multipart_size_constants() {

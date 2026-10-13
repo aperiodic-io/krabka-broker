@@ -9,13 +9,13 @@
 //!
 //! [`AssignmentHandle::add`]: crate::log::AssignmentHandle::add
 
-use std::sync::Arc;
-
-use futures_util::{StreamExt, stream::unfold};
-use tokio::sync::broadcast;
-
-use super::SubscriptionState;
-use crate::log::{MetadataEventRecord, MetadataEventStream};
+use {
+    super::SubscriptionState,
+    crate::log::{MetadataEventRecord, MetadataEventStream},
+    futures_util::{StreamExt, stream::unfold},
+    std::sync::Arc,
+    tokio::sync::broadcast,
+};
 
 /// What [`filtered_broadcast`] does with a received live record.
 enum Forward {

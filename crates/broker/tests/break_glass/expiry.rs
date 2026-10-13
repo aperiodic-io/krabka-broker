@@ -5,16 +5,16 @@
 //! set when it spends one. The case waits the window out on a real clock, the
 //! same clock the broker stamps the proposal against.
 
-use std::time::Duration;
-
-use assert2::{assert, check};
-use krabka_broker::codes;
-
-use crate::{
-    cluster::boot,
-    principals::{ALICE, BOB, CAROL},
-    proposals::{ACTION_DELETE_TOPIC, approve, now_ms, propose, stored},
-    topics::{delete_topic, topic_exists},
+use {
+    crate::{
+        cluster::boot,
+        principals::{ALICE, BOB, CAROL},
+        proposals::{ACTION_DELETE_TOPIC, approve, now_ms, propose, stored},
+        topics::{delete_topic, topic_exists},
+    },
+    assert2::{assert, check},
+    krabka_broker::codes,
+    std::time::Duration,
 };
 
 /// Sleep until the wall clock is past `expires_at_ms`.

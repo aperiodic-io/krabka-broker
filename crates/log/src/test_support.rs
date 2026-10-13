@@ -1,26 +1,22 @@
 //! Shared log, record and directory fixtures for storage tests.
 
-use std::{collections::BTreeMap, ops::RangeInclusive, path::Path};
-
-use bytes::Bytes;
-use krabka_protocol::records::{Record, RecordBatch};
-
-use crate::{
-    Log, LogConfig, Offset, ProducerId, io::LogIo, stamp_index::StampEntry, txn_index::AbortedTxn,
+use {
+    crate::{
+        Log, LogConfig, Offset, ProducerId, io::LogIo, stamp_index::StampEntry,
+        txn_index::AbortedTxn,
+    },
+    bytes::Bytes,
+    krabka_protocol::records::{Record, RecordBatch},
+    std::{collections::BTreeMap, ops::RangeInclusive, path::Path},
 };
 
-pub(crate) fn open_log(dir: &Path) -> Log {
-    Log::open(dir, LogConfig::default()).unwrap()
-}
+pub(crate) fn open_log(dir: &Path) -> Log { Log::open(dir, LogConfig::default()).unwrap() }
 
 pub(crate) fn segmented_log(dir: &Path, segment_size: krabka_units::prelude::ByteSize) -> Log {
-    Log::open(
-        dir,
-        LogConfig {
-            segment_size,
-            ..LogConfig::default()
-        },
-    )
+    Log::open(dir, LogConfig {
+        segment_size,
+        ..LogConfig::default()
+    })
     .unwrap()
 }
 
@@ -114,9 +110,7 @@ pub(crate) struct RecordedAdvice(std::sync::Mutex<Vec<(u64, u64)>>);
 
 impl RecordedAdvice {
     /// The hints given since the last call, oldest first.
-    pub(crate) fn take(&self) -> Vec<(u64, u64)> {
-        std::mem::take(&mut *self.0.lock().unwrap())
-    }
+    pub(crate) fn take(&self) -> Vec<(u64, u64)> { std::mem::take(&mut *self.0.lock().unwrap()) }
 }
 
 impl LogIo for RecordedAdvice {

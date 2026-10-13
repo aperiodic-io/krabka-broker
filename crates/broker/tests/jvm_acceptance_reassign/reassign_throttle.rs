@@ -5,12 +5,15 @@
 //! tool writes is visible to `kafka-configs --describe` and is gone from the
 //! metadata image once `--verify` has run.
 
-use assert2::assert;
-
-use crate::{
-    cluster::{assert_reassigned, assignment, execute_plan, reassignment_cluster, removed_replica},
-    jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised, verify_console_reassignment},
-    support::{JvmDockerSetup, jvm_docker_command},
+use {
+    crate::{
+        cluster::{
+            assert_reassigned, assignment, execute_plan, reassignment_cluster, removed_replica,
+        },
+        jvm_acceptance::{KAFKA_IMAGE_TXN, broker0_advertised, verify_console_reassignment},
+        support::{JvmDockerSetup, jvm_docker_command},
+    },
+    assert2::assert,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

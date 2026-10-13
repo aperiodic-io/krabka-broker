@@ -6,15 +6,15 @@
 //! The broker's own defaults are the secure settings, so a broker with no
 //! `[audit]` block still audits to the standard internal topic.
 
-use std::num::NonZeroU64;
-
-use krabka_units::convert::{ByteSizeExt as _, TimeExt as _};
-use schemars::JsonSchema;
-use serde::Deserialize;
-
-use crate::config::{
-    DEFAULT_AUDIT_CHECKPOINT_EVERY, DEFAULT_AUDIT_CHECKPOINT_EVERY_N, DEFAULT_AUDIT_SPOOL_DIR,
-    DEFAULT_AUDIT_SPOOL_MAX, DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N, DEFAULT_AUDIT_TOPIC,
+use {
+    crate::config::{
+        DEFAULT_AUDIT_CHECKPOINT_EVERY, DEFAULT_AUDIT_CHECKPOINT_EVERY_N, DEFAULT_AUDIT_SPOOL_DIR,
+        DEFAULT_AUDIT_SPOOL_MAX, DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N, DEFAULT_AUDIT_TOPIC,
+    },
+    krabka_units::convert::{ByteSizeExt as _, TimeExt as _},
+    schemars::JsonSchema,
+    serde::Deserialize,
+    std::num::NonZeroU64,
 };
 
 /// `[audit]` section of `broker.toml` (`FedRAMP` 20x MLA).
@@ -84,17 +84,11 @@ impl Default for FileAuditSpoolConfig {
     }
 }
 
-fn default_spool_dir() -> String {
-    DEFAULT_AUDIT_SPOOL_DIR.to_string()
-}
+fn default_spool_dir() -> String { DEFAULT_AUDIT_SPOOL_DIR.to_string() }
 
-fn default_spool_max_bytes() -> u64 {
-    DEFAULT_AUDIT_SPOOL_MAX.bytes_u64()
-}
+fn default_spool_max_bytes() -> u64 { DEFAULT_AUDIT_SPOOL_MAX.bytes_u64() }
 
-fn default_spool_sync_every_n() -> NonZeroU64 {
-    DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N
-}
+fn default_spool_sync_every_n() -> NonZeroU64 { DEFAULT_AUDIT_SPOOL_SYNC_EVERY_N }
 
 /// `[audit.signing]` — Ed25519 checkpoint signing key.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -128,33 +122,25 @@ impl Default for FileAuditCheckpointConfig {
     }
 }
 
-fn default_checkpoint_every_n() -> u64 {
-    DEFAULT_AUDIT_CHECKPOINT_EVERY_N
-}
+fn default_checkpoint_every_n() -> u64 { DEFAULT_AUDIT_CHECKPOINT_EVERY_N }
 
 fn default_checkpoint_every_secs() -> u64 {
     DEFAULT_AUDIT_CHECKPOINT_EVERY.secs_i64().cast_unsigned()
 }
 
-fn default_audit_enabled() -> bool {
-    true
-}
+fn default_audit_enabled() -> bool { true }
 
-fn default_audit_failure_mode() -> krabka_audit::AuditMode {
-    krabka_audit::AuditMode::FailOpen
-}
+fn default_audit_failure_mode() -> krabka_audit::AuditMode { krabka_audit::AuditMode::FailOpen }
 
-fn default_audit_topic() -> String {
-    DEFAULT_AUDIT_TOPIC.to_string()
-}
+fn default_audit_topic() -> String { DEFAULT_AUDIT_TOPIC.to_string() }
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroU64, path::PathBuf};
-
-    use krabka_units::{ByteSize, Time, kibibytes, secs};
-
-    use crate::{config::BrokerConfig, file_config::FileConfig};
+    use {
+        crate::{config::BrokerConfig, file_config::FileConfig},
+        krabka_units::{ByteSize, Time, kibibytes, secs},
+        std::{num::NonZeroU64, path::PathBuf},
+    };
 
     // Every audit setting of a `BrokerConfig`, so a test compares them as one
     // value.

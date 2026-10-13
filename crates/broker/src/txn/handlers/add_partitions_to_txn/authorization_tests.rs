@@ -15,24 +15,24 @@
 //! Every case runs against one broker that coordinates every transactional
 //! id and has one open transaction for each case.
 
-use std::{collections::BTreeSet, sync::Arc};
-
-use assert2::check;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    add_partitions_to_txn_request::{AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction},
-    add_partitions_to_txn_response::{AddPartitionsToTxnResponse, AddPartitionsToTxnResult},
-};
-
-use super::{
-    handle,
-    test_support::{enlisted, seed_transaction, start_coordinator, topic, topic_result},
-};
-use crate::{
-    authorizer::AuthorizationResult,
-    codes,
-    coordinator::bootstrap::OFFSETS_TOPIC,
-    test_support::{ControllerPeerAllowed, peer, principal, request_context},
+use {
+    super::{
+        handle,
+        test_support::{enlisted, seed_transaction, start_coordinator, topic, topic_result},
+    },
+    crate::{
+        authorizer::AuthorizationResult,
+        codes,
+        coordinator::bootstrap::OFFSETS_TOPIC,
+        test_support::{ControllerPeerAllowed, peer, principal, request_context},
+    },
+    assert2::check,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        add_partitions_to_txn_request::{AddPartitionsToTxnRequest, AddPartitionsToTxnTransaction},
+        add_partitions_to_txn_response::{AddPartitionsToTxnResponse, AddPartitionsToTxnResult},
+    },
+    std::{collections::BTreeSet, sync::Arc},
 };
 
 /// A broker principal: `ClusterAction` on the cluster and nothing else.

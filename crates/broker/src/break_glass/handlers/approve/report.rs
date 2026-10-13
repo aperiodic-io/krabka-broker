@@ -4,15 +4,16 @@
 //! reports the stored counts, so an operator sees how far a proposal got even
 //! when this request did not move it.
 
-use krabka_audit::PrivilegedPhase;
-use krabka_metadata::BreakGlassProposalRecord;
-use uuid::Uuid;
-
-use crate::break_glass::{
-    action_name,
-    config::BreakGlassPolicy,
-    gate::distinct_approvers,
-    handlers::{Refusal, UNKNOWN_ACTION},
+use {
+    crate::break_glass::{
+        action_name,
+        config::BreakGlassPolicy,
+        gate::distinct_approvers,
+        handlers::{Refusal, UNKNOWN_ACTION},
+    },
+    krabka_audit::PrivilegedPhase,
+    krabka_metadata::BreakGlassProposalRecord,
+    uuid::Uuid,
 };
 
 /// The phase an audit event records for one settled request.
@@ -85,6 +86,4 @@ pub(super) fn reason(outcome: &Result<BreakGlassProposalRecord, Refusal>) -> &st
 
 /// A count as the wire carries it. A count beyond `i32::MAX` saturates, and no
 /// reachable approver set comes near it.
-fn count(value: usize) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
-}
+fn count(value: usize) -> i32 { i32::try_from(value).unwrap_or(i32::MAX) }

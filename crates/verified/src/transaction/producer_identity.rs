@@ -1,10 +1,11 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::has_identity;
-use super::{
-    EXHAUSTED_PRODUCER_EPOCH, InitProducerIdIdentityDecision, TransactionCompletionDecision,
-    TransactionIdentity, TransactionSnapshot,
+use {
+    super::{
+        EXHAUSTED_PRODUCER_EPOCH, InitProducerIdIdentityDecision, TransactionCompletionDecision,
+        TransactionIdentity, TransactionSnapshot,
+    },
+    creusot_std::prelude::*,
 };
 
 /// What an `InitProducerId` caller's producer identity may do to the entry it

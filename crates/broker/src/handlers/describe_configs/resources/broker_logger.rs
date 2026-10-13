@@ -13,10 +13,11 @@
 //! The three refusals below are Kafka's, message for message, because
 //! `kafka-configs` prints them straight through to the operator.
 
-use krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult;
-use krabka_telemetry::LogLevelController;
-
-use super::super::wire::CONFIG_SOURCE_DYNAMIC_BROKER_LOGGER;
+use {
+    super::super::wire::CONFIG_SOURCE_DYNAMIC_BROKER_LOGGER,
+    krabka_protocol::owned::describe_configs_response::DescribeConfigsResourceResult,
+    krabka_telemetry::LogLevelController,
+};
 
 #[cfg(test)]
 mod tests;

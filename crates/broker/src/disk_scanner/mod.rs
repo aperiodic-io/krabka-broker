@@ -7,16 +7,16 @@
 
 pub mod scan;
 
-use std::path::PathBuf;
-
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio::time::interval;
-use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
-
-use crate::{
-    log_dir,
-    metrics::{BrokerMetrics, PartitionLabel},
+use {
+    crate::{
+        log_dir,
+        metrics::{BrokerMetrics, PartitionLabel},
+    },
+    krabka_units::{Time, convert::TimeExt as _},
+    std::path::PathBuf,
+    tokio::time::interval,
+    tokio_util::sync::CancellationToken,
+    tracing::{info, warn},
 };
 
 pub struct DiskScanner {
@@ -77,12 +77,12 @@ impl DiskScanner {
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Write, time::Duration};
-
-    use assert2::assert;
-    use krabka_units::{hours, millis, minutes};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_units::{hours, millis, minutes},
+        std::{io::Write, time::Duration},
+    };
 
     #[test]
     fn tick_once_sets_gauge_for_each_partition() {

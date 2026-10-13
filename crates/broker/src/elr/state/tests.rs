@@ -1,12 +1,14 @@
 //! Parsing and projection of the KIP-966 ELR state.
 
-use assert2::assert;
-use krabka_metadata::{
-    MetadataImage, MetadataRecord, NodeId, PartitionElrRecord, PartitionRecord, TopicConfigRecord,
+use {
+    super::TopicElr,
+    crate::test_support::{finalize_elr_version, partition_elr as elr},
+    assert2::assert,
+    krabka_metadata::{
+        MetadataImage, MetadataRecord, NodeId, PartitionElrRecord, PartitionRecord,
+        TopicConfigRecord,
+    },
 };
-
-use super::TopicElr;
-use crate::test_support::{finalize_elr_version, partition_elr as elr};
 
 fn orders_partition_image() -> MetadataImage {
     let mut image = MetadataImage::new(uuid::Uuid::nil());

@@ -5,24 +5,25 @@
 //! together, which is the only way to observe the response the handler
 //! returns for a rejected, valid, malformed or empty push.
 
-use assert2::assert;
-use bytes::Bytes;
-use krabka_protocol::{owned::push_telemetry_response, primitives::uuid::Uuid as ProtoUuid};
-use opentelemetry_proto::tonic::metrics::v1::number_data_point;
-use uuid::Uuid;
-
-use super::*;
-use crate::{
-    broker::Broker,
-    client_metrics::{
-        config::INTERVAL_MS_DEFAULT,
-        manager::{
-            ClientAttributes, SubscriptionDecision, compute_subscription,
-            subscription_id as compute_subscription_id,
+use {
+    super::*,
+    crate::{
+        broker::Broker,
+        client_metrics::{
+            config::INTERVAL_MS_DEFAULT,
+            manager::{
+                ClientAttributes, SubscriptionDecision, compute_subscription,
+                subscription_id as compute_subscription_id,
+            },
         },
+        handlers::push_telemetry::test_support::{gauge_metric, metrics_data},
+        test_support::{KafkaErrorCode, peer, start_broker_with},
     },
-    handlers::push_telemetry::test_support::{gauge_metric, metrics_data},
-    test_support::{KafkaErrorCode, peer, start_broker_with},
+    assert2::assert,
+    bytes::Bytes,
+    krabka_protocol::{owned::push_telemetry_response, primitives::uuid::Uuid as ProtoUuid},
+    opentelemetry_proto::tonic::metrics::v1::number_data_point,
+    uuid::Uuid,
 };
 
 crate::test_support::codec_helpers!(

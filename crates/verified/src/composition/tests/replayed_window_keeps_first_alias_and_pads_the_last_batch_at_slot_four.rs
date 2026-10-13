@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn replayed_window_keeps_first_alias_and_pads_the_last_batch_at_slot_four() {

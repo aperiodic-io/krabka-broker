@@ -102,8 +102,10 @@ fn remote_partition_delete_transition_matrix_matches_kafka() {
 
 #[test]
 fn remote_cache_actions_are_idempotent_and_never_resurrect() {
-    use RemoteCacheAction::{Noop, Reject, Remove, StoreFinished, StoreHidden};
-    use RemoteSegmentLifecycle::{CopyFinished, CopyStarted, DeleteFinished, DeleteStarted};
+    use {
+        RemoteCacheAction::{Noop, Reject, Remove, StoreFinished, StoreHidden},
+        RemoteSegmentLifecycle::{CopyFinished, CopyStarted, DeleteFinished, DeleteStarted},
+    };
 
     for (what, current, target, retry, expected) in [
         (

@@ -1,9 +1,7 @@
 //! The `OpenTelemetry` settings, which a flag may override ahead of the
 //! process environment the telemetry layer otherwise reads.
 
-use krabka_units::fmt::Human as _;
-
-use crate::cli::Args;
+use {crate::cli::Args, krabka_units::fmt::Human as _};
 
 impl Args {
     pub fn telemetry_value(&self, key: &str) -> Option<String> {
@@ -32,11 +30,7 @@ impl Args {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use clap::Parser;
-
-    use super::*;
-    use crate::test_support::env_guard;
+    use {super::*, crate::test_support::env_guard, assert2::assert, clap::Parser};
 
     #[test]
     fn otlp_time_cli_values_override_environment() {

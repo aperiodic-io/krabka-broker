@@ -2,35 +2,34 @@
 //! `EndQuorumEpoch` and `FetchSnapshot`: one table per API, each row a request and the whole
 //! decoded response it must get.
 
-use assert2::check;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        begin_quorum_epoch_request::{self as bqe_req, BeginQuorumEpochRequest},
-        begin_quorum_epoch_response::{self as bqe_resp, BeginQuorumEpochResponse},
-        end_quorum_epoch_request::{self as eqe_req, EndQuorumEpochRequest},
-        end_quorum_epoch_response::{self as eqe_resp, EndQuorumEpochResponse},
-        fetch_snapshot_request::{self as fs_req, FetchSnapshotRequest},
-        fetch_snapshot_response::{self as fs_resp, FetchSnapshotResponse},
-        vote_request::{self as vote_req, VoteRequest},
-        vote_response::{self as vote_resp, VoteResponse},
+use {
+    super::*,
+    crate::kraft::{
+        controller::test_support::{EngineSetup, build_engine_only, voter_set},
+        transport::wire::{FETCH_SNAPSHOT_VERSION, QUORUM_EPOCH_VERSION, VOTE_VERSION},
+        types::{QuorumState, SimInstant},
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use super::*;
-use crate::kraft::{
-    controller::test_support::{EngineSetup, build_engine_only, voter_set},
-    transport::wire::{FETCH_SNAPSHOT_VERSION, QUORUM_EPOCH_VERSION, VOTE_VERSION},
-    types::{QuorumState, SimInstant},
+    assert2::check,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            begin_quorum_epoch_request::{self as bqe_req, BeginQuorumEpochRequest},
+            begin_quorum_epoch_response::{self as bqe_resp, BeginQuorumEpochResponse},
+            end_quorum_epoch_request::{self as eqe_req, EndQuorumEpochRequest},
+            end_quorum_epoch_response::{self as eqe_resp, EndQuorumEpochResponse},
+            fetch_snapshot_request::{self as fs_req, FetchSnapshotRequest},
+            fetch_snapshot_response::{self as fs_resp, FetchSnapshotResponse},
+            vote_request::{self as vote_req, VoteRequest},
+            vote_response::{self as vote_resp, VoteResponse},
+        },
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 const METADATA_TOPIC: &str = "__cluster_metadata";
 
 /// The Kafka base64 form of a cluster id that is not the engines' nil id.
-fn foreign_cluster_id() -> String {
-    URL_SAFE_NO_PAD.encode(Uuid::from_u128(7).as_bytes())
-}
+fn foreign_cluster_id() -> String { URL_SAFE_NO_PAD.encode(Uuid::from_u128(7).as_bytes()) }
 
 /// Delivers one inbound request to `engine` and returns its answer, or `None`
 /// when the engine dropped the reply, which closes the connection.

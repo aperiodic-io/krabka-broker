@@ -4,13 +4,14 @@
 //! It also holds the exit codes the cases assert on, so one file names the
 //! contract a runbook branches on rather than each case repeating it.
 
-use std::path::{Path, PathBuf};
-
-use krabka_broker::{
-    Broker, BrokerConfig, BrokerHandle,
-    operator_keys::{OperatorKeyEntry, OperatorKeys},
+use {
+    krabka_broker::{
+        Broker, BrokerConfig, BrokerHandle,
+        operator_keys::{OperatorKeyEntry, OperatorKeys},
+    },
+    ring::signature::{Ed25519KeyPair, KeyPair as _},
+    std::path::{Path, PathBuf},
 };
-use ring::signature::{Ed25519KeyPair, KeyPair as _};
 
 /// The exit code for a request the broker refused.
 pub(super) const REFUSED: i32 = 1;
@@ -125,16 +126,13 @@ pub(super) async fn set_signed_freeze(bootstrap: &str, signing: &[&str]) -> i32 
 
 /// Read and verify the registry against one local trust file.
 pub(super) async fn verify_registry(bootstrap: &str, trust_file: &str) -> i32 {
-    cli(
-        bootstrap,
-        &[
-            "freeze",
-            "list",
-            "--verify-signatures",
-            "--operator-keys",
-            trust_file,
-        ],
-    )
+    cli(bootstrap, &[
+        "freeze",
+        "list",
+        "--verify-signatures",
+        "--operator-keys",
+        trust_file,
+    ])
     .await
 }
 

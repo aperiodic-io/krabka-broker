@@ -27,11 +27,11 @@
 //! [`TopicElr::partition`] always returns lists, and the handler always wraps
 //! them in `Some`.
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::{MetadataImage, NodeId, PartitionRecord};
-
-use crate::features::{ELR_VERSION, feature_enabled};
+use {
+    crate::features::{ELR_VERSION, feature_enabled},
+    krabka_metadata::{MetadataImage, NodeId, PartitionRecord},
+    std::collections::BTreeMap,
+};
 
 const LEGACY_ELR_CONFIG: &str = "krabka.elr";
 
@@ -224,13 +224,10 @@ fn parse_entry(entry: &str) -> Option<(i32, PartitionElr)> {
     if fields.next().is_some() {
         return None;
     }
-    Some((
-        partition,
-        PartitionElr {
-            eligible_leader_replicas,
-            last_known_elr,
-        },
-    ))
+    Some((partition, PartitionElr {
+        eligible_leader_replicas,
+        last_known_elr,
+    }))
 }
 
 /// Parse a possibly-empty comma-separated node-id list.

@@ -3,47 +3,48 @@
 //! measurement phase, triggers an optional failover mid-measurement, and merges
 //! the per-task histograms into the public `LatencyPercentiles` shape.
 
-use std::{
-    future::Future,
-    path::PathBuf,
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicU8, AtomicU64, Ordering},
+use {
+    crate::{
+        failover::{kill_broker_pod, partition0_leader_from_metadata, try_client},
+        hist,
+        ids::{MessageCount, TimeOffsetMs, WallclockMs},
+        numeric::{
+            event_rate, nonnegative_i64_to_u64, saturating_u64_to_i64, saturating_u128_to_u64,
+            to_f64,
+        },
+        payload,
+        prom::PromClient,
+        rate::Pacer,
+        scenario::{
+            BrokerSample, Disturbance, LatencyPercentiles, LoadMode, ModeTag, Resource, RunOutput,
+            Sample, Scenario, Stack, Throughput, Topology,
+        },
     },
-};
-
-use anyhow::{Context, Result};
-use chrono::Utc;
-use futures::{FutureExt, StreamExt, stream::FuturesUnordered};
-use hdrhistogram::Histogram;
-use krabka_client_consumer::{AutoOffsetReset, Consumer};
-use krabka_client_core::{
-    ClientFrameMax, ConnectionDispatchQueueCapacity,
-    security::{ClientSecurity, KeyStore, TlsConnectorConfig, TrustStore},
-};
-use krabka_client_producer::{Producer, ProducerError, ProducerRecord, RecordMetadata};
-use krabka_macros::RefinedNewtype;
-use krabka_security::ListenerProtocol;
-use krabka_units::prelude::*;
-use refined_type::rule::GreaterU32;
-use tokio::{task::JoinSet, time::Instant};
-use tracing::{info, warn};
-
-use crate::{
-    failover::{kill_broker_pod, partition0_leader_from_metadata, try_client},
-    hist,
-    ids::{MessageCount, TimeOffsetMs, WallclockMs},
-    numeric::{
-        event_rate, nonnegative_i64_to_u64, saturating_u64_to_i64, saturating_u128_to_u64, to_f64,
+    anyhow::{Context, Result},
+    chrono::Utc,
+    futures::{FutureExt, StreamExt, stream::FuturesUnordered},
+    hdrhistogram::Histogram,
+    krabka_client_consumer::{AutoOffsetReset, Consumer},
+    krabka_client_core::{
+        ClientFrameMax, ConnectionDispatchQueueCapacity,
+        security::{ClientSecurity, KeyStore, TlsConnectorConfig, TrustStore},
     },
-    payload,
-    prom::PromClient,
-    rate::Pacer,
-    scenario::{
-        BrokerSample, Disturbance, LatencyPercentiles, LoadMode, ModeTag, Resource, RunOutput,
-        Sample, Scenario, Stack, Throughput, Topology,
+    krabka_client_producer::{Producer, ProducerError, ProducerRecord, RecordMetadata},
+    krabka_macros::RefinedNewtype,
+    krabka_security::ListenerProtocol,
+    krabka_units::prelude::*,
+    refined_type::rule::GreaterU32,
+    std::{
+        future::Future,
+        path::PathBuf,
+        pin::Pin,
+        sync::{
+            Arc,
+            atomic::{AtomicU8, AtomicU64, Ordering},
+        },
     },
+    tokio::{task::JoinSet, time::Instant},
+    tracing::{info, warn},
 };
 
 /// Width of one time-series sample bucket. The driver splits the measurement
@@ -72,9 +73,7 @@ pub const DEFAULT_SAMPLE_INTERVAL: Time = secs(2);
 ///
 /// Panics if the named default is not protocol-safe.
 #[must_use]
-pub const fn default_producer_request_timeout() -> Time {
-    DEFAULT_PRODUCER_REQUEST_TIMEOUT
-}
+pub const fn default_producer_request_timeout() -> Time { DEFAULT_PRODUCER_REQUEST_TIMEOUT }
 
 /// Return the validated consumer request-timeout default for `stack`.
 ///
@@ -106,9 +105,7 @@ pub const fn default_consumer_build_initial_backoff() -> Time {
 }
 
 #[must_use]
-pub const fn default_consumer_build_max_backoff() -> Time {
-    DEFAULT_CONSUMER_BUILD_MAX_BACKOFF
-}
+pub const fn default_consumer_build_max_backoff() -> Time { DEFAULT_CONSUMER_BUILD_MAX_BACKOFF }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ConsumerBuildRetryPolicy {
@@ -139,19 +136,13 @@ impl ConsumerBuildRetryPolicy {
     }
 
     #[must_use]
-    pub const fn attempts(self) -> u32 {
-        self.attempts.into_value()
-    }
+    pub const fn attempts(self) -> u32 { self.attempts.into_value() }
 
     #[must_use]
-    pub fn initial_backoff(self) -> Time {
-        self.initial_backoff
-    }
+    pub fn initial_backoff(self) -> Time { self.initial_backoff }
 
     #[must_use]
-    pub fn max_backoff(self) -> Time {
-        self.max_backoff
-    }
+    pub fn max_backoff(self) -> Time { self.max_backoff }
 }
 
 impl Default for ConsumerBuildRetryPolicy {
@@ -166,14 +157,10 @@ impl Default for ConsumerBuildRetryPolicy {
 }
 
 #[must_use]
-pub const fn default_consumer_poll_timeout() -> Time {
-    DEFAULT_CONSUMER_POLL_TIMEOUT
-}
+pub const fn default_consumer_poll_timeout() -> Time { DEFAULT_CONSUMER_POLL_TIMEOUT }
 
 #[must_use]
-pub const fn default_consumer_poll_error_backoff() -> Time {
-    DEFAULT_CONSUMER_POLL_ERROR_BACKOFF
-}
+pub const fn default_consumer_poll_error_backoff() -> Time { DEFAULT_CONSUMER_POLL_ERROR_BACKOFF }
 
 /// The fixed sampling grid. Every task gets a copy, so all tasks bucket into
 /// the same slices.
@@ -246,9 +233,7 @@ impl Grid {
     }
 
     /// The width of one slice, as the extent the per-slice rates divide by.
-    fn interval(&self) -> Time {
-        Time::from_millis(saturating_u64_to_i64(self.interval_ms))
-    }
+    fn interval(&self) -> Time { Time::from_millis(saturating_u64_to_i64(self.interval_ms)) }
 }
 
 /// Parameters wired in from `main` and the CLI. This struct is distinct from
@@ -762,7 +747,7 @@ async fn capture_resources(
             cfg.stack,
             &cfg.namespace,
             scenario.duration,
-            to_f64(measured_until_ns) / 1e9,
+            to_f64(measured_until_ns) / 1.0e9,
             MessageCount(produced),
         )
         .await
@@ -1373,12 +1358,13 @@ async fn build_consumer_with_retry(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::{
-        prom::DEFAULT_PROMETHEUS_REQUEST_TIMEOUT,
-        scenario::{FailoverSpec, ModeTag, fixture::short_scenario},
+    use {
+        super::*,
+        crate::{
+            prom::DEFAULT_PROMETHEUS_REQUEST_TIMEOUT,
+            scenario::{FailoverSpec, ModeTag, fixture::short_scenario},
+        },
+        assert2::{assert, check},
     };
 
     fn cfg(broker_count: u32) -> DriverConfig {
@@ -1404,9 +1390,7 @@ mod tests {
         }
     }
 
-    fn scenario(rf: i16) -> Scenario {
-        short_scenario(rf)
-    }
+    fn scenario(rf: i16) -> Scenario { short_scenario(rf) }
 
     async fn producer_broker(
         metadata_error: i16,
@@ -1416,23 +1400,25 @@ mod tests {
         tokio::sync::oneshot::Receiver<()>,
         Arc<AtomicU64>,
     ) {
-        use bytes::BytesMut;
-        use krabka_protocol::{
-            Decode as _, Encode as _,
-            owned::{
-                api_versions_request,
-                api_versions_response::{ApiVersion, ApiVersionsResponse},
-                metadata_request::{self, MetadataRequest},
-                metadata_response::{
-                    MetadataResponse, MetadataResponseBroker, MetadataResponsePartition,
-                    MetadataResponseTopic,
+        use {
+            bytes::BytesMut,
+            krabka_protocol::{
+                Decode as _, Encode as _,
+                owned::{
+                    api_versions_request,
+                    api_versions_response::{ApiVersion, ApiVersionsResponse},
+                    metadata_request::{self, MetadataRequest},
+                    metadata_response::{
+                        MetadataResponse, MetadataResponseBroker, MetadataResponsePartition,
+                        MetadataResponseTopic,
+                    },
+                    produce_request::{self, ProduceRequest},
+                    produce_response::{
+                        PartitionProduceResponse, ProduceResponse, TopicProduceResponse,
+                    },
                 },
-                produce_request::{self, ProduceRequest},
-                produce_response::{
-                    PartitionProduceResponse, ProduceResponse, TopicProduceResponse,
-                },
+                records::RecordsPayload,
             },
-            records::RecordsPayload,
         };
 
         let port = Arc::new(std::sync::atomic::AtomicU16::new(0));

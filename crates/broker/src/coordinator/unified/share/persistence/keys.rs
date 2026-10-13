@@ -56,9 +56,7 @@ group_record_keys! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn unknown_key_version_rejected() {

@@ -6,16 +6,16 @@
 //! duplicate id is answered once, and the rows of the groups the principal may
 //! not delete follow the coordinator's rows.
 
-use std::collections::HashSet;
-
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    delete_groups_request::DeleteGroupsRequest,
-    delete_groups_response::{DeletableGroupResult, DeleteGroupsResponse},
-};
-
-use crate::{
-    broker::Broker, codes, coordinator::DeleteGroupError, handlers::group_coordinator_error,
+use {
+    crate::{
+        broker::Broker, codes, coordinator::DeleteGroupError, handlers::group_coordinator_error,
+    },
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        delete_groups_request::DeleteGroupsRequest,
+        delete_groups_response::{DeletableGroupResult, DeleteGroupsResponse},
+    },
+    std::collections::HashSet,
 };
 
 context_handler! {
@@ -89,17 +89,17 @@ async fn delete_one(broker: &Broker, group_id: &str) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        authorizer::AuthorizationResult,
-        handlers::RequestContext,
-        test_support::{
-            DenyAll, dispatch_context, peer, principal, start_group_broker_no_audit, test_ctx,
+    use {
+        super::*,
+        crate::{
+            authorizer::AuthorizationResult,
+            handlers::RequestContext,
+            test_support::{
+                DenyAll, dispatch_context, peer, principal, start_group_broker_no_audit, test_ctx,
+            },
         },
+        assert2::assert,
+        std::sync::Arc,
     };
 
     const VERSION: i16 = 2;

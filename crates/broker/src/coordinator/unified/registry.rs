@@ -6,14 +6,15 @@
 //! dead-actor detection and hydrate-from-cache rules, so they are defined
 //! together.
 
-use std::sync::Arc;
-
-use super::{
-    actor::{self, GroupActorHandle, GroupActorMessage, GroupKindTag},
-    group::CoordinatorGroup,
-    group_coordinator::{GroupCoordinator, GroupType},
-    share::actor::{ShareGroupActorHandle, ShareGroupActorMessage},
-    streams::actor::{StreamsGroupActorHandle, StreamsGroupActorMessage},
+use {
+    super::{
+        actor::{self, GroupActorHandle, GroupActorMessage, GroupKindTag},
+        group::CoordinatorGroup,
+        group_coordinator::{GroupCoordinator, GroupType},
+        share::actor::{ShareGroupActorHandle, ShareGroupActorMessage},
+        streams::actor::{StreamsGroupActorHandle, StreamsGroupActorMessage},
+    },
+    std::sync::Arc,
 };
 
 /// The `GROUP_ID_NOT_FOUND` message of a `ConsumerGroupHeartbeat` that names a
@@ -272,15 +273,16 @@ impl GroupCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::{
-        actor::MetadataProvider,
-        config::NextGenConfig,
-        share::config::ShareGroupConfig,
-        streams::config::StreamsGroupConfig,
-        test_support::{ImageMetadatalessProvider, make_coord},
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            actor::MetadataProvider,
+            config::NextGenConfig,
+            share::config::ShareGroupConfig,
+            streams::config::StreamsGroupConfig,
+            test_support::{ImageMetadatalessProvider, make_coord},
+        },
+        assert2::{assert, check},
     };
 
     #[tokio::test]

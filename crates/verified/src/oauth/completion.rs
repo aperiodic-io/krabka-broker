@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use crate::jwks::jwks_cache_facts_admissible_at;
-use crate::jwks::{JwksCacheDecision, JwksCacheFacts, jwks_cache_admission};
+use {
+    crate::jwks::{JwksCacheDecision, JwksCacheFacts, jwks_cache_admission},
+    creusot_std::prelude::*,
+};
 
 /// Bind validation completion to a forward clock observation and, when supplied,
 /// the still-current and fresh JWKS generation. The supplied cache

@@ -7,15 +7,16 @@
 //! operation-implication table, which is why it lives beside them rather than
 //! in the decision loop.
 
-use std::net::IpAddr;
-
-use krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType};
-use krabka_verified::{
-    AclOperationKind, AclPatternKind, acl_identity_match, acl_operation_match, acl_resource_match,
-    authz::{AclResourceFacts, AclResourceTypeMatch},
+use {
+    crate::cidr::Cidr,
+    krabka_metadata::{AclEntry, AclOperation, PatternType, PermissionType, ResourceType},
+    krabka_verified::{
+        AclOperationKind, AclPatternKind, acl_identity_match, acl_operation_match,
+        acl_resource_match,
+        authz::{AclResourceFacts, AclResourceTypeMatch},
+    },
+    std::net::IpAddr,
 };
-
-use crate::cidr::Cidr;
 
 pub(super) fn matches_principal(entry: &AclEntry, user_pattern: &str) -> bool {
     acl_identity_match(entry.principal == "User:*", entry.principal == user_pattern)
@@ -51,19 +52,16 @@ pub(super) fn matches_resource(entry: &AclEntry, resource_type: ResourceType, na
         PatternType::Literal => AclPatternKind::Literal,
         PatternType::Prefixed => AclPatternKind::Prefixed,
     };
-    acl_resource_match(
-        pattern,
-        AclResourceFacts {
-            resource_type: if entry.resource_type == resource_type {
-                AclResourceTypeMatch::Same
-            } else {
-                AclResourceTypeMatch::Different
-            },
-            exact_name: entry.resource_name == name,
-            wildcard_name: entry.resource_name == "*",
-            name_has_prefix: name.starts_with(entry.resource_name.as_str()),
+    acl_resource_match(pattern, AclResourceFacts {
+        resource_type: if entry.resource_type == resource_type {
+            AclResourceTypeMatch::Same
+        } else {
+            AclResourceTypeMatch::Different
         },
-    )
+        exact_name: entry.resource_name == name,
+        wildcard_name: entry.resource_name == "*",
+        name_has_prefix: name.starts_with(entry.resource_name.as_str()),
+    })
 }
 
 /// Returns true when an ACL with the `stored` operation and `permission`
@@ -117,19 +115,19 @@ fn operation_kind(operation: AclOperation) -> AclOperationKind {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-
-    use krabka_metadata::{
-        AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
-    };
-
-    use super::{matches_operation, matches_resource};
-    use crate::{
-        AuthorizationResult, Authorizer, SimpleAclAuthorizer,
-        simple::test_support::{
-            AclSetup, AliceAuthorizer, QuerySetup, acl_image, alice, check_topic_access, cidr_img,
-            image_with_acls, img, no_super, req, topic_acl,
+    use {
+        super::{matches_operation, matches_resource},
+        crate::{
+            AuthorizationResult, Authorizer, SimpleAclAuthorizer,
+            simple::test_support::{
+                AclSetup, AliceAuthorizer, QuerySetup, acl_image, alice, check_topic_access,
+                cidr_img, image_with_acls, img, no_super, req, topic_acl,
+            },
         },
+        krabka_metadata::{
+            AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
+        },
+        std::net::SocketAddr,
     };
 
     #[test]
@@ -428,13 +426,10 @@ mod tests {
         let principal = alice();
         let auth = SimpleAclAuthorizer::new(no_super());
         for (peer, acl_host, expected) in cases {
-            let img = image_with_acls(
-                image(),
-                [topic_acl(AclSetup {
-                    host: acl_host,
-                    ..Default::default()
-                })],
-            );
+            let img = image_with_acls(image(), [topic_acl(AclSetup {
+                host: acl_host,
+                ..Default::default()
+            })]);
             check_peer(&auth, &principal, &img, peer, *expected, Some(acl_host));
         }
     }
@@ -550,17 +545,14 @@ mod tests {
     /// same deny-wins-over-allow rule as a literal host ACL.
     #[test]
     fn cidr_deny_overrides_wildcard_allow_inside_range() {
-        let img = image_with_acls(
-            cidr_img(),
-            [
-                topic_acl(AclSetup::default()),
-                topic_acl(AclSetup {
-                    permission: PermissionType::Deny,
-                    host: "10.0.0.0/8",
-                    ..Default::default()
-                }),
-            ],
-        );
+        let img = image_with_acls(cidr_img(), [
+            topic_acl(AclSetup::default()),
+            topic_acl(AclSetup {
+                permission: PermissionType::Deny,
+                host: "10.0.0.0/8",
+                ..Default::default()
+            }),
+        ]);
         let a = alice();
         let auth = SimpleAclAuthorizer::new(no_super());
         let cases: &[(&str, AuthorizationResult)] = &[

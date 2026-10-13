@@ -2,16 +2,17 @@
 //! any principal in the set succeeds, while a principal outside it still
 //! gets `CLUSTER_AUTHORIZATION_FAILED` on every binding.
 
-use assert2::assert;
-use krabka_broker::Broker;
-use krabka_protocol::owned::create_acls_request::CreateAclsRequest;
-
-use crate::{
-    OPERATION_READ, OPERATION_WRITE,
-    acl_admin::{drive_create_acls_as_plain, topic_allow_creation},
-    framing::CLIENT_ID,
-    kafka_wire::PlainAuthenticationSetup,
-    sasl_cluster::sasl_plain_broker_config_multi_super,
+use {
+    crate::{
+        OPERATION_READ, OPERATION_WRITE,
+        acl_admin::{drive_create_acls_as_plain, topic_allow_creation},
+        framing::CLIENT_ID,
+        kafka_wire::PlainAuthenticationSetup,
+        sasl_cluster::sasl_plain_broker_config_multi_super,
+    },
+    assert2::assert,
+    krabka_broker::Broker,
+    krabka_protocol::owned::create_acls_request::CreateAclsRequest,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -53,15 +54,11 @@ async fn multi_super_user_both_can_provision() {
         creations: vec![topic_allow_creation("t-ops", "User:carol", OPERATION_WRITE)],
         ..Default::default()
     };
-    let ops_resp = drive_create_acls_as_plain(
-        addr,
-        ops_req,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            user: "ops-bot",
-            password: (b"ops-secret").to_vec(),
-        },
-    )
+    let ops_resp = drive_create_acls_as_plain(addr, ops_req, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        user: "ops-bot",
+        password: (b"ops-secret").to_vec(),
+    })
     .await
     .expect("CreateAcls as ops-bot must round-trip");
     assert!(ops_resp.results.len() == 1);
@@ -80,14 +77,10 @@ async fn multi_super_user_both_can_provision() {
         ],
         ..Default::default()
     };
-    let alice_resp = drive_create_acls_as_plain(
-        addr,
-        alice_req,
-        &PlainAuthenticationSetup {
-            client_id: CLIENT_ID,
-            ..Default::default()
-        },
-    )
+    let alice_resp = drive_create_acls_as_plain(addr, alice_req, &PlainAuthenticationSetup {
+        client_id: CLIENT_ID,
+        ..Default::default()
+    })
     .await
     .expect("CreateAcls request must round-trip even when denied");
     handle.shutdown().await;

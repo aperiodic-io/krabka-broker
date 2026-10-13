@@ -36,25 +36,25 @@
 //! again, so the sweep is safe to run on every broker and safe to run twice: a
 //! tombstone written for an offset that is already gone is a no-op.
 
-use std::sync::Arc;
-
-use krabka_metadata::NodeId;
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio_util::sync::CancellationToken;
-
-use super::{
-    GroupCoordinator,
-    partitioner::local_partition_for_group,
-    unified::{
-        GroupType,
-        actor::{GroupActorMessage, ReapOutcome},
+use {
+    super::{
+        GroupCoordinator,
+        partitioner::local_partition_for_group,
+        unified::{
+            GroupType,
+            actor::{GroupActorMessage, ReapOutcome},
+        },
     },
-};
-use crate::{
-    coordinator::unified::actor::GroupActorHandle,
-    metadata_source::MetadataSource,
-    task_util::{ask, run_every},
-    time_util::now_ms,
+    crate::{
+        coordinator::unified::actor::GroupActorHandle,
+        metadata_source::MetadataSource,
+        task_util::{ask, run_every},
+        time_util::now_ms,
+    },
+    krabka_metadata::NodeId,
+    krabka_units::{Time, convert::TimeExt as _},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
 };
 
 #[cfg(test)]

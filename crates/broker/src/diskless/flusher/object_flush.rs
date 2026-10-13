@@ -3,25 +3,25 @@
 //! the diskless index log, wait for the projection to catch up, and trim the
 //! local logs behind the durable frontier.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_log::Offset;
-use krabka_protocol::records::RecordBatch;
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-use object_store::{ObjectStore, ObjectStoreExt, PutPayload, path::Path};
-use tokio::sync::Mutex as AsyncMutex;
-use uuid::Uuid;
-
-use super::{FlushConfig, FlushPartition};
-use crate::{
-    diskless::{
-        index_log::DisklessIndexLog,
-        wal_index::{WalFlushRecord, WalIndexCache, WalIndexEntry},
-        wal_object::{WalObjectBuilder, parse_wal_object},
+use {
+    super::{FlushConfig, FlushPartition},
+    crate::{
+        diskless::{
+            index_log::DisklessIndexLog,
+            wal_index::{WalFlushRecord, WalIndexCache, WalIndexEntry},
+            wal_object::{WalObjectBuilder, parse_wal_object},
+        },
+        error::BrokerError,
+        metrics::BrokerMetrics,
+        time_util::now_ms,
     },
-    error::BrokerError,
-    metrics::BrokerMetrics,
-    time_util::now_ms,
+    krabka_log::Offset,
+    krabka_protocol::records::RecordBatch,
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    object_store::{ObjectStore, ObjectStoreExt, PutPayload, path::Path},
+    std::{sync::Arc, time::Duration},
+    tokio::sync::Mutex as AsyncMutex,
+    uuid::Uuid,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -242,20 +242,20 @@ async fn wait_for_committed_projection(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use assert2::assert;
-    use bytes::{Bytes, BytesMut};
-    use krabka_protocol::records::{Record, RecordBatch};
-    use object_store::memory::InMemory;
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::diskless::{
-        flusher::test_support::{
-            FlusherPartitionSetup, orders_partition, test_index_log, test_partition,
+    use {
+        super::*,
+        crate::diskless::{
+            flusher::test_support::{
+                FlusherPartitionSetup, orders_partition, test_index_log, test_partition,
+            },
+            wal_object::WalObjectBuilder,
         },
-        wal_object::WalObjectBuilder,
+        assert2::assert,
+        bytes::{Bytes, BytesMut},
+        krabka_protocol::records::{Record, RecordBatch},
+        object_store::memory::InMemory,
+        std::sync::atomic::{AtomicUsize, Ordering},
+        tempfile::tempdir,
     };
 
     #[test]
@@ -481,13 +481,10 @@ mod tests {
     async fn combined_object_stops_after_size_budget() {
         let dir = tempdir().unwrap();
         let first = orders_partition(dir.path());
-        let second = test_partition(
-            dir.path(),
-            FlusherPartitionSetup {
-                partition: krabka_ids::PartitionIndex(1),
-                ..Default::default()
-            },
-        );
+        let second = test_partition(dir.path(), FlusherPartitionSetup {
+            partition: krabka_ids::PartitionIndex(1),
+            ..Default::default()
+        });
         let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         let index = test_index_log().await;
         let cache = index.cache();

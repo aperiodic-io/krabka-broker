@@ -4,22 +4,22 @@
 //! every record synchronously into the in-memory `GroupCoordinator`. The first
 //! `FindCoordinator(GROUP)` creates the topic, not the startup.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_metadata::PartitionRecord;
-use krabka_units::convert::ByteSizeExt as _;
-
-use crate::{
-    broker::spawn_partition,
-    config::{BrokerConfig, DEFAULT_AUDIT_TOPIC},
-    coordinator::GroupCoordinator,
-    error::BrokerError,
-    log_dir,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
+use {
+    crate::{
+        broker::spawn_partition,
+        config::{BrokerConfig, DEFAULT_AUDIT_TOPIC},
+        coordinator::GroupCoordinator,
+        error::BrokerError,
+        log_dir,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+    },
+    krabka_ids::PartitionIndex,
+    krabka_metadata::PartitionRecord,
+    krabka_units::convert::ByteSizeExt as _,
+    std::{collections::BTreeMap, sync::Arc},
 };
 
 mod apply;

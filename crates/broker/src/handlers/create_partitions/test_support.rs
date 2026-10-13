@@ -3,18 +3,19 @@
 //! metadata records that seed a topic and a controller-mutation quota into a
 //! running broker.
 
-use krabka_metadata::{MetadataRecord, TopicRecord};
-use krabka_protocol::owned::create_partitions_request::{
-    CreatePartitionsAssignment, CreatePartitionsRequest, CreatePartitionsTopic,
-};
-use krabka_raft::NodeId;
-
-use crate::{
-    broker::BrokerHandle,
-    handlers::test_support::{
-        TopicPartitionCount, TopicReplicationFactor,
-        seed_controller_quota as seed_controller_quota_fixture, single_replica_partition,
+use {
+    crate::{
+        broker::BrokerHandle,
+        handlers::test_support::{
+            TopicPartitionCount, TopicReplicationFactor,
+            seed_controller_quota as seed_controller_quota_fixture, single_replica_partition,
+        },
     },
+    krabka_metadata::{MetadataRecord, TopicRecord},
+    krabka_protocol::owned::create_partitions_request::{
+        CreatePartitionsAssignment, CreatePartitionsRequest, CreatePartitionsTopic,
+    },
+    krabka_raft::NodeId,
 };
 
 pub const VERSION: i16 = 3;

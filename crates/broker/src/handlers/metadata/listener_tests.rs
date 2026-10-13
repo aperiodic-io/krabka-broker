@@ -8,25 +8,26 @@
 //! `LISTENER_NOT_FOUND`. The tests compare the responses as a client decodes
 //! them.
 
-use assert2::assert;
-use krabka_metadata::{
-    BrokerEndpoint, BrokerRegistrationRecord, LeaderEpoch, MetadataRecord, NodeId, PartitionRecord,
-    TopicRecord,
-};
-use krabka_protocol::owned::{
-    metadata_request::{MetadataRequest, MetadataRequestTopic},
-    metadata_response::{MetadataResponse, MetadataResponseBroker},
-};
-
-use crate::{
-    broker::BrokerHandle,
-    codes,
-    handlers::{
-        RequestContext, describe_topic_partitions::handle as describe_topic_partitions_handle,
+use {
+    crate::{
+        broker::BrokerHandle,
+        codes,
+        handlers::{
+            RequestContext, describe_topic_partitions::handle as describe_topic_partitions_handle,
+        },
+        test_support::{
+            broker_registration, dispatch_wire, fence_remote_broker, peer, principal,
+            start_broker_no_audit, topic_partitions_request,
+        },
     },
-    test_support::{
-        broker_registration, dispatch_wire, fence_remote_broker, peer, principal,
-        start_broker_no_audit, topic_partitions_request,
+    assert2::assert,
+    krabka_metadata::{
+        BrokerEndpoint, BrokerRegistrationRecord, LeaderEpoch, MetadataRecord, NodeId,
+        PartitionRecord, TopicRecord,
+    },
+    krabka_protocol::owned::{
+        metadata_request::{MetadataRequest, MetadataRequestTopic},
+        metadata_response::{MetadataResponse, MetadataResponseBroker},
     },
 };
 
@@ -91,14 +92,10 @@ async fn cluster() -> (BrokerHandle, tempfile::TempDir) {
     broker
         .controller
         .submit_change(vec![
-            registration(
-                2,
-                None,
-                &[
-                    ("PLAINTEXT", "b2-plain", 9092),
-                    ("EXTERNAL", "b2-ext", 19092),
-                ],
-            ),
+            registration(2, None, &[
+                ("PLAINTEXT", "b2-plain", 9092),
+                ("EXTERNAL", "b2-ext", 19092),
+            ]),
             registration(3, None, &[("PLAINTEXT", "b3-plain", 9092)]),
             registration(4, None, &[("EXTERNAL", "b4-ext", 19092)]),
             registration(5, Some("rack-5"), &[("PLAINTEXT", "b5-plain", 9092)]),
@@ -271,18 +268,13 @@ async fn a_leader_without_an_endpoint_on_the_listener_answers_no_leader_and_an_e
                 (codes::REPLICA_NOT_AVAILABLE, 2, vec![2], vec![2], vec![]),
             ],
         ),
-        (
-            "the other listener",
-            12,
-            "EXTERNAL",
-            vec![
-                // The local broker 1 has no `EXTERNAL` endpoint, so it is offline.
-                (none, 2, vec![2, 1], vec![2, 1], vec![1]),
-                (no_leader, -1, vec![9, 2], vec![9, 2], vec![9]),
-                (none, 4, vec![4, 2], vec![4, 2], vec![]),
-                (none, 2, vec![2, 3], vec![2, 3], vec![3]),
-            ],
-        ),
+        ("the other listener", 12, "EXTERNAL", vec![
+            // The local broker 1 has no `EXTERNAL` endpoint, so it is offline.
+            (none, 2, vec![2, 1], vec![2, 1], vec![1]),
+            (no_leader, -1, vec![9, 2], vec![9, 2], vec![9]),
+            (none, 4, vec![4, 2], vec![4, 2], vec![]),
+            (none, 2, vec![2, 3], vec![2, 3], vec![3]),
+        ]),
     ];
 
     for (label, version, listener, expected) in cases {

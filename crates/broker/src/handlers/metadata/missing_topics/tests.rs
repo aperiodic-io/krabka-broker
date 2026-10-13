@@ -1,18 +1,18 @@
 //! Kafka's `DefaultAutoTopicCreationManager` for a `Metadata` request that
 //! asks to auto-create a missing coordinator topic.
 
-use std::{collections::BTreeMap, time::Duration};
-
-use assert2::{assert, check};
-use krabka_protocol::{
-    owned::metadata_response::MetadataResponseTopic, primitives::uuid::Uuid as WireUuid,
-};
-
-use super::missing_topic_rows;
-use crate::{
-    codes,
-    coordinator::bootstrap::{OFFSETS_TOPIC, offsets_topic_configs},
-    test_support::{peer, principal, start_broker_no_audit_with},
+use {
+    super::missing_topic_rows,
+    crate::{
+        codes,
+        coordinator::bootstrap::{OFFSETS_TOPIC, offsets_topic_configs},
+        test_support::{peer, principal, start_broker_no_audit_with},
+    },
+    assert2::{assert, check},
+    krabka_protocol::{
+        owned::metadata_response::MetadataResponseTopic, primitives::uuid::Uuid as WireUuid,
+    },
+    std::{collections::BTreeMap, time::Duration},
 };
 
 fn row(error_code: i16, name: &str, is_internal: bool) -> MetadataResponseTopic {

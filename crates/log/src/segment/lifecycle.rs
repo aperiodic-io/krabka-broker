@@ -5,13 +5,14 @@
 //! flag, the byte length, the last offset, the maximum timestamp, and the
 //! sparse indexes -- so they belong together rather than beside a read path.
 
-use krabka_ids::Offset;
-use krabka_protocol::records::RecordBatch;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
-use tracing::instrument;
-
-use super::{Segment, io::seek_to_log_size};
-use crate::{error::LogError, io::LogIo};
+use {
+    super::{Segment, io::seek_to_log_size},
+    crate::{error::LogError, io::LogIo},
+    krabka_ids::Offset,
+    krabka_protocol::records::RecordBatch,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
+    tracing::instrument,
+};
 
 /// Log a block reservation, a release, or a switch to `O_DIRECT` that the
 /// filesystem refused.
@@ -42,9 +43,7 @@ std::thread_local! {
 
 impl Segment {
     #[cfg(all(test, not(target_os = "wasi")))]
-    pub(crate) fn test_fail_flush_handles(fail: bool) {
-        FAIL_FLUSH_HANDLES.set(fail);
-    }
+    pub(crate) fn test_fail_flush_handles(fail: bool) { FAIL_FLUSH_HANDLES.set(fail); }
 
     #[cfg(not(target_os = "wasi"))]
     pub(crate) fn flush_handles(&self) -> std::io::Result<[std::sync::Arc<std::fs::File>; 3]> {
@@ -320,15 +319,16 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{ByteSize, ByteSizeExt, kibibytes};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::segment::test_support::{
-        DENSE_INDEX, NO_LIMIT, RecordCount, RecordTimestamp, SECOND_THREE_RECORD_BATCH,
-        SampleBatchSetup, SeededSegmentSetup, THREE_RECORD_BATCH, sample_batch, seeded_fixture,
-        segment_at, test_segment, two_record_fixture,
+    use {
+        super::*,
+        crate::segment::test_support::{
+            DENSE_INDEX, NO_LIMIT, RecordCount, RecordTimestamp, SECOND_THREE_RECORD_BATCH,
+            SampleBatchSetup, SeededSegmentSetup, THREE_RECORD_BATCH, sample_batch, seeded_fixture,
+            segment_at, test_segment, two_record_fixture,
+        },
+        assert2::check,
+        krabka_units::prelude::{ByteSize, ByteSizeExt, kibibytes},
+        tempfile::tempdir,
     };
 
     /// Truncating to a relative offset keeps every batch that ends before it,

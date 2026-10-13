@@ -5,27 +5,29 @@
 //! username, a deletion and an upsertion for the same username, and a
 //! deletion whose target credential does not exist.
 
-use assert2::assert;
-use krabka_broker::Broker;
-use krabka_protocol::owned::alter_user_scram_credentials_request::{
-    AlterUserScramCredentialsRequest, ScramCredentialDeletion,
-};
-use krabka_security::SaslMechanism;
-
-use crate::{
-    alter_scram::{
-        KAFKA_DUPLICATE_RESOURCE, KAFKA_MAX_SCRAM_ITERATIONS, KAFKA_UNACCEPTABLE_CREDENTIAL,
-        KAFKA_UNSUPPORTED_SASL_MECHANISM, WIRE_MECH_SCRAM_SHA_256, WIRE_MECH_SCRAM_SHA_512,
-        drive_alter_user_scram_credentials_as_plain, pbkdf2_salt_and_salted, provision_as_admin,
-    },
-    harness::{alice_password, scram_admin_fixture, start_scram_admin},
-    support::{
-        sasl::{
-            ScramAlgorithm, ScramIterations, ScramMechanismCode, ScramUpsertionSetup,
-            scram_upsertion,
+use {
+    crate::{
+        alter_scram::{
+            KAFKA_DUPLICATE_RESOURCE, KAFKA_MAX_SCRAM_ITERATIONS, KAFKA_UNACCEPTABLE_CREDENTIAL,
+            KAFKA_UNSUPPORTED_SASL_MECHANISM, WIRE_MECH_SCRAM_SHA_256, WIRE_MECH_SCRAM_SHA_512,
+            drive_alter_user_scram_credentials_as_plain, pbkdf2_salt_and_salted,
+            provision_as_admin,
         },
-        sasl_plaintext_config,
+        harness::{alice_password, scram_admin_fixture, start_scram_admin},
+        support::{
+            sasl::{
+                ScramAlgorithm, ScramIterations, ScramMechanismCode, ScramUpsertionSetup,
+                scram_upsertion,
+            },
+            sasl_plaintext_config,
+        },
     },
+    assert2::assert,
+    krabka_broker::Broker,
+    krabka_protocol::owned::alter_user_scram_credentials_request::{
+        AlterUserScramCredentialsRequest, ScramCredentialDeletion,
+    },
+    krabka_security::SaslMechanism,
 };
 
 /// `iterations < 4096` gives `UNACCEPTABLE_CREDENTIAL`.

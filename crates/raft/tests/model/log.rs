@@ -19,9 +19,11 @@ impl ModelLog {
     pub(super) fn append_in_epoch(&mut self, epoch: Epoch, count: usize) {
         krabka_kraft_core::simulation_support::append_epochs(&mut self.epochs, epoch, count);
     }
+
     pub(super) fn truncate_to(&mut self, offset: i64) {
         krabka_kraft_core::simulation_support::truncate_epochs(&mut self.epochs, offset);
     }
+
     /// Whether every entry of this log is the leader's entry at the same
     /// offset, so that the leader's log extends this one.
     pub(super) fn is_prefix_of(&self, leader: &ModelLog) -> bool {
@@ -44,6 +46,7 @@ impl ModelLog {
             .extend_from_slice(&leader.epochs[self.epochs.len()..]);
         true
     }
+
     /// The leader epoch stamped on `offset`, or `None` when the log is shorter
     /// than that.
     pub(super) fn epoch_at(&self, offset: i64) -> Option<Epoch> {
@@ -51,6 +54,7 @@ impl ModelLog {
             .ok()
             .and_then(|offset| self.epochs.get(offset).copied())
     }
+
     pub(super) fn log_end(&self) -> LogEnd {
         LogEnd {
             last_epoch: self.last_epoch(),

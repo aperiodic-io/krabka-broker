@@ -18,11 +18,11 @@
 //! broker would keep them until the next pass — or, once the sampler stops
 //! naming the group at all, forever.
 
-use std::{collections::HashMap, sync::Arc};
-
-use dashmap::DashSet;
-
-use super::{BrokerMetrics, ConsumerGroupLabel, PartitionLabel, ReplicaLagLabel};
+use {
+    super::{BrokerMetrics, ConsumerGroupLabel, PartitionLabel, ReplicaLagLabel},
+    dashmap::DashSet,
+    std::{collections::HashMap, sync::Arc},
+};
 
 /// The label sets the two lag families currently carry.
 ///
@@ -175,9 +175,10 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     fn replica(topic: &str, partition: i32, node: u64) -> ReplicaLagLabel {
         ReplicaLagLabel {

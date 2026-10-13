@@ -8,28 +8,28 @@
 //! delegation-token-authenticated caller — the credential-disclosure gate
 //! this suite exists to pin down.
 
-use std::net::SocketAddr;
-
-use assert2::assert;
-use krabka_metadata::{
-    AclEntry, AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
-};
-use krabka_protocol::owned::describe_delegation_token_request::{
-    DescribeDelegationTokenOwner, DescribeDelegationTokenRequest,
-};
-use krabka_raft::ControllerHandle;
-use krabka_security::SecretBytes;
-use tempfile::TempDir;
-
-use super::handle;
-use crate::{
-    authorizer::{AllowAllAuthorizer, Authorizer, SimpleAclAuthorizer},
-    handlers::delegation_token_test_support::{
-        TokenSetup, anonymous, authed, kp, seed_token, test_controller, token_authed,
+use {
+    super::handle,
+    crate::{
+        authorizer::{AllowAllAuthorizer, Authorizer, SimpleAclAuthorizer},
+        handlers::delegation_token_test_support::{
+            TokenSetup, anonymous, authed, kp, seed_token, test_controller, token_authed,
+        },
+        metadata_source::MetadataSource,
+        network::auth::ConnectionAuth,
+        test_support::{AllowAclSetup, allow_acl},
     },
-    metadata_source::MetadataSource,
-    network::auth::ConnectionAuth,
-    test_support::{AllowAclSetup, allow_acl},
+    assert2::assert,
+    krabka_metadata::{
+        AclEntry, AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
+    },
+    krabka_protocol::owned::describe_delegation_token_request::{
+        DescribeDelegationTokenOwner, DescribeDelegationTokenRequest,
+    },
+    krabka_raft::ControllerHandle,
+    krabka_security::SecretBytes,
+    std::net::SocketAddr,
+    tempfile::TempDir,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -76,32 +76,24 @@ fn check_refused_token_description(
 
 async fn seed_alice_tokens(controller: &ControllerHandle) {
     seed_token(controller, TokenSetup::default()).await;
-    seed_token(
-        controller,
-        TokenSetup {
-            token_id: "t-b",
-            ..Default::default()
-        },
-    )
+    seed_token(controller, TokenSetup {
+        token_id: "t-b",
+        ..Default::default()
+    })
     .await;
 }
 
 async fn seed_admin_minted_token(controller: &ControllerHandle) {
-    seed_token(
-        controller,
-        TokenSetup {
-            token_id: "t-minted",
-            requester: Some(kp("admin")),
-            renewers: vec![kp("bob")],
-            ..Default::default()
-        },
-    )
+    seed_token(controller, TokenSetup {
+        token_id: "t-minted",
+        requester: Some(kp("admin")),
+        renewers: vec![kp("bob")],
+        ..Default::default()
+    })
     .await;
 }
 
-fn peer() -> SocketAddr {
-    "127.0.0.1:0".parse().unwrap()
-}
+fn peer() -> SocketAddr { "127.0.0.1:0".parse().unwrap() }
 
 /// The tests below want the "real ACL" semantics: the ACL extension should
 /// add a token if and only if the caller holds a matching `Describe` ACL on
@@ -160,14 +152,10 @@ async fn returns_auth_disabled_when_no_secret_key() {
     let dir = TempDir::new().unwrap();
     let controller = test_controller(dir.path().into()).await;
     let req = no_owner_filter();
-    let resp = describe(
-        &*controller,
-        &simple_authz(),
-        DescribeTokenSetup {
-            request: Some(&req),
-            ..Default::default()
-        },
-    );
+    let resp = describe(&*controller, &simple_authz(), DescribeTokenSetup {
+        request: Some(&req),
+        ..Default::default()
+    });
     assert!(resp.error_code == crate::codes::DELEGATION_TOKEN_AUTH_DISABLED);
     controller.cancel().await;
 }
@@ -177,14 +165,11 @@ async fn anonymous_caller_is_rejected_without_exposing_token_hmacs() {
     token_fixture!(dir, controller, secret);
     seed_token(&controller, TokenSetup::default()).await;
 
-    let resp = describe_unrestricted(
-        &*controller,
-        DescribeTokenSetup {
-            authentication: Some(&anonymous()),
-            secret: Some(&secret),
-            ..Default::default()
-        },
-    );
+    let resp = describe_unrestricted(&*controller, DescribeTokenSetup {
+        authentication: Some(&anonymous()),
+        secret: Some(&secret),
+        ..Default::default()
+    });
 
     check_refused_token_description(&resp);
     controller.cancel().await;
@@ -202,14 +187,11 @@ async fn token_authed_caller_is_refused_entirely() {
     // to read either one, including its own token's sibling.
     seed_alice_tokens(&controller).await;
 
-    let resp = describe_unrestricted(
-        &*controller,
-        DescribeTokenSetup {
-            authentication: Some(&token_authed("alice")),
-            secret: Some(&secret),
-            ..Default::default()
-        },
-    );
+    let resp = describe_unrestricted(&*controller, DescribeTokenSetup {
+        authentication: Some(&token_authed("alice")),
+        secret: Some(&secret),
+        ..Default::default()
+    });
 
     check_refused_token_description(&resp);
     controller.cancel().await;
@@ -223,13 +205,10 @@ async fn token_authed_caller_gets_request_not_allowed_before_auth_disabled() {
     let dir = TempDir::new().unwrap();
     let controller = test_controller(dir.path().into()).await;
 
-    let resp = describe_unrestricted(
-        &*controller,
-        DescribeTokenSetup {
-            authentication: Some(&token_authed("alice")),
-            ..Default::default()
-        },
-    );
+    let resp = describe_unrestricted(&*controller, DescribeTokenSetup {
+        authentication: Some(&token_authed("alice")),
+        ..Default::default()
+    });
 
     assert!(resp.error_code == crate::codes::DELEGATION_TOKEN_REQUEST_NOT_ALLOWED);
     controller.cancel().await;
@@ -295,54 +274,38 @@ async fn filter_token_matches_owner_renewer_or_token_id_acl() {
     } in cases
     {
         token_fixture!(dir, controller, secret);
-        seed_token(
-            &controller,
-            TokenSetup {
-                token_id: "t-owner",
-                ..Default::default()
-            },
-        )
+        seed_token(&controller, TokenSetup {
+            token_id: "t-owner",
+            ..Default::default()
+        })
         .await;
-        seed_token(
-            &controller,
-            TokenSetup {
-                token_id: "t-renewer",
-                owner: kp("bob"),
-                renewers: vec![kp("carol")],
-                ..Default::default()
-            },
-        )
+        seed_token(&controller, TokenSetup {
+            token_id: "t-renewer",
+            owner: kp("bob"),
+            renewers: vec![kp("carol")],
+            ..Default::default()
+        })
         .await;
-        seed_token(
-            &controller,
-            TokenSetup {
-                token_id: "t-other",
-                owner: kp("bob"),
-                ..Default::default()
-            },
-        )
+        seed_token(&controller, TokenSetup {
+            token_id: "t-other",
+            owner: kp("bob"),
+            ..Default::default()
+        })
         .await;
-        seed_token(
-            &controller,
-            TokenSetup {
-                token_id: "t-unrelated",
-                owner: kp("dave"),
-                ..Default::default()
-            },
-        )
+        seed_token(&controller, TokenSetup {
+            token_id: "t-unrelated",
+            owner: kp("dave"),
+            ..Default::default()
+        })
         .await;
         if let Some(entry) = acl {
             seed_acl(&controller, entry).await;
         }
 
-        let resp = describe(
-            &*controller,
-            &simple_authz(),
-            DescribeTokenSetup {
-                secret: Some(&secret),
-                ..Default::default()
-            },
-        );
+        let resp = describe(&*controller, &simple_authz(), DescribeTokenSetup {
+            secret: Some(&secret),
+            ..Default::default()
+        });
         assert!(resp.error_code == 0, "{name}");
         let expected: std::collections::HashSet<&str> = expected.iter().copied().collect();
         assert!(token_ids(&resp) == expected, "{name}");
@@ -356,25 +319,19 @@ async fn filter_token_matches_owner_renewer_or_token_id_acl() {
 async fn renewer_sees_the_token_and_owner_filter_matches_renewer_too() {
     token_fixture!(dir, controller, secret);
     // bob's token: carol is a listed renewer.
-    seed_token(
-        &controller,
-        TokenSetup {
-            token_id: "t-b",
-            owner: kp("bob"),
-            renewers: vec![kp("carol")],
-            ..Default::default()
-        },
-    )
+    seed_token(&controller, TokenSetup {
+        token_id: "t-b",
+        owner: kp("bob"),
+        renewers: vec![kp("carol")],
+        ..Default::default()
+    })
     .await;
     // dave's token: carol has no relationship.
-    seed_token(
-        &controller,
-        TokenSetup {
-            token_id: "t-d",
-            owner: kp("dave"),
-            ..Default::default()
-        },
-    )
+    seed_token(&controller, TokenSetup {
+        token_id: "t-d",
+        owner: kp("dave"),
+        ..Default::default()
+    })
     .await;
 
     // Filter asks for tokens whose owner-or-renewer is bob or dave. carol
@@ -397,15 +354,11 @@ async fn renewer_sees_the_token_and_owner_filter_matches_renewer_too() {
         ]),
         ..Default::default()
     };
-    let resp = describe(
-        &*controller,
-        &simple_authz(),
-        DescribeTokenSetup {
-            request: Some(&req),
-            authentication: Some(&authed("carol")),
-            secret: Some(&secret),
-        },
-    );
+    let resp = describe(&*controller, &simple_authz(), DescribeTokenSetup {
+        request: Some(&req),
+        authentication: Some(&authed("carol")),
+        secret: Some(&secret),
+    });
     check_visible_token_ids(&resp, &["t-b"]);
     controller.cancel().await;
 }
@@ -422,15 +375,11 @@ async fn describe_acl_on_token_id_grants_exactly_that_token() {
     seed_alice_tokens(&controller).await;
     seed_acl(&controller, describe_token_acl("t-a", "bob")).await;
 
-    let resp = describe_checked(
-        &*controller,
-        &simple_authz(),
-        DescribeTokenSetup {
-            authentication: Some(&authed("bob")),
-            secret: Some(&secret),
-            ..Default::default()
-        },
-    );
+    let resp = describe_checked(&*controller, &simple_authz(), DescribeTokenSetup {
+        authentication: Some(&authed("bob")),
+        secret: Some(&secret),
+        ..Default::default()
+    });
     assert!(
         token_ids(&resp) == std::collections::HashSet::from(["t-a"]),
         "an ACL on t-a must not also surface t-b, same owner or not; got {:?}",
@@ -445,8 +394,10 @@ async fn describe_acl_on_token_id_grants_exactly_that_token() {
 /// for an unrelated principal suppresses the no-ACL default on that owner.
 #[tokio::test]
 async fn describe_tokens_acl_on_the_owner_grants_all_of_their_tokens() {
-    use AclOperation::{All, CreateTokens, DescribeTokens};
-    use PermissionType::{Allow, Deny};
+    use {
+        AclOperation::{All, CreateTokens, DescribeTokens},
+        PermissionType::{Allow, Deny},
+    };
     type Case = (
         &'static [(AclOperation, PermissionType)],
         &'static str,
@@ -467,60 +418,44 @@ async fn describe_tokens_acl_on_the_owner_grants_all_of_their_tokens() {
     ];
     for &(operations, principal, default_allow, expected) in cases {
         token_fixture!(dir, controller, secret);
-        seed_token(
-            &controller,
-            TokenSetup {
-                token_id: "t-a1",
-                ..Default::default()
-            },
-        )
+        seed_token(&controller, TokenSetup {
+            token_id: "t-a1",
+            ..Default::default()
+        })
         .await;
-        seed_token(
-            &controller,
-            TokenSetup {
-                token_id: "t-a2",
-                ..Default::default()
-            },
-        )
+        seed_token(&controller, TokenSetup {
+            token_id: "t-a2",
+            ..Default::default()
+        })
         .await;
-        seed_token(
-            &controller,
-            TokenSetup {
-                token_id: "t-c",
-                owner: kp("carol"),
-                ..Default::default()
-            },
-        )
+        seed_token(&controller, TokenSetup {
+            token_id: "t-c",
+            owner: kp("carol"),
+            ..Default::default()
+        })
         .await;
         // Isolate the User-owner grant from the independent exact-token path.
         let mut token_deny = describe_token_acl("*", "*");
         token_deny.permission_type = Deny;
         seed_acl(&controller, token_deny).await;
         for &(operation, permission_type) in operations {
-            seed_acl(
-                &controller,
-                AclEntry {
-                    resource_type: ResourceType::User,
-                    resource_name: "User:alice".into(),
-                    pattern_type: PatternType::Literal,
-                    principal: format!("User:{principal}"),
-                    host: "*".into(),
-                    operation,
-                    permission_type,
-                },
-            )
+            seed_acl(&controller, AclEntry {
+                resource_type: ResourceType::User,
+                resource_name: "User:alice".into(),
+                pattern_type: PatternType::Literal,
+                principal: format!("User:{principal}"),
+                host: "*".into(),
+                operation,
+                permission_type,
+            })
             .await;
         }
         let authorizer = simple_authz().with_allow_everyone_if_no_acl_found(default_allow);
-        let resp = describe_checked(
-            &*controller,
-            &authorizer,
-            DescribeTokenSetup {
-                authentication: Some(&authed("bob")),
-                secret: Some(&secret),
-                ..Default::default()
-            },
-        );
+        let resp = describe_checked(&*controller, &authorizer, DescribeTokenSetup {
+            authentication: Some(&authed("bob")),
+            secret: Some(&secret),
+            ..Default::default()
+        });
         assert!(
             token_ids(&resp)
                 == expected
@@ -575,14 +510,11 @@ async fn requester_of_a_token_minted_for_another_owner_finds_and_sees_it() {
 
     token_fixture!(dir, controller, secret);
     seed_admin_minted_token(&controller).await;
-    seed_token(
-        &controller,
-        TokenSetup {
-            token_id: "t-own",
-            owner: kp("carol"),
-            ..Default::default()
-        },
-    )
+    seed_token(&controller, TokenSetup {
+        token_id: "t-own",
+        owner: kp("carol"),
+        ..Default::default()
+    })
     .await;
 
     for (caller, owners, expected) in cases {
@@ -599,15 +531,11 @@ async fn requester_of_a_token_minted_for_another_owner_finds_and_sees_it() {
             }),
             ..Default::default()
         };
-        let resp = describe(
-            &*controller,
-            &simple_authz(),
-            DescribeTokenSetup {
-                request: Some(&req),
-                authentication: Some(&authed(caller)),
-                secret: Some(&secret),
-            },
-        );
+        let resp = describe(&*controller, &simple_authz(), DescribeTokenSetup {
+            request: Some(&req),
+            authentication: Some(&authed(caller)),
+            secret: Some(&secret),
+        });
         let visible: std::collections::HashSet<&str> = token_ids(&resp);
         let expected: std::collections::HashSet<&str> = expected.iter().copied().collect();
         assert!(
@@ -630,14 +558,10 @@ async fn describe_response_reports_the_requester_that_created_the_token() {
     token_fixture!(dir, controller, secret);
     seed_admin_minted_token(&controller).await;
 
-    let resp = describe(
-        &*controller,
-        &simple_authz(),
-        DescribeTokenSetup {
-            secret: Some(&secret),
-            ..Default::default()
-        },
-    );
+    let resp = describe(&*controller, &simple_authz(), DescribeTokenSetup {
+        secret: Some(&secret),
+        ..Default::default()
+    });
     assert!(
         resp.tokens
             == vec![DescribedDelegationToken {

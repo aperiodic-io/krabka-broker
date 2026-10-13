@@ -3,17 +3,17 @@
 //! This module binds OAuth credential expiry to the KIP-368 session lifetime
 //! and implements the two-message failure handshake RFC 7628 requires.
 
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-
-use krabka_protocol::owned::{
-    sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
-};
-use krabka_units::{Time, convert::TimeExt as _};
-
-use super::{
-    response::{fail_authenticate, fail_authenticate_with, sasl_ok},
-    state::{ConnectionAuth, SaslExchange, principal_change_message},
+use {
+    super::{
+        response::{fail_authenticate, fail_authenticate_with, sasl_ok},
+        state::{ConnectionAuth, SaslExchange, principal_change_message},
+    },
+    krabka_protocol::owned::{
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+    },
+    krabka_units::{Time, convert::TimeExt as _},
+    std::sync::atomic::{AtomicI64, AtomicU64, Ordering},
 };
 
 /// SASL/OAUTHBEARER `SaslAuthenticate` handler (KIP-255 / RFC 7628).

@@ -1,6 +1,4 @@
-use std::vec;
-
-use super::*;
+use {super::*, std::vec};
 
 fn rational_trace(
     initial: (u64, u64, u64),

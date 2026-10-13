@@ -2,13 +2,13 @@
 //! serves the KIP-460 `ElectLeaders` request and the preferred-leader
 //! rebalance. It is pure: the caller submits the returned record.
 
-use std::collections::HashSet;
-
-use krabka_metadata::PartitionRecord;
-use krabka_raft::NodeId;
-
-use crate::{
-    handlers::offline_replicas::replica_dir_online, metadata_epoch::next_partition_change,
+use {
+    crate::{
+        handlers::offline_replicas::replica_dir_online, metadata_epoch::next_partition_change,
+    },
+    krabka_metadata::PartitionRecord,
+    krabka_raft::NodeId,
+    std::collections::HashSet,
 };
 
 #[cfg(test)]

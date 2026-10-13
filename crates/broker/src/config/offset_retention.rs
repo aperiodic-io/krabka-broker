@@ -13,10 +13,11 @@
 //! Everything that runs on the value reads it through these two accessors, so
 //! the fallback lives in one place.
 
-use krabka_units::Time;
-
-use crate::config::{
-    BrokerConfig, DEFAULT_OFFSETS_RETENTION, DEFAULT_OFFSETS_RETENTION_CHECK_INTERVAL,
+use {
+    crate::config::{
+        BrokerConfig, DEFAULT_OFFSETS_RETENTION, DEFAULT_OFFSETS_RETENTION_CHECK_INTERVAL,
+    },
+    krabka_units::Time,
 };
 
 impl BrokerConfig {
@@ -37,10 +38,11 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::{convert::TimeExt as _, minutes};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_units::{convert::TimeExt as _, minutes},
+    };
 
     #[test]
     fn an_untouched_broker_runs_kafkas_defaults() {

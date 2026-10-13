@@ -6,9 +6,10 @@
 //! [`ScenarioTrace`] into a Zola `{% mermaid() %}` paired shortcode. The reader
 //! thus sees exactly what the real KIP-595/996 algorithm did.
 
-use std::fmt::Write as _;
-
-use krabka_raft::scenarios::{ScenarioTrace, TraceAction};
+use {
+    krabka_raft::scenarios::{ScenarioTrace, TraceAction},
+    std::fmt::Write as _,
+};
 
 /// The intro paragraph that opens the page.
 const INTRO: &str = "\
@@ -122,9 +123,7 @@ reach the two-vote majority, so it cannot elect itself.
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn renders_sequence_diagrams_and_split_brain() {

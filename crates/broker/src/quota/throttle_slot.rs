@@ -1,10 +1,10 @@
 //! The KIP-219 throttle window that the request in flight earned.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
-use krabka_units::{Time, convert::TimeExt};
-
-use crate::metrics::QuotaCharge;
+use {
+    crate::metrics::QuotaCharge,
+    krabka_units::{Time, convert::TimeExt},
+    std::sync::atomic::{AtomicU64, Ordering},
+};
 
 /// The KIP-219 throttle window a handler computed for the request in flight.
 ///
@@ -58,9 +58,7 @@ impl ThrottleSlot {
     }
 
     /// The charge a handler deferred, if any.
-    pub(crate) fn deferred(&self) -> Option<QuotaCharge> {
-        self.deferred.get().cloned()
-    }
+    pub(crate) fn deferred(&self) -> Option<QuotaCharge> { self.deferred.get().cloned() }
 
     /// Takes the recorded window and resets the slot to zero, so that a
     /// context reused across requests cannot mute twice for one throttle.
@@ -72,10 +70,7 @@ impl ThrottleSlot {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::millis;
-
-    use super::*;
+    use {super::*, assert2::assert, krabka_units::millis};
 
     #[test]
     fn empty_slot_takes_a_zero_window() {

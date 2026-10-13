@@ -4,22 +4,25 @@
 //! carries only the topic id. Kafka's `KafkaApis.handleFetchRequest` answers
 //! `UNKNOWN_TOPIC_ID` on every partition row of a topic whose id does not
 //! resolve to a name. The zero id is such an id.
-use assert2::assert;
-
-use crate::support::{
-    fetch::{FetchLimits, RequestWaitMillis, fetch_request_for},
-    topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::support::{
+        fetch::{FetchLimits, RequestWaitMillis, fetch_request_for},
+        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    },
+    assert2::assert,
 };
 mod support;
 
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::{
-        fetch_request::{FetchPartition, FetchTopic},
-        fetch_response::{FetchableTopicResponse, PartitionData},
+use {
+    bytes::Bytes,
+    krabka_protocol::{
+        owned::{
+            fetch_request::{FetchPartition, FetchTopic},
+            fetch_response::{FetchableTopicResponse, PartitionData},
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordsPayload,
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordsPayload,
 };
 
 /// Kafka's `UNKNOWN_TOPIC_ID` error code.
@@ -80,15 +83,12 @@ async fn fetch_unresolved_topic_id_returns_unknown_topic_id() {
             ..Default::default()
         };
         actual.push((label, resp.responses));
-        expected.push((
-            label,
-            vec![FetchableTopicResponse {
-                topic: String::new(),
-                topic_id,
-                partitions: vec![refused(0), refused(1)],
-                ..Default::default()
-            }],
-        ));
+        expected.push((label, vec![FetchableTopicResponse {
+            topic: String::new(),
+            topic_id,
+            partitions: vec![refused(0), refused(1)],
+            ..Default::default()
+        }]));
     }
     assert!(actual == expected);
 }

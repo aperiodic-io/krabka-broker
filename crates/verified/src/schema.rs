@@ -129,14 +129,14 @@ pub fn schema_batch_admission(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn fail_open_admits_only_transient_failures() {
-        use SchemaFailureDecision::{AllowUnvalidated, Reject};
-        use SchemaFailureKind::{Malformed, Permanent, Transient, Unknown};
+        use {
+            SchemaFailureDecision::{AllowUnvalidated, Reject},
+            SchemaFailureKind::{Malformed, Permanent, Transient, Unknown},
+        };
 
         for (failure, open_decision) in [
             (Unknown, Reject),
@@ -165,8 +165,10 @@ mod tests {
 
     #[test]
     fn only_configured_non_null_fields_are_validated() {
-        use SchemaFieldAction::{CheckKey, CheckValue, Skip};
-        use SchemaFieldRole::{Key, Value};
+        use {
+            SchemaFieldAction::{CheckKey, CheckValue, Skip},
+            SchemaFieldRole::{Key, Value},
+        };
 
         // (scenario, key validation, value validation, role, field present, expected)
         for (scenario, key_enabled, value_enabled, role, present, expected) in [

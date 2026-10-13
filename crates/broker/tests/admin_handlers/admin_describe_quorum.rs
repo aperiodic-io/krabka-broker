@@ -3,18 +3,19 @@
 //! topic of a one-broker cluster; and the broker-listener forwarding to the
 //! active controller (#1034) on a two-broker combined cluster.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::describe_quorum_response::DescribeQuorumResponse;
-
-use crate::{
-    admin_harness::build_client,
-    support::{
-        quorum::{
-            describe_quorum_request as support_describe_quorum_request, follower_config,
-            metadata_quorum_request as describe_quorum_request, two_node_leader,
+use {
+    crate::{
+        admin_harness::build_client,
+        support::{
+            quorum::{
+                describe_quorum_request as support_describe_quorum_request, follower_config,
+                metadata_quorum_request as describe_quorum_request, two_node_leader,
+            },
+            shutdown_cluster, start_n_node_client, start_n_node_with_retry,
         },
-        shutdown_cluster, start_n_node_client, start_n_node_with_retry,
     },
+    assert2::{assert, check},
+    krabka_protocol::owned::describe_quorum_response::DescribeQuorumResponse,
 };
 
 /// Zero out the parts of a response that legitimately keep advancing between

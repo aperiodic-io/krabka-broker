@@ -4,20 +4,20 @@
 //! sparse indexes, so the shared side effects stay in one file. The verbatim
 //! path additionally has to leave the producer's CRC-covered bytes untouched.
 
-use std::io::IoSlice;
-
-use bytes::Bytes;
-use krabka_ids::{LeaderEpoch, Offset};
-use krabka_protocol::records::{HEADER_LEN, RecordBatch, patch_base_offset_and_leader_epoch};
-use krabka_units::prelude::{ByteSize, ByteSizeExt};
-use tracing::instrument;
-
-use super::{
-    Segment,
-    io::{write_all, write_all_vectored},
-    lifecycle::WriteSnapshot,
+use {
+    super::{
+        Segment,
+        io::{write_all, write_all_vectored},
+        lifecycle::WriteSnapshot,
+    },
+    crate::{VerbatimBatch, error::LogError},
+    bytes::Bytes,
+    krabka_ids::{LeaderEpoch, Offset},
+    krabka_protocol::records::{HEADER_LEN, RecordBatch, patch_base_offset_and_leader_epoch},
+    krabka_units::prelude::{ByteSize, ByteSizeExt},
+    std::io::IoSlice,
+    tracing::instrument,
 };
-use crate::{VerbatimBatch, error::LogError};
 
 /// One batch's encoded bytes, as an append path has them.
 #[derive(Clone, Copy)]
@@ -188,11 +188,12 @@ impl Segment {
         let Some(mode) = self.direct.as_mut() else {
             return match batch {
                 BatchBytes::Whole(bytes) => write_all(&*self.io, &self.log_file, bytes),
-                BatchBytes::Split(header, body) => write_all_vectored(
-                    &*self.io,
-                    &self.log_file,
-                    &mut [IoSlice::new(header), IoSlice::new(body)],
-                ),
+                BatchBytes::Split(header, body) => {
+                    write_all_vectored(&*self.io, &self.log_file, &mut [
+                        IoSlice::new(header),
+                        IoSlice::new(body),
+                    ])
+                }
             };
         };
         let io = &*self.io;
@@ -360,13 +361,15 @@ impl Segment {
 
 #[cfg(test)]
 mod tests {
-    use krabka_units::prelude::kibibytes;
-
-    use super::*;
-    use crate::segment::test_support::{
-        DENSE_INDEX, FIRST_LARGE_TIMESTAMP_BATCH, NO_LIMIT, ONE_RECORD_BATCH, RecordTimestamp,
-        SECOND_LARGE_TIMESTAMP_BATCH, SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup,
-        SeededSegmentSetup, sample_batch, seeded_fixture, segment_at, test_batch_at, test_segment,
+    use {
+        super::*,
+        crate::segment::test_support::{
+            DENSE_INDEX, FIRST_LARGE_TIMESTAMP_BATCH, NO_LIMIT, ONE_RECORD_BATCH, RecordTimestamp,
+            SECOND_LARGE_TIMESTAMP_BATCH, SECOND_SINGLE_RECORD_BATCH, SampleBatchSetup,
+            SeededSegmentSetup, sample_batch, seeded_fixture, segment_at, test_batch_at,
+            test_segment,
+        },
+        krabka_units::prelude::kibibytes,
     };
 
     #[test]

@@ -3,8 +3,10 @@
 //! than a literal, so they are gathered in one file away from the transition
 //! logic they constrain.
 
-use krabka_raft::kraft::types::{Epoch, NodeId};
-use krabka_units::prelude::{Time, TimeExt as _};
+use {
+    krabka_raft::kraft::types::{Epoch, NodeId},
+    krabka_units::prelude::{Time, TimeExt as _},
+};
 
 pub struct ConsensusModel {
     pub voter_ids: Vec<NodeId>,

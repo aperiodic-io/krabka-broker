@@ -1,10 +1,11 @@
 //! TOML shape of `[topic_policy]` — the KIP-108 / KIP-133 rule set — and the
 //! apply step that copies it onto [`crate::config::BrokerConfig`].
 
-use std::collections::BTreeMap;
-
-use super::{FileConfigError, validate::positive_usize};
-use crate::{config::BrokerConfig, topic_policy::TopicPolicy};
+use {
+    super::{FileConfigError, validate::positive_usize},
+    crate::{config::BrokerConfig, topic_policy::TopicPolicy},
+    std::collections::BTreeMap,
+};
 
 /// TOML shape of `[topic_policy]`. Maps to
 /// [`crate::topic_policy::TopicPolicy`].
@@ -87,10 +88,11 @@ pub(super) fn apply_topic_policy(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::{config::BrokerConfig, file_config::FileConfig, topic_policy::TopicPolicy};
+    use {
+        super::*,
+        crate::{config::BrokerConfig, file_config::FileConfig, topic_policy::TopicPolicy},
+        assert2::check,
+    };
 
     fn apply(toml: &str) -> Result<BrokerConfig, FileConfigError> {
         let file: FileConfig = toml::from_str(toml).expect("parse topic_policy section");

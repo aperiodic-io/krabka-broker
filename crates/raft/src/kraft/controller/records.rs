@@ -2,20 +2,21 @@
 //! to and reads from the metadata log: metadata value batches, KIP-853 typed
 //! control batches, and the KIP-595 `LeaderChange` marker.
 
-use krabka_ids::Offset;
-use krabka_metadata::{MetadataImage, MetadataRecord, TranslateError, VoterSet, from_kraft_value};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::no_op_record::NoOpRecord,
-    records::{
-        Record, RecordBatch,
-        metadata::{KraftMetadataRecord, control::ControlRecord, decode_value_header},
+use {
+    crate::{
+        error::{MetadataReplayError, RaftError},
+        kraft::types::{Epoch, NodeId},
     },
-};
-
-use crate::{
-    error::{MetadataReplayError, RaftError},
-    kraft::types::{Epoch, NodeId},
+    krabka_ids::Offset,
+    krabka_metadata::{MetadataImage, MetadataRecord, TranslateError, VoterSet, from_kraft_value},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::no_op_record::NoOpRecord,
+        records::{
+            Record, RecordBatch,
+            metadata::{KraftMetadataRecord, control::ControlRecord, decode_value_header},
+        },
+    },
 };
 
 /// Decodes the committed metadata value at `offset` against `image`, as every
@@ -338,9 +339,7 @@ pub fn next_batch_offset(batches: &[RecordBatch]) -> Option<Offset> {
 
 #[cfg(test)]
 mod metadata_record_batch_tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn metadata_record_offset_deltas_cover_empty_single_and_multiple_batches() {
@@ -373,12 +372,9 @@ mod metadata_record_batch_tests {
             check!(batch.last_offset_delta == *expected_deltas.last().expect("non-empty"));
         }
 
-        let control = typed_control_batch(
-            7,
-            &[ControlRecord::KRaftVersion(
-                krabka_protocol::owned::k_raft_version_record::KRaftVersionRecord::default(),
-            )],
-        )
+        let control = typed_control_batch(7, &[ControlRecord::KRaftVersion(
+            krabka_protocol::owned::k_raft_version_record::KRaftVersionRecord::default(),
+        )])
         .expect("control batch");
         check!(control.partition_leader_epoch == 7);
     }

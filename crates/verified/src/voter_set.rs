@@ -101,10 +101,11 @@ pub fn voter_set_wire_decision(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::{
-        VoterSetWireDecision, VoterWireDecision, voter_set_wire_decision, voter_wire_decision,
+    use {
+        super::{
+            VoterSetWireDecision, VoterWireDecision, voter_set_wire_decision, voter_wire_decision,
+        },
+        assert2::check,
     };
 
     #[test]

@@ -65,12 +65,12 @@
 
 mod support;
 
-use std::process::Command;
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-
-use crate::support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_stdin_output};
+use {
+    crate::support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_stdin_output},
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    std::process::Command,
+};
 
 /// The pinned release whose tools decode the topic.
 const KAFKA_IMAGE: &str = "mirror.gcr.io/apache/kafka:4.3.1";
@@ -383,21 +383,18 @@ impl Cluster {
     }
 
     async fn create_topic(&self) {
-        let created = docker_run_ok(
-            KAFKA_IMAGE,
-            &[
-                TOPICS_TOOL,
-                "--bootstrap-server",
-                &self.bootstrap,
-                "--create",
-                "--topic",
-                TOPIC,
-                "--partitions",
-                "1",
-                "--replication-factor",
-                "1",
-            ],
-        );
+        let created = docker_run_ok(KAFKA_IMAGE, &[
+            TOPICS_TOOL,
+            "--bootstrap-server",
+            &self.bootstrap,
+            "--create",
+            "--topic",
+            TOPIC,
+            "--partitions",
+            "1",
+            "--replication-factor",
+            "1",
+        ]);
         assert!(
             String::from_utf8_lossy(&created.stdout).contains("Created topic"),
             "kafka-topics --create",
@@ -439,17 +436,14 @@ impl Cluster {
     /// partition, with `GROUP TOPIC PARTITION CURRENT-OFFSET` in the first four
     /// columns and a header line above them.
     fn committed_offset(&self, group: &str) -> i64 {
-        let out = docker_run_ok(
-            KAFKA_IMAGE,
-            &[
-                GROUPS_TOOL,
-                "--bootstrap-server",
-                &self.bootstrap,
-                "--describe",
-                "--group",
-                group,
-            ],
-        );
+        let out = docker_run_ok(KAFKA_IMAGE, &[
+            GROUPS_TOOL,
+            "--bootstrap-server",
+            &self.bootstrap,
+            "--describe",
+            "--group",
+            group,
+        ]);
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
         let columns = stdout
             .lines()
@@ -468,35 +462,32 @@ impl Cluster {
     /// position, and the `LeaveGroup` that follows empties the group and is a
     /// second rebalance.
     fn consume_as_classic_group(&self) {
-        let out = docker_run_ok(
-            KAFKA_IMAGE,
-            &[
-                CONSOLE_CONSUMER,
-                "--bootstrap-server",
-                &self.bootstrap,
-                "--topic",
-                TOPIC,
-                "--group",
-                CLASSIC_GROUP,
-                "--from-beginning",
-                "--max-messages",
-                &RECORDS.to_string(),
-                "--timeout-ms",
-                CONSUME_TIMEOUT_MS,
-                "--consumer-property",
-                "group.protocol=classic",
-                "--consumer-property",
-                &format!("client.id={CLIENT_ID}"),
-                "--consumer-property",
-                "enable.auto.commit=true",
-                "--consumer-property",
-                &format!("session.timeout.ms={SESSION_TIMEOUT_MS}"),
-                "--consumer-property",
-                &format!("max.poll.interval.ms={REBALANCE_TIMEOUT_MS}"),
-                "--consumer-property",
-                &format!("partition.assignment.strategy={ASSIGNOR}"),
-            ],
-        );
+        let out = docker_run_ok(KAFKA_IMAGE, &[
+            CONSOLE_CONSUMER,
+            "--bootstrap-server",
+            &self.bootstrap,
+            "--topic",
+            TOPIC,
+            "--group",
+            CLASSIC_GROUP,
+            "--from-beginning",
+            "--max-messages",
+            &RECORDS.to_string(),
+            "--timeout-ms",
+            CONSUME_TIMEOUT_MS,
+            "--consumer-property",
+            "group.protocol=classic",
+            "--consumer-property",
+            &format!("client.id={CLIENT_ID}"),
+            "--consumer-property",
+            "enable.auto.commit=true",
+            "--consumer-property",
+            &format!("session.timeout.ms={SESSION_TIMEOUT_MS}"),
+            "--consumer-property",
+            &format!("max.poll.interval.ms={REBALANCE_TIMEOUT_MS}"),
+            "--consumer-property",
+            &format!("partition.assignment.strategy={ASSIGNOR}"),
+        ]);
         assert_records_read(&out);
     }
 
@@ -507,31 +498,28 @@ impl Cluster {
     /// `heartbeat.interval.ms` and `partition.assignment.strategy` in the
     /// client itself: `ConsumerConfig` fails the run rather than ignoring them.
     fn consume_as_next_gen_group(&self) {
-        let out = docker_run_ok(
-            KAFKA_IMAGE_NEXT_GEN,
-            &[
-                CONSOLE_CONSUMER,
-                "--bootstrap-server",
-                &self.bootstrap,
-                "--topic",
-                TOPIC,
-                "--group",
-                NEXT_GEN_GROUP,
-                "--from-beginning",
-                "--max-messages",
-                &RECORDS.to_string(),
-                "--timeout-ms",
-                CONSUME_TIMEOUT_MS,
-                "--consumer-property",
-                "group.protocol=consumer",
-                "--consumer-property",
-                &format!("client.id={CLIENT_ID}"),
-                "--consumer-property",
-                "enable.auto.commit=true",
-                "--consumer-property",
-                &format!("max.poll.interval.ms={REBALANCE_TIMEOUT_MS}"),
-            ],
-        );
+        let out = docker_run_ok(KAFKA_IMAGE_NEXT_GEN, &[
+            CONSOLE_CONSUMER,
+            "--bootstrap-server",
+            &self.bootstrap,
+            "--topic",
+            TOPIC,
+            "--group",
+            NEXT_GEN_GROUP,
+            "--from-beginning",
+            "--max-messages",
+            &RECORDS.to_string(),
+            "--timeout-ms",
+            CONSUME_TIMEOUT_MS,
+            "--consumer-property",
+            "group.protocol=consumer",
+            "--consumer-property",
+            &format!("client.id={CLIENT_ID}"),
+            "--consumer-property",
+            "enable.auto.commit=true",
+            "--consumer-property",
+            &format!("max.poll.interval.ms={REBALANCE_TIMEOUT_MS}"),
+        ]);
         assert_records_read(&out);
     }
 
@@ -543,31 +531,26 @@ impl Cluster {
     /// topic like any other group's; every assertion below is filtered by group
     /// id, so they are inert.
     fn read_offsets_topic(&self, formatter: &str) -> (Vec<serde_json::Value>, usize) {
-        let out = docker_run_ok(
-            KAFKA_IMAGE,
-            &[
-                CONSOLE_CONSUMER,
-                "--bootstrap-server",
-                &self.bootstrap,
-                "--topic",
-                OFFSETS_TOPIC,
-                "--from-beginning",
-                "--timeout-ms",
-                DRAIN_TIMEOUT_MS,
-                "--formatter",
-                formatter,
-                "--consumer-property",
-                "exclude.internal.topics=false",
-            ],
-        );
+        let out = docker_run_ok(KAFKA_IMAGE, &[
+            CONSOLE_CONSUMER,
+            "--bootstrap-server",
+            &self.bootstrap,
+            "--topic",
+            OFFSETS_TOPIC,
+            "--from-beginning",
+            "--timeout-ms",
+            DRAIN_TIMEOUT_MS,
+            "--formatter",
+            formatter,
+            "--consumer-property",
+            "exclude.internal.topics=false",
+        ]);
         let decoded = decode_stream(&String::from_utf8_lossy(&out.stdout));
         let processed = processed_records(&String::from_utf8_lossy(&out.stderr));
         (decoded, processed)
     }
 
-    async fn shutdown(self) {
-        self.handle.shutdown().await;
-    }
+    async fn shutdown(self) { self.handle.shutdown().await; }
 }
 
 /// Every produced record reached the consumer, so the group really did read to

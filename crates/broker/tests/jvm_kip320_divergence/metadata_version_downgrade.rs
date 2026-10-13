@@ -6,15 +6,15 @@
 //! the replication path, and it needs its own registration waits, so it does
 //! not share a file with the truncation scenarios.
 
-use std::time::{Duration, Instant};
-
-use krabka_broker::BrokerHandle;
-
-use crate::{
-    docker::{KAFKA_IMAGE_FEATURES, docker_run_kafka_tool_with_image},
-    mixed_cluster::{MixedCluster, start_mixed_cluster},
-    support,
-    topic_admin::create_mixed_topic,
+use {
+    crate::{
+        docker::{KAFKA_IMAGE_FEATURES, docker_run_kafka_tool_with_image},
+        mixed_cluster::{MixedCluster, start_mixed_cluster},
+        support,
+        topic_admin::create_mixed_topic,
+    },
+    krabka_broker::BrokerHandle,
+    std::time::{Duration, Instant},
 };
 
 fn run_features(bootstrap: &str, command: &[&str]) -> std::process::Output {

@@ -9,11 +9,11 @@
 //! this module's whole job, and it is a pure function over directory listings
 //! so a test can pin the choice without a broker.
 
-use std::path::{Path, PathBuf};
-
-use uuid::Uuid;
-
-use crate::manifest::CAPTURE_ROOT;
+use {
+    crate::manifest::CAPTURE_ROOT,
+    std::path::{Path, PathBuf},
+    uuid::Uuid,
+};
 
 /// The RLMM snapshot's path under a log directory.
 pub const RLMM_SNAPSHOT_RELATIVE: &str = "remote-log-metadata/snapshot";
@@ -115,9 +115,7 @@ pub fn newest_metadata_checkpoint(log_dir: &Path) -> Option<PathBuf> {
 ///
 /// The zero-padded epoch millisecond orders captures across timestamps; a random UUID suffix distinguishes concurrent captures and repeated clock values. Legacy timestamp-only names retain their position in the same listing, and `--capture latest` still needs only a lexicographic maximum.
 #[must_use]
-pub fn capture_id(now_ms: u64) -> String {
-    format!("{now_ms:016}-{}", Uuid::new_v4().simple())
-}
+pub fn capture_id(now_ms: u64) -> String { format!("{now_ms:016}-{}", Uuid::new_v4().simple()) }
 
 /// The archive-relative key of one artifact inside one capture.
 #[must_use]
@@ -127,10 +125,11 @@ pub fn capture_key(capture_id: &str, artifact: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::{
-        capture_id, capture_key, checkpoint_id, newest_checkpoint, newest_metadata_checkpoint,
+    use {
+        super::{
+            capture_id, capture_key, checkpoint_id, newest_checkpoint, newest_metadata_checkpoint,
+        },
+        assert2::check,
     };
 
     #[test]

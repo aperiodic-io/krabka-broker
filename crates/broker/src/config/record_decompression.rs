@@ -2,9 +2,10 @@
 //! configured ratio and output bounds, which guard the produce path against
 //! a decompression bomb.
 
-use krabka_compression::RecordDecompressionPolicy;
-
-use crate::{BrokerError, config::BrokerConfig};
+use {
+    crate::{BrokerError, config::BrokerConfig},
+    krabka_compression::RecordDecompressionPolicy,
+};
 
 impl BrokerConfig {
     /// Builds the validated Kafka record decompression policy.
@@ -29,10 +30,11 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::{ByteSize, convert::ByteSizeExt, fraction, gibibytes, mebibytes};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_units::{ByteSize, convert::ByteSizeExt, fraction, gibibytes, mebibytes},
+    };
 
     #[test]
     fn record_decompression_defaults_match_shared_policy() {

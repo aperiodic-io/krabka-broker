@@ -15,17 +15,19 @@
 //! drops every topic the principal may not describe from the row, rather than
 //! failing the whole request, and krabka matches that per-topic filter.
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    describe_transactions_request::DescribeTransactionsRequest,
-    describe_transactions_response::{DescribeTransactionsResponse, TopicData, TransactionState},
-};
-
-use crate::{
-    codes,
-    txn::state::{TxnEntry, TxnState},
+use {
+    crate::{
+        codes,
+        txn::state::{TxnEntry, TxnState},
+    },
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        describe_transactions_request::DescribeTransactionsRequest,
+        describe_transactions_response::{
+            DescribeTransactionsResponse, TopicData, TransactionState,
+        },
+    },
+    std::collections::BTreeMap,
 };
 
 /// Builds the `topics` list for one txn entry. It groups the entry's
@@ -174,13 +176,14 @@ context_handler! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        handlers::test_support::transaction_admin_tests::*,
-        test_support::{grant_topic_operation, peer, principal},
-        txn::state::TopicPartition,
+    use {
+        super::*,
+        crate::{
+            handlers::test_support::transaction_admin_tests::*,
+            test_support::{grant_topic_operation, peer, principal},
+            txn::state::TopicPartition,
+        },
+        assert2::assert,
     };
 
     fn entry() -> TxnEntry {
@@ -236,13 +239,10 @@ mod tests {
 
         // Two ids this broker coordinates, and one it does not.
         let (ongoing_id, dead_id) = ("tx-ongoing", "tx-dead");
-        lead_transaction_state_partitions(
-            &broker_handle,
-            &[
-                coordinator.partition_for(ongoing_id),
-                coordinator.partition_for(dead_id),
-            ],
-        )
+        lead_transaction_state_partitions(&broker_handle, &[
+            coordinator.partition_for(ongoing_id),
+            coordinator.partition_for(dead_id),
+        ])
         .await;
         for (tid, state) in [(ongoing_id, TxnState::Ongoing), (dead_id, TxnState::Dead)] {
             let mut entry = TxnEntry::new_empty(

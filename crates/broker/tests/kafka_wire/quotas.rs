@@ -2,17 +2,17 @@
 //! `DescribeClientQuotas`, each driven over its own authenticated SASL/PLAIN
 //! connection.
 
-use std::net::SocketAddr;
-
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{Decode, Encode};
-
-use super::{round_trip, sasl_plain_authenticate};
-use crate::{
-    kafka_wire::{ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
-    support::wire::HeaderEncoding as RequestHeaderEncoding,
+use {
+    super::{round_trip, sasl_plain_authenticate},
+    crate::{
+        kafka_wire::{ExchangeSetup as WireExchangeSetup, PlainAuthenticationSetup},
+        support::wire::HeaderEncoding as RequestHeaderEncoding,
+    },
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{Decode, Encode},
+    std::net::SocketAddr,
 };
 
 pub type QuotaEntity = Vec<(String, Option<String>)>;
@@ -50,9 +50,7 @@ pub struct QuotaDescribeSetup<'a> {
 #[derive(Clone, Copy)]
 pub struct QuotaValue(pub f64);
 impl Default for QuotaValue {
-    fn default() -> Self {
-        Self(1024.0)
-    }
+    fn default() -> Self { Self(1024.0) }
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -68,10 +66,11 @@ pub struct UserQuotaSetup<'a> {
 
 impl UserQuotaSetup<'_> {
     fn alteration_entries(&self) -> QuotaEntries {
-        vec![(
-            vec![("user".into(), Some(self.user.into()))],
-            vec![(self.key.into(), self.value.0, false)],
-        )]
+        vec![(vec![("user".into(), Some(self.user.into()))], vec![(
+            self.key.into(),
+            self.value.0,
+            false,
+        )])]
     }
 
     fn alteration_options(&self) -> QuotaAlterSetup<'_> {

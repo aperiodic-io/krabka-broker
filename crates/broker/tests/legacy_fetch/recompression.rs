@@ -6,22 +6,23 @@
 //! attributes byte, so it pins the codec id (2) that a legacy consumer sees
 //! rather than only the decoded records.
 
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_compression::CompressionType;
-use krabka_protocol::{
-    Decode,
-    kafka_3_6_2::owned::fetch_response::FetchResponse as LegacyFetchResponse,
-    records::{Attributes, Record, RecordBatch},
-};
-use krabka_records_legacy::decode_message_set;
-
-use crate::{
-    harness::{fetch_legacy_raw, legacy_bytes, produce_batch},
-    support::{
-        self,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::{
+        harness::{fetch_legacy_raw, legacy_bytes, produce_batch},
+        support::{
+            self,
+            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        },
     },
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_compression::CompressionType,
+    krabka_protocol::{
+        Decode,
+        kafka_3_6_2::owned::fetch_response::FetchResponse as LegacyFetchResponse,
+        records::{Attributes, Record, RecordBatch},
+    },
+    krabka_records_legacy::decode_message_set,
 };
 
 #[tokio::test]

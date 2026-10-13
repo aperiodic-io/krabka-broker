@@ -2,25 +2,25 @@
 //! prefixes, recovery of an image from a checkpoint plus log, and the
 //! round-trip of the durable quorum-state file at both schema versions.
 
-use std::time::Duration as StdDuration;
-
-use assert2::{assert, check};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-
-use super::*;
-use crate::{
-    MetadataLogConfig,
-    error::{MetadataReplayError, PersistedFormatError},
-    kraft::controller::{
-        control_state::voter_set_to_wire,
-        quorum_state_file::{load_quorum_state, save_quorum_state},
-        records::typed_control_batch,
-        recovery::{control_state_at, replay_committed, replay_control_records},
-        test_support::{
-            await_leader, open_test_controller, submit_change_with_timeout, test_kraft_config,
-            topic_record, voter_set,
+use {
+    super::*,
+    crate::{
+        MetadataLogConfig,
+        error::{MetadataReplayError, PersistedFormatError},
+        kraft::controller::{
+            control_state::voter_set_to_wire,
+            quorum_state_file::{load_quorum_state, save_quorum_state},
+            records::typed_control_batch,
+            recovery::{control_state_at, replay_committed, replay_control_records},
+            test_support::{
+                await_leader, open_test_controller, submit_change_with_timeout, test_kraft_config,
+                topic_record, voter_set,
+            },
         },
     },
+    assert2::{assert, check},
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    std::time::Duration as StdDuration,
 };
 
 fn quorum_state_json(directory: &std::path::Path) -> String {
@@ -76,13 +76,10 @@ fn restart_replays_control_records_only_through_persisted_high_watermark() {
 fn control_replay_stops_inside_a_partially_committed_batch() {
     let (initial, committed, uncommitted) = recovery_voters();
     let (_dir, log) = reopened_control_log(|log| {
-        let mut batch = typed_control_batch(
-            1,
-            &[
-                ControlRecord::Voters(voter_set_to_wire(&committed)),
-                ControlRecord::Voters(voter_set_to_wire(&uncommitted)),
-            ],
-        )
+        let mut batch = typed_control_batch(1, &[
+            ControlRecord::Voters(voter_set_to_wire(&committed)),
+            ControlRecord::Voters(voter_set_to_wire(&uncommitted)),
+        ])
         .expect("mixed-commit voter batch");
         log.append(&mut batch, 0).expect("append voter batch");
         log.advance_hwm(Offset(1));
@@ -191,16 +188,13 @@ fn control_state_at_replays_version_and_voters_at_boundary_offsets() {
 
     {
         let mut log = KraftLog::open(dir.path(), &MetadataLogConfig::default()).expect("open log");
-        let mut batch0 = typed_control_batch(
-            1,
-            &[ControlRecord::KRaftVersion(
-                krabka_protocol::owned::k_raft_version_record::KRaftVersionRecord {
-                    version: 0,
-                    k_raft_version: 1,
-                    ..Default::default()
-                },
-            )],
-        )
+        let mut batch0 = typed_control_batch(1, &[ControlRecord::KRaftVersion(
+            krabka_protocol::owned::k_raft_version_record::KRaftVersionRecord {
+                version: 0,
+                k_raft_version: 1,
+                ..Default::default()
+            },
+        )])
         .expect("batch 0");
         log.append(&mut batch0, 0).expect("append 0");
         log.advance_hwm(log.log_end_offset());
@@ -211,16 +205,13 @@ fn control_state_at_replays_version_and_voters_at_boundary_offsets() {
         log.append(&mut batch1, 0).expect("append 1");
         log.advance_hwm(log.log_end_offset());
 
-        let mut batch2 = typed_control_batch(
-            1,
-            &[ControlRecord::KRaftVersion(
-                krabka_protocol::owned::k_raft_version_record::KRaftVersionRecord {
-                    version: 0,
-                    k_raft_version: -1,
-                    ..Default::default()
-                },
-            )],
-        )
+        let mut batch2 = typed_control_batch(1, &[ControlRecord::KRaftVersion(
+            krabka_protocol::owned::k_raft_version_record::KRaftVersionRecord {
+                version: 0,
+                k_raft_version: -1,
+                ..Default::default()
+            },
+        )])
         .expect("batch 2");
         log.append(&mut batch2, 0).expect("append 2");
         log.advance_hwm(log.log_end_offset());

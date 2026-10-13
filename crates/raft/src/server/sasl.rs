@@ -8,18 +8,19 @@
 //! answer of Kafka's `ControllerApis.handleSaslHandshakeRequest` and
 //! `handleSaslAuthenticateRequest`: `ILLEGAL_SASL_STATE`.
 
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        sasl_authenticate_request::{self, SaslAuthenticateRequest},
-        sasl_authenticate_response::SaslAuthenticateResponse,
-        sasl_handshake_request::{self, SaslHandshakeRequest},
-        sasl_handshake_response::SaslHandshakeResponse,
+use {
+    crate::error::RaftError,
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            sasl_authenticate_request::{self, SaslAuthenticateRequest},
+            sasl_authenticate_response::SaslAuthenticateResponse,
+            sasl_handshake_request::{self, SaslHandshakeRequest},
+            sasl_handshake_response::SaslHandshakeResponse,
+        },
     },
 };
-
-use crate::error::RaftError;
 
 /// Kafka's `ILLEGAL_SASL_STATE`.
 const ILLEGAL_SASL_STATE: i16 = 34;
@@ -61,9 +62,7 @@ pub(super) fn sasl_response(api_key: i16, version: i16, body: &[u8]) -> Result<B
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn is_sasl_api_matches_handshake_and_authenticate() {

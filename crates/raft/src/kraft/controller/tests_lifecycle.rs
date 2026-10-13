@@ -2,22 +2,22 @@
 //! reaches the engine it was built for, and that a built engine elects,
 //! reports its role, and drives its timers as configured.
 
-use std::time::Duration as StdDuration;
-
-use assert2::{assert, check};
-use krabka_units::prelude::{millis, secs};
-
-use super::*;
-use crate::kraft::{
-    controller::{
-        engine_loop::sleep_until_opt,
-        queries::initial_state_voters,
-        test_support::{
-            ControllerSetup, EngineSetup, TEST_ELECTION_TIMEOUT, await_leader, build,
-            build_engine_only, elect_leader_with_helper, elect_single_voter_engine,
+use {
+    super::*,
+    crate::kraft::{
+        controller::{
+            engine_loop::sleep_until_opt,
+            queries::initial_state_voters,
+            test_support::{
+                ControllerSetup, EngineSetup, TEST_ELECTION_TIMEOUT, await_leader, build,
+                build_engine_only, elect_leader_with_helper, elect_single_voter_engine,
+            },
         },
+        transport::NullPeerSender,
     },
-    transport::NullPeerSender,
+    assert2::{assert, check},
+    krabka_units::prelude::{millis, secs},
+    std::time::Duration as StdDuration,
 };
 
 #[test]

@@ -4,12 +4,14 @@
 //! pass must obey live in `invariants.rs` and are checked as `always`
 //! properties over the pass's input and output.
 
-use super::{
-    DELETE_RETENTION_MS,
-    state::{Cleaner, Entry, EntryKind},
-};
-use crate::compact::{
-    RetainDecision, TxnDataState, data_retention_metadata, marker_retention_metadata,
+use {
+    super::{
+        DELETE_RETENTION_MS,
+        state::{Cleaner, Entry, EntryKind},
+    },
+    crate::compact::{
+        RetainDecision, TxnDataState, data_retention_metadata, marker_retention_metadata,
+    },
 };
 
 /// Run one compaction pass of `cleaner` over `log` at `clock` and return the

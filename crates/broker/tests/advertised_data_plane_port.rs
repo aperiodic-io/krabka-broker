@@ -9,11 +9,12 @@
 
 mod support;
 
-use assert2::assert;
-use krabka_protocol::owned::metadata_response::MetadataResponse;
-
-use crate::support::{
-    client::connect_client, discovery::topic_metadata_request, standalone_broker,
+use {
+    crate::support::{
+        client::connect_client, discovery::topic_metadata_request, standalone_broker,
+    },
+    assert2::assert,
+    krabka_protocol::owned::metadata_response::MetadataResponse,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

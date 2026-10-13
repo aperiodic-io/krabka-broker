@@ -9,8 +9,10 @@
 //! actually reaches a broker that answers it, and that the exit code reports
 //! what happened.
 
-use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
+use {
+    assert2::{assert, check},
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+};
 
 /// The exit code for a request the broker refused.
 const REFUSED: i32 = 1;
@@ -93,18 +95,15 @@ async fn the_operator_loop_runs_end_to_end() {
     create_topic(&bootstrap, 3).await;
 
     check!(
-        cli(
-            &bootstrap,
-            &[
-                "define",
-                "--group",
-                GROUP,
-                "--topic",
-                TOPIC,
-                "--retained-cuts",
-                "4"
-            ],
-        )
+        cli(&bootstrap, &[
+            "define",
+            "--group",
+            GROUP,
+            "--topic",
+            TOPIC,
+            "--retained-cuts",
+            "4"
+        ],)
         .await
             == 0,
         "define"
@@ -196,10 +195,13 @@ async fn a_group_may_name_a_topic_that_does_not_exist_yet() {
     let (_broker, _dir, bootstrap) = broker().await;
 
     check!(
-        cli(
-            &bootstrap,
-            &["define", "--group", GROUP, "--topic", "not-created-yet"],
-        )
+        cli(&bootstrap, &[
+            "define",
+            "--group",
+            GROUP,
+            "--topic",
+            "not-created-yet"
+        ],)
         .await
             == 0,
         "define accepts an unresolved topic name"

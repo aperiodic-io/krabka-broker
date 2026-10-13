@@ -6,14 +6,15 @@
 //! `exact_batches` check therefore lives beside the readers it guards, and
 //! apart from the quorum bookkeeping that consumes them.
 
-use bytes::Bytes;
-use krabka_ids::{LeaderEpoch, Offset, ProducerId};
-use krabka_log::{Log, VerbatimBatch};
-use krabka_protocol::records::RecordBatch;
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use super::BatchBytes;
-use crate::{error::BrokerError, wal::quorum::log_view::ShardLog};
+use {
+    super::BatchBytes,
+    crate::{error::BrokerError, wal::quorum::log_view::ShardLog},
+    bytes::Bytes,
+    krabka_ids::{LeaderEpoch, Offset, ProducerId},
+    krabka_log::{Log, VerbatimBatch},
+    krabka_protocol::records::RecordBatch,
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+};
 
 fn read_batches(
     source: &ShardLog,

@@ -31,15 +31,11 @@ pub struct ChainState {
 
 impl ChainState {
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Resume a chain from a recovered position after a restart or a spool replay.
     #[must_use]
-    pub fn resume(next_seq: u64, head: [u8; 32]) -> Self {
-        Self { next_seq, head }
-    }
+    pub fn resume(next_seq: u64, head: [u8; 32]) -> Self { Self { next_seq, head } }
 
     /// Advance the chain for a record that holds `value`.
     ///
@@ -56,21 +52,15 @@ impl ChainState {
     }
 
     #[must_use]
-    pub fn head(&self) -> [u8; 32] {
-        self.head
-    }
+    pub fn head(&self) -> [u8; 32] { self.head }
 
     #[must_use]
-    pub fn next_seq(&self) -> u64 {
-        self.next_seq
-    }
+    pub fn next_seq(&self) -> u64 { self.next_seq }
 }
 
 /// Encode `bytes` as lowercase hex.
 #[must_use]
-pub fn to_hex(bytes: &[u8]) -> String {
-    hex::encode(bytes)
-}
+pub fn to_hex(bytes: &[u8]) -> String { hex::encode(bytes) }
 
 /// Parse exactly 32 bytes of lowercase or uppercase hex.
 #[must_use]
@@ -82,9 +72,7 @@ pub fn from_hex32(s: &str) -> Option<[u8; 32]> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn genesis_is_zero() {

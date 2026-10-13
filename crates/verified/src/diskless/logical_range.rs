@@ -1,7 +1,6 @@
-use creusot_std::prelude::*;
-
-use super::DisklessRetentionPolicy;
-use crate::log_index::upper_range_cursor;
+use {
+    super::DisklessRetentionPolicy, crate::log_index::upper_range_cursor, creusot_std::prelude::*,
+};
 
 /// The bytes of the oldest `count` ranges.
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.

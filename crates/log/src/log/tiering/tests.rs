@@ -2,18 +2,19 @@
 //! the leader-epoch ranges it carries, and the local deletion that
 //! follows a successful offload.
 
-use assert2::check;
-use krabka_units::prelude::{bytes, mebibytes};
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    config::LogConfig,
-    log::test_support::{
-        append_samples, check_contiguous_exports, check_stamps, rolled_log, sample_batch,
-        sample_batch_with_epoch, sample_log, stamped_rolling_log, test_log,
+use {
+    super::*,
+    crate::{
+        config::LogConfig,
+        log::test_support::{
+            append_samples, check_contiguous_exports, check_stamps, rolled_log, sample_batch,
+            sample_batch_with_epoch, sample_log, stamped_rolling_log, test_log,
+        },
+        test_support::{log_file_count, segmented_log},
     },
-    test_support::{log_file_count, segmented_log},
+    assert2::check,
+    krabka_units::prelude::{bytes, mebibytes},
+    tempfile::tempdir,
 };
 
 /// An epoch covers `[start_offset, next.start_offset)`, so one ending
@@ -172,30 +173,21 @@ fn epochs_for_range_clamps_and_filters() {
     ];
     for (name, start, end, want) in [
         // Segment [60, 90] sits entirely in epoch 1.
-        (
-            "within one epoch",
+        ("within one epoch", Offset(60), Offset(90), vec![(
+            LeaderEpoch(1),
             Offset(60),
-            Offset(90),
-            vec![(LeaderEpoch(1), Offset(60))],
-        ),
+        )]),
         // Segment [40, 60] straddles epoch 0 (->clamped to 40) and epoch 1.
-        (
-            "straddles epochs",
-            Offset(40),
-            Offset(60),
-            vec![(LeaderEpoch(0), Offset(40)), (LeaderEpoch(1), Offset(50))],
-        ),
+        ("straddles epochs", Offset(40), Offset(60), vec![
+            (LeaderEpoch(0), Offset(40)),
+            (LeaderEpoch(1), Offset(50)),
+        ]),
         // Segment [0, 200] covers all three.
-        (
-            "covers all epochs",
-            Offset(0),
-            Offset(200),
-            vec![
-                (LeaderEpoch(0), Offset(0)),
-                (LeaderEpoch(1), Offset(50)),
-                (LeaderEpoch(2), Offset(100)),
-            ],
-        ),
+        ("covers all epochs", Offset(0), Offset(200), vec![
+            (LeaderEpoch(0), Offset(0)),
+            (LeaderEpoch(1), Offset(50)),
+            (LeaderEpoch(2), Offset(100)),
+        ]),
     ] {
         check!(
             epochs_for_range(&entries, start, end) == want,

@@ -54,9 +54,7 @@ pub(super) fn timestamp_kind(timestamp: i64, version: i16) -> krabka_verified::L
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn sentinel_constants_match_kafka_wire_values() {

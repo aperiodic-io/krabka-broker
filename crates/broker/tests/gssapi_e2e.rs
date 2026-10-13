@@ -36,15 +36,16 @@
 
 mod support;
 
-use std::{
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
+use {
+    assert2::assert,
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle, config::ListenerSpec},
+    krabka_security::{ListenerProtocol, SaslMechanism, gssapi::DEFAULT_GSSAPI_MAX_TIME_SKEW},
+    std::{
+        io::Write,
+        path::PathBuf,
+        process::{Command, Stdio},
+    },
 };
-
-use assert2::assert;
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle, config::ListenerSpec};
-use krabka_security::{ListenerProtocol, SaslMechanism, gssapi::DEFAULT_GSSAPI_MAX_TIME_SKEW};
 
 /// cp-kafka image that holds the GSSAPI-capable console tools.
 const KAFKA_IMAGE: &str = "mirror.gcr.io/confluentinc/cp-kafka:6.1.1";
@@ -54,21 +55,16 @@ const LISTEN: &str = "0.0.0.0:9092";
 /// host component of the server SPN the stock client derives, `kafka/<this>`.
 const BOOTSTRAP: &str = "host.docker.internal:9092";
 
+use crate::support::init_tracing_with;
 /// Absolute path to the KDC fixture dir, which holds `kafka.keytab` and
 /// `alice.keytab`.
 use support::{free_port, manifest_dir};
 
-use crate::support::init_tracing_with;
-
-fn kdc_fixtures() -> PathBuf {
-    manifest_dir().join("tests/fixtures/security/kdc")
-}
+fn kdc_fixtures() -> PathBuf { manifest_dir().join("tests/fixtures/security/kdc") }
 
 /// Absolute path to the GSSAPI client config dir, which holds `krb5.conf`,
 /// `client_jaas.conf`, and `client.properties`.
-fn gssapi_fixtures() -> PathBuf {
-    manifest_dir().join("tests/fixtures/gssapi")
-}
+fn gssapi_fixtures() -> PathBuf { manifest_dir().join("tests/fixtures/gssapi") }
 
 /// Spawn an in-process Krabka broker on `LISTEN`.
 ///

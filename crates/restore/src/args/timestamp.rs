@@ -155,9 +155,7 @@ fn parse_digits(s: &str, field: &str) -> Result<i64, String> {
     s.parse().map_err(|error| format!("{field}: {error}"))
 }
 
-fn is_leap_year(year: i64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
+fn is_leap_year(year: i64) -> bool { (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 }
 
 fn days_in_month(year: i64, month: i64) -> i64 {
     match month {
@@ -183,9 +181,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn timestamps_accept_bare_epoch_milliseconds() {

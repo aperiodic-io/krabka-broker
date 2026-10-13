@@ -22,6 +22,7 @@ impl CgcModel {
             max_epoch: 7,
         }
     }
+
     pub(super) fn wide() -> Self {
         Self {
             pool: vec!["a", "b", "c"],
@@ -29,7 +30,6 @@ impl CgcModel {
             max_epoch: 6,
         }
     }
-    pub(super) fn metadata(&self) -> ModelMetadata {
-        metadata(self.partitions)
-    }
+
+    pub(super) fn metadata(&self) -> ModelMetadata { metadata(self.partitions) }
 }

@@ -7,24 +7,24 @@
 //! hold the replay defence with it -- a signature captured from a freeze must
 //! not authorize the thaw that lifts it.
 
-use std::path::Path;
-
-use assert2::check;
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, codes};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    krabka::freeze::{DescribedTopicFreeze, PATTERN_TYPE_LITERAL, SetTopicFreezeRequest},
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    control_plane::{cluster_id, freeze_request, set_freeze, wait_for_registry_len},
-    signing::{SignedFreeze, signed_request, verifies_locally},
-    support::{self, OperatorKey, client::connect_owned},
-    wire::{
-        CONTROL, accepted, create_controlled_topic, create_topic, now_ms, refused,
-        wait_controlled_partitions,
+use {
+    crate::{
+        control_plane::{cluster_id, freeze_request, set_freeze, wait_for_registry_len},
+        signing::{SignedFreeze, signed_request, verifies_locally},
+        support::{self, OperatorKey, client::connect_owned},
+        wire::{
+            CONTROL, accepted, create_controlled_topic, create_topic, now_ms, refused,
+            wait_controlled_partitions,
+        },
     },
+    assert2::check,
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig, BrokerHandle, codes},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        krabka::freeze::{DescribedTopicFreeze, PATTERN_TYPE_LITERAL, SetTopicFreezeRequest},
+        primitives::uuid::Uuid as WireUuid,
+    },
+    std::path::Path,
 };
 
 async fn check_frozen_then_shutdown(
@@ -169,18 +169,15 @@ async fn an_unsigned_thaw_is_refused_whatever_require_signature_says() {
         check!(response.error_code == codes::NONE, "{label}: {response:?}");
         wait_for_registry_len(&client, 1).await;
 
-        let thaw = set_freeze(
-            &client,
-            SetTopicFreezeRequest {
-                scope: "orders".to_owned(),
-                pattern_type: PATTERN_TYPE_LITERAL,
-                frozen: false,
-                reason: "let me back in".to_owned(),
-                proposal_id: WireUuid(*uuid::Uuid::new_v4().as_bytes()),
-                set_at_ms: now_ms(),
-                ..SetTopicFreezeRequest::default()
-            },
-        )
+        let thaw = set_freeze(&client, SetTopicFreezeRequest {
+            scope: "orders".to_owned(),
+            pattern_type: PATTERN_TYPE_LITERAL,
+            frozen: false,
+            reason: "let me back in".to_owned(),
+            proposal_id: WireUuid(*uuid::Uuid::new_v4().as_bytes()),
+            set_at_ms: now_ms(),
+            ..SetTopicFreezeRequest::default()
+        })
         .await;
         check!(
             thaw.error_code == codes::OPERATOR_SIGNATURE_REQUIRED,
@@ -226,20 +223,17 @@ async fn a_signature_captured_from_a_freeze_is_refused_as_a_thaw() {
         ("the otherwise identical thaw", set_at_ms),
         ("the same signature on a fresh timestamp", now_ms() + 1_000),
     ] {
-        let thaw = set_freeze(
-            &client,
-            SetTopicFreezeRequest {
-                scope: "orders".to_owned(),
-                pattern_type: PATTERN_TYPE_LITERAL,
-                frozen: false,
-                reason: "incident".to_owned(),
-                proposal_id: WireUuid::ZERO,
-                set_at_ms: replay_at_ms,
-                key_id: key.key_id.clone(),
-                signature: captured.clone(),
-                ..SetTopicFreezeRequest::default()
-            },
-        )
+        let thaw = set_freeze(&client, SetTopicFreezeRequest {
+            scope: "orders".to_owned(),
+            pattern_type: PATTERN_TYPE_LITERAL,
+            frozen: false,
+            reason: "incident".to_owned(),
+            proposal_id: WireUuid::ZERO,
+            set_at_ms: replay_at_ms,
+            key_id: key.key_id.clone(),
+            signature: captured.clone(),
+            ..SetTopicFreezeRequest::default()
+        })
         .await;
         check!(
             thaw.error_code == codes::OPERATOR_SIGNATURE_INVALID,

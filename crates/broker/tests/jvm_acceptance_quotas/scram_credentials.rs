@@ -1,12 +1,13 @@
 //! The KIP-554 read half, `api_key` 50: `kafka-configs --describe
 //! --entity-type users` over a SCRAM credential the same tool provisioned.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, SaslClusterSetup, broker0_advertised,
-    describe_console_entity, docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity,
-    start_three_broker_sasl_plaintext_jvm_cluster_with_users, write_plain_props,
+use {
+    crate::jvm_acceptance::{
+        ADMIN, ADMIN_PASS, KAFKA_IMAGE_TXN, SaslClusterSetup, broker0_advertised,
+        describe_console_entity, docker_run_kafka_tool_with_image_and_mount, nc_check_connectivity,
+        start_three_broker_sasl_plaintext_jvm_cluster_with_users, write_plain_props,
+    },
+    assert2::assert,
 };
 
 /// JVM acceptance: `kafka-configs --describe --entity-type users` round-trip for
@@ -27,24 +28,20 @@ async fn jvm_kafka_configs_describe_users_scram_credentials_end_to_end() {
     let admin_mount = admin_props.mount_str();
 
     // Provision a SCRAM user via kafka-configs --alter (hits AlterUserScramCredentials, api_key 51).
-    let alter = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_mount,
-        &[
-            "kafka-configs",
-            "--alter",
-            "--entity-type",
-            "users",
-            "--entity-name",
-            "alice",
-            "--add-config",
-            "SCRAM-SHA-512=[iterations=4096,password=alice-secret]",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-        ],
-    );
+    let alter = docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_mount, &[
+        "kafka-configs",
+        "--alter",
+        "--entity-type",
+        "users",
+        "--entity-name",
+        "alice",
+        "--add-config",
+        "SCRAM-SHA-512=[iterations=4096,password=alice-secret]",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+    ]);
     assert!(
         alter.status.success(),
         "alter SCRAM failed: {}",

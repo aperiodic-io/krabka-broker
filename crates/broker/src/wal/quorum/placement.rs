@@ -57,11 +57,10 @@ pub(crate) fn select_voters_from_sorted_racks(
 
 #[cfg(test)]
 mod tests {
-    use krabka_metadata::BrokerEndpoint;
-    use krabka_security::ListenerProtocol;
-
-    use super::*;
-    use crate::test_support::broker_registration;
+    use {
+        super::*, crate::test_support::broker_registration, krabka_metadata::BrokerEndpoint,
+        krabka_security::ListenerProtocol,
+    };
 
     #[test]
     fn placement_prefers_rack_distinct_voters_with_local_first() {

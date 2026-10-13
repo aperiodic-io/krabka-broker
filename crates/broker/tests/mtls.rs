@@ -22,29 +22,29 @@ mod kafka_wire;
 
 mod support;
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{Decode, Encode, owned::create_topics_response::CreateTopicsResponse};
-use krabka_security::{ClientAuthMode, TlsConfig};
-use tokio::net::TcpStream;
-use tokio_rustls::{
-    TlsConnector,
-    rustls::{
-        ClientConfig,
-        pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject as _},
+use {
+    crate::{
+        kafka_wire::ExchangeSetup as WireExchangeSetup,
+        support::{
+            tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
+            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+            wire::HeaderEncoding as RequestHeaderEncoding,
+        },
     },
-};
-
-use crate::{
-    kafka_wire::ExchangeSetup as WireExchangeSetup,
-    support::{
-        tls::{PinnedCertVerifier, fixture_signature_schemes, ssl_config},
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
-        wire::HeaderEncoding as RequestHeaderEncoding,
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{Decode, Encode, owned::create_topics_response::CreateTopicsResponse},
+    krabka_security::{ClientAuthMode, TlsConfig},
+    std::sync::Arc,
+    tokio::net::TcpStream,
+    tokio_rustls::{
+        TlsConnector,
+        rustls::{
+            ClientConfig,
+            pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject as _},
+        },
     },
 };
 
@@ -275,16 +275,13 @@ fn mtls_fixture(
     let server_key_path = write_fixture(pem_dir.path(), "server.key", DEV_KEY);
     let client_ca_path = write_fixture(pem_dir.path(), "client_ca.pem", DEV_CLIENT_CA);
 
-    let cfg = ssl_config(
-        log_dir.path().to_path_buf(),
-        TlsConfig {
-            cert_chain_path: server_cert_path.clone(),
-            private_key_path: server_key_path,
-            trust_roots_path: None,
-            client_ca_path: Some(client_ca_path),
-            client_auth,
-        },
-    );
+    let cfg = ssl_config(log_dir.path().to_path_buf(), TlsConfig {
+        cert_chain_path: server_cert_path.clone(),
+        private_key_path: server_key_path,
+        trust_roots_path: None,
+        client_ca_path: Some(client_ca_path),
+        client_auth,
+    });
     (log_dir, pem_dir, cfg)
 }
 

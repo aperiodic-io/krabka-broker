@@ -7,14 +7,16 @@
 //! module is the case that holds the watermark back on purpose and reads the
 //! partition's end on either side of that.
 
-use assert2::check;
-use krabka_client_producer::Producer;
-
-use crate::{
-    support,
-    wire::{
-        EndOfPartition, create_topic, end_of_partition, latest_row, send_ok, wait_for_settled_log,
+use {
+    crate::{
+        support,
+        wire::{
+            EndOfPartition, create_topic, end_of_partition, latest_row, send_ok,
+            wait_for_settled_log,
+        },
     },
+    assert2::check,
+    krabka_client_producer::Producer,
 };
 
 /// `LATEST` under `read_uncommitted` answers the high watermark, not the log

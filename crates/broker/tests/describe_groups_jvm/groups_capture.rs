@@ -2,18 +2,19 @@
 //! calibrate Krabka's handler against the JVM answer, and the test that walks
 //! both images in turn.
 
-use assert2::assert;
-use krabka_protocol::owned::{
-    describe_groups_request::DescribeGroupsRequest,
-    describe_groups_response::{DescribeGroupsResponse, DescribedGroup},
-};
-
-use crate::{
-    CLASSIC_IMAGE, GROUP, HOST_BOOTSTRAP, NEXT_GEN_GROUP, NEXT_GEN_IMAGE, TYPELESS_GROUP,
-    groups_docker::{ContainerGuard, docker_pull, docker_run_kafka},
-    groups_fixture::{group_json, write_fixture},
-    groups_setup::{prepare_classic_groups, prepare_next_gen_group, wait_for_broker},
-    support::client::connect_owned,
+use {
+    crate::{
+        CLASSIC_IMAGE, GROUP, HOST_BOOTSTRAP, NEXT_GEN_GROUP, NEXT_GEN_IMAGE, TYPELESS_GROUP,
+        groups_docker::{ContainerGuard, docker_pull, docker_run_kafka},
+        groups_fixture::{group_json, write_fixture},
+        groups_setup::{prepare_classic_groups, prepare_next_gen_group, wait_for_broker},
+        support::client::connect_owned,
+    },
+    assert2::assert,
+    krabka_protocol::owned::{
+        describe_groups_request::DescribeGroupsRequest,
+        describe_groups_response::{DescribeGroupsResponse, DescribedGroup},
+    },
 };
 
 async fn describe_real_groups(groups: &[&str]) -> DescribeGroupsResponse {

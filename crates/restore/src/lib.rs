@@ -41,14 +41,15 @@
 //! onto an exit code, so an embedding tool keeps the structured error. See
 //! [`EXIT_OK`] for the codes.
 
-use std::{ffi::OsString, path::Path};
-
-use clap::Parser;
-use krabka_remote_storage::{
-    AuthenticatedArchive, Sha256Digest, TrustedManifestKeys, VerifyRequest, authenticate_archive,
-    diskless::CAPTURE_HEAD_NAME,
+use {
+    clap::Parser,
+    krabka_remote_storage::{
+        AuthenticatedArchive, Sha256Digest, TrustedManifestKeys, VerifyRequest,
+        authenticate_archive, diskless::CAPTURE_HEAD_NAME,
+    },
+    krabka_remote_storage_topic::Snapshot,
+    std::{ffi::OsString, path::Path},
 };
-use krabka_remote_storage_topic::Snapshot;
 
 mod args;
 mod backend;
@@ -208,17 +209,14 @@ pub async fn restore(args: &RestoreArgs) -> Result<RestoreReport, RestoreError> 
     };
     if let Some((_, head, count)) = &diskless_authentication {
         let report = authenticated.get_or_insert_with(|| {
-            (
-                None,
-                AuthenticationReport {
-                    partitions: 0,
-                    manifests: 0,
-                    objects: 0,
-                    trusted_keys: *count,
-                    chain_heads: std::collections::BTreeMap::new(),
-                    tail_truncation_protected: true,
-                },
-            )
+            (None, AuthenticationReport {
+                partitions: 0,
+                manifests: 0,
+                objects: 0,
+                trusted_keys: *count,
+                chain_heads: std::collections::BTreeMap::new(),
+                tail_truncation_protected: true,
+            })
         });
         report.1.partitions += 1;
         report.1.manifests += 1;
@@ -544,15 +542,10 @@ fn ensure_empty_log_dir(log_dir: &Path) -> Result<(), RestoreError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use clap::CommandFactory as _;
-
-    use super::*;
+    use {super::*, assert2::check, clap::CommandFactory as _};
 
     #[test]
-    fn the_command_line_is_internally_consistent() {
-        Cli::command().debug_assert();
-    }
+    fn the_command_line_is_internally_consistent() { Cli::command().debug_assert(); }
 
     #[test]
     fn an_absent_target_is_acceptable() {

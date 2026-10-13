@@ -5,13 +5,16 @@
 //! then decompresses and decodes the OTLP payload, and fans it out to the
 //! Prometheus and OTLP sinks.
 
-use krabka_compression::{CompressionError, CompressionType};
-use krabka_protocol::owned::{
-    push_telemetry_request::PushTelemetryRequest, push_telemetry_response::PushTelemetryResponse,
+use {
+    krabka_compression::{CompressionError, CompressionType},
+    krabka_protocol::owned::{
+        push_telemetry_request::PushTelemetryRequest,
+        push_telemetry_response::PushTelemetryResponse,
+    },
+    opentelemetry_proto::tonic::metrics::v1::MetricsData,
+    prost::Message as _,
+    uuid::Uuid,
 };
-use opentelemetry_proto::tonic::metrics::v1::MetricsData;
-use prost::Message as _;
-use uuid::Uuid;
 
 mod prometheus;
 
@@ -20,12 +23,14 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::prometheus::flatten_for_prometheus;
-use crate::{
-    api_catalog::UnstableApiVersions,
-    client_metrics::manager::{PushCheck, PushDecision},
-    codes,
-    handlers::context::TelemetryContext,
+use {
+    self::prometheus::flatten_for_prometheus,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        client_metrics::manager::{PushCheck, PushDecision},
+        codes,
+        handlers::context::TelemetryContext,
+    },
 };
 
 /// Kafka's `CompressionType.forId`: the ids 0 to 4 and nothing else. The

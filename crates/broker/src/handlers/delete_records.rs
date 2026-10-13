@@ -53,20 +53,21 @@
 //! preamble. The response constructors live in `response`, the offset
 //! boundary decisions in `offsets`, and the break-glass gate in `gate`.
 
-use std::collections::HashSet;
-
-use krabka_audit::PrivilegedPhase;
-use krabka_log::Offset;
-use krabka_metadata::{AclOperation, BreakGlassAction, MetadataImage};
-use krabka_protocol::owned::{
-    delete_records_request::{DeleteRecordsPartition, DeleteRecordsRequest},
-    delete_records_response::{
-        DeleteRecordsPartitionResult, DeleteRecordsResponse, DeleteRecordsTopicResult,
+use {
+    krabka_audit::PrivilegedPhase,
+    krabka_log::Offset,
+    krabka_metadata::{AclOperation, BreakGlassAction, MetadataImage},
+    krabka_protocol::owned::{
+        delete_records_request::{DeleteRecordsPartition, DeleteRecordsRequest},
+        delete_records_response::{
+            DeleteRecordsPartitionResult, DeleteRecordsResponse, DeleteRecordsTopicResult,
+        },
     },
+    krabka_units::convert::TimeExt as _,
+    krabka_verified::{DeleteRecordsTrimDecision, FreezeMutationKind},
+    std::collections::HashSet,
+    uuid::Uuid,
 };
-use krabka_units::convert::TimeExt as _;
-use krabka_verified::{DeleteRecordsTrimDecision, FreezeMutationKind};
-use uuid::Uuid;
 
 mod gate;
 mod low_watermark;
@@ -78,22 +79,26 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    gate::{authorize_trim, consumed_proposal_id, refuse_trim, spend_approval, trim_target},
-    offsets::trim_decision,
-    response::{delete_records_response, error_partition_result, partition_result, topic_result},
-};
-use crate::{
-    break_glass::handlers::audit::{GatedTransition, audit_transition, require_transition},
-    broker::Broker,
-    codes,
-    diskless::read::DisklessReadHandle,
-    error::BrokerError,
-    freeze::resolve::{FreezeMutationResolution, FreezeVerdict, resolve_freeze_mutation},
-    handlers::{RequestContext, submit_failure_code},
-    internal_topics::is_internal_topic,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
+use {
+    self::{
+        gate::{authorize_trim, consumed_proposal_id, refuse_trim, spend_approval, trim_target},
+        offsets::trim_decision,
+        response::{
+            delete_records_response, error_partition_result, partition_result, topic_result,
+        },
+    },
+    crate::{
+        break_glass::handlers::audit::{GatedTransition, audit_transition, require_transition},
+        broker::Broker,
+        codes,
+        diskless::read::DisklessReadHandle,
+        error::BrokerError,
+        freeze::resolve::{FreezeMutationResolution, FreezeVerdict, resolve_freeze_mutation},
+        handlers::{RequestContext, submit_failure_code},
+        internal_topics::is_internal_topic,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+    },
 };
 
 context_handler! {

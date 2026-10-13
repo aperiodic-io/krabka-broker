@@ -1,5 +1,7 @@
-use super::*;
-use crate::{list_offsets::ListOffsetsSelectionDecision, timestamp::timestamp_record_time};
+use {
+    super::*,
+    crate::{list_offsets::ListOffsetsSelectionDecision, timestamp::timestamp_record_time},
+};
 
 proptest! {
     #[test]

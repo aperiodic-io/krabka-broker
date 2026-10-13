@@ -6,35 +6,37 @@
 //! `unregister_records` directly, where the break-glass decision is a pure
 //! function of the metadata image, the approver set, and the clock.
 
-use std::{net::SocketAddr, sync::Arc};
-
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_metadata::{
-    BreakGlassAction as GatedAction, BreakGlassProposalRecord, MetadataRecord,
-    UnregisterBrokerRecord,
-};
-use krabka_protocol::owned::unregister_broker_response::{self, UnregisterBrokerResponse};
-use krabka_security::Principal;
-use uuid::Uuid;
-
-use super::*;
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    break_glass::gate::tests::{approved_proposal, image_of},
-    broker::Broker,
-    config::BreakGlassConfig,
-    handlers::{
-        RequestContext,
-        test_support::{ReplicatedPartitionSetup, replicated_partition as partition_fixture},
+use {
+    super::*,
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        break_glass::gate::tests::{approved_proposal, image_of},
+        broker::Broker,
+        config::BreakGlassConfig,
+        handlers::{
+            RequestContext,
+            test_support::{ReplicatedPartitionSetup, replicated_partition as partition_fixture},
+        },
+        metrics::{
+            BreakGlassAction as MetricBreakGlassAction, BreakGlassActionLabel, BrokerMetrics,
+        },
+        test_support::{
+            DenyAll, PartitionCount, PartitionEpoch, broker_registration,
+            decode_response as test_decode_response, encode_request as test_encode_request, peer,
+            principal, request_context,
+            start_broker_with_authorizer_no_audit as start_authorizer_broker,
+        },
     },
-    metrics::{BreakGlassAction as MetricBreakGlassAction, BreakGlassActionLabel, BrokerMetrics},
-    test_support::{
-        DenyAll, PartitionCount, PartitionEpoch, broker_registration,
-        decode_response as test_decode_response, encode_request as test_encode_request, peer,
-        principal, request_context,
-        start_broker_with_authorizer_no_audit as start_authorizer_broker,
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_metadata::{
+        BreakGlassAction as GatedAction, BreakGlassProposalRecord, MetadataRecord,
+        UnregisterBrokerRecord,
     },
+    krabka_protocol::owned::unregister_broker_response::{self, UnregisterBrokerResponse},
+    krabka_security::Principal,
+    std::{net::SocketAddr, sync::Arc},
+    uuid::Uuid,
 };
 
 fn encode_request(req: &UnregisterBrokerRequest, version: i16) -> Bytes {
@@ -482,16 +484,15 @@ fn the_isr_departures_sit_between_the_consume_and_the_unregister_record() {
     let leave = MetadataRecord::V1Partition(follower_departure_partition());
 
     for (case, records, expected) in [
-        (
-            "gated",
-            vec![consumed.clone(), unregister.clone()],
-            vec![consumed, leave.clone(), unregister.clone()],
-        ),
-        (
-            "ungated",
-            vec![unregister.clone()],
-            vec![leave.clone(), unregister],
-        ),
+        ("gated", vec![consumed.clone(), unregister.clone()], vec![
+            consumed,
+            leave.clone(),
+            unregister.clone(),
+        ]),
+        ("ungated", vec![unregister.clone()], vec![
+            leave.clone(),
+            unregister,
+        ]),
     ] {
         check!(
             gate::with_leaves(records, vec![leave.clone()]) == expected,

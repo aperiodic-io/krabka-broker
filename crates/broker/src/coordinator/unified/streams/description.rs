@@ -110,9 +110,7 @@ impl TopologyDescriptionPlugin {
 
     /// Whether a plugin is configured: Kafka's `isPluginConfigured`.
     #[must_use]
-    pub fn is_configured(self) -> bool {
-        self != Self::None
-    }
+    pub fn is_configured(self) -> bool { self != Self::None }
 }
 
 /// The description that the in-memory plugin holds for one group, with the
@@ -125,9 +123,7 @@ pub struct StoredDescription {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// The in-memory class loads, surrounding blanks and all, as Kafka's
     /// `ConfigDef` trims a class name. Every other name, an empty one

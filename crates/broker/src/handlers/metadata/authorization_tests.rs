@@ -6,30 +6,30 @@
 //! each case asks about topics of its own, so a topic one case auto-creates is
 //! never missing in another.
 
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-};
-
-use assert2::assert;
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::{
-    owned::{
-        metadata_request::{MetadataRequest, MetadataRequestTopic},
-        metadata_response::{MetadataResponse, MetadataResponseTopic},
+use {
+    crate::{
+        authorizer::{AuthorizationResult, Authorizer},
+        broker::BrokerHandle,
+        codes,
+        handlers::{
+            acl_wire::CLUSTER_RESOURCE_NAME,
+            test_support::{CreateTopicSetup, configured_topic_request},
+        },
+        test_support::{dispatch_wire, peer, principal, start_broker_no_audit_with},
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    authorizer::{AuthorizationResult, Authorizer},
-    broker::BrokerHandle,
-    codes,
-    handlers::{
-        acl_wire::CLUSTER_RESOURCE_NAME,
-        test_support::{CreateTopicSetup, configured_topic_request},
+    assert2::assert,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::{
+        owned::{
+            metadata_request::{MetadataRequest, MetadataRequestTopic},
+            metadata_response::{MetadataResponse, MetadataResponseTopic},
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    test_support::{dispatch_wire, peer, principal, start_broker_no_audit_with},
+    std::{
+        collections::HashSet,
+        sync::{Arc, Mutex},
+    },
 };
 
 /// The principal whose grants each case sets.
@@ -209,8 +209,10 @@ struct Case {
 
 /// The cases of [`topic_rows_follow_kafka_authorization_and_auto_creation`].
 fn topic_row_cases() -> Vec<Case> {
-    use AclOperation::{Create, Describe};
-    use Expect::{Existing, Row};
+    use {
+        AclOperation::{Create, Describe},
+        Expect::{Existing, Row},
+    };
     vec![
         Case {
             name: "cluster Create auto-creates a missing topic and answers 3",
@@ -468,13 +470,10 @@ async fn an_empty_version_0_request_asks_for_every_topic() {
         .grants
         .set(&[topic(EXISTING, AclOperation::Describe)]);
     let response = fixture
-        .metadata(
-            0,
-            &MetadataRequest {
-                topics: Some(Vec::new()),
-                ..Default::default()
-            },
-        )
+        .metadata(0, &MetadataRequest {
+            topics: Some(Vec::new()),
+            ..Default::default()
+        })
         .await;
     assert!(response.topics == vec![existing]);
 
@@ -496,9 +495,10 @@ async fn an_empty_version_0_request_asks_for_every_topic() {
 /// names is a refusal and is counted.
 #[tokio::test]
 async fn quiet_probes_leave_no_denial_behind_and_a_named_refusal_does() {
-    use AclOperation::{Alter, Create, Describe};
-
-    use crate::metrics::AuthorizationDeniedLabel;
+    use {
+        crate::metrics::AuthorizationDeniedLabel,
+        AclOperation::{Alter, Create, Describe},
+    };
 
     let fixture = start(true).await;
     let shared = fixture.broker.broker_arc_for_test();

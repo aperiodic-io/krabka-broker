@@ -7,17 +7,39 @@
 //! properties, and the boundary that keeps the search finite. The module doc
 //! of [`cross_spend_model`](super) says what each property is worth.
 
-use stateright::{Model, Property};
-
-use super::{
-    transitions::CrossSpendModel,
-    universe::{EXPIRES_AT, PROPOSALS, ProposalState, Step, Universe},
+use {
+    super::{
+        transitions::CrossSpendModel,
+        universe::{EXPIRES_AT, PROPOSALS, ProposalState, Step, Universe},
+    },
+    crate::break_glass::state_model::distinct,
+    stateright::{Model, Property},
 };
-use crate::break_glass::state_model::distinct;
 
 impl Model for CrossSpendModel {
-    type State = Universe;
     type Action = Step;
+    type State = Universe;
+
+    krabka_macros::model_transition!(last, action, state; {
+            match action {
+                Step::Approve(index, principal) => self.settle(&mut state, index, principal, false),
+                Step::Withdraw(index, principal) => self.settle(&mut state, index, principal, true),
+                Step::Expire => state.now_ms = (state.now_ms + 1).min(EXPIRES_AT),
+                Step::Consume(request) => self.consume(&mut state, request),
+            }
+            // Headline safety, per transition, so a counterexample names the step
+            // that broke it rather than surfacing at the end of the run.
+            assert2::assert!(
+                !state.cross_spent,
+                "a proposal was spent on a request it does not cover after {action:?}: {state:?}"
+            );
+            assert2::assert!(
+                state.spends.iter().all(|spent| *spent <= 1),
+                "a proposal was spent twice after {action:?}: {state:?}"
+            );
+            Some(state)
+
+    });
 
     fn init_states(&self) -> Vec<Self::State> {
         vec![Universe {
@@ -48,27 +70,6 @@ impl Model for CrossSpendModel {
             actions.push(Step::Consume(request));
         }
     }
-
-    krabka_macros::model_transition!(last, action, state; {
-            match action {
-                Step::Approve(index, principal) => self.settle(&mut state, index, principal, false),
-                Step::Withdraw(index, principal) => self.settle(&mut state, index, principal, true),
-                Step::Expire => state.now_ms = (state.now_ms + 1).min(EXPIRES_AT),
-                Step::Consume(request) => self.consume(&mut state, request),
-            }
-            // Headline safety, per transition, so a counterexample names the step
-            // that broke it rather than surfacing at the end of the run.
-            assert2::assert!(
-                !state.cross_spent,
-                "a proposal was spent on a request it does not cover after {action:?}: {state:?}"
-            );
-            assert2::assert!(
-                state.spends.iter().all(|spent| *spent <= 1),
-                "a proposal was spent twice after {action:?}: {state:?}"
-            );
-            Some(state)
-
-    });
 
     fn properties(&self) -> Vec<Property<Self>> {
         vec![

@@ -6,12 +6,13 @@
 //! `Option<krabka_units::Time>`. Only the `#[serde(...)]` arguments go through
 //! moxy's [`Meta`] parser.
 
-use moxy::{
-    ast::{List, Meta, ParseError, Parser},
-    token::{Group, TokenStream, TokenTree},
+use {
+    crate::meta::{compact, named_body},
+    moxy::{
+        ast::{List, Meta, ParseError, Parser},
+        token::{Group, TokenStream, TokenTree},
+    },
 };
-
-use crate::meta::{compact, named_body};
 
 /// A `krabka_units` value type that a config file writes as a human string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,9 +55,7 @@ impl Unit {
 }
 
 /// The last `::` segment of a path written without whitespace.
-fn last_segment(path: &str) -> &str {
-    path.rsplit("::").next().unwrap_or(path)
-}
+fn last_segment(path: &str) -> &str { path.rsplit("::").next().unwrap_or(path) }
 
 /// The unit of a type written `Option<Time>`, `Option<ByteSize>` or
 /// `Option<Ratio>` under any path prefix. `ty` carries no whitespace.
@@ -184,11 +183,12 @@ pub(crate) fn expand(meta: TokenStream, item: TokenStream) -> Result<TokenStream
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use moxy::token::TokenStream;
-
-    use super::{Unit, expand, option_unit};
-    use crate::meta::compact;
+    use {
+        super::{Unit, expand, option_unit},
+        crate::meta::compact,
+        assert2::assert,
+        moxy::token::TokenStream,
+    };
 
     #[test]
     fn option_unit_matches_the_last_segment() {

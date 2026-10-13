@@ -4,12 +4,13 @@
 //! provider install, the kTLS probe, and the dialer construction stay in one
 //! place instead of at the head of the startup sequence.
 
-use std::sync::Arc;
-
-use crate::{
-    config::BrokerConfig,
-    error::BrokerError,
-    network::{client::InterBrokerClient, ktls_probe::probe_ktls_support},
+use {
+    crate::{
+        config::BrokerConfig,
+        error::BrokerError,
+        network::{client::InterBrokerClient, ktls_probe::probe_ktls_support},
+    },
+    std::sync::Arc,
 };
 
 pub(super) struct StartupTransport {

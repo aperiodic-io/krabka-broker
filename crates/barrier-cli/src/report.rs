@@ -191,9 +191,7 @@ fn status_name(status: i8) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn a_status_code_reads_as_a_word() {

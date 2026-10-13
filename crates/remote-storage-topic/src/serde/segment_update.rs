@@ -8,17 +8,18 @@
 //! generated types from the ones apiKey 0 uses, which is why the conversions
 //! are not shared with `segment_metadata`.
 
-use krabka_protocol::owned::remote_log_segment_metadata_update_record::{
-    RemoteLogSegmentIdEntry as SegIdEntryUpd, RemoteLogSegmentMetadataUpdateRecord,
-    TopicIdPartitionEntry as TpEntryUpd,
+use {
+    super::primitives::{
+        bytes_to_custom_metadata, custom_metadata_to_bytes, domain_uuid_to_proto,
+        i8_to_segment_state, proto_uuid_to_domain, segment_state_to_i8,
+    },
+    crate::error::CodecError,
+    krabka_protocol::owned::remote_log_segment_metadata_update_record::{
+        RemoteLogSegmentIdEntry as SegIdEntryUpd, RemoteLogSegmentMetadataUpdateRecord,
+        TopicIdPartitionEntry as TpEntryUpd,
+    },
+    krabka_remote_storage::{RemoteLogSegmentId, RemoteLogSegmentMetadataUpdate, TopicIdPartition},
 };
-use krabka_remote_storage::{RemoteLogSegmentId, RemoteLogSegmentMetadataUpdate, TopicIdPartition};
-
-use super::primitives::{
-    bytes_to_custom_metadata, custom_metadata_to_bytes, domain_uuid_to_proto, i8_to_segment_state,
-    proto_uuid_to_domain, segment_state_to_i8,
-};
-use crate::error::CodecError;
 
 fn tp_to_proto_upd(tp: &TopicIdPartition) -> TpEntryUpd {
     TpEntryUpd {

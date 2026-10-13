@@ -5,8 +5,10 @@
 //! block and nothing else. Each method carries the tracing span for the
 //! operation and hands the work to the inherent method that implements it.
 
-use super::S3RemoteStorage;
-use crate::storage_manager::{RemoteStorageManager, remote_operation};
+use {
+    super::S3RemoteStorage,
+    crate::storage_manager::{RemoteStorageManager, remote_operation},
+};
 
 impl RemoteStorageManager for S3RemoteStorage {
     remote_operation! {

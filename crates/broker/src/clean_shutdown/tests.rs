@@ -1,13 +1,15 @@
 //! The clean-shutdown proof: what a graceful stop leaves, what a crash leaves,
 //! and how a controller reads either one.
 
-use assert2::assert;
-use krabka_metadata::{BrokerRegistrationRecord, MetadataImage, MetadataRecord, NodeId};
-
-use super::{
-    FILE_NAME, FORMAT_VERSION, ProofError, UNPROVEN, decode, encode, restart_was_clean, take, write,
+use {
+    super::{
+        FILE_NAME, FORMAT_VERSION, ProofError, UNPROVEN, decode, encode, restart_was_clean, take,
+        write,
+    },
+    crate::test_support::broker_registration,
+    assert2::assert,
+    krabka_metadata::{BrokerRegistrationRecord, MetadataImage, MetadataRecord, NodeId},
 };
-use crate::test_support::broker_registration;
 
 const NODE: NodeId = NodeId(2);
 

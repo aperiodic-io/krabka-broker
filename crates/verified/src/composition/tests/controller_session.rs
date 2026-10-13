@@ -1,5 +1,7 @@
-use super::*;
-use crate::{authz::controller_request_admission, jwks::JwksCacheFacts, oauth::*};
+use {
+    super::*,
+    crate::{authz::controller_request_admission, jwks::JwksCacheFacts, oauth::*},
+};
 
 type Trace = (Option<i64>, Vec<bool>, (u64, u64));
 

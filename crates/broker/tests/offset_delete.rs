@@ -6,33 +6,37 @@
 //! unconditional, and this file uses only `support::start`, which is
 //! cross-platform, so it needs no platform gate.
 
-use assert2::{assert, check};
-
-use crate::support::{
-    classic::{
-        ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol, required_member_id,
+use {
+    crate::support::{
+        classic::{
+            ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol,
+            required_member_id,
+        },
+        client::create_topic as create_support_topic,
+        offsets::{
+            offset_commit_partition, offset_commit_topic, offset_delete_partition,
+            offset_delete_request, offset_delete_topic, offset_fetch_group, offset_fetch_request,
+            offset_fetch_topic,
+        },
     },
-    client::create_topic as create_support_topic,
-    offsets::{
-        offset_commit_partition, offset_commit_topic, offset_delete_partition,
-        offset_delete_request, offset_delete_topic, offset_fetch_group, offset_fetch_request,
-        offset_fetch_topic,
-    },
+    assert2::{assert, check},
 };
 mod support;
 
-use bytes::BufMut;
-use krabka_protocol::{
-    Encode,
-    owned::{
-        consumer_protocol_subscription::ConsumerProtocolSubscription,
-        offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
-        offset_delete_response::{
-            OffsetDeleteResponse, OffsetDeleteResponsePartition, OffsetDeleteResponseTopic,
+use {
+    bytes::BufMut,
+    krabka_protocol::{
+        Encode,
+        owned::{
+            consumer_protocol_subscription::ConsumerProtocolSubscription,
+            offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
+            offset_delete_response::{
+                OffsetDeleteResponse, OffsetDeleteResponsePartition, OffsetDeleteResponseTopic,
+            },
         },
     },
+    support::topic_id_for,
 };
-use support::topic_id_for;
 
 const OFFSET_ABSENT_SENTINEL: i64 = -1; // OffsetFetch returns -1 when no offset is committed.
 
@@ -56,14 +60,12 @@ async fn commit_offset(p: &support::InProcess, group: &str, topic: &str, partiti
             group_id: group.into(),
             generation_id_or_member_epoch: -1,
             member_id: String::new(),
-            topics: vec![offset_commit_topic(
-                topic,
-                id,
-                vec![OffsetCommitRequestPartition {
+            topics: vec![offset_commit_topic(topic, id, vec![
+                OffsetCommitRequestPartition {
                     committed_leader_epoch: -1,
                     ..offset_commit_partition(partition, off, Some(String::new()))
-                }],
-            )],
+                },
+            ])],
             ..Default::default()
         })
         .await
@@ -100,10 +102,10 @@ async fn delete_offsets_from_empty_group_round_trip() {
     // Group is Empty (no JoinGroup), delete should succeed.
     let resp = p
         .client
-        .send(offset_delete_request(
-            "g1",
-            vec![offset_delete_topic("t1", vec![offset_delete_partition(0)])],
-        ))
+        .send(offset_delete_request("g1", vec![offset_delete_topic(
+            "t1",
+            vec![offset_delete_partition(0)],
+        )]))
         .await
         .expect("OffsetDelete");
     check!(resp.error_code == 0, "top-level NONE");
@@ -136,10 +138,10 @@ async fn delete_offsets_unknown_group_returns_group_id_not_found() {
 
     let resp = p
         .client
-        .send(offset_delete_request(
-            "ghost",
-            vec![offset_delete_topic("t2", vec![offset_delete_partition(0)])],
-        ))
+        .send(offset_delete_request("ghost", vec![offset_delete_topic(
+            "t2",
+            vec![offset_delete_partition(0)],
+        )]))
         .await
         .expect("OffsetDelete");
     // A group-level refusal carries only the top-level code (#734).
@@ -165,13 +167,10 @@ async fn delete_offsets_missing_topic_returns_unknown_topic_or_partition() {
 
     let resp = p
         .client
-        .send(offset_delete_request(
-            "g3",
-            vec![offset_delete_topic(
-                "nonexistent",
-                vec![offset_delete_partition(0)],
-            )],
-        ))
+        .send(offset_delete_request("g3", vec![offset_delete_topic(
+            "nonexistent",
+            vec![offset_delete_partition(0)],
+        )]))
         .await
         .expect("OffsetDelete");
     assert!(resp.error_code == 0, "top-level NONE");
@@ -194,13 +193,10 @@ async fn delete_offsets_partition_out_of_range_returns_unknown_topic_or_partitio
 
     let resp = p
         .client
-        .send(offset_delete_request(
-            "g4",
-            vec![offset_delete_topic(
-                "t4",
-                vec![offset_delete_partition(0), offset_delete_partition(99)],
-            )],
-        ))
+        .send(offset_delete_request("g4", vec![offset_delete_topic(
+            "t4",
+            vec![offset_delete_partition(0), offset_delete_partition(99)],
+        )]))
         .await
         .expect("OffsetDelete");
     // Kafka's broker answers p=99 before the coordinator answers p=0, and
@@ -286,10 +282,10 @@ async fn delete_offsets_for_subscribed_topic_returns_group_subscribed() {
     // OffsetDelete on the subscribed topic → GROUP_SUBSCRIBED_TO_TOPIC.
     let resp = p
         .client
-        .send(offset_delete_request(
-            "g5",
-            vec![offset_delete_topic("t5", vec![offset_delete_partition(0)])],
-        ))
+        .send(offset_delete_request("g5", vec![offset_delete_topic(
+            "t5",
+            vec![offset_delete_partition(0)],
+        )]))
         .await
         .expect("OffsetDelete");
     check!(resp.error_code == 0, "top-level NONE");

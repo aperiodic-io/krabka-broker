@@ -5,9 +5,10 @@
 //! produce that the validator accepted: the first one pays a registry round
 //! trip and the second is served from the cache.
 
-use assert2::check;
-
-use crate::harness::{KNOWN_ID, VALIDATED, check_value_append, framed, mock_topic_fixture};
+use {
+    crate::harness::{KNOWN_ID, VALIDATED, check_value_append, framed, mock_topic_fixture},
+    assert2::check,
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_record_framed_with_a_bound_schema_id_is_accepted() {

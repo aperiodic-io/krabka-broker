@@ -12,38 +12,38 @@
 //! follower that answered from it reported only the producers whose
 //! transaction markers it had replicated.
 
-use std::{net::SocketAddr, time::Duration};
-
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_broker::{BrokerConfig, BrokerHandle, codes};
-use krabka_client_core::{Connection, ConnectionOptions};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        describe_producers_request::{DescribeProducersRequest, TopicRequest},
-        describe_producers_response::{
-            DescribeProducersResponse, PartitionResponse, ProducerState, TopicResponse,
+use {
+    crate::{
+        cluster_lock,
+        support::{
+            client::connect_with_context,
+            produce::{SinglePartitionProduceSetup, batch_request},
+            shutdown_cluster,
+            topics::CreateTopicRequestSetup,
+            transactions::{ProducerIdentity, TransactionOutcome},
+            {self},
         },
-        produce_request::ProduceRequest,
-        produce_response::ProduceResponse,
-        write_txn_markers_request::WriteTxnMarkersRequest,
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-use tempfile::TempDir;
-
-use crate::{
-    cluster_lock,
-    support::{
-        client::connect_with_context,
-        produce::{SinglePartitionProduceSetup, batch_request},
-        shutdown_cluster,
-        topics::CreateTopicRequestSetup,
-        transactions::{ProducerIdentity, TransactionOutcome},
-        {self},
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_broker::{BrokerConfig, BrokerHandle, codes},
+    krabka_client_core::{Connection, ConnectionOptions},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            describe_producers_request::{DescribeProducersRequest, TopicRequest},
+            describe_producers_response::{
+                DescribeProducersResponse, PartitionResponse, ProducerState, TopicResponse,
+            },
+            produce_request::ProduceRequest,
+            produce_response::ProduceResponse,
+            write_txn_markers_request::WriteTxnMarkersRequest,
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
     },
+    std::{net::SocketAddr, time::Duration},
+    tempfile::TempDir,
 };
 
 type Cluster = Vec<(BrokerHandle, BrokerConfig, TempDir)>;
@@ -84,13 +84,10 @@ use crate::support::records::now_ms;
 /// One connection to the broker that binds `address`, so that a request
 /// reaches that broker and no other.
 async fn connect(address: SocketAddr) -> Connection {
-    Connection::connect(
-        address,
-        ConnectionOptions {
-            client_id: "describe-producers-replicas".to_owned(),
-            ..ConnectionOptions::default()
-        },
-    )
+    Connection::connect(address, ConnectionOptions {
+        client_id: "describe-producers-replicas".to_owned(),
+        ..ConnectionOptions::default()
+    })
     .await
     .expect("connect")
 }
@@ -131,14 +128,11 @@ fn produce_request(
 ) -> ProduceRequest {
     ProduceRequest {
         transactional_id: transactional_id.map(Into::into),
-        ..batch_request(
-            batch,
-            SinglePartitionProduceSetup {
-                topic: (TOPIC).into(),
-                topic_id,
-                ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
-            },
-        )
+        ..batch_request(batch, SinglePartitionProduceSetup {
+            topic: (TOPIC).into(),
+            topic_id,
+            ..SinglePartitionProduceSetup::replicated_with_thirty_second_timeout()
+        })
     }
 }
 

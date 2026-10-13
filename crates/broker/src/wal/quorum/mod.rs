@@ -21,19 +21,6 @@ mod recovery_tests;
 #[cfg(test)]
 mod test_support;
 
-use std::sync::{Arc, Mutex};
-
-use async_trait::async_trait;
-use krabka_ids::{Offset, PartitionIndex};
-#[cfg(test)]
-use krabka_kraft_core::NodeId;
-use krabka_log::Log;
-#[cfg(test)]
-use krabka_log::LogConfig;
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-use uuid::Uuid;
-
-use self::engine::WalShardEngine;
 pub(crate) use self::shard_dirs::{
     ShardRemoval, prune_orphaned_shard_dirs, remove_shard, shard_dir,
 };
@@ -42,8 +29,21 @@ use self::{
     engine::OpenMode,
     membership::{load_or_prepare_quorum_membership, persist_quorum_membership},
 };
-use super::WalStore;
-use crate::{diskless::hot_tail::HotTailCache, error::BrokerError};
+#[cfg(test)]
+use krabka_kraft_core::NodeId;
+#[cfg(test)]
+use krabka_log::LogConfig;
+use {
+    self::engine::WalShardEngine,
+    super::WalStore,
+    crate::{diskless::hot_tail::HotTailCache, error::BrokerError},
+    async_trait::async_trait,
+    krabka_ids::{Offset, PartitionIndex},
+    krabka_log::Log,
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::sync::{Arc, Mutex},
+    uuid::Uuid,
+};
 
 /// A [`WalStore`] backed by a quorum of durable WAL replica logs.
 #[derive(Debug, Clone)]
@@ -144,9 +144,7 @@ impl QuorumWalStore {
         })
     }
 
-    pub(crate) fn engine(&self) -> Arc<WalShardEngine> {
-        self.engine.clone()
-    }
+    pub(crate) fn engine(&self) -> Arc<WalShardEngine> { self.engine.clone() }
 }
 
 #[cfg(test)]

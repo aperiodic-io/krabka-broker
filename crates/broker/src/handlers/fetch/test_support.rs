@@ -1,17 +1,18 @@
 //! Fetch wire fixtures shared by version and replica-role tests.
 
-use assert2::assert;
-use krabka_ids::{ApiVersion, Offset, PartitionIndex};
-use krabka_protocol::{
-    Decode,
-    owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
-};
-
-use crate::{
-    broker::BrokerHandle,
-    codes::NONE,
-    fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
-    test_support::{KafkaErrorCode, encode_request},
+use {
+    crate::{
+        broker::BrokerHandle,
+        codes::NONE,
+        fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
+        test_support::{KafkaErrorCode, encode_request},
+    },
+    assert2::assert,
+    krabka_ids::{ApiVersion, Offset, PartitionIndex},
+    krabka_protocol::{
+        Decode,
+        owned::{fetch_request::FetchRequest, fetch_response::FetchResponse},
+    },
 };
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -27,9 +28,7 @@ pub(super) struct FetchWireSetup<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct FetchReplicaId(pub i32);
 impl Default for FetchReplicaId {
-    fn default() -> Self {
-        Self(-1)
-    }
+    fn default() -> Self { Self(-1) }
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -60,13 +59,10 @@ pub(super) fn sessionless_request(setup: SessionlessFetchSetup) -> FetchRequest 
     let version = setup.version.0;
     let replica_id = setup.replica.0;
     let (replica_id, replica_state) = if version >= 15 {
-        (
-            -1,
-            ReplicaState {
-                replica_id,
-                ..Default::default()
-            },
-        )
+        (-1, ReplicaState {
+            replica_id,
+            ..Default::default()
+        })
     } else {
         (replica_id, ReplicaState::default())
     };

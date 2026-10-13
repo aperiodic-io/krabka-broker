@@ -8,23 +8,23 @@
 //! Kafka has no broker isolation key, so each test sets the group override,
 //! and a group without one reads `read_uncommitted`.
 
-use std::{collections::BTreeSet, time::Duration};
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-use krabka_client_producer::Producer;
-use krabka_metadata::{GroupConfigRecord, MetadataRecord};
-
-use crate::{
-    harness::{bootstrap_share_state, produce_n},
-    share_rpc::{acquired_count, fetch_empty, share_fetch},
-    support::{
-        producer::{ProducerRecordSetup, producer_record, transactional_producer},
-        share::{
-            ShareFetchSetup, ShareRecordsSetup, ShareSessionEpoch, ShareTopicSetup,
-            join_consume_member, permitted_topic_fixture, record_values,
+use {
+    crate::{
+        harness::{bootstrap_share_state, produce_n},
+        share_rpc::{acquired_count, fetch_empty, share_fetch},
+        support::{
+            producer::{ProducerRecordSetup, producer_record, transactional_producer},
+            share::{
+                ShareFetchSetup, ShareRecordsSetup, ShareSessionEpoch, ShareTopicSetup,
+                join_consume_member, permitted_topic_fixture, record_values,
+            },
         },
     },
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    krabka_client_producer::Producer,
+    krabka_metadata::{GroupConfigRecord, MetadataRecord},
+    std::{collections::BTreeSet, time::Duration},
 };
 
 /// Kafka's `GroupConfig.SHARE_ISOLATION_LEVEL_CONFIG` values.
@@ -227,13 +227,10 @@ async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) ->
     } else {
         txn.abort().await.unwrap();
     }
-    produce_n(
-        &client,
-        ShareRecordsSetup {
-            topic_id: tid,
-            ..Default::default()
-        },
-    )
+    produce_n(&client, ShareRecordsSetup {
+        topic_id: tid,
+        ..Default::default()
+    })
     .await;
 
     let (member, _member_epoch) = join_consume_member(&broker, &client, tid).await;

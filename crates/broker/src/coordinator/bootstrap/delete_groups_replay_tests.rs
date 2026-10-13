@@ -7,29 +7,29 @@
 //! batch. These tests delete a replayed group, append the delete batch to the
 //! same log, and replay the log into a new coordinator.
 
-use std::sync::Arc;
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_log::{Offset, ProducerId};
-use krabka_protocol::records::Record;
-
-use super::replay::{finalize, replay_records};
-use crate::{
-    coordinator::{
-        persistence::{GroupMetadataValue, Key},
-        test_support::{
-            DeletionTarget, DeletionTombstonesSetup, OffsetRecordSetup,
-            TopicDeletionTombstonesSetup, default_coordinator, deletion_tombstones, offset_record,
-            parsed_offset_records, replay_offset_batch as batch, temp_log,
-            topic_deletion_tombstones,
+use {
+    super::replay::{finalize, replay_records},
+    crate::{
+        coordinator::{
+            persistence::{GroupMetadataValue, Key},
+            test_support::{
+                DeletionTarget, DeletionTombstonesSetup, OffsetRecordSetup,
+                TopicDeletionTombstonesSetup, default_coordinator, deletion_tombstones,
+                offset_record, parsed_offset_records, replay_offset_batch as batch, temp_log,
+                topic_deletion_tombstones,
+            },
+            unified::{
+                GroupCoordinator, actor::test_support::empty_metadata,
+                offsets_log::fake::InMemoryOffsetsLog,
+            },
         },
-        unified::{
-            GroupCoordinator, actor::test_support::empty_metadata,
-            offsets_log::fake::InMemoryOffsetsLog,
-        },
+        txn::marker::{MarkerType, build_marker_batch},
     },
-    txn::marker::{MarkerType, build_marker_batch},
+    assert2::check,
+    bytes::Bytes,
+    krabka_log::{Offset, ProducerId},
+    krabka_protocol::records::Record,
+    std::sync::Arc,
 };
 
 fn coordinator(log: Arc<InMemoryOffsetsLog>) -> Arc<GroupCoordinator> {
@@ -120,14 +120,11 @@ async fn a_deleted_group_and_its_offsets_stay_deleted_after_replay() {
             leader: None,
             ..GroupMetadataValue::decode_value(&group_value).unwrap()
         };
-        log.append(&mut batch(
-            None,
-            vec![Record {
-                key: Some(group_key),
-                value: Some(empty_group.encode_value().unwrap()),
-                ..Default::default()
-            }],
-        ))
+        log.append(&mut batch(None, vec![Record {
+            key: Some(group_key),
+            value: Some(empty_group.encode_value().unwrap()),
+            ..Default::default()
+        }]))
         .unwrap();
         if !row.committed.is_empty() {
             log.append(&mut batch(None, row.committed)).unwrap();

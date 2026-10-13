@@ -93,8 +93,10 @@ fn identity_wildcards_match_kafka_scenarios() {
 /// requested topic `orders`.
 #[test]
 fn resource_patterns_match_kafka_scenarios() {
-    use AclPatternKind::{Literal, Prefixed};
-    use AclResourceTypeMatch::{Different, Same};
+    use {
+        AclPatternKind::{Literal, Prefixed},
+        AclResourceTypeMatch::{Different, Same},
+    };
 
     let topic = |exact_name, wildcard_name, name_has_prefix| AclResourceFacts {
         resource_type: Same,

@@ -15,25 +15,25 @@
 //! uniqueness of each `(member, topic, partition)` coordinate, not consumer-
 //! group-style cross-member exclusivity.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::{Duration, Instant},
-};
-
-use krabka_protocol::primitives::uuid::Uuid;
-use stateright::{Checker, Model};
-
-use super::{
-    assignment::reconcile,
-    seed::{apply_seed, snapshot_seed},
-};
-use crate::{
-    coordinator::unified::{
-        actor::{MetadataProvider, reconciliation_model_support::model_properties},
-        reconciler::ReconcileInput,
-        share::state::{ShareGroupState, ShareMemberState},
+use {
+    super::{
+        assignment::reconcile,
+        seed::{apply_seed, snapshot_seed},
     },
-    model_check::run_bfs,
+    crate::{
+        coordinator::unified::{
+            actor::{MetadataProvider, reconciliation_model_support::model_properties},
+            reconciler::ReconcileInput,
+            share::state::{ShareGroupState, ShareMemberState},
+        },
+        model_check::run_bfs,
+    },
+    krabka_protocol::primitives::uuid::Uuid,
+    stateright::{Checker, Model},
+    std::{
+        collections::{HashMap, HashSet},
+        time::{Duration, Instant},
+    },
 };
 
 const TOPIC: Uuid = Uuid([42; 16]);
@@ -172,9 +172,7 @@ fn initialize(group: &mut ShareGroupState, partitions: i32) {
     group.topic_names.insert(TOPIC, TOPIC_NAME.to_owned());
 }
 
-fn metadata(partitions: i32) -> ModelMetadata {
-    ModelMetadata { partitions }
-}
+fn metadata(partitions: i32) -> ModelMetadata { ModelMetadata { partitions } }
 
 fn at(state: &State) -> Instant {
     state
@@ -293,54 +291,8 @@ macro_rules! reconcile_group_and_member {
 }
 
 impl Model for ShareModel {
-    type State = State;
     type Action = Action;
-
-    fn init_states(&self) -> Vec<Self::State> {
-        let mut group = ShareGroupState::new("g");
-        initialize(&mut group, 1);
-        vec![State {
-            group,
-            origin: Instant::now(),
-            clock: 0,
-            partitions: 1,
-            witnesses: 0,
-        }]
-    }
-
-    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
-        if state.group.group_epoch < MAX_EPOCH {
-            for member_id in ["a", "b"] {
-                if !state.group.members.contains_key(member_id) {
-                    actions.push(Action::Join(member_id));
-                }
-            }
-        }
-        for member_id in ["a", "b"] {
-            if state.group.members.contains_key(member_id) {
-                for epoch in [EpochKind::Current, EpochKind::Stale, EpochKind::Forward] {
-                    actions.push(Action::Heartbeat(member_id, epoch));
-                }
-                if state.group.group_epoch < MAX_EPOCH {
-                    actions.push(Action::Leave(member_id));
-                    for partitions in [1, 2] {
-                        if partitions != state.partitions {
-                            actions.push(Action::MetadataHeartbeat(member_id, partitions));
-                        }
-                    }
-                }
-            }
-        }
-        if state.clock < MAX_CLOCK && state.group.group_epoch < MAX_EPOCH {
-            actions.push(Action::TimeoutTick);
-        }
-        if state.witnesses & WITNESS_REPLAY == 0 {
-            actions.push(Action::Replay);
-        }
-        if state.witnesses & WITNESS_UNKNOWN == 0 {
-            actions.push(Action::UnknownHeartbeat);
-        }
-    }
+    type State = State;
 
     krabka_macros::model_transition! { last, action, state; {
         match action {
@@ -455,6 +407,52 @@ impl Model for ShareModel {
         sometimes "state_replayed" => |state| state.witnesses & WITNESS_REPLAY != 0,
         sometimes "unknown_member_rejected" => |state| state.witnesses & WITNESS_UNKNOWN != 0,
         sometimes "two_members_joined" => |state| state.group.members.len() == 2,
+    }
+
+    fn init_states(&self) -> Vec<Self::State> {
+        let mut group = ShareGroupState::new("g");
+        initialize(&mut group, 1);
+        vec![State {
+            group,
+            origin: Instant::now(),
+            clock: 0,
+            partitions: 1,
+            witnesses: 0,
+        }]
+    }
+
+    fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
+        if state.group.group_epoch < MAX_EPOCH {
+            for member_id in ["a", "b"] {
+                if !state.group.members.contains_key(member_id) {
+                    actions.push(Action::Join(member_id));
+                }
+            }
+        }
+        for member_id in ["a", "b"] {
+            if state.group.members.contains_key(member_id) {
+                for epoch in [EpochKind::Current, EpochKind::Stale, EpochKind::Forward] {
+                    actions.push(Action::Heartbeat(member_id, epoch));
+                }
+                if state.group.group_epoch < MAX_EPOCH {
+                    actions.push(Action::Leave(member_id));
+                    for partitions in [1, 2] {
+                        if partitions != state.partitions {
+                            actions.push(Action::MetadataHeartbeat(member_id, partitions));
+                        }
+                    }
+                }
+            }
+        }
+        if state.clock < MAX_CLOCK && state.group.group_epoch < MAX_EPOCH {
+            actions.push(Action::TimeoutTick);
+        }
+        if state.witnesses & WITNESS_REPLAY == 0 {
+            actions.push(Action::Replay);
+        }
+        if state.witnesses & WITNESS_UNKNOWN == 0 {
+            actions.push(Action::UnknownHeartbeat);
+        }
     }
 
     fn within_boundary(&self, state: &Self::State) -> bool {

@@ -40,30 +40,30 @@
 //! frozen topic is what a migration wants. Both retention passes stop, on
 //! every replica, because each one removes data from the topic's log.
 
-use std::sync::{Arc, atomic::Ordering};
-
-use futures_util::future::join_all;
-use krabka_metadata::NodeId;
-use krabka_remote_storage::{RemoteLogMetadataManager, RemoteStorageManager, TopicIdPartition};
-use krabka_units::{
-    ByteSize, Time, bytes,
-    convert::{ByteSizeExt as _, TimeExt as _},
-    secs,
-};
-use krabka_verified::FreezeMutationKind;
-use tokio::sync::{Semaphore, SemaphorePermit};
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
-
-use crate::{
-    api_catalog::UnstableApiVersions,
-    config_keys::resolve_remote_copy_lag,
-    freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    time_util::now_ms,
+use {
+    crate::{
+        api_catalog::UnstableApiVersions,
+        config_keys::resolve_remote_copy_lag,
+        freeze::resolve::{FreezeMutationResolution, resolve_freeze_mutation},
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        time_util::now_ms,
+    },
+    futures_util::future::join_all,
+    krabka_metadata::NodeId,
+    krabka_remote_storage::{RemoteLogMetadataManager, RemoteStorageManager, TopicIdPartition},
+    krabka_units::{
+        ByteSize, Time, bytes,
+        convert::{ByteSizeExt as _, TimeExt as _},
+        secs,
+    },
+    krabka_verified::FreezeMutationKind,
+    std::sync::{Arc, atomic::Ordering},
+    tokio::sync::{Semaphore, SemaphorePermit},
+    tokio_util::sync::CancellationToken,
+    tracing::{debug, warn},
 };
 
 mod archive;
@@ -646,24 +646,26 @@ pub(crate) use copy_segment::{ProducerSnapshotExport, export_epoch_map, export_s
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::{assert, check};
-    use fixtures::{local_backends, partition_log, partition_log_fixture, sweep_counts};
-    use krabka_ids::PartitionIndex;
-    use krabka_log::{LogConfig, Offset};
-    use krabka_metadata::{MetadataImage, MetadataRecord};
-    use krabka_remote_storage::RemoteLogSegmentState;
-    use krabka_units::millis;
-
-    use super::{
-        test_support::{fixed_source, rolled_tiered_partition_with_config, tier, tp},
-        *,
-    };
-    use crate::{
-        api_catalog::UnstableApiVersions,
-        metadata_source::MetadataSource,
-        remote_log_manager::{local_retention::finished_segment_ranges, test_support as fixtures},
+    use {
+        super::{
+            test_support::{fixed_source, rolled_tiered_partition_with_config, tier, tp},
+            *,
+        },
+        crate::{
+            api_catalog::UnstableApiVersions,
+            metadata_source::MetadataSource,
+            remote_log_manager::{
+                local_retention::finished_segment_ranges, test_support as fixtures,
+            },
+        },
+        assert2::{assert, check},
+        fixtures::{local_backends, partition_log, partition_log_fixture, sweep_counts},
+        krabka_ids::PartitionIndex,
+        krabka_log::{LogConfig, Offset},
+        krabka_metadata::{MetadataImage, MetadataRecord},
+        krabka_remote_storage::RemoteLogSegmentState,
+        krabka_units::millis,
+        std::time::Duration,
     };
 
     mod concurrency;
@@ -671,9 +673,7 @@ mod tests {
     mod freeze;
     mod store_faults;
 
-    fn image_with_orders_topic() -> MetadataImage {
-        test_support::orders_image(1)
-    }
+    fn image_with_orders_topic() -> MetadataImage { test_support::orders_image(1) }
 
     fn rolled_tiered_partition(log_dir: &std::path::Path) -> Arc<Partition> {
         rolled_tiered_partition_with_config(log_dir, fixtures::rolled_partition_config())
@@ -765,18 +765,13 @@ mod tests {
     // a partition nothing writes to any more.
     #[tokio::test]
     async fn two_sweeps_tier_an_idle_partition_through_its_active_segment() {
-        partition_log_fixture!(
-            log_dir,
-            remote_dir,
-            log,
-            LogConfig {
-                remote_storage_enable: true,
-                local_retention: Some(millis(1)),
-                retention: None,
-                retention_size: None,
-                ..LogConfig::default()
-            }
-        );
+        partition_log_fixture!(log_dir, remote_dir, log, LogConfig {
+            remote_storage_enable: true,
+            local_retention: Some(millis(1)),
+            retention: None,
+            retention_size: None,
+            ..LogConfig::default()
+        });
         for _ in 0..3 {
             log.append(&mut test_support::batch(2)).unwrap();
         }
@@ -874,9 +869,10 @@ mod tests {
     /// `log.remote.copy.lag.*` broker default too.
     #[tokio::test]
     async fn tick_all_honours_the_remote_copy_lag_on_a_trunk_broker() {
-        use krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID};
-
-        use crate::api_catalog::UnstableApiVersions::{Disabled, Enabled};
+        use {
+            crate::api_catalog::UnstableApiVersions::{Disabled, Enabled},
+            krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID},
+        };
 
         let sealed = {
             let dir = tempfile::tempdir().unwrap();
@@ -1015,17 +1011,13 @@ mod tests {
     #[tokio::test]
     async fn tick_all_holds_the_copy_at_an_open_transaction() {
         let log_dir = tempfile::tempdir().unwrap();
-        let mut log = partition_log(
-            log_dir.path(),
-            PartitionIndex(0),
-            LogConfig {
-                segment_size: bytes(256),
-                remote_storage_enable: true,
-                retention: None,
-                retention_size: None,
-                ..LogConfig::default()
-            },
-        );
+        let mut log = partition_log(log_dir.path(), PartitionIndex(0), LogConfig {
+            segment_size: bytes(256),
+            remote_storage_enable: true,
+            retention: None,
+            retention_size: None,
+            ..LogConfig::default()
+        });
         for i in 0..12 {
             let mut batch = test_support::batch(2);
             if i == 5 {

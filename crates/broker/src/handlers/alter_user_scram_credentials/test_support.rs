@@ -5,25 +5,25 @@
 //! and assert on the same result shape, so the fixtures live in one module
 //! rather than being duplicated per test file.
 
-use std::sync::Arc;
-
-use bytes::Bytes;
-use krabka_metadata::MetadataRecord;
-use krabka_protocol::owned::{
-    alter_user_scram_credentials_request::{ScramCredentialDeletion, ScramCredentialUpsertion},
-    alter_user_scram_credentials_response::AlterUserScramCredentialsResult,
-};
-use krabka_security::{SaslMechanism, scram::MIN_SCRAM_ITERATIONS};
-
-use super::{
-    records::{delete_record, upsertion_record},
-    response::{err_result, ok_result},
-    validation::{validate_deletion, validate_upsertion},
-};
-use crate::{
-    authorizer::Authorizer,
-    broker::{Broker, BrokerHandle},
-    test_support::start_broker_with,
+use {
+    super::{
+        records::{delete_record, upsertion_record},
+        response::{err_result, ok_result},
+        validation::{validate_deletion, validate_upsertion},
+    },
+    crate::{
+        authorizer::Authorizer,
+        broker::{Broker, BrokerHandle},
+        test_support::start_broker_with,
+    },
+    bytes::Bytes,
+    krabka_metadata::MetadataRecord,
+    krabka_protocol::owned::{
+        alter_user_scram_credentials_request::{ScramCredentialDeletion, ScramCredentialUpsertion},
+        alter_user_scram_credentials_response::AlterUserScramCredentialsResult,
+    },
+    krabka_security::{SaslMechanism, scram::MIN_SCRAM_ITERATIONS},
+    std::sync::Arc,
 };
 
 pub(super) const KAFKA_DUPLICATE_RESOURCE: i16 = 92;

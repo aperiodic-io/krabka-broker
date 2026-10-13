@@ -4,9 +4,10 @@
 //! which carries only the topic id. Kafka's `KafkaApis.handleProduceRequest`
 //! answers `UNKNOWN_TOPIC_ID` on every partition row of a topic whose id does
 //! not resolve to a name. The zero id is such an id.
-use assert2::assert;
-
-use crate::support::topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request};
+use {
+    crate::support::topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    assert2::assert,
+};
 mod support;
 
 use krabka_protocol::owned::{
@@ -69,18 +70,15 @@ async fn produce_unresolved_topic_id_returns_unknown_topic_id() {
             ..Default::default()
         };
         actual.push((label, resp));
-        expected.push((
-            label,
-            ProduceResponse {
-                responses: vec![TopicProduceResponse {
-                    name: String::new(),
-                    topic_id,
-                    partition_responses: vec![refused(0), refused(1)],
-                    ..Default::default()
-                }],
+        expected.push((label, ProduceResponse {
+            responses: vec![TopicProduceResponse {
+                name: String::new(),
+                topic_id,
+                partition_responses: vec![refused(0), refused(1)],
                 ..Default::default()
-            },
-        ));
+            }],
+            ..Default::default()
+        }));
     }
     assert!(actual == expected);
 }

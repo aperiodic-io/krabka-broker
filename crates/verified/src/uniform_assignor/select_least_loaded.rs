@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{HomogeneousMemberQuota, SubscriberLoad, UniformQuotaSplit};
+use {
+    super::{HomogeneousMemberQuota, SubscriberLoad, UniformQuotaSplit},
+    creusot_std::prelude::*,
+};
 
 /// Split `total_partitions` over `member_count` members, as
 /// `UniformHomogeneousAssignmentBuilder.build` does.

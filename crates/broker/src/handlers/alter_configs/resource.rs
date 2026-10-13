@@ -13,29 +13,30 @@
 //! value — earns `INVALID_REQUEST` whether or not the principal may touch the
 //! resource. That check runs first here too.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_metadata::{MetadataImage, MetadataRecord, NodeId};
-use krabka_protocol::owned::{
-    alter_configs_request::AlterConfigsResource,
-    alter_configs_response::AlterConfigsResourceResponse,
-};
-use krabka_raft::RaftError;
-
-use super::{
-    RESOURCE_TYPE_BROKER, RESOURCE_TYPE_CLIENT_METRICS, RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
-    broker_configs::broker_config_records, client_metrics_configs::client_metrics_config_record,
-    empty_resource_response, group_configs::group_config_record,
-    topic_configs::topic_config_record, validate_resource_shape,
-};
-use crate::{
-    broker::Broker,
-    codes,
-    config_keys::{broker_dynamic::BrokerConfigContext, clear_elr_records, group::GroupBounds},
-    handlers::{
-        RequestContext, audit_admin_success, config_resource_refusal,
-        forward_to_controller::guarded_operation_on_source, response_encoding::ErrorRow as _,
+use {
+    super::{
+        RESOURCE_TYPE_BROKER, RESOURCE_TYPE_CLIENT_METRICS, RESOURCE_TYPE_GROUP,
+        RESOURCE_TYPE_TOPIC, broker_configs::broker_config_records,
+        client_metrics_configs::client_metrics_config_record, empty_resource_response,
+        group_configs::group_config_record, topic_configs::topic_config_record,
+        validate_resource_shape,
     },
+    crate::{
+        broker::Broker,
+        codes,
+        config_keys::{broker_dynamic::BrokerConfigContext, clear_elr_records, group::GroupBounds},
+        handlers::{
+            RequestContext, audit_admin_success, config_resource_refusal,
+            forward_to_controller::guarded_operation_on_source, response_encoding::ErrorRow as _,
+        },
+    },
+    krabka_metadata::{MetadataImage, MetadataRecord, NodeId},
+    krabka_protocol::owned::{
+        alter_configs_request::AlterConfigsResource,
+        alter_configs_response::AlterConfigsResourceResponse,
+    },
+    krabka_raft::RaftError,
+    std::{sync::Arc, time::Duration},
 };
 
 pub(super) async fn process_resource(
@@ -159,26 +160,23 @@ fn resource_records(
             broker.config.features.unstable_api_versions,
         )
         .map(|record| vec![record]),
-        RESOURCE_TYPE_BROKER => broker_config_records(
-            resource,
-            BrokerConfigContext {
-                image,
-                serving: if ctx.forwarded && !resource.resource_name.is_empty() {
-                    resource
-                        .resource_name
-                        .parse::<u64>()
-                        .map_or(broker.config.node_id, NodeId)
-                } else {
-                    broker.config.node_id
-                },
-                log_dirs: &if ctx.forwarded {
-                    Vec::new()
-                } else {
-                    broker.config.broker_log_dirs()
-                },
-                unstable: broker.config.features.unstable_api_versions,
+        RESOURCE_TYPE_BROKER => broker_config_records(resource, BrokerConfigContext {
+            image,
+            serving: if ctx.forwarded && !resource.resource_name.is_empty() {
+                resource
+                    .resource_name
+                    .parse::<u64>()
+                    .map_or(broker.config.node_id, NodeId)
+            } else {
+                broker.config.node_id
             },
-        ),
+            log_dirs: &if ctx.forwarded {
+                Vec::new()
+            } else {
+                broker.config.broker_log_dirs()
+            },
+            unstable: broker.config.features.unstable_api_versions,
+        }),
         RESOURCE_TYPE_GROUP => group_config_record(
             resource,
             &GroupBounds::of(&broker.config),
@@ -194,24 +192,25 @@ fn resource_records(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{BrokerConfigRecord, MetadataRecord};
-    use krabka_raft::NodeId;
-
-    use super::*;
-    use crate::{
-        api_catalog::UnstableApiVersions,
-        config_keys::REMOTE_STORAGE_ENABLE,
-        handlers::{
-            alter_configs::test_support::{
-                broker_resource, image_with_broker, image_with_topic_config, topic_resource,
+    use {
+        super::*,
+        crate::{
+            api_catalog::UnstableApiVersions,
+            config_keys::REMOTE_STORAGE_ENABLE,
+            handlers::{
+                alter_configs::test_support::{
+                    broker_resource, image_with_broker, image_with_topic_config, topic_resource,
+                },
+                forward_to_controller::guarded_operation_on_source,
             },
-            forward_to_controller::guarded_operation_on_source,
+            metadata_source::MetadataSource,
+            test_support::FakeMetadataSource,
+            throttle::{FOLLOWER_THROTTLED_RATE_KEY, LEADER_THROTTLED_RATE_KEY},
+            topic_policy::TopicPolicy,
         },
-        metadata_source::MetadataSource,
-        test_support::FakeMetadataSource,
-        throttle::{FOLLOWER_THROTTLED_RATE_KEY, LEADER_THROTTLED_RATE_KEY},
-        topic_policy::TopicPolicy,
+        assert2::assert,
+        krabka_metadata::{BrokerConfigRecord, MetadataRecord},
+        krabka_raft::NodeId,
     };
 
     async fn submit_replacement(
@@ -276,15 +275,12 @@ mod tests {
             .call();
         let resource = broker_resource("1", &[]);
         let result = submit_replacement(&source, &resource, |resource, image| {
-            broker_config_records(
-                resource,
-                BrokerConfigContext {
-                    image,
-                    serving: NodeId(1),
-                    log_dirs: &[],
-                    unstable: UnstableApiVersions::Disabled,
-                },
-            )
+            broker_config_records(resource, BrokerConfigContext {
+                image,
+                serving: NodeId(1),
+                log_dirs: &[],
+                unstable: UnstableApiVersions::Disabled,
+            })
         })
         .await;
         assert!(result == Ok(()));

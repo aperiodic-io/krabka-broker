@@ -10,17 +10,17 @@
 //! it completes, when another caller changed it, or when this broker no longer
 //! coordinates it.
 
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
-
-use tokio_util::sync::CancellationToken;
-use tracing::info;
-
-use crate::{
-    metadata_source::MetadataSource,
-    txn::{
-        coordinator::{TxnCoordinator, completion::CompletionAttempt},
-        version::resolve_txn_version,
+use {
+    crate::{
+        metadata_source::MetadataSource,
+        txn::{
+            coordinator::{TxnCoordinator, completion::CompletionAttempt},
+            version::resolve_txn_version,
+        },
     },
+    std::{collections::BTreeSet, sync::Arc, time::Duration},
+    tokio_util::sync::CancellationToken,
+    tracing::info,
 };
 
 /// The wait before a failed completion runs again.

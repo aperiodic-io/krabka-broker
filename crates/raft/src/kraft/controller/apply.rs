@@ -2,15 +2,17 @@
 //! into the published [`MetadataImage`], including the capture of a
 //! `metadata.version` downgrade boundary that KIP-1155 must checkpoint at.
 
-use std::sync::Arc;
-
-use krabka_ids::Offset;
-use krabka_metadata::{MetadataImage, MetadataRecord, VotersRecord};
-
-use super::{
-    Engine, PendingDowngradeSnapshot,
-    offsets::{batch_base_in_apply_window, expected_hwm_after_advance, hwm_advanced_as_expected},
-    records::{decode_committed_value, is_kip835_noop, next_batch_offset},
+use {
+    super::{
+        Engine, PendingDowngradeSnapshot,
+        offsets::{
+            batch_base_in_apply_window, expected_hwm_after_advance, hwm_advanced_as_expected,
+        },
+        records::{decode_committed_value, is_kip835_noop, next_batch_offset},
+    },
+    krabka_ids::Offset,
+    krabka_metadata::{MetadataImage, MetadataRecord, VotersRecord},
+    std::sync::Arc,
 };
 
 impl Engine {

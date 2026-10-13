@@ -7,8 +7,10 @@
 //! so a test can prove a command line reaches the right shape without a
 //! broker.
 
-use clap::{Parser, Subcommand};
-use krabka_units::Time;
+use {
+    clap::{Parser, Subcommand},
+    krabka_units::Time,
+};
 
 /// The tool's command line.
 ///
@@ -110,10 +112,7 @@ fn parse_time(raw: &str) -> Result<Time, String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::convert::TimeExt as _;
-
-    use super::*;
+    use {super::*, assert2::check, krabka_units::convert::TimeExt as _};
 
     krabka_macros::duration_parser_fixture!(
         {
@@ -137,10 +136,12 @@ mod tests {
         ]
     );
 
-    krabka_macros::bootstrap_parser_fixture!(
-        ["krabka-barrier", "describe"],
-        ["krabka-barrier", "-b", "localhost:9092", "describe"]
-    );
+    krabka_macros::bootstrap_parser_fixture!(["krabka-barrier", "describe"], [
+        "krabka-barrier",
+        "-b",
+        "localhost:9092",
+        "describe"
+    ]);
 
     /// A group with no periodic injection is the default, and it reaches the
     /// wire as the -1 the broker reads as "on demand only".

@@ -6,16 +6,16 @@
 //! eviction that keeps only the live identities lives here, with the tests that
 //! pin it.
 
-use std::collections::HashMap;
-
-use dashmap::DashMap;
-use krabka_log::ProducerId;
-use krabka_verified::transaction::{
-    TransactionPidInstallDecision, transaction_pid_install_decision,
+use {
+    super::TxnCoordinator,
+    crate::{error::BrokerError, txn::state::TxnEntry},
+    dashmap::DashMap,
+    krabka_log::ProducerId,
+    krabka_verified::transaction::{
+        TransactionPidInstallDecision, transaction_pid_install_decision,
+    },
+    std::collections::HashMap,
 };
-
-use super::TxnCoordinator;
-use crate::{error::BrokerError, txn::state::TxnEntry};
 
 #[derive(Default)]
 pub(super) struct RecoveredTransactions {
@@ -153,10 +153,11 @@ impl TxnCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::txn::coordinator::test_support::{ProducerEpoch, TxnEntrySetup, entry};
+    use {
+        super::*,
+        crate::txn::coordinator::test_support::{ProducerEpoch, TxnEntrySetup, entry},
+        assert2::{assert, check},
+    };
 
     #[derive(Clone, Copy)]
     enum StatePartition {

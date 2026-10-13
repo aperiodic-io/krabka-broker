@@ -84,21 +84,21 @@ fn retire_offline_dirs(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{MetadataRecord, PartitionRecord};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        config_keys::RecoveryStrategy,
-        handlers::broker_heartbeat::test_support::{
-            ElectionSetup, fake_source, image_with_dir_partition, liveness_with,
+    use {
+        super::*,
+        crate::{
+            config_keys::RecoveryStrategy,
+            handlers::broker_heartbeat::test_support::{
+                ElectionSetup, fake_source, image_with_dir_partition, liveness_with,
+            },
+            metadata_source::MetadataSource,
+            metrics::BrokerMetrics,
+            test_support::{FakeMetadataSource, broker_registration},
         },
-        metadata_source::MetadataSource,
-        metrics::BrokerMetrics,
-        test_support::{FakeMetadataSource, broker_registration},
+        assert2::assert,
+        krabka_metadata::{MetadataRecord, PartitionRecord},
+        std::sync::Arc,
+        uuid::Uuid,
     };
 
     #[tokio::test]
@@ -151,10 +151,9 @@ mod tests {
         let good = Uuid::from_u128(0x600D);
         for deferred in [false, true] {
             let mut old = two_replica_image(&[bad, good]);
-            old.apply(&MetadataRecord::V1BrokerRegistration(registration(
-                1,
-                &[bad, good],
-            )));
+            old.apply(&MetadataRecord::V1BrokerRegistration(registration(1, &[
+                bad, good,
+            ])));
             if deferred {
                 old.apply(&MetadataRecord::V1Partition(PartitionRecord {
                     isr: vec![krabka_audit::NodeId(1)],
@@ -174,10 +173,9 @@ mod tests {
                 ..old.partition("t", 0).expect("partition").clone()
             };
             newer.apply(&MetadataRecord::V1Partition(expected.clone()));
-            newer.apply(&MetadataRecord::V1BrokerRegistration(registration(
-                1,
-                &[good],
-            )));
+            newer.apply(&MetadataRecord::V1BrokerRegistration(registration(1, &[
+                good,
+            ])));
             let source = Arc::new(
                 FakeMetadataSource::builder()
                     .image(old.clone())

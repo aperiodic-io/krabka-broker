@@ -6,25 +6,30 @@
 //! The feature-row and name-validation tests live beside the code they cover,
 //! in [`super::feature_keys`] and [`super::client_info`].
 
-use assert2::{assert, check};
-use bytes::{Bytes, BytesMut};
-use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-use krabka_protocol::{
-    Encode,
-    owned::{api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse},
-};
-
-use super::*;
-use crate::{
-    SslPrincipalMapper,
-    api_catalog::{
-        ClientMetricsReceiver, ListenerKind, UnstableApiVersions, VersionGates, supported_apis,
+use {
+    super::*,
+    crate::{
+        SslPrincipalMapper,
+        api_catalog::{
+            ClientMetricsReceiver, ListenerKind, UnstableApiVersions, VersionGates, supported_apis,
+        },
+        cluster_id::encode,
+        codes,
+        config::ListenerSpec,
+        handlers::RequestContext,
+        test_support::{
+            decode_response as decode_wire_response, peer, principal, start_broker_with,
+        },
     },
-    cluster_id::encode,
-    codes,
-    config::ListenerSpec,
-    handlers::RequestContext,
-    test_support::{decode_response as decode_wire_response, peer, principal, start_broker_with},
+    assert2::{assert, check},
+    bytes::{Bytes, BytesMut},
+    krabka_metadata::{FeatureLevelRecord, MetadataRecord},
+    krabka_protocol::{
+        Encode,
+        owned::{
+            api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+        },
+    },
 };
 
 const API_VERSIONS_V3: i16 = 3;
@@ -64,9 +69,7 @@ fn decode_response(version: i16, bytes: &Bytes) -> ApiVersionsResponse {
 /// on an unauthenticated connection. `handle` reads it to charge the KIP-124
 /// request quota, which no broker in this module configures, so every response
 /// below reports `throttle_time_ms = 0`.
-fn anonymous_principal() -> krabka_security::Principal {
-    principal("ANONYMOUS")
-}
+fn anonymous_principal() -> krabka_security::Principal { principal("ANONYMOUS") }
 
 /// The anonymous handshake fixture, retaining resource and identity bindings.
 macro_rules! anonymous_handshake_fixture {
@@ -107,9 +110,10 @@ macro_rules! api_version_wire {
 ///   `unstable.api.versions.enable` (#646, #784).
 #[test]
 fn api_versions_advertises_the_deliberate_ranges() {
-    use krabka_protocol::owned::api_versions_response::ApiVersion;
-
-    use crate::api_catalog::{LegacyRequestVersions, UnstableApiVersions, VersionGates};
+    use {
+        crate::api_catalog::{LegacyRequestVersions, UnstableApiVersions, VersionGates},
+        krabka_protocol::owned::api_versions_response::ApiVersion,
+    };
 
     let row = |api_key, min_version, max_version| ApiVersion {
         api_key,

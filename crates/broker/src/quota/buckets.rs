@@ -1,16 +1,16 @@
 //! Per-broker cache of `TokenBucket`s, one per (`quota_key`, `entity_key`) pair.
 
-use std::{
-    sync::{Arc, Mutex},
-    time::Instant,
+use {
+    super::IpNames,
+    crate::{config::DEFAULT_QUOTA_WINDOW, throttle::TokenBucket},
+    dashmap::DashMap,
+    krabka_metadata::EntityKey,
+    krabka_units::Time,
+    std::{
+        sync::{Arc, Mutex},
+        time::Instant,
+    },
 };
-
-use dashmap::DashMap;
-use krabka_metadata::EntityKey;
-use krabka_units::Time;
-
-use super::IpNames;
-use crate::{config::DEFAULT_QUOTA_WINDOW, throttle::TokenBucket};
 
 /// Stored entry beside each live quota bucket. It holds no client identity:
 /// the bucket belongs to its entity key, and every client that resolves to the
@@ -35,9 +35,7 @@ pub struct QuotaBuckets {
 }
 
 impl Default for QuotaBuckets {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[derive(Debug)]
@@ -53,9 +51,7 @@ impl QuotaBuckets {
     /// with [`Self::with_window`] from `[runtime] quota_window`; this is for
     /// callers that have no config to read, which is the in-process tests.
     #[must_use]
-    pub fn new() -> Self {
-        Self::with_window(DEFAULT_QUOTA_WINDOW)
-    }
+    pub fn new() -> Self { Self::with_window(DEFAULT_QUOTA_WINDOW) }
 
     /// Buckets whose byte-rate burst is `rate * quota_window`, which is the
     /// window Kafka averages a client's rate over before it throttles.
@@ -70,16 +66,12 @@ impl QuotaBuckets {
     }
 
     #[must_use]
-    pub fn quota_window(&self) -> Time {
-        self.quota_window
-    }
+    pub fn quota_window(&self) -> Time { self.quota_window }
 
     /// The addresses the image's `ip` quota entity names stand for, which the
     /// quota refresh task keeps current.
     #[must_use]
-    pub fn ip_names(&self) -> &IpNames {
-        &self.ip_names
-    }
+    pub fn ip_names(&self) -> &IpNames { &self.ip_names }
 
     /// Returns the bucket for `(quota_key, entity_key)`, and creates it
     /// lazily if it does not exist. A new bucket starts at `initial_rate`
@@ -181,26 +173,21 @@ impl QuotaBuckets {
 
     #[cfg(test)]
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.buckets.len()
-    }
+    pub fn len(&self) -> usize { self.buckets.len() }
 
     #[cfg(test)]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.buckets.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.buckets.is_empty() }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
+    use {
+        super::{super::bucket_rate, *},
+        assert2::{assert, check},
+    };
 
-    use super::{super::bucket_rate, *};
-
-    fn key(user: &str) -> EntityKey {
-        vec![("user".into(), Some(user.into()))]
-    }
+    fn key(user: &str) -> EntityKey { vec![("user".into(), Some(user.into()))] }
 
     /// KIP-13 measures a client's rate over `quota.window.num` windows of
     /// `quota.window.size.seconds`, so a client may spend a whole window's

@@ -6,12 +6,13 @@
 //! half-applied. The byte-range accessor that serves `FetchSnapshot` requests
 //! is here too, because it reads the same artifact.
 
-use krabka_metadata::{MetadataImage, from_kraft_value};
-use krabka_protocol::records::{RecordBatch, metadata::control::ControlRecord};
-use uuid::Uuid;
-
-use super::{SnapshotContents, SnapshotControlState, voters::voter_set_from_wire};
-use crate::error::RaftError;
+use {
+    super::{SnapshotContents, SnapshotControlState, voters::voter_set_from_wire},
+    crate::error::RaftError,
+    krabka_metadata::{MetadataImage, from_kraft_value},
+    krabka_protocol::records::{RecordBatch, metadata::control::ControlRecord},
+    uuid::Uuid,
+};
 
 /// Reads a canonical `.checkpoint` byte stream back into the sequence of
 /// `MetadataRecord`s it contains (skipping the header/footer control
@@ -157,26 +158,27 @@ fn invalid_snapshot_order() -> RaftError {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::{BufMut, BytesMut};
-    use krabka_metadata::{
-        FeatureLevelRecord, LeaderRecoveryState, MetadataRecord, NodeId, PartitionElrRecord,
-        PartitionRecord, PartitionRecoveryRecord, TopicRecord, Voter, VoterEndpoint, VoterSet,
-        voters::KRaftVersionRange,
-    };
-    use krabka_protocol::{
-        owned::{
-            k_raft_version_record::KRaftVersionRecord as WireKRaftVersionRecord,
-            snapshot_footer_record::SnapshotFooterRecord,
-            snapshot_header_record::SnapshotHeaderRecord,
-            voters_record::VotersRecord as WireVotersRecord,
+    use {
+        super::*,
+        crate::snapshot::{
+            SNAPSHOT_KRAFT_VERSION_BASE_OFFSET, SNAPSHOT_VOTERS_BASE_OFFSET, SnapshotWriter,
         },
-        records::metadata::control::encode_typed_control_batch,
-    };
-
-    use super::*;
-    use crate::snapshot::{
-        SNAPSHOT_KRAFT_VERSION_BASE_OFFSET, SNAPSHOT_VOTERS_BASE_OFFSET, SnapshotWriter,
+        assert2::check,
+        bytes::{BufMut, BytesMut},
+        krabka_metadata::{
+            FeatureLevelRecord, LeaderRecoveryState, MetadataRecord, NodeId, PartitionElrRecord,
+            PartitionRecord, PartitionRecoveryRecord, TopicRecord, Voter, VoterEndpoint, VoterSet,
+            voters::KRaftVersionRange,
+        },
+        krabka_protocol::{
+            owned::{
+                k_raft_version_record::KRaftVersionRecord as WireKRaftVersionRecord,
+                snapshot_footer_record::SnapshotFooterRecord,
+                snapshot_header_record::SnapshotHeaderRecord,
+                voters_record::VotersRecord as WireVotersRecord,
+            },
+            records::metadata::control::encode_typed_control_batch,
+        },
     };
 
     krabka_macros::single_replica_partition_fixture!(single_replica_partition);

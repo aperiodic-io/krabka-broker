@@ -14,19 +14,20 @@
 //!    group_instance_id: Some(...) }` resolves the static slot and
 //!    removes it.
 
-use assert2::{assert, check};
-use bytes::Bytes;
-use krabka_protocol::owned::{
-    heartbeat_request::HeartbeatRequest,
-    join_group_request::JoinGroupRequest,
-    join_group_response::{JoinGroupResponse, JoinGroupResponseMember},
-    leave_group_request::{LeaveGroupRequest, MemberIdentity},
-    sync_group_request::SyncGroupRequest,
-};
-
-use crate::support::classic::{
-    ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
-    classic_sync_request, sync_assignment,
+use {
+    crate::support::classic::{
+        ClassicJoinSetup, ClassicSyncSetup, ClassicTimeouts, GenerationId, classic_join_request,
+        classic_sync_request, sync_assignment,
+    },
+    assert2::{assert, check},
+    bytes::Bytes,
+    krabka_protocol::owned::{
+        heartbeat_request::HeartbeatRequest,
+        join_group_request::JoinGroupRequest,
+        join_group_response::{JoinGroupResponse, JoinGroupResponseMember},
+        leave_group_request::{LeaveGroupRequest, MemberIdentity},
+        sync_group_request::SyncGroupRequest,
+    },
 };
 
 mod support;

@@ -2,11 +2,12 @@
 //! sends, so the frontiers, the reset offset, and the offset the append reached
 //! each pass through a check here before the follower acts on them.
 
-use krabka_ids::Offset;
-use krabka_kraft_core::LogOffsetMetadata;
-use krabka_protocol::owned::fetch_response::{FetchResponse, PartitionData};
-
-use crate::wal::quorum::registry::ShardId;
+use {
+    crate::wal::quorum::registry::ShardId,
+    krabka_ids::Offset,
+    krabka_kraft_core::LogOffsetMetadata,
+    krabka_protocol::owned::fetch_response::{FetchResponse, PartitionData},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct WalFetchFrontiers {
@@ -89,9 +90,7 @@ pub(super) fn response_partition(response: FetchResponse, shard: ShardId) -> Opt
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     fn frontiers(start: i64, high_watermark: i64, end: i64) -> PartitionData {
         PartitionData {

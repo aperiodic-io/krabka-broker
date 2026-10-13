@@ -63,9 +63,7 @@ pub(crate) struct PlacementRng(u64);
 
 impl PlacementRng {
     /// A generator that repeats one sequence for one `seed`.
-    pub(crate) fn seeded(seed: u64) -> Self {
-        Self(seed)
-    }
+    pub(crate) fn seeded(seed: u64) -> Self { Self(seed) }
 
     /// A generator seeded from the hash randomness of the process.
     pub(crate) fn from_entropy() -> Self {
@@ -73,9 +71,7 @@ impl PlacementRng {
         Self::seeded(std::collections::hash_map::RandomState::new().hash_one(0_u8))
     }
 
-    fn next_u64(&mut self) -> u64 {
-        placement_random_step(&mut self.0)
-    }
+    fn next_u64(&mut self) -> u64 { placement_random_step(&mut self.0) }
 
     /// A value in `0..bound`, or 0 when `bound` is 0.
     fn below(&mut self, bound: usize) -> usize {

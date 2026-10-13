@@ -5,13 +5,13 @@
 //! environment-address variants use. It is separate from the routes so that
 //! the listener lifecycle stays in one place.
 
-use std::net::SocketAddr;
-
-use axum::Router;
-
-use super::{
-    config::{ProfilingConfig, ProfilingError},
-    routes::{pprof_router, pprof_router_with_config},
+use {
+    super::{
+        config::{ProfilingConfig, ProfilingError},
+        routes::{pprof_router, pprof_router_with_config},
+    },
+    axum::Router,
+    std::net::SocketAddr,
 };
 
 /// Bind an admin HTTP server on `addr`.
@@ -165,9 +165,7 @@ pub async fn spawn_admin_from_env_with_config(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[tokio::test]
     async fn supervised_admin_exit_classifies_clean_error_and_join_outcomes() {

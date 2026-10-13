@@ -11,17 +11,18 @@
 //! `--access-key` flag: an auditor should hold a read-only role, not a copy of
 //! the writer's keys.
 
-use std::{collections::BTreeSet, fmt::Write as _, path::PathBuf, process::ExitCode, sync::Arc};
-
-use clap::{Args, Parser, Subcommand};
-use hex::FromHex as _;
-use krabka_object_store::{
-    IncompleteMultipartUpload, ObjectStoreConfig, S3Config, build_object_store,
-    list_s3_multipart_uploads,
-};
-use krabka_remote_storage::{
-    ArchiveVerifyReport, ChainHead, PartitionVerifyReport, TrustedManifestKeys, VerifyDepth,
-    VerifyRequest, verify_archive,
+use {
+    clap::{Args, Parser, Subcommand},
+    hex::FromHex as _,
+    krabka_object_store::{
+        IncompleteMultipartUpload, ObjectStoreConfig, S3Config, build_object_store,
+        list_s3_multipart_uploads,
+    },
+    krabka_remote_storage::{
+        ArchiveVerifyReport, ChainHead, PartitionVerifyReport, TrustedManifestKeys, VerifyDepth,
+        VerifyRequest, verify_archive,
+    },
+    std::{collections::BTreeSet, fmt::Write as _, path::PathBuf, process::ExitCode, sync::Arc},
 };
 
 /// Orphan keys listed before the output is truncated.
@@ -520,12 +521,7 @@ fn protection(report: &krabka_remote_storage::ObjectProtectionReport) -> String 
 
 #[cfg(test)]
 mod tests {
-    use std::process::ExitCode;
-
-    use assert2::assert;
-    use krabka_remote_storage::VerifyBreak;
-
-    use super::*;
+    use {super::*, assert2::assert, krabka_remote_storage::VerifyBreak, std::process::ExitCode};
 
     fn args(topic: Option<&str>) -> VerifyArgs {
         VerifyArgs {

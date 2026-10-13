@@ -1,14 +1,15 @@
 //! Common cluster mutations used by the reassignment scenarios.
-use krabka_broker::BrokerHandle;
-use krabka_metadata::PartitionRecord;
-
-use crate::{
-    jvm_acceptance::{
-        ADMIN, ADMIN_PASS, ClientPropsFile, KAFKA_IMAGE_TXN, SaslClusterSetup, TempFileMount,
-        broker0_advertised, create_console_topic, plain_client_properties,
-        start_registered_sasl_cluster, write_plain_props, write_temp_file,
+use {
+    crate::{
+        jvm_acceptance::{
+            ADMIN, ADMIN_PASS, ClientPropsFile, KAFKA_IMAGE_TXN, SaslClusterSetup, TempFileMount,
+            broker0_advertised, create_console_topic, plain_client_properties,
+            start_registered_sasl_cluster, write_plain_props, write_temp_file,
+        },
+        support::{JvmDockerSetup, jvm_docker_command},
     },
-    support::{JvmDockerSetup, jvm_docker_command},
+    krabka_broker::BrokerHandle,
+    krabka_metadata::PartitionRecord,
 };
 
 pub(crate) fn free_replica(record: &PartitionRecord) -> u64 {

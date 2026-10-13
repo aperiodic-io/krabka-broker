@@ -8,20 +8,21 @@
 //!
 //! [`RequestContext`]: crate::handlers::RequestContext
 
-use bytes::Bytes;
-use futures_util::future::BoxFuture;
-use krabka_units::convert::TimeExt as _;
-
-use crate::{
-    authorizer::{AuthorizationRequest, AuthorizationResult},
-    broker::Broker,
-    codes::{CLUSTER_AUTHORIZATION_FAILED, NONE},
-    error::BrokerError,
-    handlers::{
-        ApiVersion, CorrelationId, acl_wire::CLUSTER_RESOURCE_NAME, alter_replica_log_dirs::handle,
-        audit_admin_for, encode_response,
+use {
+    crate::{
+        authorizer::{AuthorizationRequest, AuthorizationResult},
+        broker::Broker,
+        codes::{CLUSTER_AUTHORIZATION_FAILED, NONE},
+        error::BrokerError,
+        handlers::{
+            ApiVersion, CorrelationId, acl_wire::CLUSTER_RESOURCE_NAME,
+            alter_replica_log_dirs::handle, audit_admin_for, encode_response,
+        },
+        network::auth::ConnectionAuth,
     },
-    network::auth::ConnectionAuth,
+    bytes::Bytes,
+    futures_util::future::BoxFuture,
+    krabka_units::convert::TimeExt as _,
 };
 
 pub(super) fn alter_replica_log_dirs_adapter<'a>(
@@ -57,16 +58,17 @@ pub(super) fn alter_replica_log_dirs_adapter<'a>(
         };
 
         let image = broker.controller.current_image();
-        let authorized = broker.config.authorizer.authorize(
-            &*image,
-            &AuthorizationRequest {
+        let authorized = broker
+            .config
+            .authorizer
+            .authorize(&*image, &AuthorizationRequest {
                 principal,
                 host: peer,
                 resource_type: krabka_metadata::ResourceType::Cluster,
                 resource_name: CLUSTER_RESOURCE_NAME,
                 operation: krabka_metadata::AclOperation::Alter,
-            },
-        ) == AuthorizationResult::Allow;
+            })
+            == AuthorizationResult::Allow;
 
         if !authorized {
             let mut cur = body;
@@ -109,7 +111,11 @@ pub(super) fn alter_replica_log_dirs_adapter<'a>(
 /// Token adapters all decode first and encode the resulting response at the
 /// negotiated version. The supplied body retains each operation's auth and audit order.
 macro_rules! token_adapter {
-    ($name:ident, $request_ty:path, ($broker:ident, $request:ident, $auth:ident, $peer:ident), $body:block) => {
+    (
+        $name:ident,
+        $request_ty:path,($broker:ident, $request:ident, $auth:ident, $peer:ident),
+        $body:block
+    ) => {
         pub(super) fn $name<'a>(
             $broker: &'a Broker,
             version: ApiVersion,
@@ -286,24 +292,24 @@ fn audit_token_operation(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use krabka_protocol::owned::{
-        alter_replica_log_dirs_request::{
-            AlterReplicaLogDir, AlterReplicaLogDirTopic, AlterReplicaLogDirsRequest,
+    use {
+        super::*,
+        crate::{
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            network::auth::ConnectionAuth,
+            test_support::{DenyAll, codec_helpers, peer, principal, start_broker_with_authorizer},
         },
-        alter_replica_log_dirs_response::{
-            AlterReplicaLogDirPartitionResult, AlterReplicaLogDirTopicResult,
-            AlterReplicaLogDirsResponse,
+        krabka_protocol::owned::{
+            alter_replica_log_dirs_request::{
+                AlterReplicaLogDir, AlterReplicaLogDirTopic, AlterReplicaLogDirsRequest,
+            },
+            alter_replica_log_dirs_response::{
+                AlterReplicaLogDirPartitionResult, AlterReplicaLogDirTopicResult,
+                AlterReplicaLogDirsResponse,
+            },
         },
-    };
-    use krabka_security::SaslMechanism;
-
-    use super::*;
-    use crate::{
-        codes::CLUSTER_AUTHORIZATION_FAILED,
-        network::auth::ConnectionAuth,
-        test_support::{DenyAll, codec_helpers, peer, principal, start_broker_with_authorizer},
+        krabka_security::SaslMechanism,
+        std::sync::Arc,
     };
 
     codec_helpers!(AlterReplicaLogDirsRequest, AlterReplicaLogDirsResponse);

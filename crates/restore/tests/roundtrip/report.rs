@@ -2,19 +2,21 @@
 //! against the counts the fixture must produce, and then rendered through the
 //! `--report json` path.
 
-use assert2::check;
-use krabka_audit::FileEd25519Signer;
-use krabka_ids::Offset;
-use krabka_remote_storage::MANIFEST_SUFFIX;
-use krabka_restore::{
-    MetadataRestoreReport, PartitionReport, ReportFormat, RestoreReport, SegmentOutcome, restore,
-};
-use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-
-use crate::{
-    args::{RestoreOptions, restore_args},
-    fixture::build_fixture,
-    restored::fresh_restore,
+use {
+    crate::{
+        args::{RestoreOptions, restore_args},
+        fixture::build_fixture,
+        restored::fresh_restore,
+    },
+    assert2::check,
+    krabka_audit::FileEd25519Signer,
+    krabka_ids::Offset,
+    krabka_remote_storage::MANIFEST_SUFFIX,
+    krabka_restore::{
+        MetadataRestoreReport, PartitionReport, ReportFormat, RestoreReport, SegmentOutcome,
+        restore,
+    },
+    ring::{rand::SystemRandom, signature::Ed25519KeyPair},
 };
 
 #[tokio::test]
@@ -58,14 +60,10 @@ async fn authenticated_object_count_covers_only_the_selected_topic() {
         .count() as u64;
     let target = tempfile::tempdir().unwrap();
     let refs = extra.iter().map(String::as_str).collect::<Vec<_>>();
-    let args = restore_args(
-        fixture.archive_root.path(),
-        target.path(),
-        RestoreOptions {
-            extra: &refs,
-            ..Default::default()
-        },
-    );
+    let args = restore_args(fixture.archive_root.path(), target.path(), RestoreOptions {
+        extra: &refs,
+        ..Default::default()
+    });
 
     let report = restore(&args).await.unwrap();
     check!(report.authentication.unwrap().objects == expected);

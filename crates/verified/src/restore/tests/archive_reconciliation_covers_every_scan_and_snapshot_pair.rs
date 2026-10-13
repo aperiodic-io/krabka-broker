@@ -2,8 +2,10 @@ use super::*;
 
 #[test]
 fn archive_reconciliation_covers_every_scan_and_snapshot_pair() {
-    use RestoreReconcileDecision::{Disagree, Exclude, Keep};
-    use RestoreSnapshotState::{DeleteFinished, DeleteStarted, Live, Missing};
+    use {
+        RestoreReconcileDecision::{Disagree, Exclude, Keep},
+        RestoreSnapshotState::{DeleteFinished, DeleteStarted, Live, Missing},
+    };
     for (scanned, state, expected) in [
         (true, Live, Keep),
         (true, DeleteStarted, Exclude),

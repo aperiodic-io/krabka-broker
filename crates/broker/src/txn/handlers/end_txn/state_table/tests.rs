@@ -1,6 +1,4 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 const PID: ProducerId = ProducerId(7);
 const EPOCH: i16 = 4;

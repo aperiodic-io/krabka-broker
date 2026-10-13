@@ -6,24 +6,25 @@
 //! for a step that stopped before a broker answered, and an exit code for one
 //! that a broker answered.
 
-use krabka_protocol::{
-    krabka::{
-        break_glass as bg,
-        freeze::{self as api, PATTERN_TYPE_ANY},
+use {
+    super::{
+        cli::{Action, BreakGlassCommand, Command, FreezeCommand, FreezeSigningArgs, ScopeArgs},
+        failure::Failure,
+        report::{
+            described_error, print_freeze, print_proposal, report_error, report_set_freeze,
+            report_verify,
+        },
+        signing, verify,
     },
-    owned::describe_cluster_request::DescribeClusterRequest,
-    primitives::uuid::Uuid as WireUuid,
-};
-use krabka_units::{Time, convert::TimeExt as _};
-
-use super::{
-    cli::{Action, BreakGlassCommand, Command, FreezeCommand, FreezeSigningArgs, ScopeArgs},
-    failure::Failure,
-    report::{
-        described_error, print_freeze, print_proposal, report_error, report_set_freeze,
-        report_verify,
+    krabka_protocol::{
+        krabka::{
+            break_glass as bg,
+            freeze::{self as api, PATTERN_TYPE_ANY},
+        },
+        owned::describe_cluster_request::DescribeClusterRequest,
+        primitives::uuid::Uuid as WireUuid,
     },
-    signing, verify,
+    krabka_units::{Time, convert::TimeExt as _},
 };
 
 // Commands share transport errors and the broker's ordinary refusal report.

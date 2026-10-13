@@ -1,7 +1,8 @@
-use assert2::assert;
-
-use super::*;
-use crate::schema::{SchemaBatchAdmission, SchemaFailureKind, SchemaFieldAction, SchemaFieldRole};
+use {
+    super::*,
+    crate::schema::{SchemaBatchAdmission, SchemaFailureKind, SchemaFieldAction, SchemaFieldRole},
+    assert2::assert,
+};
 
 pub(super) fn oracle(
     fields: &[SchemaWalkField],

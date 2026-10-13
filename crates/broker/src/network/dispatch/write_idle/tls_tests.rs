@@ -1,26 +1,26 @@
 //! Real rustls records over a bounded, paced byte transport. Paused time makes
 //! ciphertext progress and a complete flush spanning many idle windows exact.
 
-use std::{
-    io,
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+use {
+    super::WriteIdle,
+    crate::test_support::localhost_ecdsa_pair,
+    assert2::assert,
+    rustls::pki_types::{PrivateKeyDer, ServerName},
+    std::{
+        io,
+        pin::Pin,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        task::{Context, Poll},
+        time::Duration,
     },
-    task::{Context, Poll},
-    time::Duration,
+    tokio::{
+        io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, DuplexStream, ReadBuf},
+        time::{Instant, Sleep},
+    },
 };
-
-use assert2::assert;
-use rustls::pki_types::{PrivateKeyDer, ServerName};
-use tokio::{
-    io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, DuplexStream, ReadBuf},
-    time::{Instant, Sleep},
-};
-
-use super::WriteIdle;
-use crate::test_support::localhost_ecdsa_pair;
 
 /// Limit ciphertext reads to 64 bytes every 10ms after the handshake. Delaying
 /// plaintext reads would test rustls buffering rather than socket progress.

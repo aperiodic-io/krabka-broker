@@ -19,23 +19,24 @@
 //!     cargo nextest run -p krabka-broker --test metrics_contract
 //! ```
 
-use std::{
-    collections::BTreeSet,
-    path::{Path, PathBuf},
+use {
+    assert2::assert,
+    krabka_broker::metrics::{
+        ApiKeyLabel, AuthorizationDeniedLabel, BarrierGroupLabel, BreakGlassAction,
+        BreakGlassActionLabel, BreakGlassState, BreakGlassStateLabel, BrokerMetrics,
+        CleanerFailureLabel, CleanerFailureReason, ClientSoftwareLabel, ConnectionCloseReason,
+        ConnectionCloseReasonLabel, ConsumerGroupLabel, DirectoryLabel, PartitionLabel,
+        QuotaEntityLabel, QuotaType, QuotaTypeLabel, RaftStateLabel, ReplicaLagLabel,
+        SaslMechanismLabel, SchemaRejectionLabel, ShareGroupIdLabel, ShareGroupLabel, TopicLabel,
+        WalShardLabel, WalVoterLabel,
+    },
+    krabka_metadata::BreakGlassAction as GatedAction,
+    prometheus_client::metrics::family::Family,
+    std::{
+        collections::BTreeSet,
+        path::{Path, PathBuf},
+    },
 };
-
-use assert2::assert;
-use krabka_broker::metrics::{
-    ApiKeyLabel, AuthorizationDeniedLabel, BarrierGroupLabel, BreakGlassAction,
-    BreakGlassActionLabel, BreakGlassState, BreakGlassStateLabel, BrokerMetrics,
-    CleanerFailureLabel, CleanerFailureReason, ClientSoftwareLabel, ConnectionCloseReason,
-    ConnectionCloseReasonLabel, ConsumerGroupLabel, DirectoryLabel, PartitionLabel,
-    QuotaEntityLabel, QuotaType, QuotaTypeLabel, RaftStateLabel, ReplicaLagLabel,
-    SaslMechanismLabel, SchemaRejectionLabel, ShareGroupIdLabel, ShareGroupLabel, TopicLabel,
-    WalShardLabel, WalVoterLabel,
-};
-use krabka_metadata::BreakGlassAction as GatedAction;
-use prometheus_client::metrics::family::Family;
 
 mod support;
 
@@ -351,93 +352,69 @@ fn seed_grouped_families(metrics: &BrokerMetrics) {
         shard,
     } = SeedLabels::new();
 
-    seed(
-        &topic,
-        &[
-            &metrics.topic_bytes_in,
-            &metrics.topic_bytes_out,
-            &metrics.topic_messages_in,
-            &metrics.topic_produce_requests,
-            &metrics.topic_fetch_requests,
-            &metrics.topic_failed_produce_requests,
-            &metrics.topic_failed_fetch_requests,
-            &metrics.produce_message_conversions,
-            &metrics.fetch_message_conversions,
-            &metrics.barrier_markers_written_total,
-            &metrics.topic_freeze_rejections,
-            &metrics.remote_copy_bytes_total,
-            &metrics.remote_fetch_bytes_total,
-            &metrics.remote_copy_requests_total,
-            &metrics.remote_fetch_requests_total,
-            &metrics.remote_delete_requests_total,
-            &metrics.remote_copy_errors_total,
-            &metrics.remote_fetch_errors_total,
-            &metrics.remote_delete_errors_total,
-        ],
-    );
-    seed(
-        &topic,
-        &[
-            &metrics.remote_copy_lag_bytes,
-            &metrics.remote_copy_lag_segments,
-            &metrics.remote_delete_lag_bytes,
-            &metrics.remote_delete_lag_segments,
-        ],
-    );
-    seed(
-        &partition,
-        &[
-            &metrics.partition_bytes_in,
-            &metrics.partition_bytes_out,
-            &metrics.replication_bytes_in,
-            &metrics.replication_bytes_out,
-            &metrics.partition_cpu_micros,
-            &metrics.log_compactions_total,
-        ],
-    );
-    seed(
-        &partition,
-        &[
-            &metrics.partition_disk_bytes,
-            &metrics.delivery_watermark,
-            &metrics.delivery_pending_records,
-        ],
-    );
-    seed(
-        &api_key,
-        &[
-            &metrics.api_requests,
-            &metrics.unsupported_api_requests,
-            &metrics.request_errors,
-        ],
-    );
-    seed(
-        &api_key,
-        &[
-            &metrics.request_duration_seconds,
-            &metrics.request_local_duration_seconds,
-            &metrics.request_remote_duration_seconds,
-            &metrics.request_throttle_duration_seconds,
-        ],
-    );
-    seed(
-        &group,
-        &[
-            &metrics.barrier_epochs_started_total,
-            &metrics.barrier_epochs_committed_total,
-            &metrics.barrier_epochs_published_partial_total,
-        ],
-    );
+    seed(&topic, &[
+        &metrics.topic_bytes_in,
+        &metrics.topic_bytes_out,
+        &metrics.topic_messages_in,
+        &metrics.topic_produce_requests,
+        &metrics.topic_fetch_requests,
+        &metrics.topic_failed_produce_requests,
+        &metrics.topic_failed_fetch_requests,
+        &metrics.produce_message_conversions,
+        &metrics.fetch_message_conversions,
+        &metrics.barrier_markers_written_total,
+        &metrics.topic_freeze_rejections,
+        &metrics.remote_copy_bytes_total,
+        &metrics.remote_fetch_bytes_total,
+        &metrics.remote_copy_requests_total,
+        &metrics.remote_fetch_requests_total,
+        &metrics.remote_delete_requests_total,
+        &metrics.remote_copy_errors_total,
+        &metrics.remote_fetch_errors_total,
+        &metrics.remote_delete_errors_total,
+    ]);
+    seed(&topic, &[
+        &metrics.remote_copy_lag_bytes,
+        &metrics.remote_copy_lag_segments,
+        &metrics.remote_delete_lag_bytes,
+        &metrics.remote_delete_lag_segments,
+    ]);
+    seed(&partition, &[
+        &metrics.partition_bytes_in,
+        &metrics.partition_bytes_out,
+        &metrics.replication_bytes_in,
+        &metrics.replication_bytes_out,
+        &metrics.partition_cpu_micros,
+        &metrics.log_compactions_total,
+    ]);
+    seed(&partition, &[
+        &metrics.partition_disk_bytes,
+        &metrics.delivery_watermark,
+        &metrics.delivery_pending_records,
+    ]);
+    seed(&api_key, &[
+        &metrics.api_requests,
+        &metrics.unsupported_api_requests,
+        &metrics.request_errors,
+    ]);
+    seed(&api_key, &[
+        &metrics.request_duration_seconds,
+        &metrics.request_local_duration_seconds,
+        &metrics.request_remote_duration_seconds,
+        &metrics.request_throttle_duration_seconds,
+    ]);
+    seed(&group, &[
+        &metrics.barrier_epochs_started_total,
+        &metrics.barrier_epochs_committed_total,
+        &metrics.barrier_epochs_published_partial_total,
+    ]);
     seed(&group, &[&metrics.barrier_injection_duration_seconds]);
     seed(&group, &[&metrics.barrier_latest_epoch]);
-    seed(
-        &shard,
-        &[
-            &metrics.diskless_wal_durable_watermark,
-            &metrics.diskless_wal_index_projection_lag,
-            &metrics.diskless_wal_trim_frontier,
-        ],
-    );
+    seed(&shard, &[
+        &metrics.diskless_wal_durable_watermark,
+        &metrics.diskless_wal_index_projection_lag,
+        &metrics.diskless_wal_trim_frontier,
+    ]);
 }
 
 /// Gives one label set to every family whose label type no other family

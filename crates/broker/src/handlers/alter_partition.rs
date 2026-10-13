@@ -7,19 +7,21 @@
 //! and submits the updated `PartitionRecord`s through
 //! guarded image submission. Admission is rebuilt after a conflicting commit.
 
-use std::{sync::Arc, time::Duration};
-
-use krabka_metadata::{MetadataImage, MetadataRecord, NodeId};
-use krabka_protocol::{
-    owned::{
-        alter_partition_request::AlterPartitionRequest,
-        alter_partition_response::{
-            AlterPartitionResponse, PartitionData as RespPartitionData, TopicData as RespTopicData,
+use {
+    krabka_metadata::{MetadataImage, MetadataRecord, NodeId},
+    krabka_protocol::{
+        owned::{
+            alter_partition_request::AlterPartitionRequest,
+            alter_partition_response::{
+                AlterPartitionResponse, PartitionData as RespPartitionData,
+                TopicData as RespTopicData,
+            },
         },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
+    krabka_raft::RaftError,
+    std::{sync::Arc, time::Duration},
 };
-use krabka_raft::RaftError;
 
 mod isr_update;
 
@@ -28,16 +30,18 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::isr_update::handle_partition_with_recovery;
-use crate::{
-    broker::Broker,
-    codes,
-    elr::ElrPublisher,
-    handlers::{
-        RequestContext, cluster_action_denied,
-        forward_to_controller::{guarded_operation_on_source, is_active_controller},
+use {
+    self::isr_update::handle_partition_with_recovery,
+    crate::{
+        broker::Broker,
+        codes,
+        elr::ElrPublisher,
+        handlers::{
+            RequestContext, cluster_action_denied,
+            forward_to_controller::{guarded_operation_on_source, is_active_controller},
+        },
+        heartbeat::controller_state::replicated_registrations,
     },
-    heartbeat::controller_state::replicated_registrations,
 };
 
 context_handler! {

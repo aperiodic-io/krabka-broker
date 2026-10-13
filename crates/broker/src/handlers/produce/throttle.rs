@@ -1,19 +1,20 @@
 //! The KIP-13 producer byte-rate and KIP-124 request-percentage accounting,
 //! and the throttled response encode that closes a `Produce` request.
 
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{
-    Encode,
-    owned::produce_response::{ProduceResponse, TopicProduceResponse},
-};
-
-use super::node_endpoints::produce_node_endpoints;
-use crate::{
-    broker::Broker,
-    error::BrokerError,
-    handlers::RequestContext,
-    metrics::QuotaType,
-    quota::{QuotaDelay, consume_producer_quota, throttle_time_ms},
+use {
+    super::node_endpoints::produce_node_endpoints,
+    crate::{
+        broker::Broker,
+        error::BrokerError,
+        handlers::RequestContext,
+        metrics::QuotaType,
+        quota::{QuotaDelay, consume_producer_quota, throttle_time_ms},
+    },
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{
+        Encode,
+        owned::produce_response::{ProduceResponse, TopicProduceResponse},
+    },
 };
 
 /// First `Produce` response version that carries the KIP-951 `CurrentLeader`
@@ -48,13 +49,12 @@ pub(super) fn finish_produce_response(
     // Resolving it through the metric records the throttle phase and the quota
     // that caused it, and hands back the delay the response reports and the
     // mute below honors.
-    let delay = broker.metrics.record_applied_throttle(
-        super::PRODUCE_API_KEY,
-        &[
+    let delay = broker
+        .metrics
+        .record_applied_throttle(super::PRODUCE_API_KEY, &[
             (QuotaType::Produce, data_delay).into(),
             (QuotaType::Request, request_delay).into(),
-        ],
-    );
+        ]);
     // KIP-951: the `CurrentLeader` hints the partition rows carry are node ids,
     // and the producer can only act on one whose address it knows. Both halves
     // of the KIP encode at v10+, so a client that cannot read the hint is also
@@ -94,12 +94,13 @@ pub(super) fn finish_produce_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_units::secs;
-
-    use crate::quota::{
-        QuotaBuckets, consume_producer_quota,
-        test_support::{QuotaRecordSetup, QuotaValue, image_with_quota},
+    use {
+        crate::quota::{
+            QuotaBuckets, consume_producer_quota,
+            test_support::{QuotaRecordSetup, QuotaValue, image_with_quota},
+        },
+        assert2::assert,
+        krabka_units::secs,
     };
 
     #[test]

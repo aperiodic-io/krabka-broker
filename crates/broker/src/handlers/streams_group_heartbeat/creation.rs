@@ -16,22 +16,23 @@
 //! the response of a later heartbeat has a `MISSING_INTERNAL_TOPICS` status,
 //! that status names the failure.
 
-use krabka_metadata::{AclOperation, ResourceType};
-use krabka_protocol::owned::{
-    common::streams_group_heartbeat_response::status::Status,
-    create_topics_request::{CreatableTopic, CreatableTopicConfig},
-    streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-};
-
-use crate::{
-    broker::Broker,
-    coordinator::unified::streams::{
-        actor::resolve_group_config_from_image,
-        topology::{InternalTopicSpec, status as topo_status},
+use {
+    crate::{
+        broker::Broker,
+        coordinator::unified::streams::{
+            actor::resolve_group_config_from_image,
+            topology::{InternalTopicSpec, status as topo_status},
+        },
+        handlers::{RequestContext, acl_denied, acl_wire::CLUSTER_RESOURCE_NAME},
+        time_util::now_ms,
+        topic_creator::ForwardedIdentity,
     },
-    handlers::{RequestContext, acl_denied, acl_wire::CLUSTER_RESOURCE_NAME},
-    time_util::now_ms,
-    topic_creator::ForwardedIdentity,
+    krabka_metadata::{AclOperation, ResourceType},
+    krabka_protocol::owned::{
+        common::streams_group_heartbeat_response::status::Status,
+        create_topics_request::{CreatableTopic, CreatableTopicConfig},
+        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+    },
 };
 
 /// How many failures the `MISSING_INTERNAL_TOPICS` status names, as Kafka's
@@ -216,11 +217,7 @@ fn creatable_topic(spec: &InternalTopicSpec) -> CreatableTopic {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check, std::collections::BTreeMap};
 
     /// Kafka's `InternalTopicManager.toCreatableTopic` sends -1 for a
     /// topology that names no replication factor, and the controller applies

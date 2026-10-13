@@ -50,15 +50,16 @@ pub(crate) fn controller_managed_topic_config_message(key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::{
+    use {
         super::{
-            RETENTION_MS,
-            broker_scope::BROKER_WITNESS,
-            validation::{is_recognized, validate_topic_config},
+            super::{
+                RETENTION_MS,
+                broker_scope::BROKER_WITNESS,
+                validation::{is_recognized, validate_topic_config},
+            },
+            *,
         },
-        *,
+        assert2::check,
     };
 
     #[test]

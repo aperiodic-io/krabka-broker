@@ -3,19 +3,19 @@
 
 mod support;
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker, BrokerConfig};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-    create_topics_request::{CreatableTopic, CreateTopicsRequest},
-};
-
-use crate::support::{
-    client::{connect, connect_client},
-    consumer_groups::{consumer_heartbeat, joining_consumer},
+use {
+    crate::support::{
+        client::{connect, connect_client},
+        consumer_groups::{consumer_heartbeat, joining_consumer},
+    },
+    assert2::assert,
+    krabka_broker::{BootstrapMode, Broker, BrokerConfig},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        create_topics_request::{CreatableTopic, CreateTopicsRequest},
+    },
+    std::sync::Arc,
 };
 
 async fn create_topic(client: &Client, name: &str, partitions: i32) {

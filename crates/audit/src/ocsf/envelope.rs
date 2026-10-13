@@ -2,10 +2,7 @@
 //! block that stamps the schema version and the emitting product, and the
 //! `status_id` code that reports whether the audited operation succeeded.
 
-use serde_json::json;
-
-use super::ProductInfo;
-use crate::event::AuditOutcome;
+use {super::ProductInfo, crate::event::AuditOutcome, serde_json::json};
 
 const SCHEMA_VERSION: &str = "1.3.0";
 

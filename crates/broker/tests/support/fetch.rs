@@ -1,12 +1,13 @@
 //! Fetch fixtures with explicit limits and caller-owned session and replica fields.
 
-use krabka_ids::{Offset, PartitionIndex};
-use krabka_protocol::{
-    owned::fetch_request::{FetchPartition, FetchRequest, FetchTopic, ForgottenTopic},
-    primitives::uuid::Uuid,
-};
-
 pub use super::share::{FetchByteLimit, RequestWaitMillis};
+use {
+    krabka_ids::{Offset, PartitionIndex},
+    krabka_protocol::{
+        owned::fetch_request::{FetchPartition, FetchRequest, FetchTopic, ForgottenTopic},
+        primitives::uuid::Uuid,
+    },
+};
 
 #[derive(Clone, Copy)]
 pub struct FetchLimits {
@@ -89,11 +90,9 @@ pub struct SinglePartitionFetchSetup {
 
 pub fn single_partition_fetch(setup: SinglePartitionFetchSetup) -> FetchRequest {
     fetch_request_for(
-        vec![fetch_topic_row(
-            setup.topic,
-            setup.topic_id,
-            vec![setup.partition],
-        )],
+        vec![fetch_topic_row(setup.topic, setup.topic_id, vec![
+            setup.partition,
+        ])],
         setup.limits,
     )
 }
@@ -131,9 +130,7 @@ pub fn fetch_request_for(topics: Vec<FetchTopic>, limits: FetchLimits) -> FetchR
 }
 
 /// Preserve the protocol's ordinary limits for session-only requests.
-pub fn default_fetch_limits() -> FetchLimits {
-    FetchLimits::default()
-}
+pub fn default_fetch_limits() -> FetchLimits { FetchLimits::default() }
 
 #[derive(Clone, Copy, Default)]
 pub struct FetchSessionId(pub i32);
@@ -150,9 +147,7 @@ pub struct FetchSessionSetup {
 }
 
 impl FetchSessionSetup {
-    pub fn incremental(id: FetchSessionId) -> Self {
-        Self::at_epoch(id, FetchSessionEpoch(1))
-    }
+    pub fn incremental(id: FetchSessionId) -> Self { Self::at_epoch(id, FetchSessionEpoch(1)) }
 
     /// Explicit epochs include deliberately malformed and stale fixture values.
     pub fn at_epoch(id: FetchSessionId, epoch: FetchSessionEpoch) -> Self {

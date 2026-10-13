@@ -3,12 +3,14 @@
 //! controller implementation because every controller-only operation here is a
 //! deliberate refusal rather than a delegation.
 
-use super::{
-    AddVoter, Arc, BTreeSet, DelegationTokenMutation, MetadataImage, MetadataRecord,
-    MetadataSource, MetadataWriter, Node, NodeId, QuorumState, RaftError, ReconfigOutcome,
-    RemoveVoter, SnapshotRange, SocketAddr, SubmitChangeResult, UpdateVoter, watch,
+use {
+    super::{
+        AddVoter, Arc, BTreeSet, DelegationTokenMutation, MetadataImage, MetadataRecord,
+        MetadataSource, MetadataWriter, Node, NodeId, QuorumState, RaftError, ReconfigOutcome,
+        RemoveVoter, SnapshotRange, SocketAddr, SubmitChangeResult, UpdateVoter, watch,
+    },
+    crate::metadata_observer::MetadataObserver,
 };
-use crate::metadata_observer::MetadataObserver;
 
 /// Broker-only metadata source: reads from a [`MetadataObserver`], writes
 /// by forwarding to the controller quorum.
@@ -26,33 +28,28 @@ impl ObserverSource {
 
 #[async_trait::async_trait]
 impl MetadataSource for ObserverSource {
-    fn current_image(&self) -> Arc<MetadataImage> {
-        self.observer.current_image()
-    }
-    fn watch_image(&self) -> watch::Receiver<Arc<MetadataImage>> {
-        self.observer.watch_image()
-    }
-    fn watch_leader(&self) -> watch::Receiver<Option<NodeId>> {
-        self.observer.watch_leader()
-    }
-    fn current_metadata_offset(&self) -> i64 {
-        self.observer.current_metadata_offset()
-    }
-    fn quorum_committed_offset(&self) -> i64 {
-        self.observer.quorum_committed_offset()
-    }
+    fn current_image(&self) -> Arc<MetadataImage> { self.observer.current_image() }
+
+    fn watch_image(&self) -> watch::Receiver<Arc<MetadataImage>> { self.observer.watch_image() }
+
+    fn watch_leader(&self) -> watch::Receiver<Option<NodeId>> { self.observer.watch_leader() }
+
+    fn current_metadata_offset(&self) -> i64 { self.observer.current_metadata_offset() }
+
+    fn quorum_committed_offset(&self) -> i64 { self.observer.quorum_committed_offset() }
+
     fn last_applied_record_timestamp_ms(&self) -> i64 {
         self.observer.last_applied_record_timestamp_ms()
     }
-    fn watch_fatal(&self) -> watch::Receiver<Option<String>> {
-        self.observer.watch_fatal()
-    }
-    fn metadata_load_error_count(&self) -> u64 {
-        self.observer.metadata_load_error_count()
-    }
+
+    fn watch_fatal(&self) -> watch::Receiver<Option<String>> { self.observer.watch_fatal() }
+
+    fn metadata_load_error_count(&self) -> u64 { self.observer.metadata_load_error_count() }
+
     fn pending_record_processing_time_us(&self) -> (u64, u64) {
         self.observer.pending_record_processing_time_us()
     }
+
     fn quorum_state(&self) -> QuorumState {
         // A broker-only node is not a voter and has no openraft state of its
         // own, so only `current_leader` is meaningful here. DescribeQuorum
@@ -63,15 +60,16 @@ impl MetadataSource for ObserverSource {
             ..Default::default()
         }
     }
-    fn current_controller_epoch(&self) -> Option<u64> {
-        None
-    }
+
+    fn current_controller_epoch(&self) -> Option<u64> { None }
+
     async fn submit_change(
         &self,
         records: Vec<MetadataRecord>,
     ) -> Result<SubmitChangeResult, RaftError> {
         self.writer.submit_change(records).await
     }
+
     async fn submit_delegation_token_mutations(
         &self,
         mutations: Vec<DelegationTokenMutation>,
@@ -80,45 +78,54 @@ impl MetadataSource for ObserverSource {
             .submit_delegation_token_mutations(mutations)
             .await
     }
+
     async fn change_membership(&self, _new_voters: BTreeSet<NodeId>) -> Result<(), RaftError> {
         Err(RaftError::NotLeader {
             current_leader: None,
         })
     }
+
     async fn add_learner(&self, _node_id: NodeId, _node: Node) -> Result<(), RaftError> {
         Err(RaftError::NotLeader {
             current_leader: None,
         })
     }
+
     fn controller_bound_addr(&self) -> SocketAddr {
         // A broker-only node runs no controller listener. The only callers
         // (DescribeQuorum / KIP-853 reconfiguration) live on controllers, so
         // this is never reached in practice; report an unspecified address.
         SocketAddr::from(([0, 0, 0, 0], 0))
     }
+
     fn read_snapshot_range(&self, _position: i64, _max_bytes: i32) -> SnapshotRange {
         // A broker-only observer keeps a checkpoint to resume from, but it is
         // not a member of the metadata quorum and does not serve it:
         // FetchSnapshot is answered by the controller quorum.
         SnapshotRange::NoSnapshot
     }
+
     async fn trigger_snapshot(&self) -> Result<(), RaftError> {
         Err(RaftError::NotLeader {
             current_leader: None,
         })
     }
+
     async fn add_voter(&self, _req: AddVoter) -> Result<ReconfigOutcome, RaftError> {
         let current_leader = *self.observer.watch_leader().borrow();
         Err(RaftError::NotLeader { current_leader })
     }
+
     async fn remove_voter(&self, _req: RemoveVoter) -> Result<ReconfigOutcome, RaftError> {
         let current_leader = *self.observer.watch_leader().borrow();
         Err(RaftError::NotLeader { current_leader })
     }
+
     async fn update_voter(&self, _req: UpdateVoter) -> Result<ReconfigOutcome, RaftError> {
         let current_leader = *self.observer.watch_leader().borrow();
         Err(RaftError::NotLeader { current_leader })
     }
+
     async fn forward_raw(
         &self,
         api_key: i16,
@@ -127,22 +134,21 @@ impl MetadataSource for ObserverSource {
     ) -> Option<Result<bytes::Bytes, RaftError>> {
         Some(self.writer.forward_raw(api_key, version, body).await)
     }
-    async fn cancel(&self) {
-        self.observer.cancel().await;
-    }
+
+    async fn cancel(&self) { self.observer.cancel().await; }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
-    use tempfile::TempDir;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        metadata_observer::{ObserverConfig, test_support::observer_config},
-        metadata_source::test_support::{start_controller, topic_record},
+    use {
+        super::*,
+        crate::{
+            metadata_observer::{ObserverConfig, test_support::observer_config},
+            metadata_source::test_support::{start_controller, topic_record},
+        },
+        std::sync::Mutex,
+        tempfile::TempDir,
+        uuid::Uuid,
     };
 
     struct RecordingWriter {
@@ -158,6 +164,7 @@ mod tests {
             self.calls.lock().unwrap().push(records);
             Ok(SubmitChangeResult::default())
         }
+
         async fn submit_delegation_token_mutations(
             &self,
             _mutations: Vec<DelegationTokenMutation>,

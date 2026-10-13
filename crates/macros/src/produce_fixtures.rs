@@ -1,8 +1,9 @@
 //! A single-partition Produce request shared by wire-test fixtures.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::fixtures::named_items;
+use {
+    crate::fixtures::named_items,
+    moxy::{ast::ParseError, token::TokenStream},
+};
 
 pub(crate) fn single_partition_produce(input: TokenStream) -> Result<TokenStream, ParseError> {
     named_items(input, |name| {

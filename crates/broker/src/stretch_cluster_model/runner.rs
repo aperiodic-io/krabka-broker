@@ -4,8 +4,7 @@
 //! exhaustive, because a truncated search proves nothing and the two must move
 //! together.
 
-use super::config::StretchModel;
-use crate::model_check::check_model;
+use {super::config::StretchModel, crate::model_check::check_model};
 
 const MAX_STATES: usize = 200_000;
 const MAX_DEPTH: usize = 60;

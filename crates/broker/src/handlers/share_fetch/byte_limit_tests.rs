@@ -6,44 +6,44 @@
 //! share consumer treats an acquired offset with no record as a gap, and
 //! acknowledges it as `Gap`, which archives the record without delivery.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_protocol::{
-    owned::{
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        produce_response::ProduceResponse,
-        share_fetch_request::{
-            AcknowledgementBatch, FetchPartition, FetchTopic, ShareFetchRequest,
+use {
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::BrokerHandle,
+        codes,
+        handlers::{
+            produce::handle,
+            test_support::{
+                AcknowledgementCode, AcknowledgementPartitionSetup, AcknowledgementSetup,
+                ClientTopicSetup, ShareSessionEpoch, ShareWireSetup, TopicPartitionCount,
+                acknowledge_batches_request, acquired_share_records,
+                create_topic as create_topic_from_test_support, share_acknowledge_wire,
+                share_fetch_wire,
+            },
         },
-        share_fetch_response::{PartitionData, ShareFetchResponse},
-    },
-    primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch, RecordsPayload},
-};
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::BrokerHandle,
-    codes,
-    handlers::{
-        produce::handle,
         test_support::{
-            AcknowledgementCode, AcknowledgementPartitionSetup, AcknowledgementSetup,
-            ClientTopicSetup, ShareSessionEpoch, ShareWireSetup, TopicPartitionCount,
-            acknowledge_batches_request, acquired_share_records,
-            create_topic as create_topic_from_test_support, share_acknowledge_wire,
-            share_fetch_wire,
+            decode_response, encode_request, initialize_share_state, peer, principal,
+            start_broker_no_audit_with,
         },
     },
-    test_support::{
-        decode_response, encode_request, initialize_share_state, peer, principal,
-        start_broker_no_audit_with,
+    assert2::assert,
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_protocol::{
+        owned::{
+            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+            produce_response::ProduceResponse,
+            share_fetch_request::{
+                AcknowledgementBatch, FetchPartition, FetchTopic, ShareFetchRequest,
+            },
+            share_fetch_response::{PartitionData, ShareFetchResponse},
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::{Record, RecordBatch, RecordsPayload},
     },
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::sync::Arc,
 };
 
 /// The number of batches that each topic holds.
@@ -55,9 +55,7 @@ const RECORDS_PER_BATCH: i64 = 2;
 /// Produce v12 names the topic.
 const PRODUCE_VERSION: i16 = 12;
 
-async fn start() -> (BrokerHandle, tempfile::TempDir) {
-    start_with_delivery_attempts(5).await
-}
+async fn start() -> (BrokerHandle, tempfile::TempDir) { start_with_delivery_attempts(5).await }
 
 async fn start_with_delivery_attempts(attempts: i16) -> (BrokerHandle, tempfile::TempDir) {
     start_broker_no_audit_with(|cfg| {
@@ -84,14 +82,11 @@ async fn create_topic_with_partitions(
     name: &str,
     partitions: i32,
 ) -> WireUuid {
-    create_topic_from_test_support(
-        broker,
-        ClientTopicSetup {
-            client_id: "share-fetch-byte-limit-test",
-            name,
-            partitions: TopicPartitionCount(partitions),
-        },
-    )
+    create_topic_from_test_support(broker, ClientTopicSetup {
+        client_id: "share-fetch-byte-limit-test",
+        name,
+        partitions: TopicPartitionCount(partitions),
+    })
     .await
 }
 
@@ -206,16 +201,10 @@ async fn send_share_fetch(
     broker: &BrokerHandle,
     request: &ShareFetchRequest,
 ) -> ShareFetchResponse {
-    share_fetch_wire(
-        broker,
-        request,
-        ShareWireSetup {
-            version: krabka_ids::ApiVersion(
-                krabka_protocol::owned::share_fetch_request::MAX_VERSION,
-            ),
-            ..Default::default()
-        },
-    )
+    share_fetch_wire(broker, request, ShareWireSetup {
+        version: krabka_ids::ApiVersion(krabka_protocol::owned::share_fetch_request::MAX_VERSION),
+        ..Default::default()
+    })
     .await
 }
 
@@ -231,9 +220,7 @@ fn partition(response: &ShareFetchResponse) -> PartitionData {
 }
 
 /// The `(first, last)` offsets of every acquired row.
-fn acquired(row: &PartitionData) -> Vec<(i64, i64)> {
-    acquired_share_records(row)
-}
+fn acquired(row: &PartitionData) -> Vec<(i64, i64)> { acquired_share_records(row) }
 
 /// The offsets of every record that the row carries.
 fn record_offsets(row: &PartitionData) -> Vec<i64> {
@@ -367,14 +354,11 @@ async fn every_acquired_offset_has_its_record_in_the_response() {
             .call()
             .await;
 
-        actual.push((
-            case.name,
-            Outcome {
-                acquired: acquired(&partition(&limited)),
-                records: record_offsets(&partition(&limited)),
-                remainder: acquired(&partition(&rest)),
-            },
-        ));
+        actual.push((case.name, Outcome {
+            acquired: acquired(&partition(&limited)),
+            records: record_offsets(&partition(&limited)),
+            remainder: acquired(&partition(&rest)),
+        }));
         expected.push((case.name, case.expected));
     }
 
@@ -557,30 +541,18 @@ async fn only_the_first_partition_may_exceed_the_byte_budget() {
 
     // `(name, MaxBytes as (numerator, denominator) of one batch, expected)`.
     let cases = [
-        (
-            "half-a-batch",
-            (1, 2),
-            Spread {
-                rows_with_records: 1,
-                batches: 1,
-            },
-        ),
-        (
-            "half-a-batch-each",
-            (3, 2),
-            Spread {
-                rows_with_records: 1,
-                batches: 1,
-            },
-        ),
-        (
-            "a-batch-each",
-            (3, 1),
-            Spread {
-                rows_with_records: 3,
-                batches: 3,
-            },
-        ),
+        ("half-a-batch", (1, 2), Spread {
+            rows_with_records: 1,
+            batches: 1,
+        }),
+        ("half-a-batch-each", (3, 2), Spread {
+            rows_with_records: 1,
+            batches: 1,
+        }),
+        ("a-batch-each", (3, 1), Spread {
+            rows_with_records: 3,
+            batches: 3,
+        }),
     ];
     let mut actual = Vec::new();
     let mut expected = Vec::new();
@@ -652,14 +624,10 @@ async fn release(
         ),
         ..AcknowledgementSetup::for_topic_session(group, ShareSessionEpoch(epoch), topic_id)
     });
-    let response = share_acknowledge_wire(
-        broker,
-        &request,
-        ShareWireSetup {
-            version: krabka_ids::ApiVersion(version),
-            ..Default::default()
-        },
-    )
+    let response = share_acknowledge_wire(broker, &request, ShareWireSetup {
+        version: krabka_ids::ApiVersion(version),
+        ..Default::default()
+    })
     .await;
     let row = &response.responses[0].partitions[0];
     assert!(

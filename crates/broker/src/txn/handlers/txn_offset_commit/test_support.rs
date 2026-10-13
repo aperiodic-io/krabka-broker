@@ -2,11 +2,12 @@
 //! two-partition commit for a single topic, which both the response builders
 //! and the `__consumer_offsets` append are checked against.
 
-use std::collections::HashSet;
-
-use krabka_ids::ProducerId;
-use krabka_protocol::owned::txn_offset_commit_request::{
-    TxnOffsetCommitRequest, TxnOffsetCommitRequestPartition, TxnOffsetCommitRequestTopic,
+use {
+    krabka_ids::ProducerId,
+    krabka_protocol::owned::txn_offset_commit_request::{
+        TxnOffsetCommitRequest, TxnOffsetCommitRequestPartition, TxnOffsetCommitRequestTopic,
+    },
+    std::collections::HashSet,
 };
 
 #[derive(Clone, Copy, Default)]

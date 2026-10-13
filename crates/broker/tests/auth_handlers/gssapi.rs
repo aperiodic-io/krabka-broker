@@ -6,27 +6,28 @@
 //! inter-broker initiate from a keytab against the MIT KDC fixture and is
 //! `#[ignore]`d by default.
 
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
-        sasl_handshake_request::SaslHandshakeRequest,
-        sasl_handshake_response::SaslHandshakeResponse,
+use {
+    crate::{
+        harness::{round_trip, start_broker_stream},
+        inter_broker::run_inter_broker_auth_test,
+        support::{
+            manifest_dir,
+            sasl::sasl_temp_config,
+            wire::{CorrelationId as WireCorrelationId, SocketExchangeSetup},
+        },
     },
-};
-use krabka_security::SaslMechanism;
-
-use crate::{
-    harness::{round_trip, start_broker_stream},
-    inter_broker::run_inter_broker_auth_test,
-    support::{
-        manifest_dir,
-        sasl::sasl_temp_config,
-        wire::{CorrelationId as WireCorrelationId, SocketExchangeSetup},
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+            sasl_handshake_request::SaslHandshakeRequest,
+            sasl_handshake_response::SaslHandshakeResponse,
+        },
     },
+    krabka_security::SaslMechanism,
 };
 
 /// A broker with GSSAPI enabled advertises GSSAPI in its `SaslHandshake`
@@ -144,15 +145,13 @@ async fn gssapi_inter_broker_client_authenticates_from_keytab() {
         max_time_skew: krabka_security::gssapi::DEFAULT_GSSAPI_MAX_TIME_SKEW,
     });
 
-    let result = run_inter_broker_auth_test(
-        cfg,
-        krabka_broker::config::InterBrokerCredentials::Gssapi {
+    let result =
+        run_inter_broker_auth_test(cfg, krabka_broker::config::InterBrokerCredentials::Gssapi {
             keytab_path: fixtures.join("alice.keytab"),
             client_principal: "alice@CRABKA.TEST".to_string(),
             service_name: "kafka".to_string(),
             kdc_url,
-        },
-    )
-    .await;
+        })
+        .await;
     result.expect("InterBrokerClient GSSAPI auth + ApiVersions round-trip must succeed");
 }

@@ -26,15 +26,16 @@
 mod kafka_wire;
 mod support;
 
-use std::{io, net::SocketAddr};
-
-use assert2::assert;
-use kafka_wire::single_record_produce_request;
-use krabka_broker::{BrokerHandle, authorizer::opa::OpaAuthorizer};
-use krabka_protocol::owned::produce_response::ProduceResponse;
-use krabka_security::SaslMechanism;
-use tempfile::TempDir;
-use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+use {
+    assert2::assert,
+    kafka_wire::single_record_produce_request,
+    krabka_broker::{BrokerHandle, authorizer::opa::OpaAuthorizer},
+    krabka_protocol::owned::produce_response::ProduceResponse,
+    krabka_security::SaslMechanism,
+    std::{io, net::SocketAddr},
+    tempfile::TempDir,
+    wiremock::{Mock, MockServer, ResponseTemplate, matchers::method},
+};
 
 // Local mirror of `krabka_broker::codes::TOPIC_AUTHORIZATION_FAILED`,
 // kept inline because the `codes` module is crate-private. The value
@@ -133,16 +134,13 @@ use crate::{
 /// session. Admin is the super-user in both tests, so the call bypasses the OPA
 /// mock and the topic materialises whatever OPA answers.
 async fn create_topic_as_admin(addr: SocketAddr, name: &str) {
-    create_topic_as_super_user(
-        addr,
-        AutomaticTopicSetup {
-            client_id: CLIENT_ID,
-            topic: ConfiguredTopicSetup {
-                name: name.to_string(),
-                ..Default::default()
-            },
+    create_topic_as_super_user(addr, AutomaticTopicSetup {
+        client_id: CLIENT_ID,
+        topic: ConfiguredTopicSetup {
+            name: name.to_string(),
+            ..Default::default()
         },
-    )
+    })
     .await;
 }
 
@@ -163,9 +161,7 @@ async fn create_topic_as_admin(addr: SocketAddr, name: &str) {
 /// but a literal that flows into the client auth calls trips GitHub's default
 /// code-scanning credential query. Building it here keeps those sites free of
 /// literals.
-fn alice_password() -> Vec<u8> {
-    b"wonderland".to_vec()
-}
+fn alice_password() -> Vec<u8> { b"wonderland".to_vec() }
 
 async fn produce_when_partition_ready(
     handle: &BrokerHandle,

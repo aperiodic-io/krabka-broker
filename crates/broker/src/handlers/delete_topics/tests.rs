@@ -1,38 +1,38 @@
 //! Tests for the `DeleteTopics` handler driven over the wire against a live
 //! in-process broker.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_metadata::{AclEntry, AclOperation, MetadataRecord, PatternType, ResourceType};
-use krabka_protocol::{
-    owned::{
-        delete_topics_request::DeleteTopicsRequest,
-        delete_topics_response::{DeletableTopicResult, DeleteTopicsResponse},
+use {
+    super::{
+        test_support::{DOOMED, gated_config, id_state, named_state, request},
+        *,
     },
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use super::{
-    test_support::{DOOMED, gated_config, id_state, named_state, request},
-    *,
-};
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::Broker,
-    codes,
-    config::BreakGlassConfig,
-    handlers::{
-        RequestContext,
-        acl_wire::CLUSTER_RESOURCE_NAME,
-        create_topics::handle as create_topics_handle,
-        test_support::{AclSetup, CreateTopicSetup, configured_topic_request},
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::Broker,
+        codes,
+        config::BreakGlassConfig,
+        handlers::{
+            RequestContext,
+            acl_wire::CLUSTER_RESOURCE_NAME,
+            create_topics::handle as create_topics_handle,
+            test_support::{AclSetup, CreateTopicSetup, configured_topic_request},
+        },
+        metrics::AuthorizationDeniedLabel,
+        test_support::{
+            AllowAclSetup, DenyAll, allow_acl, dispatch_wire, peer, principal,
+            start_broker_no_audit_with, start_broker_with_authorizer_no_audit as start_broker,
+        },
     },
-    metrics::AuthorizationDeniedLabel,
-    test_support::{
-        AllowAclSetup, DenyAll, allow_acl, dispatch_wire, peer, principal,
-        start_broker_no_audit_with, start_broker_with_authorizer_no_audit as start_broker,
+    assert2::{assert, check},
+    krabka_metadata::{AclEntry, AclOperation, MetadataRecord, PatternType, ResourceType},
+    krabka_protocol::{
+        owned::{
+            delete_topics_request::DeleteTopicsRequest,
+            delete_topics_response::{DeletableTopicResult, DeleteTopicsResponse},
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
+    std::sync::Arc,
 };
 
 /// Wire version the cluster-`Delete` shortcut test drives both `CreateTopics`
@@ -253,15 +253,11 @@ async fn invalid_topic_rows_answer_invalid_request_and_delete_nothing() {
                 "Neither topic name nor id were specified.",
             )],
         ),
-        (
-            "a name and a non-zero id",
-            vec![both],
-            vec![invalid(
-                Some(TOPIC),
-                topic_id,
-                "You may not specify both topic name and topic id.",
-            )],
-        ),
+        ("a name and a non-zero id", vec![both], vec![invalid(
+            Some(TOPIC),
+            topic_id,
+            "You may not specify both topic name and topic id.",
+        )]),
         (
             "a duplicate name",
             vec![named_state(TOPIC), named_state(TOPIC)],
@@ -372,34 +368,22 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
     });
 
     let cases = [
-        (
-            "cluster Delete authorizes every survivor",
-            Case {
-                acls: vec![cluster_delete.clone()],
-                deleted: &["a", "app-x"],
-            },
-        ),
-        (
-            "a literal ACL authorizes only its exact name",
-            Case {
-                acls: vec![literal_a_delete.clone()],
-                deleted: &["a"],
-            },
-        ),
-        (
-            "an app- prefixed ACL authorizes only its prefix",
-            Case {
-                acls: vec![prefixed_app_delete.clone()],
-                deleted: &["app-x"],
-            },
-        ),
-        (
-            "no Delete ACL authorizes nothing",
-            Case {
-                acls: vec![],
-                deleted: &[],
-            },
-        ),
+        ("cluster Delete authorizes every survivor", Case {
+            acls: vec![cluster_delete.clone()],
+            deleted: &["a", "app-x"],
+        }),
+        ("a literal ACL authorizes only its exact name", Case {
+            acls: vec![literal_a_delete.clone()],
+            deleted: &["a"],
+        }),
+        ("an app- prefixed ACL authorizes only its prefix", Case {
+            acls: vec![prefixed_app_delete.clone()],
+            deleted: &["app-x"],
+        }),
+        ("no Delete ACL authorizes nothing", Case {
+            acls: vec![],
+            deleted: &[],
+        }),
     ];
 
     for (label, case) in cases {
@@ -416,23 +400,15 @@ async fn handle_authorizes_delete_per_topic_when_cluster_delete_is_denied() {
             )])
             .await
             .expect("seed create acl");
-        seed_topic(
-            &broker,
-            &test_context(&p, &peer),
-            CreateTopicSetup {
-                topic: "a",
-                ..Default::default()
-            },
-        )
+        seed_topic(&broker, &test_context(&p, &peer), CreateTopicSetup {
+            topic: "a",
+            ..Default::default()
+        })
         .await;
-        seed_topic(
-            &broker,
-            &test_context(&p, &peer),
-            CreateTopicSetup {
-                topic: "app-x",
-                ..Default::default()
-            },
-        )
+        seed_topic(&broker, &test_context(&p, &peer), CreateTopicSetup {
+            topic: "app-x",
+            ..Default::default()
+        })
         .await;
 
         // Grant this case's Delete ACL shape, if any.
@@ -612,14 +588,10 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             .submit_change(vec![MetadataRecord::V1AccessControlEntry(cluster_create)])
             .await
             .expect("seed create acl");
-        let topic_id = seeded_topic_id(
-            &broker,
-            &test_context(&p, &peer),
-            CreateTopicSetup {
-                topic: TOPIC,
-                ..Default::default()
-            },
-        )
+        let topic_id = seeded_topic_id(&broker, &test_context(&p, &peer), CreateTopicSetup {
+            topic: TOPIC,
+            ..Default::default()
+        })
         .await;
         crate::handlers::acl_test_support::seed_case_acls!(broker, case.acls);
 
@@ -677,14 +649,10 @@ async fn delete_topic_enable_false_refuses_every_row() {
         .await;
         let broker = broker_handle.broker_arc_for_test();
         request_identity!((p, peer), principal("admin"));
-        let topic_id = seeded_topic_id(
-            &broker,
-            &test_context(&p, &peer),
-            CreateTopicSetup {
-                topic: TOPIC,
-                ..Default::default()
-            },
-        )
+        let topic_id = seeded_topic_id(&broker, &test_context(&p, &peer), CreateTopicSetup {
+            topic: TOPIC,
+            ..Default::default()
+        })
         .await;
         let req = if version < 6 {
             DeleteTopicsRequest {

@@ -6,9 +6,10 @@
 //! from the flag definitions and from the hashing the format run performs on
 //! the parsed result.
 
-use krabka_security::{SaslMechanism, scram::MIN_SCRAM_ITERATIONS};
-
-use super::args::ScramSpec;
+use {
+    super::args::ScramSpec,
+    krabka_security::{SaslMechanism, scram::MIN_SCRAM_ITERATIONS},
+};
 
 pub(super) fn parse_scram_spec(s: &str) -> Result<ScramSpec, String> {
     let s = s.trim();

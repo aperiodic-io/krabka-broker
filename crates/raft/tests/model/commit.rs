@@ -3,12 +3,13 @@
 //! returns. It is separate because it is the only place the model turns
 //! replication progress into an observable acknowledgement.
 
-use krabka_raft::kraft::types::Epoch;
-use stateright::semantics::ConsistencyTester;
-
-use super::{
-    spec::LogRet,
-    state::{CommitPoint, ModelState, live_authority, node_high_watermark},
+use {
+    super::{
+        spec::LogRet,
+        state::{CommitPoint, ModelState, live_authority, node_high_watermark},
+    },
+    krabka_raft::kraft::types::Epoch,
+    stateright::semantics::ConsistencyTester,
 };
 
 pub(super) fn wal_quorum_frontier(state: &ModelState) -> i64 {

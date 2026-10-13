@@ -1,8 +1,6 @@
-use creusot_std::prelude::*;
-
-use super::ProducerReloadRange;
 #[cfg(creusot)]
 use super::ProducerSnapshotEntryFacts;
+use {super::ProducerReloadRange, creusot_std::prelude::*};
 
 open_logic! {
 /// Kafka's `truncateAndReload` keeps a snapshot exactly when

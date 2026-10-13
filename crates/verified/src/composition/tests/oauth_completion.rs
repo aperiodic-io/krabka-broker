@@ -1,5 +1,7 @@
-use super::*;
-use crate::{jwks::JwksCacheFacts, oauth::*};
+use {
+    super::*,
+    crate::{jwks::JwksCacheFacts, oauth::*},
+};
 
 fn cache_snapshot_ok(at: i64, c: JwksCacheFacts) -> bool {
     c.generation_before.is_multiple_of(2)

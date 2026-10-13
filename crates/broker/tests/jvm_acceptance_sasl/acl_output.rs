@@ -85,9 +85,7 @@ fn field(line: &str, key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// What `--list` prints after `--producer --topic orders`: the two topic
     /// operations the shorthand expands to, and the cluster `IDEMPOTENT_WRITE`

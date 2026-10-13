@@ -71,12 +71,13 @@
 //! [`self::consume`] holds `try_consume`. [`self::state`] holds the
 //! broker-wide [`ThrottleState`] bundle.
 
-use std::sync::{
-    Arc, Mutex, MutexGuard, PoisonError,
-    atomic::{AtomicU64, Ordering::Relaxed},
+use {
+    qubit_clock::{MonotonicClock, StdMonotonicClock},
+    std::sync::{
+        Arc, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicU64, Ordering::Relaxed},
+    },
 };
-
-use qubit_clock::{MonotonicClock, StdMonotonicClock};
 
 mod consume;
 mod rate;
@@ -152,9 +153,7 @@ pub struct TokenBucket {
 
 impl TokenBucket {
     #[must_use]
-    pub fn new() -> Self {
-        Self::with_clock(Arc::new(StdMonotonicClock::new()))
-    }
+    pub fn new() -> Self { Self::with_clock(Arc::new(StdMonotonicClock::new())) }
 
     /// Constructs a bucket backed by a caller-supplied [`MonotonicClock`].
     ///
@@ -180,9 +179,7 @@ impl TokenBucket {
     }
 
     #[inline]
-    fn now_nanos(&self) -> u64 {
-        clock_nanos(&*self.clock)
-    }
+    fn now_nanos(&self) -> u64 { clock_nanos(&*self.clock) }
 
     /// Locks the group.
     ///
@@ -196,23 +193,20 @@ impl TokenBucket {
     /// The micro-token rate the unthrottled fast path sees, read without the
     /// lock.
     #[inline]
-    fn fast_path_rate(&self) -> u64 {
-        self.micro_rate_per_sec.load(Relaxed)
-    }
+    fn fast_path_rate(&self) -> u64 { self.micro_rate_per_sec.load(Relaxed) }
 }
 
 impl Default for TokenBucket {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{bytes, bytes_per_sec};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_units::prelude::{bytes, bytes_per_sec},
+    };
 
     #[test]
     fn debug_renders_bucket_fields() {

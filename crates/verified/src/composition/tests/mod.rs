@@ -1,6 +1,4 @@
-use proptest::prelude::*;
-
-use super::*;
+use {super::*, proptest::prelude::*};
 
 mod abort_union;
 mod byte_quorum;
@@ -141,9 +139,7 @@ fn indexed_timestamp_records(
     (offsets, times, entries)
 }
 
-fn oracle_sequence(value: i64) -> i32 {
-    i32::try_from(value.rem_euclid(1_i64 << 31)).unwrap()
-}
+fn oracle_sequence(value: i64) -> i32 { i32::try_from(value.rem_euclid(1_i64 << 31)).unwrap() }
 
 fn oracle_retry_matches(row: &ProducerSnapshotEntryFacts, request: (i16, i32, i32, bool)) -> bool {
     request.0 == row.producer_epoch

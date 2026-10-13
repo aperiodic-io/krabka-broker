@@ -1,10 +1,11 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::time_index::sparse_timestamp_window_valid;
-use super::{
-    SparseTimestampWindow, constructed_index_retained_candidate,
-    diskless_trim_reconciliation_preserves_coverage,
+use {
+    super::{
+        SparseTimestampWindow, constructed_index_retained_candidate,
+        diskless_trim_reconciliation_preserves_coverage,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Keep logical visibility unchanged while physical eviction reroutes the first

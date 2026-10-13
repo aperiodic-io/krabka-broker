@@ -7,9 +7,7 @@
 //! step and because they are the only methods here that read metadata rather
 //! than acquisition state.
 
-use krabka_ids::PartitionIndex;
-
-use super::SharePartitionLeaderManager;
+use {super::SharePartitionLeaderManager, krabka_ids::PartitionIndex};
 
 impl SharePartitionLeaderManager {
     /// Resolves the wire `(leader_id, leader_epoch)` for
@@ -80,13 +78,13 @@ impl SharePartitionLeaderManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_ids::LeaderEpoch;
-    use krabka_metadata::{MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicRecord};
-
-    use crate::share_partition::manager::test_support::{manager, manager_with_image};
+    use {
+        crate::share_partition::manager::test_support::{manager, manager_with_image},
+        assert2::assert,
+        krabka_ids::LeaderEpoch,
+        krabka_metadata::{MetadataImage, MetadataRecord, NodeId, PartitionRecord, TopicRecord},
+        std::sync::Arc,
+    };
 
     #[tokio::test]
     async fn topic_leader_is_self_false_for_unknown_topic() {
@@ -101,29 +99,26 @@ mod tests {
         // A topic-partition led by node 2 at leader epoch 5. Both components are
         // non-default and differ from every fixed-tuple mutant
         // ((0,0)/(0,1)/(-1,0)/(1,1)).
-        let image = Arc::new(MetadataImage::from_records(
-            uuid::Uuid::nil(),
-            &[
-                MetadataRecord::V1Topic(TopicRecord {
-                    name: "t".into(),
-                    topic_id: tid,
-                    partitions: 1,
-                    replication_factor: 1,
-                }),
-                MetadataRecord::V1Partition(PartitionRecord {
-                    topic: "t".into(),
-                    partition: 0,
-                    leader: NodeId(2),
-                    replicas: vec![NodeId(2)],
-                    isr: vec![NodeId(2)],
-                    leader_epoch: LeaderEpoch(5),
-                    adding_replicas: vec![],
-                    removing_replicas: vec![],
-                    directories: vec![],
-                    partition_epoch: 0,
-                }),
-            ],
-        ));
+        let image = Arc::new(MetadataImage::from_records(uuid::Uuid::nil(), &[
+            MetadataRecord::V1Topic(TopicRecord {
+                name: "t".into(),
+                topic_id: tid,
+                partitions: 1,
+                replication_factor: 1,
+            }),
+            MetadataRecord::V1Partition(PartitionRecord {
+                topic: "t".into(),
+                partition: 0,
+                leader: NodeId(2),
+                replicas: vec![NodeId(2)],
+                isr: vec![NodeId(2)],
+                leader_epoch: LeaderEpoch(5),
+                adding_replicas: vec![],
+                removing_replicas: vec![],
+                directories: vec![],
+                partition_epoch: 0,
+            }),
+        ]));
         let mgr = manager_with_image(image);
 
         // Known partition resolves to (leader_id, leader_epoch) from the image.

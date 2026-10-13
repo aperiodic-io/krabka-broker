@@ -5,9 +5,7 @@
 //! versions, so the cluster that mints a token and the reader that recovers it
 //! stay together.
 
-use krabka_broker::BrokerConfig;
-
-use crate::jvm_acceptance::SaslClusterSetup;
+use {crate::jvm_acceptance::SaslClusterSetup, krabka_broker::BrokerConfig};
 
 /// Like [`start_three_broker_sasl_plaintext_jvm_cluster_with_users`] but
 /// also enables `SCRAM-SHA-256` on the listener and installs the given

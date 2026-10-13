@@ -1,8 +1,9 @@
 //! Consensus log and voter fixtures shared by unit and integration tests.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::{fixtures::name, meta::arguments};
+use {
+    crate::{fixtures::name, meta::arguments},
+    moxy::{ast::ParseError, token::TokenStream},
+};
 
 pub(crate) fn empty_endpoint_voters(input: TokenStream) -> Result<TokenStream, ParseError> {
     let name = name(input)?;

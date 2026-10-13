@@ -2,40 +2,40 @@
 //! and metadata backends, and builders for rolled logs, tiered partitions and
 //! synthetic segment exports.
 
-use std::{
-    collections::BTreeMap,
-    ops::RangeInclusive,
-    sync::{Arc, Mutex, atomic::Ordering},
-};
-
-use krabka_ids::{LeaderEpoch, PartitionIndex};
-use krabka_log::{Log, LogConfig, Offset, SegmentExport};
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_protocol::records::RecordBatch;
-use krabka_remote_storage::{
-    CustomMetadata, IndexType, InmemoryRemoteLogMetadataManager, LocalTieredStorage,
-    LogSegmentData, ObjectEntry, RemoteLogMetadataManager, RemoteLogSegmentId,
-    RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState,
-    RemoteStorageError, RemoteStorageManager, Sha256Digest, TopicIdPartition, WormArchiver,
-};
-use krabka_units::{ByteSize, bytes};
-use uuid::Uuid;
-
-use crate::{
-    api_catalog::UnstableApiVersions,
-    broker::spawn_partition,
-    log_dir::partition_dir,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    metrics::{BrokerMetrics, TopicLabel},
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    remote_log_manager::{ArchiveMode, RemoteTier},
-    test_support::{
-        FakeMetadataSource, KeyedBatchSetup, KeyedRecordCount, UnixMillis, keyed_records_batch,
+use {
+    crate::{
+        api_catalog::UnstableApiVersions,
+        broker::spawn_partition,
+        log_dir::partition_dir,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        metrics::{BrokerMetrics, TopicLabel},
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        remote_log_manager::{ArchiveMode, RemoteTier},
+        test_support::{
+            FakeMetadataSource, KeyedBatchSetup, KeyedRecordCount, UnixMillis, keyed_records_batch,
+        },
+        time_util::now_ms,
     },
-    time_util::now_ms,
+    krabka_ids::{LeaderEpoch, PartitionIndex},
+    krabka_log::{Log, LogConfig, Offset, SegmentExport},
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_protocol::records::RecordBatch,
+    krabka_remote_storage::{
+        CustomMetadata, IndexType, InmemoryRemoteLogMetadataManager, LocalTieredStorage,
+        LogSegmentData, ObjectEntry, RemoteLogMetadataManager, RemoteLogSegmentId,
+        RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState,
+        RemoteStorageError, RemoteStorageManager, Sha256Digest, TopicIdPartition, WormArchiver,
+    },
+    krabka_units::{ByteSize, bytes},
+    std::{
+        collections::BTreeMap,
+        ops::RangeInclusive,
+        sync::{Arc, Mutex, atomic::Ordering},
+    },
+    uuid::Uuid,
 };
 
 /// A `BrokerMetrics` shared by every tier a unit test builds.
@@ -67,14 +67,10 @@ pub(crate) fn tier<'a>(
     rsm: &'a Arc<dyn RemoteStorageManager>,
     rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
 ) -> RemoteTier<'a> {
-    configured_tier(
-        rsm,
-        rlmm,
-        TierSetup {
-            archive,
-            ..Default::default()
-        },
-    )
+    configured_tier(rsm, rlmm, TierSetup {
+        archive,
+        ..Default::default()
+    })
 }
 
 /// Policies and resources for a test tier. Counter assertions override the shared metrics.
@@ -253,6 +249,8 @@ impl FakeWormArchive {
 }
 
 impl RemoteStorageManager for FakeWormArchive {
+    missing_remote_reads!();
+
     fn copy_log_segment_data(
         &self,
         metadata: &RemoteLogSegmentMetadata,
@@ -275,7 +273,7 @@ impl RemoteStorageManager for FakeWormArchive {
             .insert(metadata.remote_log_segment_id().id, sealed.bytes.to_vec());
         Ok(Some(sealed.receipt.to_custom_metadata()))
     }
-    missing_remote_reads!();
+
     fn delete_log_segment_data(
         &self,
         metadata: &RemoteLogSegmentMetadata,
@@ -296,9 +294,7 @@ pub fn fixed_source(image: MetadataImage) -> FakeMetadataSource {
         .build()
 }
 
-pub fn tp() -> TopicIdPartition {
-    TopicIdPartition::new(Uuid::from_u128(1), "orders", 0)
-}
+pub fn tp() -> TopicIdPartition { TopicIdPartition::new(Uuid::from_u128(1), "orders", 0) }
 
 pub fn batch(n: i32) -> RecordBatch {
     keyed_records_batch(KeyedBatchSetup {
@@ -309,13 +305,10 @@ pub fn batch(n: i32) -> RecordBatch {
 
 /// Build a log rolled into several sealed segments under `dir`.
 pub fn rolled_log(dir: &std::path::Path) -> Log {
-    let mut log = Log::open(
-        dir,
-        LogConfig {
-            segment_size: bytes(256), // tiny so we roll fast
-            ..LogConfig::default()
-        },
-    )
+    let mut log = Log::open(dir, LogConfig {
+        segment_size: bytes(256), // tiny so we roll fast
+        ..LogConfig::default()
+    })
     .unwrap();
     append_fixture_batches(&mut log, 12);
     log.sync().unwrap();
@@ -526,7 +519,14 @@ pub(crate) use partition_log_fixture;
 
 /// Bind a fixture partition to registry/metadata/storage without moving the caller's guards.
 macro_rules! register_fixture {
-    ($partitions:ident, $controller:ident, $rsm:ident, $rlmm:ident, $partition:expr, $remote:ident) => {
+    (
+        $partitions:ident,
+        $controller:ident,
+        $rsm:ident,
+        $rlmm:ident,
+        $partition:expr,
+        $remote:ident
+    ) => {
         $partitions.insert("orders".into(), krabka_ids::PartitionIndex(0), $partition);
         let $controller = crate::remote_log_manager::test_support::fixed_source(
             crate::remote_log_manager::test_support::orders_image(1),
@@ -651,9 +651,7 @@ pub fn write_once_backends() -> (
     )
 }
 
-pub fn two_exports() -> Vec<SegmentExport> {
-    two_exports_with_size(bytes(64))
-}
+pub fn two_exports() -> Vec<SegmentExport> { two_exports_with_size(bytes(64)) }
 
 /// Consecutive ten-offset exports sharing the caller's segment size.
 pub fn two_exports_with_size(size: ByteSize) -> Vec<SegmentExport> {
@@ -728,7 +726,9 @@ pub(crate) use rolled_partition_fixture;
 
 /// Register the caller's partition and run the first mutable-tier sweep.
 macro_rules! registered_sweep_fixture {
-    ($registry:ident, $controller:ident, $rsm:ident, $rlmm:ident, $partition:expr, $remote:ident) => {
+    (
+        $registry:ident, $controller:ident, $rsm:ident, $rlmm:ident, $partition:expr, $remote:ident
+    ) => {
         crate::remote_log_manager::test_support::register_fixture!(
             $registry,
             $controller,

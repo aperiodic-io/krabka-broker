@@ -16,23 +16,24 @@
 //! cluster speaks `SASL_PLAINTEXT` so that alice, bob and carol are three real
 //! principals and no broker-side shortcut stands in for a second person.
 
-use assert2::assert;
-use krabka_broker::coordinator::AUDIT_TOPIC;
-use krabka_protocol::{
-    krabka::{
-        break_glass::{
-            ApproveBreakGlassRequest, ApproveBreakGlassResponse, ProposeBreakGlassRequest,
-            ProposeBreakGlassResponse,
-        },
-        freeze::{PATTERN_TYPE_LITERAL, SetTopicFreezeRequest, SetTopicFreezeResponse},
+use {
+    crate::{
+        freeze_signing::{FreezeBytes, freeze_signing_bytes},
+        support::{self, OperatorKeysSetup, OperatorSaslSetup},
     },
-    owned::metadata_request::MetadataRequest,
-    primitives::uuid::Uuid as WireUuid,
-};
-
-use crate::{
-    freeze_signing::{FreezeBytes, freeze_signing_bytes},
-    support::{self, OperatorKeysSetup, OperatorSaslSetup},
+    assert2::assert,
+    krabka_broker::coordinator::AUDIT_TOPIC,
+    krabka_protocol::{
+        krabka::{
+            break_glass::{
+                ApproveBreakGlassRequest, ApproveBreakGlassResponse, ProposeBreakGlassRequest,
+                ProposeBreakGlassResponse,
+            },
+            freeze::{PATTERN_TYPE_LITERAL, SetTopicFreezeRequest, SetTopicFreezeResponse},
+        },
+        owned::metadata_request::MetadataRequest,
+        primitives::uuid::Uuid as WireUuid,
+    },
 };
 
 /// The proposer. She freezes the topic, opens the proposal, and thaws it.
@@ -208,9 +209,8 @@ pub(super) async fn boot_workflow_cluster() -> Cluster {
     let alice_key = support::mint_operator_key(&keys, ALICE_KEY_ID, ALICE);
     let log_dir = dir.path().join("data");
 
-    let (broker, bootstrap, _config) = support::start_with_operator_keys_sasl(
-        &log_dir,
-        OperatorSaslSetup {
+    let (broker, bootstrap, _config) =
+        support::start_with_operator_keys_sasl(&log_dir, OperatorSaslSetup {
             trust: OperatorKeysSetup {
                 keys: &[&alice_key],
                 approvers: &[ALICE, BOB, CAROL],
@@ -220,9 +220,8 @@ pub(super) async fn boot_workflow_cluster() -> Cluster {
                 ("bob", "bob-pw"),
                 ("carol", "carol-pw"),
             ],
-        },
-    )
-    .await;
+        })
+        .await;
     broker.wait_until_partition_present(AUDIT_TOPIC, 0).await;
     Cluster {
         broker,
@@ -263,17 +262,14 @@ pub(super) async fn run_thaw_workflow() -> ThawWorkflow {
     let (alice, bob, carol, cluster_id) = cluster.workflow_clients().await;
 
     let freeze_set_at_ms = now_ms();
-    let frozen = send_signed_freeze(
-        &alice,
-        &SignedFreeze {
-            key: &cluster.alice_key,
-            cluster_id: &cluster_id,
-            frozen: true,
-            reason: FREEZE_REASON,
-            proposal_id: uuid::Uuid::nil(),
-            set_at_ms: freeze_set_at_ms,
-        },
-    )
+    let frozen = send_signed_freeze(&alice, &SignedFreeze {
+        key: &cluster.alice_key,
+        cluster_id: &cluster_id,
+        frozen: true,
+        reason: FREEZE_REASON,
+        proposal_id: uuid::Uuid::nil(),
+        set_at_ms: freeze_set_at_ms,
+    })
     .await;
     assert!(frozen.error_code == 0, "the freeze was refused: {frozen:?}");
 
@@ -293,17 +289,14 @@ pub(super) async fn run_thaw_workflow() -> ThawWorkflow {
     // A signed record's timestamp must beat the entry it replaces. The two
     // requests are several round trips apart, so wall time already does that;
     // the `max` makes it true whatever the clock's resolution.
-    let thawed = send_signed_freeze(
-        &alice,
-        &SignedFreeze {
-            key: &cluster.alice_key,
-            cluster_id: &cluster_id,
-            frozen: false,
-            reason: THAW_REASON,
-            proposal_id: uuid::Uuid::from_bytes(proposed.proposal_id.0),
-            set_at_ms: now_ms().max(freeze_set_at_ms + 1),
-        },
-    )
+    let thawed = send_signed_freeze(&alice, &SignedFreeze {
+        key: &cluster.alice_key,
+        cluster_id: &cluster_id,
+        frozen: false,
+        reason: THAW_REASON,
+        proposal_id: uuid::Uuid::from_bytes(proposed.proposal_id.0),
+        set_at_ms: now_ms().max(freeze_set_at_ms + 1),
+    })
     .await;
     assert!(thawed.error_code == 0, "the thaw was refused: {thawed:?}");
 

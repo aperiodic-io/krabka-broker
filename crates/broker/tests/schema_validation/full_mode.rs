@@ -6,29 +6,26 @@
 //! to be admitted under `id` and rejected under `full` for either half to mean
 //! anything.
 
-use assert2::check;
-
-use crate::harness::{
-    INVALID_RECORD, KNOWN_ID, SchemaTopicSetup, VALIDATED, create_topic, framed,
-    mock_topic_fixture, order_avro_body, produce_value,
+use {
+    crate::harness::{
+        INVALID_RECORD, KNOWN_ID, SchemaTopicSetup, VALIDATED, create_topic, framed,
+        mock_topic_fixture, order_avro_body, produce_value,
+    },
+    assert2::check,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_mode_checks_the_body_and_id_mode_does_not() {
     let (_registry, broker, client, _dir, id_mode) =
         mock_topic_fixture("validated", VALIDATED).await;
-    let full_mode = create_topic(
-        &broker,
-        &client,
-        SchemaTopicSetup {
-            name: "validated-full",
-            configs: &[
-                ("schema.validation.value", "true"),
-                ("schema.validation.mode", "full"),
-            ],
-            ..Default::default()
-        },
-    )
+    let full_mode = create_topic(&broker, &client, SchemaTopicSetup {
+        name: "validated-full",
+        configs: &[
+            ("schema.validation.value", "true"),
+            ("schema.validation.mode", "full"),
+        ],
+        ..Default::default()
+    })
     .await;
 
     // Framed with a bound id, but the body is not an Avro datum of the schema

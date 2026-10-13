@@ -2,16 +2,18 @@
 //! It stages the producer identity the client continues with after completion,
 //! then persists the Prepare record before any marker leaves this broker.
 
-use super::producer_identity::prepare_completion_identities;
-use crate::{
-    codes,
-    txn::{
-        coordinator::TxnCoordinator,
-        decision::{apply_end_txn_prepare, decide_phase1_transition},
-        marker::MarkerType,
-        state::{TxnEntry, TxnState},
-        util::now_millis,
-        version::TxnVersion,
+use {
+    super::producer_identity::prepare_completion_identities,
+    crate::{
+        codes,
+        txn::{
+            coordinator::TxnCoordinator,
+            decision::{apply_end_txn_prepare, decide_phase1_transition},
+            marker::MarkerType,
+            state::{TxnEntry, TxnState},
+            util::now_millis,
+            version::TxnVersion,
+        },
     },
 };
 

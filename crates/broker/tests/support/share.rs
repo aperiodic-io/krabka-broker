@@ -1,37 +1,37 @@
 //! Membership and record fixtures for share-group integration scenarios.
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
-
-use assert2::assert;
-use krabka_broker::BrokerConfig;
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::{
-        produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-        share_acknowledge_request::{
-            AcknowledgePartition, AcknowledgeTopic, AcknowledgementBatch as AckAckBatch,
-            ShareAcknowledgeRequest,
+use {
+    crate::support::{
+        client::{connect as connect_client, create_topic_with},
+        configs::{
+            IncrementalConfigsSetup, incremental_config, incremental_request, incremental_resource,
         },
-        share_acknowledge_response::ShareAcknowledgeResponse,
-        share_fetch_request::{
-            AcknowledgementBatch as FetchAckBatch, FetchPartition, FetchTopic, ForgottenTopic,
-            ShareFetchRequest,
+        records::{batch_from_records, value_record},
+        topics::{CreateTopicSetup, TopicPartitionCount},
+    },
+    assert2::assert,
+    krabka_broker::BrokerConfig,
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::{
+            produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+            share_acknowledge_request::{
+                AcknowledgePartition, AcknowledgeTopic, AcknowledgementBatch as AckAckBatch,
+                ShareAcknowledgeRequest,
+            },
+            share_acknowledge_response::ShareAcknowledgeResponse,
+            share_fetch_request::{
+                AcknowledgementBatch as FetchAckBatch, FetchPartition, FetchTopic, ForgottenTopic,
+                ShareFetchRequest,
+            },
+            share_group_heartbeat_request::ShareGroupHeartbeatRequest,
         },
-        share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+        primitives::uuid::Uuid as WireUuid,
+        records::{Record, RecordBatch},
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::{Record, RecordBatch},
-};
-
-use crate::support::{
-    client::{connect as connect_client, create_topic_with},
-    configs::{
-        IncrementalConfigsSetup, incremental_config, incremental_request, incremental_resource,
+    std::{
+        sync::{Arc, OnceLock},
+        time::Duration,
     },
-    records::{batch_from_records, value_record},
-    topics::{CreateTopicSetup, TopicPartitionCount},
 };
 const SHARE_STATE_PARTITIONS: i32 = 1;
 const MAX_CONCURRENT_TEST_BROKERS: usize = 3;
@@ -45,9 +45,7 @@ pub fn topic_id(broker: &krabka_broker::BrokerHandle, topic: &str) -> uuid::Uuid
         .expect("topic present in image")
 }
 
-pub fn wire(tid: uuid::Uuid) -> WireUuid {
-    WireUuid(*tid.as_bytes())
-}
+pub fn wire(tid: uuid::Uuid) -> WireUuid { WireUuid(*tid.as_bytes()) }
 
 pub async fn broker_test_permit() -> tokio::sync::OwnedSemaphorePermit {
     static GATE: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
@@ -79,15 +77,13 @@ pub async fn bootstrap_share_state(
 pub async fn set_auto_offset_reset_earliest(client: &Client, group: &str) {
     let resp = client
         .send(incremental_request(IncrementalConfigsSetup {
-            resources: vec![incremental_resource(
-                RESOURCE_TYPE_GROUP,
-                group,
-                vec![incremental_config(
+            resources: vec![incremental_resource(RESOURCE_TYPE_GROUP, group, vec![
+                incremental_config(
                     "share.auto.offset.reset",
                     Some("earliest".into()),
                     crate::support::configs::ConfigOperation::Set,
-                )],
-            )],
+                ),
+            ])],
             ..Default::default()
         }))
         .await
@@ -111,9 +107,7 @@ pub struct ShareProduceSetup<'a> {
 pub struct ShareRecordCount(pub i64);
 
 impl Default for ShareRecordCount {
-    fn default() -> Self {
-        Self(1)
-    }
+    fn default() -> Self { Self(1) }
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -277,9 +271,7 @@ pub async fn permitted_topic_fixture(
     (permit, broker, client, dir, tid)
 }
 
-pub async fn connect(bootstrap: &str) -> Arc<Client> {
-    connect_client(bootstrap, "c1").await
-}
+pub async fn connect(bootstrap: &str) -> Arc<Client> { connect_client(bootstrap, "c1").await }
 pub async fn create_topic(
     broker: &krabka_broker::BrokerHandle,
     client: &Client,
@@ -327,6 +319,7 @@ impl<'a> ShareSessionSetup<'a> {
         self.epoch = epoch;
         self
     }
+
     pub fn fetch_at(self, epoch: ShareSessionEpoch) -> ShareFetchSetup<'a> {
         self.with_epoch(epoch).into()
     }
@@ -338,9 +331,11 @@ impl<'a> ShareSessionSetup<'a> {
             ..Default::default()
         }
     }
+
     pub fn opening(member: &'a str, topic_id: uuid::Uuid) -> Self {
         Self::at_epoch(member, topic_id, ShareSessionEpoch(0))
     }
+
     pub fn at_epoch(member: &'a str, topic_id: uuid::Uuid, epoch: ShareSessionEpoch) -> Self {
         Self {
             member,
@@ -363,6 +358,7 @@ impl<'a> ShareFetchSetup<'a> {
     pub fn joined(member: &'a str, topic_id: uuid::Uuid) -> Self {
         ShareSessionSetup::joined(member, topic_id).into()
     }
+
     pub fn at_epoch(member: &'a str, topic_id: uuid::Uuid, epoch: ShareSessionEpoch) -> Self {
         ShareSessionSetup::at_epoch(member, topic_id, epoch).into()
     }
@@ -444,10 +440,12 @@ impl<'a> ShareAck<'a> {
         self.ack_type = AcknowledgementCode(2);
         self
     }
+
     pub fn reject(mut self) -> Self {
         self.ack_type = AcknowledgementCode(3);
         self
     }
+
     pub fn starting_at(mut self, first: krabka_ids::Offset) -> Self {
         self.first = first;
         self
@@ -472,17 +470,13 @@ pub async fn share_ack(
         member_id: Some(ack.session.member.into()),
         epoch: ShareSessionEpoch(ack.session.epoch.0),
         mode: RenewalMode::Settle,
-        topics: vec![acknowledge_topic(
-            wire(ack.session.topic_id),
-            vec![acknowledge_partition(
-                ack.session.partition.0,
-                vec![acknowledgement(
-                    ack.first.0,
-                    ack.last.0,
-                    vec![ack.ack_type.0; count],
-                )],
-            )],
-        )],
+        topics: vec![acknowledge_topic(wire(ack.session.topic_id), vec![
+            acknowledge_partition(ack.session.partition.0, vec![acknowledgement(
+                ack.first.0,
+                ack.last.0,
+                vec![ack.ack_type.0; count],
+            )]),
+        ])],
     });
     let resp: ShareAcknowledgeResponse = client.send(req).await.expect("ShareAcknowledge");
     assert!(
@@ -883,14 +877,10 @@ pub async fn consumption_fixture(
 ) -> ConsumptionFixture {
     let (permit, broker, client, dir, tid) =
         permitted_topic_fixture(ShareTopicSetup::default(), |_| {}).await;
-    let (member, _) = initialize(
-        &broker,
-        &client,
-        ConsumptionSetup {
-            topic_id: tid,
-            count: setup.count,
-        },
-    )
+    let (member, _) = initialize(&broker, &client, ConsumptionSetup {
+        topic_id: tid,
+        count: setup.count,
+    })
     .await;
     ConsumptionFixture {
         _permit: permit,

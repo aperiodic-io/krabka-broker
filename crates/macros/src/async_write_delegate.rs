@@ -1,8 +1,6 @@
 //! Forward flush and shutdown polls through the first field of an unpinned tuple wrapper.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::fixtures::name;
+use crate::{fixtures::name, prelude::*};
 
 pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
     let policy = name(input)?;

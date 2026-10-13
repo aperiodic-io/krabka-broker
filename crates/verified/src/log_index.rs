@@ -128,9 +128,7 @@ pub fn offset_index_position_at_or_after(entries: &[(u32, u32)], target: u32) ->
 #[cfg(test)]
 mod tests {
 
-    use proptest::prelude::*;
-
-    use super::*;
+    use {super::*, proptest::prelude::*};
 
     fn offset_lookup_cases() -> impl Strategy<Value = (std::collections::BTreeSet<u32>, u32)> {
         (

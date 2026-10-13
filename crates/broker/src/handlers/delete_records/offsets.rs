@@ -1,9 +1,11 @@
 //! The verified offset boundary decision a `DeleteRecords` trim makes before
 //! it touches a log.
 
-use krabka_log::Offset;
-use krabka_verified::{
-    DeleteRecordsTrimDecision, DeleteRecordsTrimFacts, delete_records_trim_decision,
+use {
+    krabka_log::Offset,
+    krabka_verified::{
+        DeleteRecordsTrimDecision, DeleteRecordsTrimFacts, delete_records_trim_decision,
+    },
 };
 
 pub(super) fn trim_decision(
@@ -25,10 +27,11 @@ pub(super) fn trim_decision(
 
 #[cfg(test)]
 mod tests {
-    use DeleteRecordsTrimDecision::{Apply, Noop, RejectMalformed, RejectOutOfRange};
-    use assert2::assert;
-
-    use super::*;
+    use {
+        super::*,
+        DeleteRecordsTrimDecision::{Apply, Noop, RejectMalformed, RejectOutOfRange},
+        assert2::assert,
+    };
 
     #[test]
     fn trim_decision_covers_bounds_stale_requests_and_retries() {

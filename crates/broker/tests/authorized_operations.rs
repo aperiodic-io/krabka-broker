@@ -19,34 +19,36 @@
 
 mod support;
 
-use std::{collections::HashSet, sync::Arc};
-
-use assert2::assert;
-use bytes::{Buf, BytesMut};
-use krabka_broker::{Broker, BrokerConfig, authorizer::SimpleAclAuthorizer};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        describe_cluster_request::DescribeClusterRequest,
-        describe_groups_request::DescribeGroupsRequest, metadata_request::MetadataRequest,
-        metadata_response::MetadataResponse,
+use {
+    crate::support::{
+        acl::{
+            BIT_ALTER, BIT_ALTER_CONFIGS, BIT_CLUSTER_ACTION, BIT_CREATE, BIT_DELETE, BIT_DESCRIBE,
+            BIT_DESCRIBE_CONFIGS, BIT_IDEMPOTENT_WRITE, BIT_READ, TOPIC_FULL_MASK,
+        },
+        client::connect_owned,
+        discovery::named_topic_metadata,
+        topics::{
+            ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
+            metadata_topic,
+        },
+        wire::{
+            CorrelationId, HeaderEncoding, WireFrameSetup, request_body_capacity, request_frame,
+        },
     },
-};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-use crate::support::{
-    acl::{
-        BIT_ALTER, BIT_ALTER_CONFIGS, BIT_CLUSTER_ACTION, BIT_CREATE, BIT_DELETE, BIT_DESCRIBE,
-        BIT_DESCRIBE_CONFIGS, BIT_IDEMPOTENT_WRITE, BIT_READ, TOPIC_FULL_MASK,
+    assert2::assert,
+    bytes::{Buf, BytesMut},
+    krabka_broker::{Broker, BrokerConfig, authorizer::SimpleAclAuthorizer},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            describe_cluster_request::DescribeClusterRequest,
+            describe_groups_request::DescribeGroupsRequest, metadata_request::MetadataRequest,
+            metadata_response::MetadataResponse,
+        },
     },
-    client::connect_owned,
-    discovery::named_topic_metadata,
-    topics::{
-        ConfiguredTopicSetup, TopicPartitionCount, creatable_topic, create_topic_request,
-        metadata_topic,
-    },
-    wire::{CorrelationId, HeaderEncoding, WireFrameSetup, request_body_capacity, request_frame},
+    std::{collections::HashSet, sync::Arc},
+    tokio::io::{AsyncReadExt, AsyncWriteExt},
 };
 
 // Bit positions match Kafka's `AclOperation.code()` (verified by the

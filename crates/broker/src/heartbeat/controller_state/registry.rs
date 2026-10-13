@@ -4,17 +4,17 @@
 //! The behaviour over these types is split by concern into the sibling
 //! modules, which reach the fields from here.
 
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
-
-use krabka_units::{Time, convert::TimeExt as _};
-use tokio::sync::Mutex;
-
-use super::clock::Clock;
 #[cfg(test)]
 use super::clock::TestClock;
+use {
+    super::clock::Clock,
+    krabka_units::{Time, convert::TimeExt as _},
+    std::{
+        collections::HashMap,
+        time::{Duration, Instant},
+    },
+    tokio::sync::Mutex,
+};
 
 /// Per-broker liveness state as seen by the controller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,9 +99,7 @@ pub(crate) struct ControllerLivenessState {
 
 impl ControllerLivenessState {
     /// Create a new registry with the given heartbeat timeout.
-    pub(crate) fn new(timeout: Time) -> Self {
-        Self::with_clock(timeout.to_std(), Clock::Real)
-    }
+    pub(crate) fn new(timeout: Time) -> Self { Self::with_clock(timeout.to_std(), Clock::Real) }
 
     /// Construct with the selected clock for production or controlled liveness windows.
     pub(super) fn with_clock(timeout: Duration, clock: Clock) -> Self {

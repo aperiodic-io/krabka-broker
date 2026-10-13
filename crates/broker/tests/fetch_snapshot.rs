@@ -7,17 +7,17 @@
 //! `KafkaRaftClient.handleFetchSnapshotRequest` does, so a request names the
 //! snapshot it wants and the leader epoch it believes in.
 
-use std::{
-    path::Path,
-    time::{Duration, Instant},
+use {
+    crate::support::topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+    assert2::{assert, check},
+    krabka_protocol::owned::fetch_snapshot_request::{
+        FetchSnapshotRequest, PartitionSnapshot, SnapshotId, TopicSnapshot,
+    },
+    std::{
+        path::Path,
+        time::{Duration, Instant},
+    },
 };
-
-use assert2::{assert, check};
-use krabka_protocol::owned::fetch_snapshot_request::{
-    FetchSnapshotRequest, PartitionSnapshot, SnapshotId, TopicSnapshot,
-};
-
-use crate::support::topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request};
 
 mod support;
 

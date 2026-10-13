@@ -4,12 +4,13 @@
 //! the only part of verification that reads record bytes, and every sidecar
 //! check below it consumes the `end_offset` this pass establishes.
 
-use krabka_ids::Offset;
-use krabka_protocol::records::{RecordsError, validate_one_v2_batch};
-use object_store::path::Path;
-
-use super::offset_as_u64;
-use crate::{discover::SegmentInventory, error::RestoreError};
+use {
+    super::offset_as_u64,
+    crate::{discover::SegmentInventory, error::RestoreError},
+    krabka_ids::Offset,
+    krabka_protocol::records::{RecordsError, validate_one_v2_batch},
+    object_store::path::Path,
+};
 
 /// What one pass over a `.log`'s batches established.
 pub(super) struct LogWalk {

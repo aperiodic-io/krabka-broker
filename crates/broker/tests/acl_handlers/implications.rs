@@ -2,9 +2,10 @@
 //! grants Describe, so Metadata-by-name resolves the topic without a
 //! separate Describe seed.
 
-use assert2::assert;
-
-use crate::{polling::named_metadata_as_alice, sasl_cluster::start_alice_topic_grant};
+use {
+    crate::{polling::named_metadata_as_alice, sasl_cluster::start_alice_topic_grant},
+    assert2::assert,
+};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn implication_metadata_describes_after_read_acl() {

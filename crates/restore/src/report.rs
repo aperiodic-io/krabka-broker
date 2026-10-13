@@ -9,12 +9,12 @@
 //! outcome. Both render the same model, so they can never disagree. A dry run
 //! produces the same report as a real run, with `dry_run` set.
 
-use std::{collections::BTreeMap, fmt::Write as _, path::PathBuf};
-
-use serde::Serialize;
-use uuid::Uuid;
-
-use crate::materialize::SegmentOutcome;
+use {
+    crate::materialize::SegmentOutcome,
+    serde::Serialize,
+    std::{collections::BTreeMap, fmt::Write as _, path::PathBuf},
+    uuid::Uuid,
+};
 
 /// How [`RestoreReport::render`] writes the summary.
 ///
@@ -388,9 +388,7 @@ fn write_partition_line(out: &mut String, partition: &PartitionReport) {
 }
 
 /// `"s"` for anything but exactly one, so counts read as plain English.
-fn plural(count: u64) -> &'static str {
-    if count == 1 { "" } else { "s" }
-}
+fn plural(count: u64) -> &'static str { if count == 1 { "" } else { "s" } }
 
 /// Group `n`'s digits with `,` every three places, for a human scanning a
 /// terminal. `krabka-restore` has no formatting-number dependency in its
@@ -410,13 +408,14 @@ fn format_thousands(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_ids::Offset;
-    use uuid::Uuid;
-
-    use super::{
-        MetadataRestoreReport, PartitionReport, ReportFormat, RestoreReport, SegmentOutcome,
-        SkippedSegment, format_thousands, plural,
+    use {
+        super::{
+            MetadataRestoreReport, PartitionReport, ReportFormat, RestoreReport, SegmentOutcome,
+            SkippedSegment, format_thousands, plural,
+        },
+        assert2::check,
+        krabka_ids::Offset,
+        uuid::Uuid,
     };
 
     #[derive(Clone, Copy, Default)]

@@ -5,16 +5,17 @@
 //! overrides, the producer forces a segment roll, and the consumer reads back
 //! offsets whose local segments are already evicted.
 
-use assert2::assert;
-
-use super::{
-    docker::{KAFKA_IMAGE, KAFKA_IMAGE_TIERED, docker_run_kafka_tool_with_image},
-    minio::minio_list_objects,
-    ports::broker0_advertised,
-};
-use crate::{
-    jvm_acceptance::wait_jvm_log_config,
-    support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_stdin_output},
+use {
+    super::{
+        docker::{KAFKA_IMAGE, KAFKA_IMAGE_TIERED, docker_run_kafka_tool_with_image},
+        minio::minio_list_objects,
+        ports::broker0_advertised,
+    },
+    crate::{
+        jvm_acceptance::wait_jvm_log_config,
+        support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_stdin_output},
+    },
+    assert2::assert,
 };
 
 /// Segment size every tiered-storage suite boots its broker with, as
@@ -59,30 +60,27 @@ pub(crate) async fn create_tiered_topic(broker: &krabka_broker::BrokerHandle, to
     // Uses the KIP-405-aware `cp-kafka:7.8.8` image — older clients' `TopicCommand`
     // validates `--config` keys client-side and rejects `remote.storage.enable` /
     // `local.retention.bytes` before the request leaves the container.
-    docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TIERED,
-        &[
-            "kafka-topics",
-            "--create",
-            "--if-not-exists",
-            "--topic",
-            topic,
-            "--partitions",
-            "1",
-            "--replication-factor",
-            "1",
-            "--config",
-            "remote.storage.enable=true",
-            "--config",
-            "local.retention.bytes=1",
-            "--config",
-            "retention.bytes=-1",
-            "--config",
-            "retention.ms=-1",
-            "--bootstrap-server",
-            broker0_advertised(),
-        ],
-    );
+    docker_run_kafka_tool_with_image(KAFKA_IMAGE_TIERED, &[
+        "kafka-topics",
+        "--create",
+        "--if-not-exists",
+        "--topic",
+        topic,
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+        "--config",
+        "remote.storage.enable=true",
+        "--config",
+        "local.retention.bytes=1",
+        "--config",
+        "retention.bytes=-1",
+        "--config",
+        "retention.ms=-1",
+        "--bootstrap-server",
+        broker0_advertised(),
+    ]);
 
     // Only the overrides the JVM CLI actually sent are worth waiting for; the
     // segment size is inherited the moment the partition exists.
@@ -197,9 +195,7 @@ const SEGMENT_ARTIFACTS: [&str; 5] = [
 
 /// The key each `mc ls --recursive` line names. It is the last
 /// whitespace-separated field of the line, after the date, size and class.
-fn listed_key(line: &str) -> Option<&str> {
-    line.split_whitespace().last()
-}
+fn listed_key(line: &str) -> Option<&str> { line.split_whitespace().last() }
 
 /// Group `listing`'s keys by segment and report `(complete, seen)`: how many
 /// segments hold every entry of [`SEGMENT_ARTIFACTS`], and how many segments
@@ -309,23 +305,20 @@ pub(crate) fn consume_record_values(
     timeout_ms: u64,
     bootstrap_host_port: &str,
 ) -> Vec<String> {
-    let consumer_out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TIERED,
-        &[
-            "kafka-console-consumer",
-            "--bootstrap-server",
-            bootstrap_host_port,
-            "--topic",
-            topic,
-            "--partition",
-            "0",
-            "--from-beginning",
-            "--max-messages",
-            &max.to_string(),
-            "--timeout-ms",
-            &timeout_ms.to_string(),
-        ],
-    );
+    let consumer_out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TIERED, &[
+        "kafka-console-consumer",
+        "--bootstrap-server",
+        bootstrap_host_port,
+        "--topic",
+        topic,
+        "--partition",
+        "0",
+        "--from-beginning",
+        "--max-messages",
+        &max.to_string(),
+        "--timeout-ms",
+        &timeout_ms.to_string(),
+    ]);
     let stdout = String::from_utf8_lossy(&consumer_out.stdout);
     stdout
         .lines()

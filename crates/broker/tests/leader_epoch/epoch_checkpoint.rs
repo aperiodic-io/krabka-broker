@@ -5,14 +5,15 @@
 //! This test checks the file's byte format directly, separately from the
 //! leader-epoch behavior exercised over the wire.
 
-use assert2::check;
-
-use crate::{
-    epoch_harness::{boot_single, create_topic, record, set_leader_epoch, topic_id_for},
-    support::{
-        client::connect_client,
-        produce::{SinglePartitionProduceSetup, batch_request},
+use {
+    crate::{
+        epoch_harness::{boot_single, create_topic, record, set_leader_epoch, topic_id_for},
+        support::{
+            client::connect_client,
+            produce::{SinglePartitionProduceSetup, batch_request},
+        },
     },
+    assert2::check,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -24,28 +25,22 @@ async fn epoch_checkpoint_byte_compat() {
     let client = connect_client(bootstrap.clone(), None).await;
     let topic_id = topic_id_for(&client, "ckpt").await;
     client
-        .send(batch_request(
-            record("v0"),
-            SinglePartitionProduceSetup {
-                topic: ("ckpt").into(),
-                topic_id,
-                ..Default::default()
-            },
-        ))
+        .send(batch_request(record("v0"), SinglePartitionProduceSetup {
+            topic: ("ckpt").into(),
+            topic_id,
+            ..Default::default()
+        }))
         .await
         .expect("produce");
 
     // Bump epoch to 1 + produce another.
     set_leader_epoch(&broker, "ckpt", 1).await;
     client
-        .send(batch_request(
-            record("v1"),
-            SinglePartitionProduceSetup {
-                topic: ("ckpt").into(),
-                topic_id,
-                ..Default::default()
-            },
-        ))
+        .send(batch_request(record("v1"), SinglePartitionProduceSetup {
+            topic: ("ckpt").into(),
+            topic_id,
+            ..Default::default()
+        }))
         .await
         .expect("produce");
 

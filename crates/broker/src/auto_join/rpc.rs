@@ -5,20 +5,21 @@
 //! closes the connection, mirroring `Controller::forward_submit_to`. A fresh
 //! connection per attempt is what keeps the retry loops stateless.
 
-use bytes::{Bytes, BytesMut};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        add_raft_voter_request::{self, AddRaftVoterRequest},
-        add_raft_voter_response::AddRaftVoterResponse,
-        remove_raft_voter_request::{self, RemoveRaftVoterRequest},
-        remove_raft_voter_response::RemoveRaftVoterResponse,
-        update_raft_voter_request::{self, UpdateRaftVoterRequest},
-        update_raft_voter_response::UpdateRaftVoterResponse,
+use {
+    crate::{host_port::parse_host_port, network::client::InterBrokerClient},
+    bytes::{Bytes, BytesMut},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            add_raft_voter_request::{self, AddRaftVoterRequest},
+            add_raft_voter_response::AddRaftVoterResponse,
+            remove_raft_voter_request::{self, RemoveRaftVoterRequest},
+            remove_raft_voter_response::RemoveRaftVoterResponse,
+            update_raft_voter_request::{self, UpdateRaftVoterRequest},
+            update_raft_voter_response::UpdateRaftVoterResponse,
+        },
     },
 };
-
-use crate::{host_port::parse_host_port, network::client::InterBrokerClient};
 
 pub(super) async fn send_remove_raft_voter(
     client: &InterBrokerClient,

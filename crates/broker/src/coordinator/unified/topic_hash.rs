@@ -28,10 +28,7 @@
 //! the Basic Multilingual Plane before `U+E000`..`U+FFFF`, where UTF-8 byte
 //! order puts it after. Both sorts here follow Java.
 
-use std::cmp::Ordering;
-
-use krabka_metadata::MetadataImage;
-use twox_hash::XxHash3_64;
+use {krabka_metadata::MetadataImage, std::cmp::Ordering, twox_hash::XxHash3_64};
 
 /// `Utils.TOPIC_HASH_MAGIC_BYTE`: the version of the topic hash layout.
 const TOPIC_HASH_MAGIC_BYTE: u8 = 0x00;
@@ -42,9 +39,7 @@ fn java_string_order(left: &str, right: &str) -> Ordering {
 }
 
 /// Java's `String.length()`: the number of UTF-16 code units.
-fn utf16_len(value: &str) -> i32 {
-    i32::try_from(value.encode_utf16().count()).unwrap_or(i32::MAX)
-}
+fn utf16_len(value: &str) -> i32 { i32::try_from(value.encode_utf16().count()).unwrap_or(i32::MAX) }
 
 /// hash4j's `putString`: the UTF-16 code units, then their count as an `int`.
 fn put_string(stream: &mut Vec<u8>, value: &str) {
@@ -54,9 +49,7 @@ fn put_string(stream: &mut Vec<u8>, value: &str) {
     stream.extend_from_slice(&utf16_len(value).to_le_bytes());
 }
 
-fn xxh3(stream: &[u8]) -> i64 {
-    i64::from_le_bytes(XxHash3_64::oneshot(stream).to_le_bytes())
-}
+fn xxh3(stream: &[u8]) -> i64 { i64::from_le_bytes(XxHash3_64::oneshot(stream).to_le_bytes()) }
 
 /// Kafka's `Utils.computeTopicHash` for a topic that exists.
 ///
@@ -155,9 +148,7 @@ pub fn image_metadata_hash<'a>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// The topic id `0123456789abcdef-fedcba9876543210`.
     const ID: [u8; 16] = [

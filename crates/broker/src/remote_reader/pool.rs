@@ -15,9 +15,10 @@
 //! the readers waiting for one. A read that would push the waiting count past
 //! `max_pending_tasks` is rejected rather than queued.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-use tokio::sync::{Semaphore, SemaphorePermit};
+use {
+    std::sync::atomic::{AtomicUsize, Ordering},
+    tokio::sync::{Semaphore, SemaphorePermit},
+};
 
 /// A read the pool refused because its pending queue was already full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,9 +66,7 @@ impl ReaderPool {
     /// A pool that never refuses and never waits, for the in-process tests
     /// that are not about the cap itself.
     #[cfg(test)]
-    pub(crate) fn unbounded() -> Self {
-        Self::new(Semaphore::MAX_PERMITS, usize::MAX)
-    }
+    pub(crate) fn unbounded() -> Self { Self::new(Semaphore::MAX_PERMITS, usize::MAX) }
 
     /// Waits for a slot, or refuses when the pending queue is full.
     ///
@@ -100,9 +99,7 @@ impl ReaderPool {
 
     /// Reads waiting for a permit right now
     /// (Kafka's `RemoteLogReaderTaskQueueSize`).
-    pub(crate) fn queue_size(&self) -> usize {
-        self.pending.load(Ordering::Acquire)
-    }
+    pub(crate) fn queue_size(&self) -> usize { self.pending.load(Ordering::Acquire) }
 
     /// The share of the pool's read slots that are free, as a percentage
     /// (Kafka's `RemoteLogReaderAvgIdlePercent`).
@@ -120,9 +117,7 @@ impl ReaderPool {
     }
 
     /// Reads refused since startup because the pending queue was full.
-    pub(crate) fn rejected(&self) -> usize {
-        self.rejected.load(Ordering::Relaxed)
-    }
+    pub(crate) fn rejected(&self) -> usize { self.rejected.load(Ordering::Relaxed) }
 }
 
 #[cfg(test)]

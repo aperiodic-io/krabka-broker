@@ -67,7 +67,5 @@ impl TestClock {
         );
     }
 
-    pub(super) fn clock(&self) -> Clock {
-        Clock::Test(self.0.clone())
-    }
+    pub(super) fn clock(&self) -> Clock { Clock::Test(self.0.clone()) }
 }

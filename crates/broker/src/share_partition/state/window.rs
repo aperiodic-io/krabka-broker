@@ -7,13 +7,14 @@
 //! offset range. The concern-specific modules call these helpers; none of them
 //! is part of the public surface of `AcquisitionState`.
 
-use krabka_log::Offset;
-
-use super::{
-    AcquisitionState, InFlightBatch, RecordState, clamp_i32,
-    dlq::{ArchiveSink, DlqCause},
+use {
+    super::{
+        AcquisitionState, InFlightBatch, RecordState, clamp_i32,
+        dlq::{ArchiveSink, DlqCause},
+    },
+    crate::codes::{INVALID_RECORD_STATE, INVALID_REQUEST},
+    krabka_log::Offset,
 };
-use crate::codes::{INVALID_RECORD_STATE, INVALID_REQUEST};
 
 /// Gives an acquired run back: Kafka's `InFlightState.tryUpdateState` to
 /// `AVAILABLE`, which archives the run instead when its delivery count has

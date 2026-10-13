@@ -4,9 +4,10 @@
 //! group: a capture is written into the archive a restore reads, so the tool
 //! never introduces a second place to point at.
 
-use clap::{Args, Parser, Subcommand};
-
-use crate::{archive::ArchiveArgs, connection::SecurityArgs};
+use {
+    crate::{archive::ArchiveArgs, connection::SecurityArgs},
+    clap::{Args, Parser, Subcommand},
+};
 
 /// The capture selector that means "the newest capture in the archive".
 pub const LATEST: &str = "latest";
@@ -137,10 +138,11 @@ pub enum Command {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use clap::Parser as _;
-
-    use super::{Cli, Command};
+    use {
+        super::{Cli, Command},
+        assert2::{assert, check},
+        clap::Parser as _,
+    };
 
     #[test]
     fn a_capture_takes_both_sources_and_one_archive() {

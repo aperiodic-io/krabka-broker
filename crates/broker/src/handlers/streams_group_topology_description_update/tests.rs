@@ -1,19 +1,19 @@
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-use krabka_protocol::owned::{
-    common::streams_group_topology_description_update_request::{
-        topology_description::TopologyDescription,
-        topology_description_node::TopologyDescriptionNode,
-        topology_description_subtopology::TopologyDescriptionSubtopology,
+use {
+    super::*,
+    crate::test_support::{
+        ControllerPeerAllowed, GrantsInPrincipalName, start_broker_with, test_ctx,
     },
-    streams_group_topology_description_update_response::MAX_VERSION,
-};
-
-use super::*;
-use crate::test_support::{
-    ControllerPeerAllowed, GrantsInPrincipalName, start_broker_with, test_ctx,
+    assert2::assert,
+    krabka_metadata::{FeatureLevelRecord, MetadataRecord},
+    krabka_protocol::owned::{
+        common::streams_group_topology_description_update_request::{
+            topology_description::TopologyDescription,
+            topology_description_node::TopologyDescriptionNode,
+            topology_description_subtopology::TopologyDescriptionSubtopology,
+        },
+        streams_group_topology_description_update_response::MAX_VERSION,
+    },
+    std::sync::Arc,
 };
 
 crate::test_support::context_helper!(client_id = "streams-client");

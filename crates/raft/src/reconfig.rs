@@ -1,8 +1,6 @@
 //! KIP-853 requests submitted to the single-owner Raft engine.
 
-use krabka_metadata::Voter;
-
-use crate::NodeId;
+use {crate::NodeId, krabka_metadata::Voter};
 
 /// A request to add one voter. The candidate must already be a caught-up observer.
 #[derive(Debug, Clone)]

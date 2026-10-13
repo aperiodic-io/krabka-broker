@@ -5,12 +5,12 @@
 //! broker leads, so a second pass only runs once there is something new to
 //! see, or the client's `max_wait_ms` expired.
 
-use std::{sync::Arc, time::Duration};
-
-use tokio::sync::Notify;
-
-use super::pending::PendingPartition;
-use crate::broker::Broker;
+use {
+    super::pending::PendingPartition,
+    crate::broker::Broker,
+    std::{sync::Arc, time::Duration},
+    tokio::sync::Notify,
+};
 
 type WaitFut = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
@@ -82,9 +82,7 @@ async fn wait_for_notifications(waits: Vec<WaitFut>, max_wait: Duration) -> Long
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[tokio::test(start_paused = true)]
     async fn notification_wait_reports_empty_wakeup_and_timeout() {

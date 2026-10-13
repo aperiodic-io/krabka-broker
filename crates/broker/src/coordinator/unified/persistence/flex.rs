@@ -35,14 +35,15 @@
 //! bind them to the broker's `&mut &[u8]` reader and map `ProtocolError` into
 //! [`BrokerError`], so a record codec reads as a list of fields.
 
-use bytes::{BufMut, Bytes, BytesMut};
-use krabka_protocol::{
-    ProtocolError,
-    primitives::{array, fixed, string_bytes, uuid::Uuid, varint},
-    tagged_fields::{UnknownTaggedFields, WriteTaggedFields, read_tagged_fields},
+use {
+    crate::{coordinator::unified::persistence::get_i16, error::BrokerError},
+    bytes::{BufMut, Bytes, BytesMut},
+    krabka_protocol::{
+        ProtocolError,
+        primitives::{array, fixed, string_bytes, uuid::Uuid, varint},
+        tagged_fields::{UnknownTaggedFields, WriteTaggedFields, read_tagged_fields},
+    },
 };
-
-use crate::{coordinator::unified::persistence::get_i16, error::BrokerError};
 
 /// Writes a version-0 flexible record with no known message tags.
 pub(crate) fn encode_value(write: impl FnOnce(&mut BytesMut)) -> Bytes {
@@ -176,9 +177,7 @@ macro_rules! array_value_codec {
 
 pub(crate) use array_value_codec;
 
-fn protocol(e: ProtocolError) -> BrokerError {
-    BrokerError::Protocol(e)
-}
+fn protocol(e: ProtocolError) -> BrokerError { BrokerError::Protocol(e) }
 
 // ───────────────────────────────────────────────────────────────── writers ──
 
@@ -213,9 +212,7 @@ pub(crate) fn put_uuid(buf: &mut BytesMut, bytes: [u8; 16]) {
 
 /// Writes the tagged-field trailer of a message or a nested struct that sets no
 /// tag: a single `0` byte.
-pub(crate) fn put_empty_tagged_fields(buf: &mut BytesMut) {
-    varint::put_uvarint(buf, 0);
-}
+pub(crate) fn put_empty_tagged_fields(buf: &mut BytesMut) { varint::put_uvarint(buf, 0); }
 
 /// Writes a tagged-field trailer that carries `entries`, each a `(tag,
 /// payload)` pair. [`WriteTaggedFields`] sorts them, which the wire format
@@ -429,9 +426,7 @@ pub(crate) fn get_string_array(buf: &mut &[u8]) -> Result<Vec<String>, BrokerErr
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[test]
     fn compact_string_is_length_plus_one() {
@@ -467,10 +462,10 @@ mod tests {
     #[test]
     fn tagged_fields_round_trip_in_tag_order() {
         let mut buf = BytesMut::new();
-        put_tagged_fields(
-            &mut buf,
-            vec![(9, Bytes::from_static(b"z")), (1, Bytes::from_static(b"a"))],
-        );
+        put_tagged_fields(&mut buf, vec![
+            (9, Bytes::from_static(b"z")),
+            (1, Bytes::from_static(b"a")),
+        ]);
         assert!(&buf[..] == b"\x02\x01\x01a\x09\x01z");
     }
 

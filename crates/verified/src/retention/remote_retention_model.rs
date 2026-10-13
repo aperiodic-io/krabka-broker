@@ -1,8 +1,6 @@
-use creusot_std::prelude::*;
-
-use super::LocalRetentionSegment;
 #[cfg(creusot)]
 use super::{RemoteRetentionSegment, local_prefix_bytes};
+use {super::LocalRetentionSegment, creusot_std::prelude::*};
 
 /// Decide whether one held barrier cut falls outside the retained epoch
 /// window.

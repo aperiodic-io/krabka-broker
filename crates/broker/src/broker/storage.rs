@@ -3,39 +3,39 @@
 //! the group coordinator and producer-id manager on top of them. It is its own
 //! module because it is the one startup step that touches on-disk state.
 
-use std::sync::Arc;
-
-use krabka_ids::PartitionIndex;
-use krabka_units::convert::TimeExt as _;
-
-use crate::{
-    broker::{
-        DisklessRuntime,
-        partition_spawn::{PartitionSpawnConfig, try_spawn_partition_with_replication_target},
+use {
+    crate::{
+        broker::{
+            DisklessRuntime,
+            partition_spawn::{PartitionSpawnConfig, try_spawn_partition_with_replication_target},
+        },
+        config::BrokerConfig,
+        config_keys::resolve_diskless,
+        coordinator::{
+            GroupCoordinator,
+            bootstrap::{bootstrap, bootstrap_audit_topic},
+            unified::{ImageMetadataProvider, offsets_log::ProductionOffsetsLog},
+        },
+        cordoned_log_dirs::CordonedLogDirs,
+        diskless::recovery::{open_config, recover_open_log},
+        error::BrokerError,
+        log_dir,
+        log_dir_id::LogDirIds,
+        log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource,
+        partition::{PartitionRuntimeConfig, ReplicationTarget},
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        producer_state::ProducerState,
+        replicator_supervisor::desired_wal_placements,
+        wal::{
+            ControllerSequencer, OffsetSequencer,
+            quorum::{follower::hydrate_on_promotion, registry::ShardId},
+        },
     },
-    config::BrokerConfig,
-    config_keys::resolve_diskless,
-    coordinator::{
-        GroupCoordinator,
-        bootstrap::{bootstrap, bootstrap_audit_topic},
-        unified::{ImageMetadataProvider, offsets_log::ProductionOffsetsLog},
-    },
-    cordoned_log_dirs::CordonedLogDirs,
-    diskless::recovery::{open_config, recover_open_log},
-    error::BrokerError,
-    log_dir,
-    log_dir_id::LogDirIds,
-    log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource,
-    partition::{PartitionRuntimeConfig, ReplicationTarget},
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    producer_state::ProducerState,
-    replicator_supervisor::desired_wal_placements,
-    wal::{
-        ControllerSequencer, OffsetSequencer,
-        quorum::{follower::hydrate_on_promotion, registry::ShardId},
-    },
+    krabka_ids::PartitionIndex,
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
 };
 
 pub(super) struct StorageStartup {

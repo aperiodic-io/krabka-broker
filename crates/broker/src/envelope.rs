@@ -29,23 +29,24 @@
 //!   principal it cannot deserialize is a `PrincipalDeserializationException`.
 //!   It performs no principal-*type* check, so neither does this module.
 
-use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
-use krabka_protocol::{
-    Decode as _, Encode as _, ProtocolError, UnknownTaggedFields,
-    owned::{
-        default_principal_data::{self, DefaultPrincipalData},
-        envelope_request::EnvelopeRequest,
-        envelope_response::EnvelopeResponse,
+use {
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        handlers::{ApiKeyCode, ApiVersion, CorrelationId},
+        network::{request::parse_request, response_header_v1},
     },
-    primitives::string_bytes::put_nullable_string,
-    tagged_fields::read_tagged_fields,
-};
-
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    handlers::{ApiKeyCode, ApiVersion, CorrelationId},
-    network::{request::parse_request, response_header_v1},
+    bytes::{Buf as _, BufMut as _, Bytes, BytesMut},
+    krabka_protocol::{
+        Decode as _, Encode as _, ProtocolError, UnknownTaggedFields,
+        owned::{
+            default_principal_data::{self, DefaultPrincipalData},
+            envelope_request::EnvelopeRequest,
+            envelope_response::EnvelopeResponse,
+        },
+        primitives::string_bytes::put_nullable_string,
+        tagged_fields::read_tagged_fields,
+    },
 };
 
 /// A failure serving one `Envelope`, and the `EnvelopeResponse.error_code`
@@ -492,10 +493,11 @@ fn encode_response(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::api_catalog::UnstableApiVersions;
+    use {
+        super::*,
+        crate::api_catalog::UnstableApiVersions,
+        assert2::{assert, check},
+    };
 
     /// `DefaultKafkaPrincipalBuilder.serialize(new KafkaPrincipal("User",
     /// "alice"))` in `mirror.gcr.io/apache/kafka:4.3.1`, captured verbatim:

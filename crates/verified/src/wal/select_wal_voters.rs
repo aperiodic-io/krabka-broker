@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use super::WalFetchAdmission;
+use {super::WalFetchAdmission, creusot_std::prelude::*};
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]

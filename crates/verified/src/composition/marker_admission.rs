@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
-use super::{
-    FetchWatermarks, committed_fetch_excludes_unstable, control_marker_bounds_committed_fetch,
-};
-use crate::transaction::{
-    TransactionMarkerMaterializationDecision as Decision, TransactionMarkerPartitionState,
-    TransactionMarkerRequest, transaction_marker_equal_epoch_fenced,
-    transaction_marker_materialization_decision,
+use {
+    super::{
+        FetchWatermarks, committed_fetch_excludes_unstable, control_marker_bounds_committed_fetch,
+    },
+    crate::transaction::{
+        TransactionMarkerMaterializationDecision as Decision, TransactionMarkerPartitionState,
+        TransactionMarkerRequest, transaction_marker_equal_epoch_fenced,
+        transaction_marker_materialization_decision,
+    },
+    creusot_std::prelude::*,
 };
 
 open_logic! {
@@ -86,16 +87,13 @@ pub(super) fn admitted_marker_bounds_committed_fetch(
     other_starts: &[i64],
     bounds: (i64, i64), // observed HW and delivery cap
 ) -> AdmittedMarkerFetch {
-    let (_, other_visibility) = committed_fetch_excludes_unstable(
-        other_starts,
-        FetchWatermarks {
-            log_start: 0,
-            log_end: span.0,
-            hw: bounds.0,
-            lso: span.0,
-            deliverable: bounds.1,
-        },
-    )
+    let (_, other_visibility) = committed_fetch_excludes_unstable(other_starts, FetchWatermarks {
+        log_start: 0,
+        log_end: span.0,
+        hw: bounds.0,
+        lso: span.0,
+        deliverable: bounds.1,
+    })
     .unwrap();
     let before = other_visibility.limit_offset.min(pending_start);
     proof_assert!(before@ <= pending_start@

@@ -1,9 +1,10 @@
 //! Listener fixtures with explicit security protocols and advertised addresses.
 
-use std::net::SocketAddr;
-
-use krabka_broker::{SslPrincipalMapper, config::ListenerSpec};
-use krabka_security::ListenerProtocol;
+use {
+    krabka_broker::{SslPrincipalMapper, config::ListenerSpec},
+    krabka_security::ListenerProtocol,
+    std::net::SocketAddr,
+};
 
 pub fn listener(name: &str, addr: SocketAddr, protocol: ListenerProtocol) -> ListenerSpec {
     ListenerSpec {

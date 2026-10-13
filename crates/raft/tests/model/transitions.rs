@@ -3,15 +3,16 @@
 //! scheduler, and it is the one place production `Action`s become network
 //! envelopes, log writes, and high-watermark movement.
 
-use krabka_raft::kraft::{
-    action::Action,
-    event::Event,
-    types::{LogView, NodeId, SimInstant},
-};
-
-use super::{
-    config::ConsensusModel,
-    state::{Envelope, ModelState, StepWitness, node_high_watermark},
+use {
+    super::{
+        config::ConsensusModel,
+        state::{Envelope, ModelState, StepWitness, node_high_watermark},
+    },
+    krabka_raft::kraft::{
+        action::Action,
+        event::Event,
+        types::{LogView, NodeId, SimInstant},
+    },
 };
 
 /// Constant logical time. Timeouts are modeled as nondeterministic actions, so

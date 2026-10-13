@@ -35,11 +35,10 @@ impl TxnVersion {
     pub(crate) fn flexible_records(self) -> bool {
         matches!(self, TxnVersion::Flexible | TxnVersion::Verified)
     }
+
     /// The epoch bump on completion and the verify-only `AddPartitionsToTxn`
     /// both apply at `TV >= 2`.
-    pub(crate) fn verified(self) -> bool {
-        matches!(self, TxnVersion::Verified)
-    }
+    pub(crate) fn verified(self) -> bool { matches!(self, TxnVersion::Verified) }
 
     /// The `transaction.version` level, which
     /// `TransactionLogValue.ClientTransactionVersion` carries.
@@ -89,10 +88,11 @@ pub(crate) fn resolve_txn_version(image: &MetadataImage) -> TxnVersion {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{FeatureLevelRecord, MetadataRecord};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_metadata::{FeatureLevelRecord, MetadataRecord},
+    };
 
     fn image_with_tv(level: Option<i16>) -> MetadataImage {
         let mut m = MetadataImage::new(uuid::Uuid::nil());

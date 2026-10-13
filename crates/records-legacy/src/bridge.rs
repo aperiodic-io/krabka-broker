@@ -14,18 +14,19 @@
 //! `is_control_batch == true`. v0/v1 has no concept of them, and Kafka's
 //! reference broker drops them on down-conversion.
 
-use bytes::{Bytes, BytesMut};
-use krabka_compression::{CompressionType, RecordDecompressionPolicy};
-use krabka_ids::Offset;
-use krabka_protocol::records::{Attributes, Record, RecordBatch, RecordsError};
-
-use crate::{
-    error::LegacyRecordsError,
-    message::Magic,
-    set::{
-        ParsedRecord, decode_message_set_with_policy, encode_compressed_message_set,
-        encode_flat_message_set,
+use {
+    crate::{
+        error::LegacyRecordsError,
+        message::Magic,
+        set::{
+            ParsedRecord, decode_message_set_with_policy, encode_compressed_message_set,
+            encode_flat_message_set,
+        },
     },
+    bytes::{Bytes, BytesMut},
+    krabka_compression::{CompressionType, RecordDecompressionPolicy},
+    krabka_ids::Offset,
+    krabka_protocol::records::{Attributes, Record, RecordBatch, RecordsError},
 };
 
 /// Iterate the v2 batch's records and drop control batches entirely.
@@ -209,13 +210,14 @@ impl From<RecordsError> for LegacyRecordsError {
 #[cfg(test)]
 mod tests {
 
-    use bytes::Bytes;
-    use krabka_compression::{CompressionError, RecordDecompressionPolicy};
-    use krabka_protocol::records::{Record, RecordBatch};
-    use krabka_units::{bytes, fraction};
-
-    use super::*;
-    use crate::{decode_message_set, message::Message};
+    use {
+        super::*,
+        crate::{decode_message_set, message::Message},
+        bytes::Bytes,
+        krabka_compression::{CompressionError, RecordDecompressionPolicy},
+        krabka_protocol::records::{Record, RecordBatch},
+        krabka_units::{bytes, fraction},
+    };
 
     fn v2_batch(codec: CompressionType) -> RecordBatch {
         RecordBatch {
@@ -402,10 +404,11 @@ mod tests {
         let recs = decode_message_set(&mut cur, legacy_bytes.len()).unwrap();
         // No structural representation of headers in v0/v1.
         assert2::assert!(
-            recs == crate::set::test_support::sample_records_v1_at(
-                1000,
-                [1_700_000_000, 1_700_000_100, 1_700_000_500]
-            )
+            recs == crate::set::test_support::sample_records_v1_at(1000, [
+                1_700_000_000,
+                1_700_000_100,
+                1_700_000_500
+            ])
         );
     }
 

@@ -5,22 +5,23 @@
 //! and that the message names the cause. An exit code alone would not catch a
 //! verifier that fails for the wrong reason.
 
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
+use {
+    assert2::check,
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    krabka_audit::signing::FileEd25519Signer,
+    krabka_remote_storage::{
+        ChainHead, ChainStamp, EpochId, MANIFEST_SUFFIX, ManifestSeq, ObjectEntry, Sha256Digest,
+        WormArchiver, WormChainRecord, manifest_head,
+    },
+    ring::{rand::SystemRandom, signature::Ed25519KeyPair},
+    std::{
+        path::{Path, PathBuf},
+        process::Command,
+        sync::Arc,
+    },
+    tempfile::TempDir,
+    uuid::Uuid,
 };
-
-use assert2::check;
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use krabka_audit::signing::FileEd25519Signer;
-use krabka_remote_storage::{
-    ChainHead, ChainStamp, EpochId, MANIFEST_SUFFIX, ManifestSeq, ObjectEntry, Sha256Digest,
-    WormArchiver, WormChainRecord, manifest_head,
-};
-use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
-use tempfile::TempDir;
-use uuid::Uuid;
 
 const TOPIC: &str = "orders";
 const PARTITION: i32 = 0;
@@ -30,9 +31,7 @@ const SEGMENTS: usize = 2;
 const SEGMENT_SPAN: i64 = 100;
 
 /// Kafka renders UUIDs in URL-safe, unpadded Base64 for remote-tier paths.
-fn uuid_b64(uuid: Uuid) -> String {
-    URL_SAFE_NO_PAD.encode(uuid.as_bytes())
-}
+fn uuid_b64(uuid: Uuid) -> String { URL_SAFE_NO_PAD.encode(uuid.as_bytes()) }
 
 krabka_macros::worm_segment_fixture!(
     metadata,
@@ -203,9 +202,7 @@ impl Fixture {
         std::fs::write(self.root().join(&self.manifest_keys[index]), &sealed.bytes).unwrap();
     }
 
-    fn root(&self) -> &Path {
-        self.root.path()
-    }
+    fn root(&self) -> &Path { self.root.path() }
 
     /// The arguments every test shares: the archive and the trusted key.
     fn base_args(&self) -> Vec<String> {

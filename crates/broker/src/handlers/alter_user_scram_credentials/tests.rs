@@ -5,19 +5,19 @@
 //! feature gate, and the metadata image a successful request leaves behind.
 //! Most of them drive a live broker, so they are kept out of the module root.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use krabka_protocol::owned::alter_user_scram_credentials_request::ScramCredentialDeletion;
-use krabka_security::{SaslMechanism, scram::MIN_SCRAM_ITERATIONS};
-
-use super::*;
-use crate::{
-    handlers::alter_user_scram_credentials::test_support::{
-        deletion, expected_response, expected_result, low_metadata_version, start_broker,
-        test_context, valid_upsertion,
+use {
+    super::*,
+    crate::{
+        handlers::alter_user_scram_credentials::test_support::{
+            deletion, expected_response, expected_result, low_metadata_version, start_broker,
+            test_context, valid_upsertion,
+        },
+        test_support::{DenyAll, test_ctx, wait_for_controller_leader},
     },
-    test_support::{DenyAll, test_ctx, wait_for_controller_leader},
+    assert2::assert,
+    krabka_protocol::owned::alter_user_scram_credentials_request::ScramCredentialDeletion,
+    krabka_security::{SaslMechanism, scram::MIN_SCRAM_ITERATIONS},
+    std::sync::Arc,
 };
 
 fn valid_request(user: &str) -> AlterUserScramCredentialsRequest {
@@ -60,9 +60,7 @@ fn scram_gate_permits_unknown_and_at_or_above_level() {
 }
 
 #[tokio::test]
-async fn handle_denies_invalid_rows_before_scram_validation() {
-    denied_invalid_rows(false).await;
-}
+async fn handle_denies_invalid_rows_before_scram_validation() { denied_invalid_rows(false).await; }
 
 #[tokio::test]
 async fn handle_authorizes_and_persists_valid_upsertion() {

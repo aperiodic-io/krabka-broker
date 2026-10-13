@@ -7,21 +7,23 @@
 //! keys fill only while the target still holds its default so an explicit CLI
 //! or environment value keeps precedence.
 
-use super::{
-    FileConfig, FileConfigError,
-    delegation_token::apply_delegation_tokens,
-    listener_settings::{ListenerSettings, apply_listener_settings},
-    oauthbearer_apply::apply_oauthbearer,
-    privileged_actions::apply_privileged_action_policy,
-    remote_storage::apply_remote_storage,
-    sasl_plain::apply_sasl_plain,
-    tail::{FileConfigTail, apply_config_tail},
-    topic_policy::apply_topic_policy,
-    validate::positive_time,
-};
-use crate::{
-    config::{BrokerConfig, DEFAULT_BROKER_ID},
-    replica_selector::ReplicaSelectorKind,
+use {
+    super::{
+        FileConfig, FileConfigError,
+        delegation_token::apply_delegation_tokens,
+        listener_settings::{ListenerSettings, apply_listener_settings},
+        oauthbearer_apply::apply_oauthbearer,
+        privileged_actions::apply_privileged_action_policy,
+        remote_storage::apply_remote_storage,
+        sasl_plain::apply_sasl_plain,
+        tail::{FileConfigTail, apply_config_tail},
+        topic_policy::apply_topic_policy,
+        validate::positive_time,
+    },
+    crate::{
+        config::{BrokerConfig, DEFAULT_BROKER_ID},
+        replica_selector::ReplicaSelectorKind,
+    },
 };
 
 impl FileConfig {
@@ -242,14 +244,15 @@ impl FileConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_security::ListenerProtocol;
-    use krabka_units::{millis, secs};
-
-    use super::*;
-    use crate::{
-        config::BrokerConfig,
-        file_config::{FileListener, test_support::configured_unwrap_parse},
+    use {
+        super::*,
+        crate::{
+            config::BrokerConfig,
+            file_config::{FileListener, test_support::configured_unwrap_parse},
+        },
+        assert2::{assert, check},
+        krabka_security::ListenerProtocol,
+        krabka_units::{millis, secs},
     };
 
     #[test]
@@ -384,9 +387,7 @@ protocol = "Plaintext"
     /// metadata directory is not a data directory.
     #[test]
     fn metadata_log_dir_resolves_like_kafkas_metadata_log_dir() {
-        use std::path::PathBuf;
-
-        use crate::config::BrokerConfig;
+        use {crate::config::BrokerConfig, std::path::PathBuf};
 
         // (what, file, flag, metadata dir, data dirs)
         let cases = [

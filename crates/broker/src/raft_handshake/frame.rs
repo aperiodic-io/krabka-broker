@@ -8,16 +8,17 @@
 //! and v1 response headers live here as well, because they are what makes
 //! the two directions agree.
 
-use krabka_client_core::ClientDuplex;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{api_versions_request, request_header::RequestHeader},
+use {
+    super::{API_KEY_API_VERSIONS, API_KEY_SASL_AUTHENTICATE, SASL_AUTHENTICATE_FLEXIBLE_VERSION},
+    crate::network::codec::validate_frame_length,
+    krabka_client_core::ClientDuplex,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{api_versions_request, request_header::RequestHeader},
+    },
+    krabka_raft::RaftHandshakeError,
+    tokio::io::{AsyncReadExt, AsyncWriteExt},
 };
-use krabka_raft::RaftHandshakeError;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-use super::{API_KEY_API_VERSIONS, API_KEY_SASL_AUTHENTICATE, SASL_AUTHENTICATE_FLEXIBLE_VERSION};
-use crate::network::codec::validate_frame_length;
 
 /// Reads one length-prefixed Kafka request frame, removes the
 /// `RequestHeader` (v1 or v2), and returns `(api_key, api_version,
@@ -138,16 +139,17 @@ fn is_response_header_flexible(api_key: i16, api_version: i16) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::{BufMut, Bytes};
-
-    use super::*;
-    use crate::raft_handshake::{
-        API_KEY_SASL_HANDSHAKE,
-        test_support::{
-            HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
-            RequestFrameSetup, read_request_from_frame, read_response_frame, request_frame,
+    use {
+        super::*,
+        crate::raft_handshake::{
+            API_KEY_SASL_HANDSHAKE,
+            test_support::{
+                HandshakeApiKey, HandshakeApiVersion, HandshakeCorrelationId, HandshakeHeader,
+                RequestFrameSetup, read_request_from_frame, read_response_frame, request_frame,
+            },
         },
+        assert2::assert,
+        bytes::{BufMut, Bytes},
     };
 
     struct FixedResp(&'static [u8]);
@@ -162,9 +164,7 @@ mod tests {
             Ok(())
         }
 
-        fn encoded_len(&self, _version: i16) -> usize {
-            self.0.len()
-        }
+        fn encoded_len(&self, _version: i16) -> usize { self.0.len() }
     }
 
     const SASL_HEADER_CASES: [(HandshakeApiKey, HandshakeApiVersion, HandshakeHeader); 4] = [

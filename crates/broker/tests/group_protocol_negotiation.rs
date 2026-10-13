@@ -7,18 +7,18 @@
 
 mod support;
 
-use std::time::Duration;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    join_group_request::JoinGroupRequest, join_group_response::JoinGroupResponse,
-};
-
-use crate::support::{
-    classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol},
-    client::connect_owned,
+use {
+    crate::support::{
+        classic::{ClassicJoinSetup, ClassicTimeouts, classic_join_request, join_protocol},
+        client::connect_owned,
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        join_group_request::JoinGroupRequest, join_group_response::JoinGroupResponse,
+    },
+    std::time::Duration,
 };
 
 // Kafka error codes consumed by these tests.
@@ -155,24 +155,20 @@ async fn empty_intersection_returns_inconsistent_group_protocol() {
     let (handle, bootstrap, _tempdir) = start_broker().await;
     let group_id = "cg-empty-intersection";
 
-    let [resp_a, resp_b] = race_consumer_joins(
-        &bootstrap,
-        group_id,
-        [
-            (
-                "member-a",
-                RANGE_ONLY,
-                "member A second JoinGroup timed out",
-                "member A task panic",
-            ),
-            (
-                "member-b",
-                COOPERATIVE_ONLY,
-                "member B second JoinGroup timed out",
-                "member B task panic",
-            ),
-        ],
-    )
+    let [resp_a, resp_b] = race_consumer_joins(&bootstrap, group_id, [
+        (
+            "member-a",
+            RANGE_ONLY,
+            "member A second JoinGroup timed out",
+            "member A task panic",
+        ),
+        (
+            "member-b",
+            COOPERATIVE_ONLY,
+            "member B second JoinGroup timed out",
+            "member B task panic",
+        ),
+    ])
     .await;
     handle.shutdown().await;
 
@@ -193,30 +189,26 @@ async fn vote_picks_cooperative_when_majority() {
     let (handle, bootstrap, _tempdir) = start_broker().await;
     let group_id = "cg-vote-cooperative";
 
-    let [resp_a, resp_b, resp_c] = race_consumer_joins(
-        &bootstrap,
-        group_id,
-        [
-            (
-                "member-a",
-                COOPERATIVE_FIRST,
-                "member A second JoinGroup timed out",
-                "member A task panic",
-            ),
-            (
-                "member-b",
-                COOPERATIVE_FIRST,
-                "member B second JoinGroup timed out",
-                "member B task panic",
-            ),
-            (
-                "member-c",
-                RANGE_FIRST,
-                "member C second JoinGroup timed out",
-                "member C task panic",
-            ),
-        ],
-    )
+    let [resp_a, resp_b, resp_c] = race_consumer_joins(&bootstrap, group_id, [
+        (
+            "member-a",
+            COOPERATIVE_FIRST,
+            "member A second JoinGroup timed out",
+            "member A task panic",
+        ),
+        (
+            "member-b",
+            COOPERATIVE_FIRST,
+            "member B second JoinGroup timed out",
+            "member B task panic",
+        ),
+        (
+            "member-c",
+            RANGE_FIRST,
+            "member C second JoinGroup timed out",
+            "member C task panic",
+        ),
+    ])
     .await;
     handle.shutdown().await;
 
@@ -241,24 +233,20 @@ async fn vote_ties_broken_lexicographically() {
     let group_id = "cg-tie";
 
     // One TCP connection per racing member.
-    let [resp_a, resp_b] = race_consumer_joins(
-        &bootstrap,
-        group_id,
-        [
-            (
-                "member-a",
-                RANGE_FIRST,
-                "member A second JoinGroup timed out",
-                "member A task panic",
-            ),
-            (
-                "member-b",
-                COOPERATIVE_FIRST,
-                "member B second JoinGroup timed out",
-                "member B task panic",
-            ),
-        ],
-    )
+    let [resp_a, resp_b] = race_consumer_joins(&bootstrap, group_id, [
+        (
+            "member-a",
+            RANGE_FIRST,
+            "member A second JoinGroup timed out",
+            "member A task panic",
+        ),
+        (
+            "member-b",
+            COOPERATIVE_FIRST,
+            "member B second JoinGroup timed out",
+            "member B task panic",
+        ),
+    ])
     .await;
     handle.shutdown().await;
 

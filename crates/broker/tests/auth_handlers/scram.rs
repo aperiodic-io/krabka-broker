@@ -2,24 +2,24 @@
 //! two-round exchange against a credential provisioned through the
 //! controller, and the wrong-password path that closes the connection.
 
-use std::{io, net::SocketAddr};
-
-use assert2::assert;
-use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse;
-use krabka_security::SaslMechanism;
-use tokio::net::TcpStream;
-
-use crate::{
-    harness::{alice_password, metadata_probe, start_scram_alice, wrong_scram_password},
-    kafka_wire::{
-        SaslAuthenticateSetup, SaslHandshakeSetup, ScramAuthenticationSetup, sasl_authenticate_on,
-        sasl_handshake_on, sasl_scram_authenticate_on,
+use {
+    crate::{
+        harness::{alice_password, metadata_probe, start_scram_alice, wrong_scram_password},
+        kafka_wire::{
+            SaslAuthenticateSetup, SaslHandshakeSetup, ScramAuthenticationSetup,
+            sasl_authenticate_on, sasl_handshake_on, sasl_scram_authenticate_on,
+        },
+        reauth_cases::{
+            capped_session_closes, different_principal_closes, repeated_expired_reauth,
+            same_principal_reopens,
+        },
+        support::wire::CorrelationId,
     },
-    reauth_cases::{
-        capped_session_closes, different_principal_closes, repeated_expired_reauth,
-        same_principal_reopens,
-    },
-    support::wire::CorrelationId,
+    assert2::assert,
+    krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse,
+    krabka_security::SaslMechanism,
+    std::{io, net::SocketAddr},
+    tokio::net::TcpStream,
 };
 
 /// Happy-path drive of a SASL/SCRAM-SHA-512 session.
@@ -114,15 +114,12 @@ pub async fn drive_sasl_scram_session(
     mechanism: krabka_security::SaslMechanism,
 ) -> Result<(), io::Error> {
     let mut stream = TcpStream::connect(addr).await?;
-    sasl_scram_authenticate_on(
-        &mut stream,
-        &ScramAuthenticationSetup {
-            client_id: "krabka-sasl-test",
-            user,
-            password: (password).into(),
-            mechanism,
-        },
-    )
+    sasl_scram_authenticate_on(&mut stream, &ScramAuthenticationSetup {
+        client_id: "krabka-sasl-test",
+        user,
+        password: (password).into(),
+        mechanism,
+    })
     .await?;
     metadata_probe(&mut stream, 5).await
 }
@@ -135,14 +132,11 @@ pub async fn scram_authenticate(
     setup: &ScramAuthenticationSetup<'_>,
 ) -> Result<SaslAuthenticateResponse, io::Error> {
     corr.0 += 1;
-    sasl_handshake_on(
-        stream,
-        SaslHandshakeSetup {
-            client_id: setup.client_id,
-            correlation: *corr,
-            mechanism: setup.mechanism.wire_name(),
-        },
-    )
+    sasl_handshake_on(stream, SaslHandshakeSetup {
+        client_id: setup.client_id,
+        correlation: *corr,
+        mechanism: setup.mechanism.wire_name(),
+    })
     .await?;
 
     let (client_first, client) =

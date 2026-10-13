@@ -1,51 +1,29 @@
-use assert2::assert;
-
-use super::*;
+use {super::*, assert2::assert};
 
 #[test]
 fn quota_split_is_kafkas_floor_and_remainder() {
     // Kafka's own example: 11 partitions over 3 members.
     let rows = [
-        (
-            11,
-            3,
-            UniformQuotaSplit {
-                minimum_quota: 3,
-                extra_quotas: 2,
-            },
-        ),
-        (
-            5,
-            2,
-            UniformQuotaSplit {
-                minimum_quota: 2,
-                extra_quotas: 1,
-            },
-        ),
-        (
-            2,
-            3,
-            UniformQuotaSplit {
-                minimum_quota: 0,
-                extra_quotas: 2,
-            },
-        ),
-        (
-            6,
-            3,
-            UniformQuotaSplit {
-                minimum_quota: 2,
-                extra_quotas: 0,
-            },
-        ),
-        (
-            0,
-            4,
-            UniformQuotaSplit {
-                minimum_quota: 0,
-                extra_quotas: 0,
-            },
-        ),
+        (11, 3, UniformQuotaSplit {
+            minimum_quota: 3,
+            extra_quotas: 2,
+        }),
+        (5, 2, UniformQuotaSplit {
+            minimum_quota: 2,
+            extra_quotas: 1,
+        }),
+        (2, 3, UniformQuotaSplit {
+            minimum_quota: 0,
+            extra_quotas: 2,
+        }),
+        (6, 3, UniformQuotaSplit {
+            minimum_quota: 2,
+            extra_quotas: 0,
+        }),
+        (0, 4, UniformQuotaSplit {
+            minimum_quota: 0,
+            extra_quotas: 0,
+        }),
     ];
     for (total, members, expected) in rows {
         assert!(

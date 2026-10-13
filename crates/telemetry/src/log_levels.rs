@@ -49,17 +49,18 @@
 //! with the same setting. The mapping round-trips, so a `FATAL` an operator
 //! writes is the `FATAL` the describe reads back.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
-};
-
-use tracing::{Metadata, span};
-use tracing_core::{Interest, callsite};
-use tracing_subscriber::{
-    EnvFilter,
-    filter::LevelFilter,
-    layer::{Context, Filter},
+use {
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    },
+    tracing::{Metadata, span},
+    tracing_core::{Interest, callsite},
+    tracing_subscriber::{
+        EnvFilter,
+        filter::LevelFilter,
+        layer::{Context, Filter},
+    },
 };
 
 #[cfg(test)]
@@ -359,9 +360,7 @@ impl LogLevelController {
 
     /// Whether a logger by this name exists on this node.
     #[must_use]
-    pub fn contains(&self, name: &str) -> bool {
-        self.level(name).is_some()
-    }
+    pub fn contains(&self, name: &str) -> bool { self.level(name).is_some() }
 
     /// Pin `name` to `level`, in this process only.
     ///

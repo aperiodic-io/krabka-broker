@@ -6,22 +6,23 @@
 //! `Cleaner.groupSegmentsBySize`), and never touches the active segment, so
 //! the log-end offset a producer sees does not move.
 
-use krabka_ids::Offset;
-use krabka_units::prelude::{
-    ByteSize, ByteSizeExt as _, Ratio, RatioExt as _, Time, TimeExt as _, fraction,
-};
-use tracing::instrument;
-
-use super::Log;
-use crate::{
-    compact::{
-        CleanedTransactionMetadata, CleaningRound, RewriteOutput, RewriteRetention, atomic_swap,
-        atomic_swap_retiring, build_offset_map, rewrite_segments,
+use {
+    super::Log,
+    crate::{
+        compact::{
+            CleanedTransactionMetadata, CleaningRound, RewriteOutput, RewriteRetention,
+            atomic_swap, atomic_swap_retiring, build_offset_map, rewrite_segments,
+        },
+        error::LogError,
+        retention,
+        segment::Segment,
+        txn_index::TxnIndex,
     },
-    error::LogError,
-    retention,
-    segment::Segment,
-    txn_index::TxnIndex,
+    krabka_ids::Offset,
+    krabka_units::prelude::{
+        ByteSize, ByteSizeExt as _, Ratio, RatioExt as _, Time, TimeExt as _, fraction,
+    },
+    tracing::instrument,
 };
 
 /// Inputs to one [`Log::compact`] pass that depend on broker-side state.
@@ -526,21 +527,21 @@ mod transaction_tests;
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
-
-    use bytes::BytesMut;
-    use krabka_units::prelude::{bytes, mebibytes};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        CleanupPolicy,
-        config::{DeliveryPolicy, LogConfig},
-        log::test_support::{
-            append_keyed_samples, compact_test_log, compacting_segments, compaction_ctx,
-            keyed_batch, set_segment_size, tiny_segments,
+    use {
+        super::*,
+        crate::{
+            CleanupPolicy,
+            config::{DeliveryPolicy, LogConfig},
+            log::test_support::{
+                append_keyed_samples, compact_test_log, compacting_segments, compaction_ctx,
+                keyed_batch, set_segment_size, tiny_segments,
+            },
+            name,
         },
-        name,
+        bytes::BytesMut,
+        krabka_units::prelude::{bytes, mebibytes},
+        std::io::Write as _,
+        tempfile::tempdir,
     };
 
     fn read_values(log: &Log) -> Vec<Vec<u8>> {
@@ -1074,13 +1075,9 @@ mod tests {
         log
     }
 
-    fn sealed_sizes(log: &Log) -> Vec<ByteSize> {
-        log.segments.iter().map(Segment::size).collect()
-    }
+    fn sealed_sizes(log: &Log) -> Vec<ByteSize> { log.segments.iter().map(Segment::size).collect() }
 
-    fn append_distinct_keys(log: &mut Log) {
-        append_keyed_samples(log, 6, |i| format!("k{i}"));
-    }
+    fn append_distinct_keys(log: &mut Log) { append_keyed_samples(log, 6, |i| format!("k{i}")); }
 
     #[test]
     fn compact_refuses_a_compressed_record_above_the_limit_and_leaves_the_log_alone() {

@@ -1,17 +1,18 @@
 //! The `kafka-delete-records` tool, which trims a log through `DeleteRecords`
 //! and reports the new low watermark.
 
-use std::io::Write as _;
-
-use assert2::assert;
-
-use crate::{
-    jvm_acceptance::{
-        KAFKA_IMAGE, KAFKA_IMAGE_TXN, broker0_advertised, create_console_topic,
-        docker_run_kafka_tool_with_image, docker_run_kafka_tool_with_mount, nc_check_connectivity,
-        start_host_broker, start_host_broker_in, wait_jvm_partition_leader, write_temp_file,
+use {
+    crate::{
+        jvm_acceptance::{
+            KAFKA_IMAGE, KAFKA_IMAGE_TXN, broker0_advertised, create_console_topic,
+            docker_run_kafka_tool_with_image, docker_run_kafka_tool_with_mount,
+            nc_check_connectivity, start_host_broker, start_host_broker_in,
+            wait_jvm_partition_leader, write_temp_file,
+        },
+        support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_parse_offset},
     },
-    support::{ContainerInput, JvmDockerSetup, jvm_docker_command, jvm_parse_offset},
+    assert2::assert,
+    std::io::Write as _,
 };
 
 /// `kafka-delete-records --offset-json-file <(...)`: produce 20
@@ -86,9 +87,7 @@ async fn kafka_delete_records_trim_survives_a_broker_restart() {
 }
 
 /// One partition at replication factor one, which is all a single node hosts.
-fn create_topic(topic: &str) {
-    create_console_topic(KAFKA_IMAGE, &[], topic, 1, 1);
-}
+fn create_topic(topic: &str) { create_console_topic(KAFKA_IMAGE, &[], topic, 1, 1); }
 
 /// Produce `count` records to `topic` through `kafka-console-producer`, one
 /// line per record on the tool's stdin.
@@ -140,16 +139,13 @@ fn delete_records_to(topic: &str, offset: i64) -> String {
     let file = write_temp_file("offsets.json", &json);
     let mount = format!("{}:/offsets.json:ro", file.host_path());
 
-    let out = docker_run_kafka_tool_with_mount(
-        &mount,
-        &[
-            "kafka-delete-records",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--offset-json-file",
-            "/offsets.json",
-        ],
-    );
+    let out = docker_run_kafka_tool_with_mount(&mount, &[
+        "kafka-delete-records",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--offset-json-file",
+        "/offsets.json",
+    ]);
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
@@ -166,18 +162,15 @@ fn delete_records_to(topic: &str, offset: i64) -> String {
 /// offsets off the newer image for the same reason. Only the tool container
 /// changes; the broker under test is still the one this case booted.
 fn jvm_earliest_offset(topic: &str) -> i64 {
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-get-offsets",
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--topic-partitions",
-            &format!("{topic}:0"),
-            "--time",
-            "-2",
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-get-offsets",
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--topic-partitions",
+        &format!("{topic}:0"),
+        "--time",
+        "-2",
+    ]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let prefix = format!("{topic}:0:");
     let line = stdout

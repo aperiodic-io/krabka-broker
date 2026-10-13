@@ -21,9 +21,10 @@
 //! - The finalized-features epoch is the offset of the last record the
 //!   metadata image contains, `image.highestOffsetAndEpoch().offset()`.
 
-use krabka_protocol::owned::api_versions_response::{FinalizedFeatureKey, SupportedFeatureKey};
-
-use crate::{UnstableFeatureVersions, supported_feature_range};
+use {
+    crate::{UnstableFeatureVersions, supported_feature_range},
+    krabka_protocol::owned::api_versions_response::{FinalizedFeatureKey, SupportedFeatureKey},
+};
 
 /// First `ApiVersions` version whose JVM client reads a zero feature minimum.
 /// Below it Kafka sets `alterFeatureLevel0`.
@@ -96,10 +97,11 @@ pub fn finalized_feature_keys(image: &krabka_metadata::MetadataImage) -> Vec<Fin
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::metadata_version::{METADATA_VERSION_MAX, METADATA_VERSION_MIN};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::check,
+        krabka_metadata::metadata_version::{METADATA_VERSION_MAX, METADATA_VERSION_MIN},
+    };
 
     krabka_macros::supported_feature_fixture!(supported);
     krabka_macros::supported_features_fixture!(modern_supported, supported);
@@ -162,11 +164,10 @@ mod tests {
     #[test]
     fn finalized_features_omit_level_zero() {
         for (kraft_version, levels, expected) in [
-            (
-                0,
-                vec![],
-                vec![finalized("metadata.version", METADATA_VERSION_MIN)],
-            ),
+            (0, vec![], vec![finalized(
+                "metadata.version",
+                METADATA_VERSION_MIN,
+            )]),
             (
                 0,
                 vec![("metadata.version", 25), ("group.version", 1)],
@@ -175,14 +176,10 @@ mod tests {
                     finalized("metadata.version", 25),
                 ],
             ),
-            (
-                1,
-                vec![("metadata.version", 25)],
-                vec![
-                    finalized("kraft.version", 1),
-                    finalized("metadata.version", 25),
-                ],
-            ),
+            (1, vec![("metadata.version", 25)], vec![
+                finalized("kraft.version", 1),
+                finalized("metadata.version", 25),
+            ]),
             (
                 0,
                 vec![

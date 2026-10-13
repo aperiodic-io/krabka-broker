@@ -8,16 +8,17 @@
 //! two-person rule is what the case is about, and it is checked the way the
 //! suite checks everything else.
 
-use assert2::{assert, check};
-use krabka_client_admin::{AdminClient, CreateTopicSpec};
-use krabka_client_core::{Client, security::ClientSecurity};
-use krabka_protocol::krabka::freeze::SetTopicFreezeRequest;
-
-use crate::{
-    host_broker::{JvmBroker, start_jvm_broker},
-    jvm_acceptance::break_glass::{approve as approve_proposal, propose},
-    support,
-    vocabulary::{APPROVER_ONE, APPROVER_TWO, PROPOSER, WIRE_UNCLEAN_ELECT_LEADERS},
+use {
+    crate::{
+        host_broker::{JvmBroker, start_jvm_broker},
+        jvm_acceptance::break_glass::{approve as approve_proposal, propose},
+        support,
+        vocabulary::{APPROVER_ONE, APPROVER_TWO, PROPOSER, WIRE_UNCLEAN_ELECT_LEADERS},
+    },
+    assert2::{assert, check},
+    krabka_client_admin::{AdminClient, CreateTopicSpec},
+    krabka_client_core::{Client, security::ClientSecurity},
+    krabka_protocol::krabka::freeze::SetTopicFreezeRequest,
 };
 
 /// A plaintext host-side client for the krabka-private APIs.

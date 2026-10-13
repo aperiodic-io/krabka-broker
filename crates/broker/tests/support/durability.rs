@@ -1,16 +1,17 @@
 //! Exact single-partition requests for replication and durability scenarios.
 
-use assert2::assert;
-use bytes::Bytes;
-use krabka_broker::BrokerHandle;
-use krabka_protocol::records::RecordBatch;
-
-use super::topic_id_for;
-use crate::support::{
-    client::connect_client,
-    records::value_record,
-    registered_cluster,
-    topics::{TopicReplicationFactor, create_topic_request},
+use {
+    super::topic_id_for,
+    crate::support::{
+        client::connect_client,
+        records::value_record,
+        registered_cluster,
+        topics::{TopicReplicationFactor, create_topic_request},
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_broker::BrokerHandle,
+    krabka_protocol::records::RecordBatch,
 };
 
 #[derive(Clone, Copy)]
@@ -46,14 +47,10 @@ pub async fn replicated_topic_fixture(
 ) {
     let cluster = registered_cluster(setup.brokers.0).await;
     let bootstrap = cluster[0].1.listen_addr.to_string();
-    create_topic_on_replicas(
-        &cluster[0].0,
-        &bootstrap,
-        TopicReplicasSetup {
-            topic: setup.topic,
-            replicas: setup.replicas,
-        },
-    )
+    create_topic_on_replicas(&cluster[0].0, &bootstrap, TopicReplicasSetup {
+        topic: setup.topic,
+        replicas: setup.replicas,
+    })
     .await;
     (cluster, bootstrap)
 }
@@ -81,10 +78,9 @@ pub async fn create_topic_on_replicas(
     let client = connect_client(bootstrap.to_string(), None).await;
     let replicas: Vec<i32> = (1..=i32::from(setup.replicas.0)).collect();
     let resp = client
-        .send(create_topic_request(super::topic_on(
-            setup.topic,
-            &[&replicas],
-        )))
+        .send(create_topic_request(super::topic_on(setup.topic, &[
+            &replicas,
+        ])))
         .await
         .expect("CreateTopics");
     assert!(

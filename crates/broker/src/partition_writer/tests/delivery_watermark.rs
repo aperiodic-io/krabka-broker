@@ -1,14 +1,15 @@
 //! Writer-loop tests for the delivery-watermark refresh that runs after
 //! every message, on both a scheduled and an immediate topic.
 
-use assert2::check;
-use krabka_log::{LogConfig, Offset};
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    partition_writer::test_support::sample_batch,
-    test_support::{EmptyPayloadBatchSetup, RecordCount},
+use {
+    super::*,
+    crate::{
+        partition_writer::test_support::sample_batch,
+        test_support::{EmptyPayloadBatchSetup, RecordCount},
+    },
+    assert2::check,
+    krabka_log::{LogConfig, Offset},
+    tempfile::tempdir,
 };
 
 #[tokio::test]
@@ -34,16 +35,11 @@ async fn a_produce_to_a_scheduled_topic_refreshes_the_mirror_and_rearms_the_sche
     delivery.adopt(&waker);
 
     let (tx, rx) = mpsc::channel(1);
-    let writer = spawn_writer(
-        dir.path(),
-        log.clone(),
-        rx,
-        WriterOptions {
-            topic: "scheduled".to_string(),
-            delivery: delivery.clone(),
-            ..Default::default()
-        },
-    );
+    let writer = spawn_writer(dir.path(), log.clone(), rx, WriterOptions {
+        topic: "scheduled".to_string(),
+        delivery: delivery.clone(),
+        ..Default::default()
+    });
 
     // A batch that is already active moves the watermark to the log end.
     let ack_rx = queue_batch(&tx, batch_at(NOW_MS - 60_000)).await;
@@ -84,16 +80,11 @@ async fn a_produce_to_an_immediate_topic_keeps_the_mirror_at_the_log_end() {
     let log = open_default_log(dir.path());
     let delivery = DeliveryHandles::new();
     let (tx, rx) = mpsc::channel(1);
-    let writer = spawn_writer(
-        dir.path(),
-        log.clone(),
-        rx,
-        WriterOptions {
-            topic: "immediate".to_string(),
-            delivery: delivery.clone(),
-            ..Default::default()
-        },
-    );
+    let writer = spawn_writer(dir.path(), log.clone(), rx, WriterOptions {
+        topic: "immediate".to_string(),
+        delivery: delivery.clone(),
+        ..Default::default()
+    });
 
     let ack_rx = queue_batch(
         &tx,

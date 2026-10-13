@@ -6,12 +6,13 @@
 //! wait for the same two records, so the pair lives here rather than in either
 //! harness.
 
-use krabka_broker::{
-    BrokerConfig, BrokerHandle, NodeId,
-    config::{NodeRole, StretchProfile},
+use {
+    crate::{SITE_A, SITE_C, SITES, WITNESS, within},
+    krabka_broker::{
+        BrokerConfig, BrokerHandle, NodeId,
+        config::{NodeRole, StretchProfile},
+    },
 };
-
-use crate::{SITE_A, SITE_C, SITES, WITNESS, within};
 
 pub fn stretch_profile() -> StretchProfile {
     StretchProfile {

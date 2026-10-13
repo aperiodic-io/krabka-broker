@@ -44,20 +44,21 @@
 //! `state_machine`, the durable append and the log prune in `persist`, and the
 //! log replay in `recovery`.
 
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
+use {
+    dashmap::DashMap,
+    krabka_ids::PartitionIndex,
+    krabka_log::Offset,
+    krabka_metadata::MetadataImage,
+    qubit_clock::WallClock,
+    std::{
+        collections::HashMap,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
     },
+    tokio::sync::{Mutex, OwnedMutexGuard, RwLock, RwLockReadGuard},
 };
-
-use dashmap::DashMap;
-use krabka_ids::PartitionIndex;
-use krabka_log::Offset;
-use krabka_metadata::MetadataImage;
-use qubit_clock::WallClock;
-use tokio::sync::{Mutex, OwnedMutexGuard, RwLock, RwLockReadGuard};
 
 pub(crate) mod jobs;
 mod persist;
@@ -325,15 +326,11 @@ impl ShareCoordinator {
     }
 
     /// The current time in milliseconds since the epoch.
-    fn now_ms(&self) -> i64 {
-        epoch_millis(self.wall_clock.now())
-    }
+    fn now_ms(&self) -> i64 { epoch_millis(self.wall_clock.now()) }
 
     /// Wait for an indeterminate append or a client retry to request a
     /// bounded replay against the supervisor's current metadata image.
-    pub(crate) async fn recovery_requested(&self) {
-        self.recovery_needed.notified().await;
-    }
+    pub(crate) async fn recovery_requested(&self) { self.recovery_needed.notified().await; }
 
     /// Applies the leadership of `image` to the led partitions.
     ///
@@ -388,14 +385,11 @@ impl ShareCoordinator {
                 } else {
                     LoadStatus::Pending
                 };
-                led.insert(
-                    partition,
-                    LedPartition {
-                        leader_epoch,
-                        generation,
-                        status,
-                    },
-                );
+                led.insert(partition, LedPartition {
+                    leader_epoch,
+                    generation,
+                    status,
+                });
                 to_drop.push(partition);
                 if local {
                     to_load.push((partition, generation));
@@ -530,14 +524,11 @@ impl ShareCoordinator {
         let mut led = self.leader_partitions.write().await;
         led.clear();
         for p in 0..self.config.state_topic_num_partitions {
-            led.insert(
-                PartitionIndex(p),
-                LedPartition {
-                    leader_epoch: 0,
-                    generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
-                    status: LoadStatus::Active,
-                },
-            );
+            led.insert(PartitionIndex(p), LedPartition {
+                leader_epoch: 0,
+                generation: self.next_generation.fetch_add(1, Ordering::Relaxed),
+                status: LoadStatus::Active,
+            });
         }
     }
 
@@ -563,14 +554,11 @@ impl ShareCoordinator {
             let mut led = self.leader_partitions.write().await;
             for p in 0..self.config.state_topic_num_partitions {
                 let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
-                led.insert(
-                    PartitionIndex(p),
-                    LedPartition {
-                        leader_epoch: 0,
-                        generation,
-                        status: LoadStatus::Loading,
-                    },
-                );
+                led.insert(PartitionIndex(p), LedPartition {
+                    leader_epoch: 0,
+                    generation,
+                    status: LoadStatus::Loading,
+                });
                 self.drop_partition_state(PartitionIndex(p));
                 terms.push((PartitionIndex(p), generation));
             }

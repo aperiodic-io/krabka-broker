@@ -8,11 +8,13 @@
 //! builds are one contract: the parser is the only thing that constructs the
 //! type, and every rejection an operator can see is written here.
 
-use base64::Engine as _;
-use krabka_ids::{Offset, ProducerId};
-use krabka_metadata::NodeId;
-use regex::Regex;
-use uuid::Uuid;
+use {
+    base64::Engine as _,
+    krabka_ids::{Offset, ProducerId},
+    krabka_metadata::NodeId,
+    regex::Regex,
+    uuid::Uuid,
+};
 
 /// Kafka's limit on a topic name, which a bound may not exceed either.
 const MAX_TOPIC_NAME_LEN: usize = 249;
@@ -70,9 +72,7 @@ impl Eq for HeaderPattern {}
 /// Parse a node id as `krabka-format --node-id` parses it: Kafka's
 /// `node.id`, an `int` that is not negative. The restore formats the target
 /// with the id, so an id that the formatter refuses is refused here first.
-pub(super) fn parse_node_id(s: &str) -> Result<NodeId, String> {
-    krabka_format::parse_node_id(s)
-}
+pub(super) fn parse_node_id(s: &str) -> Result<NodeId, String> { krabka_format::parse_node_id(s) }
 
 /// Parses a `--cluster-id` value in Kafka's base64 `Uuid` form (what
 /// `Metadata` and `DescribeCluster` report, e.g. `AQIDBAUGBwgJCgsMDQ4PEA`) or
@@ -229,10 +229,7 @@ pub(super) fn parse_header_pattern(s: &str) -> Result<HeaderPattern, String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::args::test_support::partition;
+    use {super::*, crate::args::test_support::partition, assert2::check};
 
     /// `--cluster-id` accepts Kafka's base64 `Uuid` form -- what `Metadata`
     /// and `DescribeCluster` report (#1082) -- as well as the hyphenated

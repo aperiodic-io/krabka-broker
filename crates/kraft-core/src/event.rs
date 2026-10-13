@@ -1,8 +1,9 @@
 //! Inputs to the consensus state machine.
 
-use uuid::Uuid;
-
-use crate::types::{Epoch, LogOffsetMetadata, NodeId};
+use {
+    crate::types::{Epoch, LogOffsetMetadata, NodeId},
+    uuid::Uuid,
+};
 
 /// Where a replica stands in a resigning leader's `EndQuorumEpoch`
 /// `PreferredCandidates` list.

@@ -11,25 +11,25 @@
 //! `acks=all` partition hands back so the handler can drive every partition's
 //! wait together.
 
-use std::sync::Arc;
-
-use krabka_log::{Offset, VerbatimBatch};
-use krabka_protocol::owned::produce_response::PartitionProduceResponse;
-use tokio::sync::oneshot;
-
-use super::{
-    ACKS_ALL, INVALID_OFFSET, NO_LOG_APPEND_TIME, durability_frontier,
-    prepare::{PreparedBatch, PreparedSource},
-};
-use crate::{
-    codes,
-    error::BrokerError,
-    metrics::RequestPhases,
-    partition::{
-        AppendedBatch, Partition, ProduceData, ProduceJob, ProducerAppendCheck, ReplicationTarget,
-        WriterMessage,
+use {
+    super::{
+        ACKS_ALL, INVALID_OFFSET, NO_LOG_APPEND_TIME, durability_frontier,
+        prepare::{PreparedBatch, PreparedSource},
     },
-    producer_state::ProducerState,
+    crate::{
+        codes,
+        error::BrokerError,
+        metrics::RequestPhases,
+        partition::{
+            AppendedBatch, Partition, ProduceData, ProduceJob, ProducerAppendCheck,
+            ReplicationTarget, WriterMessage,
+        },
+        producer_state::ProducerState,
+    },
+    krabka_log::{Offset, VerbatimBatch},
+    krabka_protocol::owned::produce_response::PartitionProduceResponse,
+    std::sync::Arc,
+    tokio::sync::oneshot,
 };
 
 /// The partition metadata-transition barrier a produce holds from the dedup
@@ -330,9 +330,7 @@ impl AppendCommit {
 ///
 /// The read is one brief lock on the partition's log, the same one
 /// `log_end_offset()` takes.
-fn stamp_log_start(part: &Partition) -> i64 {
-    part.log_start_offset().0
-}
+fn stamp_log_start(part: &Partition) -> i64 { part.log_start_offset().0 }
 
 /// The log start offset of a row whose append the log refused.
 ///
@@ -454,23 +452,23 @@ pub(super) fn build_produce_data(prepared: PreparedBatch, leader_epoch: i32) -> 
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_log::Offset;
-    use krabka_protocol::owned::produce_response::PartitionProduceResponse;
-    use krabka_raft::NodeId;
-
-    use super::PendingAck;
-    use crate::{
-        codes,
-        error::BrokerError,
-        log_dir::partition_dir,
-        metrics::{BrokerMetrics, RequestPhases},
-        partition::{AppendedBatch, test_support::test_partition},
-        partition_writer::storage_failure_error,
-        producer_state::ProducerState,
-        test_support::{StandalonePartitionSetup, spawn_standalone_partition},
+    use {
+        super::PendingAck,
+        crate::{
+            codes,
+            error::BrokerError,
+            log_dir::partition_dir,
+            metrics::{BrokerMetrics, RequestPhases},
+            partition::{AppendedBatch, test_support::test_partition},
+            partition_writer::storage_failure_error,
+            producer_state::ProducerState,
+            test_support::{StandalonePartitionSetup, spawn_standalone_partition},
+        },
+        assert2::assert,
+        krabka_log::Offset,
+        krabka_protocol::owned::produce_response::PartitionProduceResponse,
+        krabka_raft::NodeId,
+        std::sync::Arc,
     };
 
     /// Kafka's `acks=all` completion: `DelayedProduce` leaves an expired wait
@@ -618,18 +616,19 @@ mod tests {
         delay: std::time::Duration,
         answer: Result<AppendedBatch, BrokerError>,
     ) -> PartitionProduceResponse {
-        use bytes::Bytes;
-        use krabka_compression::RecordDecompressionPolicy;
-        use krabka_protocol::records::{Record, RecordBatch};
-
-        use crate::{
-            handlers::produce::{
-                framing::PartitionPayload,
-                hot_path::TimestampPolicy,
-                prepare::{DecodeEnv, prepare_batch},
-                test_support::encode_batch,
+        use {
+            crate::{
+                handlers::produce::{
+                    framing::PartitionPayload,
+                    hot_path::TimestampPolicy,
+                    prepare::{DecodeEnv, prepare_batch},
+                    test_support::encode_batch,
+                },
+                partition::{Partition, WriterMessage},
             },
-            partition::{Partition, WriterMessage},
+            bytes::Bytes,
+            krabka_compression::RecordDecompressionPolicy,
+            krabka_protocol::records::{Record, RecordBatch},
         };
 
         let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));

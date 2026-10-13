@@ -91,11 +91,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::{Bytes, BytesMut};
-    use krabka_protocol::records::{Attributes, RecordHeader};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        bytes::{Bytes, BytesMut},
+        krabka_protocol::records::{Attributes, RecordHeader},
+    };
 
     const BASE_OFFSET: i64 = 1_000;
     const BASE_TIMESTAMP: i64 = 1_700_000_000_000;

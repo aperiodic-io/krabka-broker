@@ -1,8 +1,9 @@
 //! One `SplitMix64` step for deterministic placement and benchmark streams.
 
-use moxy::{ast::ParseError, token::TokenStream};
-
-use crate::fixtures::name;
+use {
+    crate::fixtures::name,
+    moxy::{ast::ParseError, token::TokenStream},
+};
 
 pub(crate) fn splitmix64_step(tokens: TokenStream) -> Result<TokenStream, ParseError> {
     let name = name(tokens)?;

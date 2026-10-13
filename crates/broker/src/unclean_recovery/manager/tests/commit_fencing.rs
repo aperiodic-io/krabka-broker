@@ -1,9 +1,6 @@
 //! Election admission must remain current across the durable audit await.
 
-use assert2::assert;
-
-use super::*;
-use crate::test_support::paused_audit::PausedAudit;
+use {super::*, crate::test_support::paused_audit::PausedAudit, assert2::assert};
 
 #[tokio::test]
 async fn recovery_commit_rejects_changes_while_durable_audit_is_pending() {

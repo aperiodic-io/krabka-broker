@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{DisklessBatchStep, DisklessTrimDecision};
+use {
+    super::{DisklessBatchStep, DisklessTrimDecision},
+    creusot_std::prelude::*,
+};
 
 /// Extend an object byte span only across a contiguous whole indexed range.
 ///

@@ -6,13 +6,14 @@
 //! `AlterUserScramCredentials`, then the provisioned user drives the RFC 5802
 //! state machine -- and differ only in the digest they name.
 
-use assert2::assert;
-
-use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, authenticated_console_round_trip,
-    broker0_advertised, create_console_topic, docker_run_kafka_tool_with_image_and_mount,
-    nc_check_connectivity, provision_plain_scram, scram_jaas, start_dual_mech_broker,
-    start_dual_mech_broker_with_reauth, write_client_props, write_plain_props,
+use {
+    crate::jvm_acceptance::{
+        ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, authenticated_console_round_trip,
+        broker0_advertised, create_console_topic, docker_run_kafka_tool_with_image_and_mount,
+        nc_check_connectivity, provision_plain_scram, scram_jaas, start_dual_mech_broker,
+        start_dual_mech_broker_with_reauth, write_client_props, write_plain_props,
+    },
+    assert2::assert,
 };
 
 /// End-to-end `SASL_PLAINTEXT` + SCRAM-SHA-512 drive of the JVM tools
@@ -71,24 +72,20 @@ async fn jvm_sasl_scram_sha512_in_band_reauth_under_max_reauth_window() {
     let admin_props = write_plain_props(ADMIN, ADMIN_PASS);
     provision_plain_scram(&admin_props.mount_str(), ALICE, ALICE_PASS, "SCRAM-SHA-512");
     create_console_topic(KAFKA_IMAGE_TXN, &[&admin_props.mount_str()], TOPIC, 1, 1);
-    docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &admin_props.mount_str(),
-        &[
-            "kafka-acls",
-            "--add",
-            "--allow-principal",
-            &format!("User:{ALICE}"),
-            "--operation",
-            "Write",
-            "--topic",
-            TOPIC,
-            "--bootstrap-server",
-            broker0_advertised(),
-            "--command-config",
-            "/client.properties",
-        ],
-    );
+    docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_props.mount_str(), &[
+        "kafka-acls",
+        "--add",
+        "--allow-principal",
+        &format!("User:{ALICE}"),
+        "--operation",
+        "Write",
+        "--topic",
+        TOPIC,
+        "--bootstrap-server",
+        broker0_advertised(),
+        "--command-config",
+        "/client.properties",
+    ]);
 
     // Ten records at one per second: about ten seconds on one connection,
     // five times the two-second re-auth window.
@@ -100,10 +97,8 @@ async fn jvm_sasl_scram_sha512_in_band_reauth_under_max_reauth_window() {
          acks=1\n",
         scram_jaas(ALICE, ALICE_PASS),
     ));
-    let out = docker_run_kafka_tool_with_image_and_mount(
-        KAFKA_IMAGE_TXN,
-        &alice_props.mount_str(),
-        &[
+    let out =
+        docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &alice_props.mount_str(), &[
             "kafka-verifiable-producer",
             "--bootstrap-server",
             broker0_advertised(),
@@ -115,8 +110,7 @@ async fn jvm_sasl_scram_sha512_in_band_reauth_under_max_reauth_window() {
             "1",
             "--producer.config",
             "/client.properties",
-        ],
-    );
+        ]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let acked = stdout.matches("producer_send_success").count();
     assert!(
@@ -154,24 +148,20 @@ async fn scram_round_trip(topic: &str, mechanism: &str) {
     // Grant alice Read + Write on the topic. ACL implications cover
     // Describe.
     for op in ["Read", "Write"] {
-        docker_run_kafka_tool_with_image_and_mount(
-            KAFKA_IMAGE_TXN,
-            &admin_props.mount_str(),
-            &[
-                "kafka-acls",
-                "--add",
-                "--allow-principal",
-                &format!("User:{ALICE}"),
-                "--operation",
-                op,
-                "--topic",
-                topic,
-                "--bootstrap-server",
-                broker0_advertised(),
-                "--command-config",
-                "/client.properties",
-            ],
-        );
+        docker_run_kafka_tool_with_image_and_mount(KAFKA_IMAGE_TXN, &admin_props.mount_str(), &[
+            "kafka-acls",
+            "--add",
+            "--allow-principal",
+            &format!("User:{ALICE}"),
+            "--operation",
+            op,
+            "--topic",
+            topic,
+            "--bootstrap-server",
+            broker0_advertised(),
+            "--command-config",
+            "/client.properties",
+        ]);
     }
 
     // Produce 10 records.

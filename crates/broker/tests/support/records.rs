@@ -1,9 +1,10 @@
 //! Record fixtures that retain the protocol's complete default headers.
 
-use bytes::Bytes;
-use krabka_protocol::records::{Record, RecordBatch};
-
-use crate::support::transactions::{ProducerEpoch, ProducerIdentity};
+use {
+    crate::support::transactions::{ProducerEpoch, ProducerIdentity},
+    bytes::Bytes,
+    krabka_protocol::records::{Record, RecordBatch},
+};
 
 pub fn value_record(offset_delta: i32, value: Option<Bytes>) -> Record {
     Record {

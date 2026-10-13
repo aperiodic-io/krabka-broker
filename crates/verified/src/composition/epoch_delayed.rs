@@ -1,13 +1,14 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::epoch_handoff::handoff_input_valid;
-use super::{
-    ProducerDecision, ProducerSnapshotEntryFacts, completed_batches_preserve_first_retry,
-    decrement_sequence, epoch_handoff_distinguishes_identity_and_data_retry,
-    rebuilt_data_window_bounds_retry,
+use {
+    super::{
+        ProducerDecision, ProducerSnapshotEntryFacts, completed_batches_preserve_first_retry,
+        decrement_sequence, epoch_handoff_distinguishes_identity_and_data_retry,
+        rebuilt_data_window_bounds_retry,
+    },
+    crate::transaction::InitProducerIdIdentityDecision,
+    creusot_std::prelude::*,
 };
-use crate::transaction::InitProducerIdIdentityDecision;
 
 type DelayedHandoff = (
     InitProducerIdIdentityDecision,

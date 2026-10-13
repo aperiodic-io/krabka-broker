@@ -5,34 +5,34 @@
 //! correlation id, so the tests read as a sequence of protocol steps rather
 //! than of encode/decode boilerplate.
 
-use std::io;
-
-use bytes::BytesMut;
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        create_delegation_token_request::CreateDelegationTokenRequest,
-        create_delegation_token_response::CreateDelegationTokenResponse,
-        describe_delegation_token_request::DescribeDelegationTokenRequest,
-        describe_delegation_token_response::DescribeDelegationTokenResponse,
-        expire_delegation_token_request::ExpireDelegationTokenRequest,
-        expire_delegation_token_response::ExpireDelegationTokenResponse,
-        renew_delegation_token_request::RenewDelegationTokenRequest,
-        renew_delegation_token_response::RenewDelegationTokenResponse,
+use {
+    crate::{
+        support::wire::{
+            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+            SocketExchangeSetup,
+        },
+        wire::round_trip,
     },
-};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
-};
-
-use crate::{
-    support::wire::{
-        CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-        SocketExchangeSetup,
+    bytes::BytesMut,
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            create_delegation_token_request::CreateDelegationTokenRequest,
+            create_delegation_token_response::CreateDelegationTokenResponse,
+            describe_delegation_token_request::DescribeDelegationTokenRequest,
+            describe_delegation_token_response::DescribeDelegationTokenResponse,
+            expire_delegation_token_request::ExpireDelegationTokenRequest,
+            expire_delegation_token_response::ExpireDelegationTokenResponse,
+            renew_delegation_token_request::RenewDelegationTokenRequest,
+            renew_delegation_token_response::RenewDelegationTokenResponse,
+        },
     },
-    wire::round_trip,
+    std::io,
+    tokio::{
+        io::{AsyncRead, AsyncWrite},
+        net::TcpStream,
+    },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

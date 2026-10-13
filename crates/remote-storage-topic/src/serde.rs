@@ -19,13 +19,14 @@
 //! cursor helpers that `snapshot.rs` frames its own envelope with live in
 //! `reader`.
 
-use bytes::Bytes;
-use krabka_protocol::RemoteLogMetadataRecord;
-use krabka_remote_storage::{
-    RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemotePartitionDeleteMetadata,
+use {
+    crate::error::CodecError,
+    bytes::Bytes,
+    krabka_protocol::RemoteLogMetadataRecord,
+    krabka_remote_storage::{
+        RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate, RemotePartitionDeleteMetadata,
+    },
 };
-
-use crate::error::CodecError;
 
 mod partition_delete;
 mod primitives;

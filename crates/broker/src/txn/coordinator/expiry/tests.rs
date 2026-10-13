@@ -3,34 +3,34 @@
 //! `__transaction_state-0` partition is a real log on disk, driven both
 //! directly and through one tick of the background task that ticks it.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_log::{Offset, ProducerId};
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_protocol::{
-    UnknownTaggedFields, owned::describe_transactions_response::TransactionState,
-};
-use krabka_units::mebibytes;
-use tempfile::{TempDir, tempdir};
-
-use super::*;
-use crate::{
-    codes,
-    handlers::describe_transactions::transaction_state_row,
-    partition_registry::PartitionRegistry,
-    producer_id_manager::ProducerIdManager,
-    test_support::{FakeMetadataSource, StandalonePartitionSetup, open_partition},
-    txn::{
-        bootstrap,
-        coordinator::test_support::{StateImageSetup, state_image},
-        id_expiration::sweep_once,
-        log_record::decode_key,
-        state::TxnEntry,
-        two_pc::NO_TIMEOUT_MS,
-        version::TxnVersion,
+use {
+    super::*,
+    crate::{
+        codes,
+        handlers::describe_transactions::transaction_state_row,
+        partition_registry::PartitionRegistry,
+        producer_id_manager::ProducerIdManager,
+        test_support::{FakeMetadataSource, StandalonePartitionSetup, open_partition},
+        txn::{
+            bootstrap,
+            coordinator::test_support::{StateImageSetup, state_image},
+            id_expiration::sweep_once,
+            log_record::decode_key,
+            state::TxnEntry,
+            two_pc::NO_TIMEOUT_MS,
+            version::TxnVersion,
+        },
     },
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_log::{Offset, ProducerId},
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_protocol::{
+        UnknownTaggedFields, owned::describe_transactions_response::TransactionState,
+    },
+    krabka_units::mebibytes,
+    std::sync::Arc,
+    tempfile::{TempDir, tempdir},
 };
 
 const TID: &str = "tid-expiry";
@@ -157,13 +157,10 @@ async fn seeded_coordinator(entry: TxnEntry, leader: NodeId) -> (Arc<TxnCoordina
     partitions.insert(
         bootstrap::TOPIC.into(),
         PartitionIndex(0),
-        open_partition(
-            dir.path(),
-            StandalonePartitionSetup {
-                topic: bootstrap::TOPIC,
-                ..Default::default()
-            },
-        ),
+        open_partition(dir.path(), StandalonePartitionSetup {
+            topic: bootstrap::TOPIC,
+            ..Default::default()
+        }),
     );
     let coordinator = Arc::new(TxnCoordinator::new(
         NodeId(1),

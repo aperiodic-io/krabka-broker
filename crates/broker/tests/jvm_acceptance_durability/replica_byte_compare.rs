@@ -6,14 +6,14 @@
 //! the JVM tools, so it carries the container mount handling that the other
 //! cases do not need.
 
-use std::{io::Write as _, process::Command};
-
-use assert2::assert;
-
-use crate::{
-    jvm_acceptance::KAFKA_IMAGE,
-    prepare_replication_topic,
-    support::{init_jvm_tracing, jvm_acks_all_producer, start_jvm_cluster},
+use {
+    crate::{
+        jvm_acceptance::KAFKA_IMAGE,
+        prepare_replication_topic,
+        support::{init_jvm_tracing, jvm_acks_all_producer, start_jvm_cluster},
+    },
+    assert2::assert,
+    std::{io::Write as _, process::Command},
 };
 
 // Replication byte-compare: stand up a 3-broker Krabka cluster, create a

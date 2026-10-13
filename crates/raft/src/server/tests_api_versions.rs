@@ -3,21 +3,23 @@
 //! open after each one, and gives the same bytes that the handshake gets for a
 //! request before SASL authentication.
 
-use std::sync::Arc;
-
-use assert2::check;
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse},
+use {
+    super::{
+        ConnectionContext, ListenerApiVersions, handle_conn,
+        test_support::{read_frame, single_voter_engine},
+    },
+    crate::{AllowAllGrants, ControllerApiVersions as _, ListenerLimits, kraft::KraftController},
+    assert2::check,
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+        },
+    },
+    std::sync::Arc,
+    tokio::io::AsyncWriteExt,
+    tokio_util::sync::CancellationToken,
 };
-use tokio::io::AsyncWriteExt;
-use tokio_util::sync::CancellationToken;
-
-use super::{
-    ConnectionContext, ListenerApiVersions, handle_conn,
-    test_support::{read_frame, single_voter_engine},
-};
-use crate::{AllowAllGrants, ControllerApiVersions as _, ListenerLimits, kraft::KraftController};
 
 krabka_macros::vector_request_fixture!(request_frame, i32);
 

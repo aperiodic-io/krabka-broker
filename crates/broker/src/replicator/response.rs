@@ -12,30 +12,30 @@
 //! is the cost the batching exists to remove. A row that wants one says so
 //! with [`RowAction::Backoff`] and the loop applies the longest of them once.
 
-use std::{collections::BTreeMap, sync::Arc};
-
-use bytes::Buf as _;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Offset, VerbatimBatch};
-use krabka_protocol::{
-    owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
-    primitives::uuid::Uuid as WireUuid,
-    records::{Attributes, RecordBatch, RecordsError, RecordsPayload, validate_one_v2_batch},
-};
-use krabka_units::Time;
-use krabka_verified::{ReplicaFetchMutation, broker::ReplicaFetchFacts};
-use tracing::{info, warn};
-
-use super::{
-    Config, FollowedKey,
-    follower_throttle::record_replicated,
-    replication_target_changed,
-    truncation::{
-        diverging_epoch_truncation_target, handle_epoch_fence,
-        handle_offset_moved_to_tiered_storage, handle_offset_out_of_range,
+use {
+    super::{
+        Config, FollowedKey,
+        follower_throttle::record_replicated,
+        replication_target_changed,
+        truncation::{
+            diverging_epoch_truncation_target, handle_epoch_fence,
+            handle_offset_moved_to_tiered_storage, handle_offset_out_of_range,
+        },
     },
+    crate::{codes, partition::Partition},
+    bytes::Buf as _,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Offset, VerbatimBatch},
+    krabka_protocol::{
+        owned::fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+        primitives::uuid::Uuid as WireUuid,
+        records::{Attributes, RecordBatch, RecordsError, RecordsPayload, validate_one_v2_batch},
+    },
+    krabka_units::Time,
+    krabka_verified::{ReplicaFetchMutation, broker::ReplicaFetchFacts},
+    std::{collections::BTreeMap, sync::Arc},
+    tracing::{info, warn},
 };
-use crate::{codes, partition::Partition};
 
 /// What the fetcher should do with one partition after reading its row.
 ///
@@ -570,28 +570,28 @@ pub(super) async fn handle_response(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use assert2::assert;
-    use bytes::BytesMut;
-    use krabka_compression::CompressionType;
-    use krabka_protocol::{
-        owned::fetch_response::{EpochEndOffset, LeaderIdAndEpoch},
-        records::{Record, RecordBatch},
-    };
-    use krabka_raft::NodeId;
-    use krabka_units::{mebibytes, secs};
-
-    use super::*;
-    use crate::{
-        partition::Partition,
-        replicator::{
-            ensure_local_partition,
-            test_support::{
-                LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID, fetch_response,
-                image_with_leader, partition_response, test_config,
+    use {
+        super::*,
+        crate::{
+            partition::Partition,
+            replicator::{
+                ensure_local_partition,
+                test_support::{
+                    LEADER_ID, NODE_ID, PARTITION, TOPIC, WIRE_TOPIC_ID, fetch_response,
+                    image_with_leader, partition_response, test_config,
+                },
             },
         },
+        assert2::assert,
+        bytes::BytesMut,
+        krabka_compression::CompressionType,
+        krabka_protocol::{
+            owned::fetch_response::{EpochEndOffset, LeaderIdAndEpoch},
+            records::{Record, RecordBatch},
+        },
+        krabka_raft::NodeId,
+        krabka_units::{mebibytes, secs},
+        std::time::Duration,
     };
 
     fn local_partition_fixture() -> (Config, tempfile::TempDir, Arc<Partition>) {
@@ -725,16 +725,12 @@ mod tests {
                 ..LeaderIdAndEpoch::default()
             },
         ] {
-            let resp = fetch_response(
-                TOPIC,
-                WIRE_TOPIC_ID,
-                PartitionData {
-                    partition_index: PARTITION,
-                    error_code: codes::NONE,
-                    current_leader,
-                    ..PartitionData::default()
-                },
-            );
+            let resp = fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
+                partition_index: PARTITION,
+                error_code: codes::NONE,
+                current_leader,
+                ..PartitionData::default()
+            });
 
             assert!(handle_response(resp, &cfg, cfg.leader_epoch.0).await == RowAction::Drop);
         }
@@ -746,20 +742,16 @@ mod tests {
         part.replicate_batch(one_record_batch(0)).await.unwrap();
         assert!(part.log_end_offset() == Offset(1));
 
-        let resp = fetch_response(
-            TOPIC,
-            WIRE_TOPIC_ID,
-            PartitionData {
-                partition_index: PARTITION,
-                error_code: codes::NONE,
-                diverging_epoch: EpochEndOffset {
-                    epoch: cfg.leader_epoch.0,
-                    end_offset: 0,
-                    ..EpochEndOffset::default()
-                },
-                ..PartitionData::default()
+        let resp = fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
+            partition_index: PARTITION,
+            error_code: codes::NONE,
+            diverging_epoch: EpochEndOffset {
+                epoch: cfg.leader_epoch.0,
+                end_offset: 0,
+                ..EpochEndOffset::default()
             },
-        );
+            ..PartitionData::default()
+        });
 
         assert!(handle_response(resp, &cfg, cfg.leader_epoch.0 - 1).await == RowAction::Drop);
         assert!(part.log_end_offset() == Offset(1));
@@ -859,20 +851,16 @@ mod tests {
                     part.log.lock().unwrap().append(&mut batch).unwrap();
                 }
             }
-            let resp = fetch_response(
-                TOPIC,
-                WIRE_TOPIC_ID,
-                PartitionData {
-                    partition_index: PARTITION,
-                    error_code: codes::NONE,
-                    diverging_epoch: EpochEndOffset {
-                        epoch,
-                        end_offset,
-                        ..EpochEndOffset::default()
-                    },
-                    ..PartitionData::default()
+            let resp = fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
+                partition_index: PARTITION,
+                error_code: codes::NONE,
+                diverging_epoch: EpochEndOffset {
+                    epoch,
+                    end_offset,
+                    ..EpochEndOffset::default()
                 },
-            );
+                ..PartitionData::default()
+            });
 
             let action = handle_response(resp, &cfg, cfg.leader_epoch.0).await;
 
@@ -887,16 +875,12 @@ mod tests {
     async fn failed_append_leaves_log_retryable() {
         let (cfg, _log_dir, part) = local_partition_fixture();
         let respond = |base_offset| {
-            fetch_response(
-                TOPIC,
-                WIRE_TOPIC_ID,
-                PartitionData {
-                    partition_index: PARTITION,
-                    error_code: codes::NONE,
-                    records: Some(RecordsPayload::V2(vec![one_record_batch(base_offset)])),
-                    ..PartitionData::default()
-                },
-            )
+            fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
+                partition_index: PARTITION,
+                error_code: codes::NONE,
+                records: Some(RecordsPayload::V2(vec![one_record_batch(base_offset)])),
+                ..PartitionData::default()
+            })
         };
         assert!(handle_response(respond(0), &cfg, cfg.leader_epoch.0).await == RowAction::Continue);
         assert!(part.log_end_offset() == Offset(1));
@@ -922,16 +906,12 @@ mod tests {
         } else {
             RecordsPayload::V2(vec![batch])
         };
-        fetch_response(
-            TOPIC,
-            WIRE_TOPIC_ID,
-            PartitionData {
-                partition_index: PARTITION,
-                error_code: codes::NONE,
-                records: Some(records),
-                ..PartitionData::default()
-            },
-        )
+        fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
+            partition_index: PARTITION,
+            error_code: codes::NONE,
+            records: Some(records),
+            ..PartitionData::default()
+        })
     }
 
     /// A disk that refuses every write to a segment's `.log` file.
@@ -1019,16 +999,12 @@ mod tests {
         let mut encoded = BytesMut::new();
         batch.encode(&mut encoded).unwrap();
         let encoded = encoded.freeze();
-        let response = fetch_response(
-            TOPIC,
-            WIRE_TOPIC_ID,
-            PartitionData {
-                partition_index: PARTITION,
-                error_code: codes::NONE,
-                records: Some(RecordsPayload::Raw(encoded.clone())),
-                ..PartitionData::default()
-            },
-        );
+        let response = fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
+            partition_index: PARTITION,
+            error_code: codes::NONE,
+            records: Some(RecordsPayload::Raw(encoded.clone())),
+            ..PartitionData::default()
+        });
 
         assert!(handle_response(response, &cfg, cfg.leader_epoch.0).await == RowAction::Continue);
         let stored = part
@@ -1056,20 +1032,16 @@ mod tests {
     #[tokio::test]
     async fn handle_response_stops_on_diverging_epoch_after_local_promotion() {
         let (cfg, _log_dir) = test_config(image_with_leader(NODE_ID));
-        let resp = fetch_response(
-            TOPIC,
-            WIRE_TOPIC_ID,
-            PartitionData {
-                partition_index: PARTITION,
-                error_code: codes::NONE,
-                diverging_epoch: EpochEndOffset {
-                    epoch: 4,
-                    end_offset: 0,
-                    ..EpochEndOffset::default()
-                },
-                ..PartitionData::default()
+        let resp = fetch_response(TOPIC, WIRE_TOPIC_ID, PartitionData {
+            partition_index: PARTITION,
+            error_code: codes::NONE,
+            diverging_epoch: EpochEndOffset {
+                epoch: 4,
+                end_offset: 0,
+                ..EpochEndOffset::default()
             },
-        );
+            ..PartitionData::default()
+        });
 
         assert!(handle_response(resp, &cfg, cfg.leader_epoch.0).await == RowAction::Drop);
     }

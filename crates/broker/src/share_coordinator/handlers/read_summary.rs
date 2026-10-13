@@ -12,16 +12,17 @@
 //! A key this broker leads but does not know returns Kafka's uninitialized
 //! summary: start offset and delivery-complete count `-1`, epochs `0`.
 
-use krabka_metadata::MetadataImage;
-use krabka_protocol::owned::{
-    read_share_group_state_summary_request::ReadShareGroupStateSummaryRequest,
-    read_share_group_state_summary_response::{
-        PartitionResult, ReadShareGroupStateSummaryResponse, ReadStateSummaryResult,
+use {
+    crate::share_coordinator::coordinator::{
+        ShareCoordinator, ShareStateError, UNINITIALIZED_START_OFFSET,
     },
-};
-
-use crate::share_coordinator::coordinator::{
-    ShareCoordinator, ShareStateError, UNINITIALIZED_START_OFFSET,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::{
+        read_share_group_state_summary_request::ReadShareGroupStateSummaryRequest,
+        read_share_group_state_summary_response::{
+            PartitionResult, ReadShareGroupStateSummaryResponse, ReadStateSummaryResult,
+        },
+    },
 };
 
 super::share_state_handler!(
@@ -99,14 +100,15 @@ fn error_message(error: ShareStateError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use krabka_protocol::{
-        UnknownTaggedFields,
-        owned::read_share_group_state_summary_request::{PartitionData, ReadStateSummaryData},
-        primitives::uuid::Uuid as ProtoUuid,
+    use {
+        super::*,
+        crate::codes,
+        krabka_protocol::{
+            UnknownTaggedFields,
+            owned::read_share_group_state_summary_request::{PartitionData, ReadStateSummaryData},
+            primitives::uuid::Uuid as ProtoUuid,
+        },
     };
-
-    use super::*;
-    use crate::codes;
 
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([41; 16]);
     const WIRE_TOPIC: ProtoUuid = ProtoUuid([41; 16]);

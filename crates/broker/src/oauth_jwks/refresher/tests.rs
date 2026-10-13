@@ -2,17 +2,18 @@
 //! a custom trust bundle, the on-demand signal and its rate limit, the two
 //! shared timestamps a validator reads, and the shutdown a dead ticker forces.
 
-use assert2::{assert, check};
-use krabka_units::{millis, minutes};
-use qubit_clock::{ManualMonotonicClock, MonotonicClock as _, StdTimer};
-
-use super::*;
-use crate::{
-    oauth_jwks::test_support::{
-        JWKS_BODY, RefresherSetup, await_until, dormant_timer, make_signal_refresher, serve_jwks,
-        serve_jwks_counting, serve_jwks_https, test_refresher,
+use {
+    super::*,
+    crate::{
+        oauth_jwks::test_support::{
+            JWKS_BODY, RefresherSetup, await_until, dormant_timer, make_signal_refresher,
+            serve_jwks, serve_jwks_counting, serve_jwks_https, test_refresher,
+        },
+        test_support::{BrokenTimer, TimerFailure},
     },
-    test_support::{BrokenTimer, TimerFailure},
+    assert2::{assert, check},
+    krabka_units::{millis, minutes},
+    qubit_clock::{ManualMonotonicClock, MonotonicClock as _, StdTimer},
 };
 
 async fn check_first_fetch_and_stop(
@@ -109,16 +110,12 @@ async fn refresher_https_fetch_fails_when_custom_trust_doesnt_match_server_cert(
     let shutdown = CancellationToken::new();
     let interval = millis(50);
     let clock = ManualMonotonicClock::new_shared();
-    let refresher = test_refresher(
-        handle.clone(),
-        shutdown.clone(),
-        RefresherSetup {
-            endpoint: format!("https://127.0.0.1:{}/jwks", addr.port()),
-            interval,
-            tls_trust: Some(bogus_ca),
-            timer: clock.new_timer(),
-        },
-    );
+    let refresher = test_refresher(handle.clone(), shutdown.clone(), RefresherSetup {
+        endpoint: format!("https://127.0.0.1:{}/jwks", addr.port()),
+        interval,
+        tls_trust: Some(bogus_ca),
+        timer: clock.new_timer(),
+    });
     let task = tokio::spawn(refresher.run());
 
     // Drive several refresh intervals. Each round blocks (bounded real time,
@@ -434,15 +431,11 @@ fn dead_timer_refresher(
     handle: &JwksHandle,
     timer: &Arc<BrokenTimer>,
 ) -> JwksRefresher {
-    test_refresher(
-        handle.clone(),
-        CancellationToken::new(),
-        RefresherSetup {
-            endpoint: format!("http://{addr}/jwks"),
-            timer: timer.injectable(),
-            ..Default::default()
-        },
-    )
+    test_refresher(handle.clone(), CancellationToken::new(), RefresherSetup {
+        endpoint: format!("http://{addr}/jwks"),
+        timer: timer.injectable(),
+        ..Default::default()
+    })
 }
 
 async fn check_first_deadline_failure(failure: TimerFailure) {

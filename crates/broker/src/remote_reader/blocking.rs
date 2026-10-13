@@ -8,13 +8,14 @@
 //! `RemoteStorageError::Io`, so a defective SPI implementation surfaces as a
 //! read error rather than as a lost future.
 
-use krabka_remote_storage::{
-    BytePosition, IndexType, RemoteLogSegmentMetadata, RemoteStorageError, TopicIdPartition,
+use {
+    super::RemoteReader,
+    crate::blocking::spawn_blocking,
+    krabka_remote_storage::{
+        BytePosition, IndexType, RemoteLogSegmentMetadata, RemoteStorageError, TopicIdPartition,
+    },
+    tracing::warn,
 };
-use tracing::warn;
-
-use super::RemoteReader;
-use crate::blocking::spawn_blocking;
 
 impl RemoteReader {
     pub(super) async fn list_remote_log_segments_blocking(
@@ -88,14 +89,14 @@ impl RemoteReader {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_ids::LeaderEpoch;
-    use krabka_remote_storage::{LocalTieredStorage, RemoteLogMetadataManager};
-
-    use super::*;
-    use crate::remote_reader::test_support::tp;
+    use {
+        super::*,
+        crate::remote_reader::test_support::tp,
+        assert2::assert,
+        krabka_ids::LeaderEpoch,
+        krabka_remote_storage::{LocalTieredStorage, RemoteLogMetadataManager},
+        std::sync::Arc,
+    };
 
     struct SlowListRlmm {
         reactor_ticked: Arc<std::sync::atomic::AtomicBool>,

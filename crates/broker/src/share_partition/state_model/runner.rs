@@ -3,12 +3,13 @@
 //! The bounds sit next to the assertions that prove a run was exhaustive,
 //! because a truncated search proves nothing and the two must move together.
 
-use stateright::Checker;
-
-use super::config::ShareModel;
-use crate::{
-    coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
-    model_check::run_bfs,
+use {
+    super::config::ShareModel,
+    crate::{
+        coordinator::unified::actor::reconciliation_model_support::pinned_model_runner,
+        model_check::run_bfs,
+    },
+    stateright::Checker,
 };
 
 /// Hard backstop on generated states. It bounds host memory even if

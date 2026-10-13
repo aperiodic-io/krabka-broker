@@ -5,13 +5,13 @@
 //! is written into the archive the restore reads and an operator must not have
 //! to learn two spellings for one bucket.
 
-use std::{collections::BTreeSet, sync::Arc};
-
 pub use krabka_object_store::ArchiveArgs;
-use krabka_object_store::{ObjectOps, ObjectStoreClient, PutMode, PutRequest, build_object_store};
-use object_store::path::Path;
-
-use crate::error::BackupError;
+use {
+    crate::error::BackupError,
+    krabka_object_store::{ObjectOps, ObjectStoreClient, PutMode, PutRequest, build_object_store},
+    object_store::path::Path,
+    std::{collections::BTreeSet, sync::Arc},
+};
 
 /// A read and write handle on the archive, with the operator's key prefix
 /// applied.
@@ -61,14 +61,10 @@ impl Archive {
     /// Returns [`BackupError::ObjectStore`] when the key already exists or the write fails.
     pub async fn put_new(&self, relative: &str, bytes: Vec<u8>) -> Result<(), BackupError> {
         self.client
-            .put(
-                &self.key(relative),
-                bytes.into(),
-                PutRequest {
-                    mode: PutMode::Create,
-                    ..PutRequest::default()
-                },
-            )
+            .put(&self.key(relative), bytes.into(), PutRequest {
+                mode: PutMode::Create,
+                ..PutRequest::default()
+            })
             .await?;
         Ok(())
     }
@@ -140,15 +136,15 @@ impl Archive {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::check;
-    use bytes::Bytes;
-    use krabka_object_store::{ObjectStoreClient, ObjectStoreError, fault::FaultInjectingStore};
-    use object_store::{ObjectStoreExt as _, PutPayload, path::Path};
-
-    use super::{Archive, ArchiveArgs, BTreeSet};
-    use crate::error::{BackupError, EXIT_BAD_ARGUMENT};
+    use {
+        super::{Archive, ArchiveArgs, BTreeSet},
+        crate::error::{BackupError, EXIT_BAD_ARGUMENT},
+        assert2::check,
+        bytes::Bytes,
+        krabka_object_store::{ObjectStoreClient, ObjectStoreError, fault::FaultInjectingStore},
+        object_store::{ObjectStoreExt as _, PutPayload, path::Path},
+        std::sync::Arc,
+    };
 
     fn local_args(root: &std::path::Path) -> ArchiveArgs {
         ArchiveArgs {

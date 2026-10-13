@@ -12,9 +12,10 @@
 //! the model is a value rather than a `cfg` so that tests on a native target
 //! can drive the preopened model too.
 
-use std::{io, net::SocketAddr};
-
-use tokio::net::{TcpListener, TcpStream};
+use {
+    std::{io, net::SocketAddr},
+    tokio::net::{TcpListener, TcpStream},
+};
 
 /// How a platform gives the broker its sockets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,9 +99,7 @@ pub(crate) fn bind_listener(addr: SocketAddr) -> std::future::Ready<io::Result<T
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     #[tokio::test]
     async fn a_preopened_listener_reports_its_configured_address() {

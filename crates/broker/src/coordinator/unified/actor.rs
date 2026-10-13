@@ -13,11 +13,12 @@
 //! the mailbox loop, and the shared services and constants — while each RPC
 //! path lives in its own submodule.
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
-
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
+use {
+    std::{collections::HashMap, sync::Arc, time::Instant},
+    tokio::{
+        sync::{mpsc, oneshot},
+        task::JoinHandle,
+    },
 };
 
 mod classic_join;
@@ -64,21 +65,23 @@ pub use self::{
     retention::ReapOutcome,
     views::{ClassicMemberView, ClassicView, DescribeMember, DescribeView},
 };
-use self::{
-    dispatch::handle_actor_message,
-    tick::{handle_actor_tick, handle_classic_sync_expiry},
-    waiters::complete_classic_rebalance,
-};
-use crate::{
-    coordinator::unified::{
-        GroupCoordinator,
-        config::NextGenConfig,
-        group::{ConsumerState, CoordinatorGroup},
-        offsets_log::OffsetsLog,
-        reconciler::ReconcileInput,
+use {
+    self::{
+        dispatch::handle_actor_message,
+        tick::{handle_actor_tick, handle_classic_sync_expiry},
+        waiters::complete_classic_rebalance,
     },
-    task_util::spawn_mailbox,
-    time_util,
+    crate::{
+        coordinator::unified::{
+            GroupCoordinator,
+            config::NextGenConfig,
+            group::{ConsumerState, CoordinatorGroup},
+            offsets_log::OffsetsLog,
+            reconciler::ReconcileInput,
+        },
+        task_util::spawn_mailbox,
+        time_util,
+    },
 };
 
 /// A Kafka wire `error_code` value, as carried in response `error_code`

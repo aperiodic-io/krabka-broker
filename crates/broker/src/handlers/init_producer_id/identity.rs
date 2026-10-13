@@ -49,11 +49,7 @@ pub(super) async fn stage_recovery_identity(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_log::ProducerId;
-
-    use super::*;
-    use crate::txn::state::TxnState;
+    use {super::*, crate::txn::state::TxnState, assert2::assert, krabka_log::ProducerId};
 
     /// Kafka `prepareIncrementProducerEpoch` bumps the epoch, and
     /// `prepareProducerIdRotation` rotates to a fresh producer id once the

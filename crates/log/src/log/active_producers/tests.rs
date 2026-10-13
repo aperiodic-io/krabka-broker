@@ -1,13 +1,14 @@
-use assert2::assert;
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
-
-use super::*;
-use crate::{
-    TransactionalBatch,
-    log::test_support::{
-        AppendPath as Path, append_path as append, control_key, control_value, test_log,
+use {
+    super::*,
+    crate::{
+        TransactionalBatch,
+        log::test_support::{
+            AppendPath as Path, append_path as append, control_key, control_value, test_log,
+        },
+        test_support::open_log,
     },
-    test_support::open_log,
+    assert2::assert,
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
 };
 
 // A data batch of `producer` (`(id, epoch)`) with `records` records from
@@ -380,13 +381,10 @@ fn active_producers_report_the_producer_state_of_every_append_path() {
 #[test]
 fn last_records_of_active_producers_follow_every_append_path() {
     let last = |producer_id, last_data_offset: Option<i64>, producer_epoch| {
-        (
-            ProducerId(producer_id),
-            ProducerLastRecord {
-                last_data_offset: last_data_offset.map(Offset),
-                producer_epoch,
-            },
-        )
+        (ProducerId(producer_id), ProducerLastRecord {
+            last_data_offset: last_data_offset.map(Offset),
+            producer_epoch,
+        })
     };
     let cases: Vec<(
         &str,
@@ -443,11 +441,9 @@ fn remove_expired_producers_keeps_open_transactions_and_recent_producers() {
     // (case, now_ms, the producers that stay)
     let cases = [
         ("before any producer expires", 1_999, vec![1, 2, 3]),
-        (
-            "the idle producer at the exact expiration",
-            2_000,
-            vec![2, 3],
-        ),
+        ("the idle producer at the exact expiration", 2_000, vec![
+            2, 3,
+        ]),
         ("both idle producers", 4_000, vec![3]),
         ("long after every write", i64::MAX, vec![3]),
     ];

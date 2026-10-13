@@ -6,12 +6,13 @@
 //! broker-only node to start creates the topic on itself, and its audit writer
 //! then records the broker start in that partition.
 
-use assert2::assert;
-use krabka_broker::{BootstrapMode, Broker, config::NodeRole, coordinator::AUDIT_TOPIC};
-use krabka_raft::NodeId;
-use tempfile::TempDir;
-
-use crate::support::{ClusterNodeSetup, NodeIndex, controller_voters};
+use {
+    crate::support::{ClusterNodeSetup, NodeIndex, controller_voters},
+    assert2::assert,
+    krabka_broker::{BootstrapMode, Broker, config::NodeRole, coordinator::AUDIT_TOPIC},
+    krabka_raft::NodeId,
+    tempfile::TempDir,
+};
 
 mod support;
 
@@ -24,15 +25,12 @@ async fn only_a_broker_holds_the_audit_partition_under_an_isolated_controller() 
     let mut controller_listeners = controller_listeners.into_iter();
 
     let controller_dir = TempDir::new().unwrap();
-    let mut controller_config = support::broker_config(
-        controller_dir.path(),
-        ClusterNodeSetup {
-            client_addrs: &client_addrs,
-            controller_addrs: &controller_addrs,
-            voters: controller_voters(&voters),
-            ..Default::default()
-        },
-    );
+    let mut controller_config = support::broker_config(controller_dir.path(), ClusterNodeSetup {
+        client_addrs: &client_addrs,
+        controller_addrs: &controller_addrs,
+        voters: controller_voters(&voters),
+        ..Default::default()
+    });
     controller_config.roles = vec![NodeRole::Controller];
     let controller = Broker::start_with_listeners(
         controller_config,
@@ -48,16 +46,13 @@ async fn only_a_broker_holds_the_audit_partition_under_an_isolated_controller() 
         .is_some();
 
     let broker_dir = TempDir::new().unwrap();
-    let mut broker_config = support::broker_config(
-        broker_dir.path(),
-        ClusterNodeSetup {
-            index: NodeIndex(1),
-            client_addrs: &client_addrs,
-            controller_addrs: &controller_addrs,
-            voters: controller_voters(&voters),
-            mode: BootstrapMode::Join,
-        },
-    );
+    let mut broker_config = support::broker_config(broker_dir.path(), ClusterNodeSetup {
+        index: NodeIndex(1),
+        client_addrs: &client_addrs,
+        controller_addrs: &controller_addrs,
+        voters: controller_voters(&voters),
+        mode: BootstrapMode::Join,
+    });
     broker_config.roles = vec![NodeRole::Broker];
     let broker = Broker::start_with_listeners(
         broker_config,

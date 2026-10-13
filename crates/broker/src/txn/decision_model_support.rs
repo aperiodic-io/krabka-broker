@@ -1,14 +1,17 @@
 //! Shared initialization transitions and independent Kafka fence oracle for the
 //! transaction decision and timeout models.
 
-use krabka_log::ProducerId;
-use krabka_verified::transaction::TransactionReaperCompletionDecision;
-
-use super::{
-    coordinator::completion::{apply_completion, completion_decision, completion_for},
-    handlers::end_txn::{completion_producer_identity, prepare_server_abort_identities_with_fresh},
-    state::{TxnEntry, TxnState},
-    version::TxnVersion,
+use {
+    super::{
+        coordinator::completion::{apply_completion, completion_decision, completion_for},
+        handlers::end_txn::{
+            completion_producer_identity, prepare_server_abort_identities_with_fresh,
+        },
+        state::{TxnEntry, TxnState},
+        version::TxnVersion,
+    },
+    krabka_log::ProducerId,
+    krabka_verified::transaction::TransactionReaperCompletionDecision,
 };
 
 /// Drive the common begin gate and generation stamp, with an optional start-clock write.

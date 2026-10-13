@@ -1,7 +1,4 @@
-use assert2::assert;
-
-use super::*;
-use crate::list_offsets::ListOffsetsSelectionDecision;
+use {super::*, crate::list_offsets::ListOffsetsSelectionDecision, assert2::assert};
 
 fn check_window(window: SparseTimestampWindow<'_>, base: i64, floor: i64, target: i64) {
     let (offsets, times, rows) = window;

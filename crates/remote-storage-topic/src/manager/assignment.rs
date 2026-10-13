@@ -5,11 +5,10 @@
 //! reconciler records. Both halves share the `ready_targets` map and the
 //! HWM-unknown sentinel, so they belong in one module.
 
-use krabka_remote_storage::RemoteStorageError;
-use tracing::warn;
-
-use super::TopicBasedRemoteLogMetadataManager;
-use crate::log::PartitionStart;
+use {
+    super::TopicBasedRemoteLogMetadataManager, crate::log::PartitionStart,
+    krabka_remote_storage::RemoteStorageError, tracing::warn,
+};
 
 #[cfg(test)]
 mod tests;

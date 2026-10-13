@@ -3,36 +3,40 @@
 //! broker socket, and the test passwords the SASL exchanges authenticate
 //! with.
 
-use std::io;
-
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use tokio::net::TcpStream;
-
 /// alice's SCRAM test password, built from characters at runtime.
 ///
 /// The value is a non-secret test fixture. But a literal that goes into the
 /// client SASL-auth calls trips GitHub's default code-scanning credential
 /// query. This function keeps those call sites free of literals.
 pub use crate::support::sasl::alice_password;
-use crate::{
-    kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
-    support::{
-        sasl::{ScramCredentialSetup, provision_scram, sasl_plaintext_mechanisms, start_broker},
-        sasl_plaintext_config,
-        wire::{
-            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
-            SocketExchangeSetup,
+use {
+    crate::{
+        kafka_wire::{self, ExchangeSetup as WireExchangeSetup},
+        support::{
+            sasl::{
+                ScramCredentialSetup, provision_scram, sasl_plaintext_mechanisms, start_broker,
+            },
+            sasl_plaintext_config,
+            wire::{
+                CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+                SocketExchangeSetup,
+            },
         },
     },
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    std::io,
+    tokio::net::TcpStream,
 };
 
 pub(crate) mod common_imports {
-    pub use assert2::check;
-    pub use krabka_broker::Broker;
-    pub use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-    pub use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse;
-    pub use krabka_security::SaslMechanism;
-    pub use tokio::net::TcpStream;
+    pub use {
+        assert2::check,
+        krabka_broker::Broker,
+        krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+        krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse,
+        krabka_security::SaslMechanism,
+        tokio::net::TcpStream,
+    };
 }
 
 pub struct BrokerStream {
@@ -71,15 +75,11 @@ pub async fn sasl_authenticate_round_trip(
 ///
 /// A runtime value stops code scanning from giving a false positive for a
 /// static secret in the integration fixtures.
-pub fn admin_plain_password() -> String {
-    ['s', 'e', 'c', 'r', 'e', 't'].iter().collect()
-}
+pub fn admin_plain_password() -> String { ['s', 'e', 'c', 'r', 'e', 't'].iter().collect() }
 
 /// wrong SCRAM test password, built at runtime for the same reason as
 /// `admin_plain_password`.
-pub fn wrong_scram_password() -> String {
-    ['h', 'u', 'n', 't', 'e', 'r', '2'].iter().collect()
-}
+pub fn wrong_scram_password() -> String { ['h', 'u', 'n', 't', 'e', 'r', '2'].iter().collect() }
 
 // One length-prefixed request/response exchange, bound to this suite.
 crate::socket_round_trip_fixture!(pub round_trip, "krabka-sasl-test");
@@ -164,13 +164,10 @@ pub async fn start_scram_alice(
     let broker = krabka_broker::Broker::start(cfg)
         .await
         .expect("broker must start");
-    provision_scram(
-        &broker,
-        ScramCredentialSetup {
-            mechanism,
-            ..Default::default()
-        },
-    )
+    provision_scram(&broker, ScramCredentialSetup {
+        mechanism,
+        ..Default::default()
+    })
     .await;
     broker
 }
@@ -246,14 +243,11 @@ pub async fn start_reauth_broker(
         .expect("broker must start");
     if mechanism == krabka_security::SaslMechanism::ScramSha512 {
         for user in ["alice", "bob"] {
-            provision_scram(
-                &broker,
-                ScramCredentialSetup {
-                    user: (user).into(),
-                    mechanism,
-                    ..Default::default()
-                },
-            )
+            provision_scram(&broker, ScramCredentialSetup {
+                user: (user).into(),
+                mechanism,
+                ..Default::default()
+            })
             .await;
         }
     }

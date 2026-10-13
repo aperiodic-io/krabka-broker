@@ -6,12 +6,13 @@
 //! the group, which is the one place session state reaches into the
 //! acquisition machines. The two sit together because a disconnect runs both.
 
-use std::collections::HashSet;
-
-use super::SharePartitionLeaderManager;
-use crate::share_partition::{
-    group_settings::GroupShareSettings,
-    session::{FetchPartitions, ResponseRow, ShareFetchSessionUpdate, SharePartitionKey},
+use {
+    super::SharePartitionLeaderManager,
+    crate::share_partition::{
+        group_settings::GroupShareSettings,
+        session::{FetchPartitions, ResponseRow, ShareFetchSessionUpdate, SharePartitionKey},
+    },
+    std::collections::HashSet,
 };
 
 impl SharePartitionLeaderManager {
@@ -96,15 +97,17 @@ impl SharePartitionLeaderManager {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
-    use assert2::assert;
-    use krabka_log::Offset;
-
-    use crate::share_partition::{
-        manager::test_support::{LOCK, SessionCapacity, manager, manager_with_unlimited_fallback},
-        session::FetchPartitions,
-        state::AcquisitionState,
+    use {
+        crate::share_partition::{
+            manager::test_support::{
+                LOCK, SessionCapacity, manager, manager_with_unlimited_fallback,
+            },
+            session::FetchPartitions,
+            state::AcquisitionState,
+        },
+        assert2::assert,
+        krabka_log::Offset,
+        std::collections::HashSet,
     };
 
     #[test]

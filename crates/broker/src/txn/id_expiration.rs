@@ -19,14 +19,14 @@
 //! idempotent -- a second one for an id already gone is a no-op on replay -- so
 //! a duplicate or late sweep on a moved partition is safe.
 
-use std::sync::Arc;
-
-use krabka_units::{Time, convert::TimeExt as _};
-use tracing::{debug, info};
-
-use crate::{
-    metadata_source::MetadataSource,
-    txn::{coordinator::TxnCoordinator, util::now_millis},
+use {
+    crate::{
+        metadata_source::MetadataSource,
+        txn::{coordinator::TxnCoordinator, util::now_millis},
+    },
+    krabka_units::{Time, convert::TimeExt as _},
+    std::sync::Arc,
+    tracing::{debug, info},
 };
 
 super::util::reaper_task! {

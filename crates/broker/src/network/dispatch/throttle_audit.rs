@@ -16,16 +16,16 @@
 //! table under test. An API added to the catalog but not to [`probes`] fails
 //! [`every_advertised_api_is_classified`].
 
-use std::collections::BTreeMap;
-
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_protocol::Encode;
-
-use super::response::throttle_is_leading_field;
-use crate::{
-    api_catalog::dispatched_apis,
-    handlers::{ApiKeyCode, ApiVersion, registry::build_registry},
+use {
+    super::response::throttle_is_leading_field,
+    crate::{
+        api_catalog::dispatched_apis,
+        handlers::{ApiKeyCode, ApiVersion, registry::build_registry},
+    },
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_protocol::Encode,
+    std::collections::BTreeMap,
 };
 
 /// Written into `throttle_time_ms` before encoding. Any value works as long as

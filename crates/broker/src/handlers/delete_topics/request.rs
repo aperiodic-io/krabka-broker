@@ -13,16 +13,17 @@
 //! authorization it also rejects a name whose topic id another row carries.
 //! This module applies the same rules.
 
-use std::collections::{HashMap, HashSet};
-
-use krabka_protocol::{
-    owned::{
-        delete_topics_request::DeleteTopicsRequest, delete_topics_response::DeletableTopicResult,
+use {
+    super::{authz::TopicAccess, wire::invalid_topic_result},
+    krabka_protocol::{
+        owned::{
+            delete_topics_request::DeleteTopicsRequest,
+            delete_topics_response::DeletableTopicResult,
+        },
+        primitives::uuid::Uuid as WireUuid,
     },
-    primitives::uuid::Uuid as WireUuid,
+    std::collections::{HashMap, HashSet},
 };
-
-use super::{authz::TopicAccess, wire::invalid_topic_result};
 
 /// One requested topic: the name resolved from the metadata image (`None` when
 /// the image does not know it), whether the client identified the topic by id,
@@ -204,11 +205,12 @@ impl ValidatedTopics {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord};
-    use krabka_protocol::owned::delete_topics_request::DeleteTopicState;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_metadata::{MetadataImage, MetadataRecord, TopicRecord},
+        krabka_protocol::owned::delete_topics_request::DeleteTopicState,
+    };
 
     const ORDERS_ID: WireUuid = WireUuid([7; 16]);
     const OTHER_ID: WireUuid = WireUuid([9; 16]);

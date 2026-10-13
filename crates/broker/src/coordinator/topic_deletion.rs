@@ -25,20 +25,20 @@
 //! whose `__consumer_offsets` partition it leads, the same ownership rule as
 //! the offset-retention sweep.
 
-use std::sync::Arc;
-
-use krabka_metadata::{MetadataImage, NodeId};
-use tokio_util::sync::CancellationToken;
-
-use super::{
-    GroupCoordinator,
-    metadata_update::{changed_topics, on_metadata_update, regex_resolution_may_change},
-    partitioner::local_partition_for_group,
-    unified::actor::GroupActorMessage,
-};
-use crate::{
-    metadata_source::{MetadataSource, next_image_until_shutdown},
-    task_util::ask,
+use {
+    super::{
+        GroupCoordinator,
+        metadata_update::{changed_topics, on_metadata_update, regex_resolution_may_change},
+        partitioner::local_partition_for_group,
+        unified::actor::GroupActorMessage,
+    },
+    crate::{
+        metadata_source::{MetadataSource, next_image_until_shutdown},
+        task_util::ask,
+    },
+    krabka_metadata::{MetadataImage, NodeId},
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
 };
 
 #[cfg(test)]

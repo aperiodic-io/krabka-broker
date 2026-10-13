@@ -1,9 +1,11 @@
 //! Shard-addressed WAL RPC descriptors.
 
-use bytes::Bytes;
-use krabka_ids::PartitionIndex;
-use krabka_protocol::{Decode, Encode, owned::fetch_request::FetchRequest};
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
+use {
+    bytes::Bytes,
+    krabka_ids::PartitionIndex,
+    krabka_protocol::{Decode, Encode, owned::fetch_request::FetchRequest},
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+};
 
 const KRAFT_METADATA_TOPIC_ID: krabka_protocol::primitives::uuid::Uuid =
     krabka_protocol::primitives::uuid::Uuid([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
@@ -249,9 +251,7 @@ pub(crate) fn encode_fetch_for_group(
 
 #[cfg(test)]
 mod tests {
-    use krabka_raft::NodeId;
-
-    use super::*;
+    use {super::*, krabka_raft::NodeId};
 
     #[test]
     fn classify_fetch_distinguishes_metadata_quorum() {

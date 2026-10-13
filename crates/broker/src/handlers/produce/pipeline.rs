@@ -2,44 +2,44 @@
 //! through every gate in order and returns that partition's response row, or
 //! the high-watermark wait that still stands between it and one.
 
-use std::sync::Arc;
-
-use krabka_compression::RecordDecompressionPolicy;
-use krabka_protocol::owned::produce_response::{
-    BatchIndexAndErrorMessage, PartitionProduceResponse,
-};
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use super::{
-    INVALID_OFFSET,
-    append::{AppendContext, AppendOutcome, PendingAck, dispatch_prepared},
-    delivery::DeliveryGate,
-    framing::FramedPartition,
-    leadership::{
-        BrokerProducePolicy, current_leader_hint, diskless_role_ready, replica_state_matches_image,
-        replication_target_matches_image, validate_partition_gate,
+use {
+    super::{
+        INVALID_OFFSET,
+        append::{AppendContext, AppendOutcome, PendingAck, dispatch_prepared},
+        delivery::DeliveryGate,
+        framing::FramedPartition,
+        leadership::{
+            BrokerProducePolicy, current_leader_hint, diskless_role_ready,
+            replica_state_matches_image, replication_target_matches_image, validate_partition_gate,
+        },
+        prepare::{DecodeEnv, PreparedBatch, prepare_batch},
+        producer_checks::{
+            DedupOutcome, TransactionRequest, Verification, handle_duplicate,
+            produce_verification_code, verify_transactional_produce, verify_with_coordinator,
+        },
+        record_limit::exceeds_decompressed_limit,
+        schema::{SCHEMA_REJECTION_MESSAGE, validate_batch_schemas},
+        topic_settings::TimestampPolicy,
     },
-    prepare::{DecodeEnv, PreparedBatch, prepare_batch},
-    producer_checks::{
-        DedupOutcome, TransactionRequest, Verification, handle_duplicate,
-        produce_verification_code, verify_transactional_produce, verify_with_coordinator,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        codes,
+        error::BrokerError,
+        freeze::resolve::{FreezeMutationResolution, FreezeVerdict},
+        log_dir_status::LogDirRegistry,
+        metrics::{BrokerMetrics, RequestPhases},
+        partition::{Partition, ReplicationTarget},
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        schema_validation::{SchemaGate, SchemaValidator},
+        txn::{coordinator::TxnCoordinator, state::TopicPartition},
     },
-    record_limit::exceeds_decompressed_limit,
-    schema::{SCHEMA_REJECTION_MESSAGE, validate_batch_schemas},
-    topic_settings::TimestampPolicy,
-};
-use crate::{
-    api_catalog::UnstableApiVersions,
-    codes,
-    error::BrokerError,
-    freeze::resolve::{FreezeMutationResolution, FreezeVerdict},
-    log_dir_status::LogDirRegistry,
-    metrics::{BrokerMetrics, RequestPhases},
-    partition::{Partition, ReplicationTarget},
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    schema_validation::{SchemaGate, SchemaValidator},
-    txn::{coordinator::TxnCoordinator, state::TopicPartition},
+    krabka_compression::RecordDecompressionPolicy,
+    krabka_protocol::owned::produce_response::{
+        BatchIndexAndErrorMessage, PartitionProduceResponse,
+    },
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+    std::sync::Arc,
 };
 
 /// Per-partition produce input, held apart so that the call site can time the

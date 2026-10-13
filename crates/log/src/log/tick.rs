@@ -11,15 +11,15 @@
 //! empty newest segment, and never evicts a segment that still holds a record
 //! whose delivery time has not arrived.
 
-use std::{collections::HashSet, time::SystemTime};
-
-use krabka_ids::Offset;
-use krabka_units::prelude::{ByteSizeExt, TimeExt as _};
-use krabka_verified::retention::{LocalRetentionSegment, local_retention_prefix};
-use tracing::instrument;
-
-use super::Log;
-use crate::{error::LogError, producer_snapshot, retention, segment::Segment};
+use {
+    super::Log,
+    crate::{error::LogError, producer_snapshot, retention, segment::Segment},
+    krabka_ids::Offset,
+    krabka_units::prelude::{ByteSizeExt, TimeExt as _},
+    krabka_verified::retention::{LocalRetentionSegment, local_retention_prefix},
+    std::{collections::HashSet, time::SystemTime},
+    tracing::instrument,
+};
 
 impl Log {
     /// Periodic maintenance: apply time- and size-based retention when `cleanup.policy` holds `delete`, and delete
@@ -189,17 +189,18 @@ impl Log {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_units::prelude::{ByteSize, kibibytes, millis, secs};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        config::LogConfig,
-        log::test_support::{
-            append_samples, install_stamps, rolled_log, rolling_test_log, sample_batch, test_log,
-            tiny_segments,
+    use {
+        super::*,
+        crate::{
+            config::LogConfig,
+            log::test_support::{
+                append_samples, install_stamps, rolled_log, rolling_test_log, sample_batch,
+                test_log, tiny_segments,
+            },
         },
+        assert2::check,
+        krabka_units::prelude::{ByteSize, kibibytes, millis, secs},
+        tempfile::tempdir,
     };
 
     /// Retention may take the whole log, but it never leaves the log without a
@@ -254,19 +255,15 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100);
         let all = vec![Offset(0), Offset(1), Offset(2)];
         let cases: [Case; 8] = [
-            (
-                CleanupPolicy::Delete,
-                None,
-                Offset(0),
-                vec![Offset(1), Offset(2)],
-            ),
+            (CleanupPolicy::Delete, None, Offset(0), vec![
+                Offset(1),
+                Offset(2),
+            ]),
             (CleanupPolicy::Compact, None, Offset(0), all.clone()),
-            (
-                CleanupPolicy::CompactAndDelete,
-                None,
-                Offset(0),
-                vec![Offset(1), Offset(2)],
-            ),
+            (CleanupPolicy::CompactAndDelete, None, Offset(0), vec![
+                Offset(1),
+                Offset(2),
+            ]),
             // Size retention with a budget of nothing deletes every segment,
             // the active one behind a roll, but only under a policy that
             // deletes.
@@ -290,26 +287,21 @@ mod tests {
             ),
             // A segment wholly below the log start offset goes under every
             // policy, and a segment the start offset only reaches stays.
-            (
-                CleanupPolicy::Compact,
-                None,
+            (CleanupPolicy::Compact, None, Offset(1), vec![
                 Offset(1),
-                vec![Offset(1), Offset(2)],
-            ),
+                Offset(2),
+            ]),
             (CleanupPolicy::Compact, None, Offset(2), vec![Offset(2)]),
         ];
 
         for (cleanup_policy, retention_size, log_start, expected) in cases {
             let dir = tempdir().unwrap();
-            let mut log = Log::open(
-                dir.path(),
-                LogConfig {
-                    retention: Some(secs(10)),
-                    retention_size,
-                    cleanup_policy,
-                    ..tiny_segments()
-                },
-            )
+            let mut log = Log::open(dir.path(), LogConfig {
+                retention: Some(secs(10)),
+                retention_size,
+                cleanup_policy,
+                ..tiny_segments()
+            })
             .unwrap();
             for timestamp in [1_000, 95_000, 95_000] {
                 let mut batch = sample_batch(1);
@@ -385,13 +377,10 @@ mod tests {
             ("an old file goes", Duration::from_hours(2), true),
         ] {
             let dir = tempdir().unwrap();
-            let mut log = Log::open(
-                dir.path(),
-                LogConfig {
-                    retention: Some(secs(60 * 60)),
-                    ..tiny_segments()
-                },
-            )
+            let mut log = Log::open(dir.path(), LogConfig {
+                retention: Some(secs(60 * 60)),
+                ..tiny_segments()
+            })
             .unwrap();
             let mut untimed = sample_batch(1);
             untimed.max_timestamp = -1;
@@ -450,13 +439,10 @@ mod tests {
     #[test]
     fn tick_removes_only_retained_away_segment_stamp_indexes() {
         let dir = tempdir().unwrap();
-        let mut log = Log::open(
-            dir.path(),
-            LogConfig {
-                retention: Some(millis(1)),
-                ..tiny_segments()
-            },
-        )
+        let mut log = Log::open(dir.path(), LogConfig {
+            retention: Some(millis(1)),
+            ..tiny_segments()
+        })
         .unwrap();
         install_stamps(&mut log, 10, 1);
         for timestamp in [0, 0, 1_000] {
@@ -534,14 +520,11 @@ mod tests {
         // Tiered topic: tick must not delete any segment, however old.
         // The remote-log manager owns local eviction.
         let dir_tiered = tempdir().unwrap();
-        let mut tiered = rolled_log(
-            dir_tiered.path(),
-            &LogConfig {
-                remote_storage_enable: true,
-                retention: Some(millis(1)),
-                ..LogConfig::default()
-            },
-        );
+        let mut tiered = rolled_log(dir_tiered.path(), &LogConfig {
+            remote_storage_enable: true,
+            retention: Some(millis(1)),
+            ..LogConfig::default()
+        });
         let sealed_before = tiered.tierable_segments().len();
         assert2::assert!(sealed_before > 0);
         tiered.tick(far_future, Offset(i64::MAX)).unwrap();
@@ -549,14 +532,11 @@ mod tests {
 
         // Non-tiered baseline: tick should still evict aggressively.
         let dir_plain = tempdir().unwrap();
-        let mut plain = rolled_log(
-            dir_plain.path(),
-            &LogConfig {
-                remote_storage_enable: false,
-                retention: Some(millis(1)),
-                ..LogConfig::default()
-            },
-        );
+        let mut plain = rolled_log(dir_plain.path(), &LogConfig {
+            remote_storage_enable: false,
+            retention: Some(millis(1)),
+            ..LogConfig::default()
+        });
         assert2::assert!(!plain.tierable_segments().is_empty());
         plain.tick(far_future, Offset(i64::MAX)).unwrap();
         // Non-tiered path: every segment is past retention, so every sealed

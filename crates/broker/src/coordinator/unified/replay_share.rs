@@ -7,16 +7,18 @@
 //! The rules for creating a group, ignoring a tombstone, and failing the load
 //! are [`replay_policy`](super::replay_policy)'s.
 
-use super::{
-    group_coordinator::GroupCoordinator,
-    replay_policy::{
-        GroupLookup, LEAVE_GROUP_MEMBER_EPOCH, ModernGroupType, group_tombstone, persisted_group,
-        target_metadata, target_metadata_tombstone,
+use {
+    super::{
+        group_coordinator::GroupCoordinator,
+        replay_policy::{
+            GroupLookup, LEAVE_GROUP_MEMBER_EPOCH, ModernGroupType, group_tombstone,
+            persisted_group, target_metadata, target_metadata_tombstone,
+        },
+        seeds::ShareGroupSeed,
+        share,
     },
-    seeds::ShareGroupSeed,
-    share,
+    crate::error::BrokerError,
 };
-use crate::error::BrokerError;
 
 /// The fields of a member that Kafka's replay creates from a current
 /// assignment record alone: `ShareGroupMember.Builder`'s defaults.
@@ -329,17 +331,19 @@ impl GroupCoordinator {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-    use crate::coordinator::unified::{
-        persistence_next_gen::GroupMetadataValue,
-        share::persistence::{
-            ShareGroupCurrentMemberAssignmentValue, ShareGroupKey, ShareGroupMetadataValue,
-            ShareGroupStatePartitionMetadataValue, ShareGroupTargetAssignmentMemberValue,
-            ShareGroupTargetAssignmentMetadataValue, TopicPartitionsInfo,
-        },
-        test_support::{
-            AssignmentDeletionSetup, check_replay_cases, proto_uuid, replay_fixtures,
-            replay_tombstone_constructor, share_member,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            persistence_next_gen::GroupMetadataValue,
+            share::persistence::{
+                ShareGroupCurrentMemberAssignmentValue, ShareGroupKey, ShareGroupMetadataValue,
+                ShareGroupStatePartitionMetadataValue, ShareGroupTargetAssignmentMemberValue,
+                ShareGroupTargetAssignmentMetadataValue, TopicPartitionsInfo,
+            },
+            test_support::{
+                AssignmentDeletionSetup, check_replay_cases, proto_uuid, replay_fixtures,
+                replay_tombstone_constructor, share_member,
+            },
         },
     };
 
@@ -410,13 +414,12 @@ mod tests {
 
     fn replay(coord: &GroupCoordinator, record: &Record) -> Result<(), BrokerError> {
         match record.clone() {
-            Record::Group(epoch) => coord.replay_share_group_metadata(
-                "g",
-                ShareGroupMetadataValue {
+            Record::Group(epoch) => {
+                coord.replay_share_group_metadata("g", ShareGroupMetadataValue {
                     epoch,
                     metadata_hash: 9,
-                },
-            ),
+                })
+            }
             Record::Member(member) => {
                 coord.replay_share_member_metadata("g", member, share_member(member))
             }
@@ -436,13 +439,10 @@ mod tests {
             Record::StateMetadata => {
                 coord.replay_share_state_partition_metadata("g", state_metadata())
             }
-            Record::ConsumerGroup => coord.replay_group_metadata(
-                "g",
-                GroupMetadataValue {
-                    epoch: 1,
-                    metadata_hash: 0,
-                },
-            ),
+            Record::ConsumerGroup => coord.replay_group_metadata("g", GroupMetadataValue {
+                epoch: 1,
+                metadata_hash: 0,
+            }),
             Record::Tombstone(key) => coord.replay_share_tombstone(&key),
         }
     }

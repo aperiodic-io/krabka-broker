@@ -1,7 +1,4 @@
-use assert2::check;
-use proptest::prelude::*;
-
-use super::*;
+use {super::*, assert2::check, proptest::prelude::*};
 
 /// The production implementation that this kernel replaced: sort
 /// descending, take the majority-th largest, gate on `epoch_start`, and

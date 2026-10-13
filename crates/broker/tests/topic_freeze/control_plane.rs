@@ -8,17 +8,18 @@
 //! that handler and the produce gate both read the controller's current image,
 //! so a registry that answers over the wire is a produce path that answers too.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_broker::codes;
-use krabka_client_core::Client;
-use krabka_protocol::{
-    krabka::freeze::{
-        DescribeTopicFreezesRequest, DescribedTopicFreeze, SetTopicFreezeRequest,
-        SetTopicFreezeResponse,
+use {
+    assert2::assert,
+    krabka_broker::codes,
+    krabka_client_core::Client,
+    krabka_protocol::{
+        krabka::freeze::{
+            DescribeTopicFreezesRequest, DescribedTopicFreeze, SetTopicFreezeRequest,
+            SetTopicFreezeResponse,
+        },
+        owned::describe_cluster_request::DescribeClusterRequest,
     },
-    owned::describe_cluster_request::DescribeClusterRequest,
+    std::time::{Duration, Instant},
 };
 
 /// How long a wire-visible state change gets before a case gives up on it.

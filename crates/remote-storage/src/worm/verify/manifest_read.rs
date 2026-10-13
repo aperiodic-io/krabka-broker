@@ -6,14 +6,14 @@
 //! version it does not implement, and it reports each refusal as archive
 //! content rather than as a failure to look.
 
-use std::sync::Arc;
-
-use krabka_object_store::{ObjectStoreError, read_capped};
-use object_store::{ObjectStore, path::Path};
-
-use crate::worm::{
-    error::WormError,
-    manifest::{MANIFEST_FORMAT_VERSION, SegmentManifest},
+use {
+    crate::worm::{
+        error::WormError,
+        manifest::{MANIFEST_FORMAT_VERSION, SegmentManifest},
+    },
+    krabka_object_store::{ObjectStoreError, read_capped},
+    object_store::{ObjectStore, path::Path},
+    std::sync::Arc,
 };
 
 /// Byte cap on one manifest object.
@@ -89,11 +89,12 @@ pub(super) type KeyedManifest = (String, SegmentManifest);
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use bytes::Bytes;
-
-    use super::*;
-    use crate::worm::verify::test_support::{Archive, put_raw};
+    use {
+        super::*,
+        crate::worm::verify::test_support::{Archive, put_raw},
+        assert2::check,
+        bytes::Bytes,
+    };
 
     #[tokio::test]
     async fn a_manifest_of_any_version_but_the_current_one_is_a_break() {

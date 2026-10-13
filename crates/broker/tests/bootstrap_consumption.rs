@@ -24,20 +24,22 @@ mod kafka_wire;
 
 mod support;
 
-use std::{io, net::SocketAddr};
-
-use assert2::assert;
-use krabka_broker::{Broker, BrokerConfig};
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::owned::{
-    metadata_request::MetadataRequest, metadata_response::MetadataResponse,
-};
-use krabka_security::{ListenerProtocol, SaslMechanism};
-use tokio::net::TcpStream;
-
-use crate::{
-    kafka_wire::{ExchangeSetup as WireExchangeSetup, ScramAuthenticationSetup},
-    support::wire::{CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding},
+use {
+    crate::{
+        kafka_wire::{ExchangeSetup as WireExchangeSetup, ScramAuthenticationSetup},
+        support::wire::{
+            CorrelationId as WireCorrelationId, HeaderEncoding as RequestHeaderEncoding,
+        },
+    },
+    assert2::assert,
+    krabka_broker::{Broker, BrokerConfig},
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::owned::{
+        metadata_request::MetadataRequest, metadata_response::MetadataResponse,
+    },
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::{io, net::SocketAddr},
+    tokio::net::TcpStream,
 };
 
 /// The client id every request header in this suite carries.
@@ -151,15 +153,12 @@ async fn drive_sasl_scram_session(
     password: &str,
 ) -> Result<(), io::Error> {
     let mut stream = TcpStream::connect(addr).await?;
-    kafka_wire::sasl_scram_authenticate_on(
-        &mut stream,
-        &ScramAuthenticationSetup {
-            client_id: CLIENT_ID,
-            user,
-            password: (password).into(),
-            ..Default::default()
-        },
-    )
+    kafka_wire::sasl_scram_authenticate_on(&mut stream, &ScramAuthenticationSetup {
+        client_id: CLIENT_ID,
+        user,
+        password: (password).into(),
+        ..Default::default()
+    })
     .await?;
     let md_resp: MetadataResponse = kafka_wire::exchange(
         &mut stream,

@@ -16,19 +16,19 @@
 //! Kafka's `PeriodicTask` does with a `ControllerResult<Boolean>` of `true`,
 //! so the remainder does not wait for the next check interval.
 
-use std::{collections::HashSet, sync::Arc};
-
-use async_trait::async_trait;
-use krabka_metadata::{MetadataImage, MetadataRecord};
-use krabka_units::{Time, convert::TimeExt as _, millis};
-use krabka_verified::broker::PreferredLeaderChange;
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
-
-use crate::{
-    config_keys::witness_node_ids,
-    heartbeat::controller_state::ControllerLivenessState,
-    leader_election::{ElectionType, select_new_leader_for_partition},
+use {
+    crate::{
+        config_keys::witness_node_ids,
+        heartbeat::controller_state::ControllerLivenessState,
+        leader_election::{ElectionType, select_new_leader_for_partition},
+    },
+    async_trait::async_trait,
+    krabka_metadata::{MetadataImage, MetadataRecord},
+    krabka_units::{Time, convert::TimeExt as _, millis},
+    krabka_verified::broker::PreferredLeaderChange,
+    std::{collections::HashSet, sync::Arc},
+    tokio_util::sync::CancellationToken,
+    tracing::{debug, info, warn},
 };
 
 /// Minimal trait for the controller surface this module uses. It lets tests
@@ -165,14 +165,14 @@ pub(crate) async fn rebalance_tick(
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Mutex, time::Duration};
-
-    use assert2::assert;
-    use krabka_metadata::{PartitionRecord, TopicRecord};
-    use krabka_units::{millis, minutes, secs};
-    use uuid::Uuid;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::assert,
+        krabka_metadata::{PartitionRecord, TopicRecord},
+        krabka_units::{millis, minutes, secs},
+        std::{sync::Mutex, time::Duration},
+        uuid::Uuid,
+    };
 
     /// A controller whose image takes every batch it commits, as the real
     /// `submit_change` returns only once the leader applied it.
@@ -203,12 +203,10 @@ mod tests {
 
     #[async_trait]
     impl ControllerLike for MockController {
-        fn is_leader(&self) -> bool {
-            self.is_leader
-        }
-        fn current_image(&self) -> Arc<MetadataImage> {
-            self.image.lock().unwrap().clone()
-        }
+        fn is_leader(&self) -> bool { self.is_leader }
+
+        fn current_image(&self) -> Arc<MetadataImage> { self.image.lock().unwrap().clone() }
+
         async fn submit_change(&self, records: Vec<MetadataRecord>) -> Result<(), String> {
             self.submit_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);

@@ -1,10 +1,11 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::admitted_marker_bounds_committed_fetch;
-use crate::transaction::{
-    TransactionMarkerMaterializationDecision as Decision, TransactionMarkerPartitionState,
-    TransactionMarkerRequest,
+use {
+    super::admitted_marker_bounds_committed_fetch,
+    crate::transaction::{
+        TransactionMarkerMaterializationDecision as Decision, TransactionMarkerPartitionState,
+        TransactionMarkerRequest,
+    },
+    assert2::assert,
+    proptest::prelude::*,
 };
 
 fn check(

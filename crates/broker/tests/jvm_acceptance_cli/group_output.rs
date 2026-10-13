@@ -194,9 +194,7 @@ fn quoted_groups(line: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     /// The tool's own table, padded the way `%-30s` pads it, with the header
     /// and a blank line the parser has to drop.

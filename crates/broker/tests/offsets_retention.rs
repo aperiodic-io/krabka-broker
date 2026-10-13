@@ -9,31 +9,32 @@
 
 mod support;
 
-use std::{sync::Arc, time::Duration};
-
-use assert2::{assert, check};
-use krabka_broker::{Broker, BrokerConfig, codes};
-use krabka_client_core::Client;
-use krabka_protocol::owned::{
-    describe_configs_request::DescribeConfigsRequest,
-    describe_configs_response::DescribeConfigsResourceResult,
-    list_groups_request::ListGroupsRequest,
-    offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
-};
-use krabka_units::{millis, minutes};
-use support::topic_id_for;
-
-use crate::support::{
-    client::connect_owned,
-    configs::describe_resource,
-    offsets::{
-        offset_commit_topic, offset_delete_partition, offset_delete_request, offset_delete_topic,
+use {
+    crate::support::{
+        client::connect_owned,
+        configs::describe_resource,
+        offsets::{
+            offset_commit_topic, offset_delete_partition, offset_delete_request,
+            offset_delete_topic,
+        },
+        standalone_broker,
+        topics::{
+            ConfiguredTopicSetup, CreateTopicRequestSetup, CreateTopicsTimeoutMillis,
+            creatable_topic, create_topic_request_with_setup,
+        },
     },
-    standalone_broker,
-    topics::{
-        ConfiguredTopicSetup, CreateTopicRequestSetup, CreateTopicsTimeoutMillis, creatable_topic,
-        create_topic_request_with_setup,
+    assert2::{assert, check},
+    krabka_broker::{Broker, BrokerConfig, codes},
+    krabka_client_core::Client,
+    krabka_protocol::owned::{
+        describe_configs_request::DescribeConfigsRequest,
+        describe_configs_response::DescribeConfigsResourceResult,
+        list_groups_request::ListGroupsRequest,
+        offset_commit_request::{OffsetCommitRequest, OffsetCommitRequestPartition},
     },
+    krabka_units::{millis, minutes},
+    std::{sync::Arc, time::Duration},
+    support::topic_id_for,
 };
 
 /// `ConfigResource.Type.BROKER`.
@@ -224,16 +225,14 @@ async fn the_broker_sweep_reaps_a_dead_group_on_its_own() {
             group_id: GROUP.to_string(),
             generation_id_or_member_epoch: -1,
             member_id: String::new(),
-            topics: vec![offset_commit_topic(
-                TOPIC.to_string(),
-                topic_id,
-                vec![OffsetCommitRequestPartition {
+            topics: vec![offset_commit_topic(TOPIC.to_string(), topic_id, vec![
+                OffsetCommitRequestPartition {
                     partition_index: 0,
                     committed_offset: 5,
                     committed_leader_epoch: -1,
                     ..Default::default()
-                }],
-            )],
+                },
+            ])],
             ..Default::default()
         })
         .await
@@ -255,13 +254,9 @@ async fn the_broker_sweep_reaps_a_dead_group_on_its_own() {
     // --delete-offsets` does. What is left is a memberless group holding
     // nothing.
     let deleted = client
-        .send(offset_delete_request(
-            GROUP.to_string(),
-            vec![offset_delete_topic(
-                TOPIC.to_string(),
-                vec![offset_delete_partition(0)],
-            )],
-        ))
+        .send(offset_delete_request(GROUP.to_string(), vec![
+            offset_delete_topic(TOPIC.to_string(), vec![offset_delete_partition(0)]),
+        ]))
         .await
         .expect("OffsetDelete");
     assert!(deleted.error_code == codes::NONE);

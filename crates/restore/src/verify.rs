@@ -18,14 +18,15 @@
 //! the producer-state snapshot, and [`self::leader_epoch`] for the
 //! leader-epoch checkpoint.
 
-use std::collections::BTreeMap;
-
-use bytes::Bytes;
-use krabka_ids::{LeaderEpoch, Offset};
-use krabka_object_store::{ObjectOps, ObjectStoreError};
-use krabka_remote_storage::{ObjectEntry, Sha256Digest, TopicIdPartition};
-use object_store::path::Path;
-use uuid::Uuid;
+use {
+    bytes::Bytes,
+    krabka_ids::{LeaderEpoch, Offset},
+    krabka_object_store::{ObjectOps, ObjectStoreError},
+    krabka_remote_storage::{ObjectEntry, Sha256Digest, TopicIdPartition},
+    object_store::path::Path,
+    std::collections::BTreeMap,
+    uuid::Uuid,
+};
 
 mod index;
 mod leader_epoch;
@@ -35,16 +36,18 @@ mod snapshot;
 #[cfg(test)]
 mod tests;
 
-use self::{
-    index::{validate_offset_index, validate_time_index, validate_txn_index},
-    leader_epoch::parse_leader_epoch_checkpoint,
-    log_walk::walk_log,
-    snapshot::validate_producer_snapshot,
-};
-use crate::{
-    backend::ArchiveStore,
-    discover::{ArchiveObject, SegmentInventory},
-    error::RestoreError,
+use {
+    self::{
+        index::{validate_offset_index, validate_time_index, validate_txn_index},
+        leader_epoch::parse_leader_epoch_checkpoint,
+        log_walk::walk_log,
+        snapshot::validate_producer_snapshot,
+    },
+    crate::{
+        backend::ArchiveStore,
+        discover::{ArchiveObject, SegmentInventory},
+        error::RestoreError,
+    },
 };
 
 /// What verification established about one segment.
@@ -307,6 +310,4 @@ pub(super) async fn fetch_capped(
 /// offset or timestamp is never negative in a well-formed segment; this only
 /// has to render something sensible for corrupt input, never panic, and never
 /// allocate.
-fn offset_as_u64(value: i64) -> u64 {
-    u64::try_from(value).unwrap_or(0)
-}
+fn offset_as_u64(value: i64) -> u64 { u64::try_from(value).unwrap_or(0) }

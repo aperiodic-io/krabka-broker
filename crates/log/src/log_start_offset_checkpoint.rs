@@ -23,14 +23,14 @@
 //! Kafka's row count has no counterpart: a per-partition file holds exactly one
 //! value.
 
-use std::{fs, path::Path};
-
-use krabka_ids::Offset;
-
-use crate::{
-    error::LogError,
-    io::{IoTarget, LogIo, write_atomic},
-    name,
+use {
+    crate::{
+        error::LogError,
+        io::{IoTarget, LogIo, write_atomic},
+        name,
+    },
+    krabka_ids::Offset,
+    std::{fs, path::Path},
 };
 
 /// Read the checkpointed log start offset. A missing file gives `None`, which
@@ -105,10 +105,7 @@ pub(crate) fn remove(dir: &Path) -> Result<(), LogError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::io::FileIo;
+    use {super::*, crate::io::FileIo, assert2::assert};
 
     #[test]
     fn round_trips_through_the_file() {

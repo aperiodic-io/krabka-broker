@@ -7,20 +7,20 @@
 //! `metadata.version` 3.7-IV0 (level 15) or later, and the record always says
 //! `zkMigrationReady` false.
 
-use std::collections::BTreeMap;
-
-use bytes::Bytes;
-use krabka_metadata::{ControllerRegistrationRecord, MetadataRecord, NodeId};
-use krabka_protocol::{
-    Decode, owned::controller_registration_request::ControllerRegistrationRequest,
+use {
+    super::{
+        INVALID_REGISTRATION, NOT_CONTROLLER, SUCCESS, UNSUPPORTED_VERSION, is_leader,
+        listeners::decode_controller_listeners, raft_error_code,
+        response::controller_registration_response,
+    },
+    crate::{RaftError, kraft::KraftController},
+    bytes::Bytes,
+    krabka_metadata::{ControllerRegistrationRecord, MetadataRecord, NodeId},
+    krabka_protocol::{
+        Decode, owned::controller_registration_request::ControllerRegistrationRequest,
+    },
+    std::collections::BTreeMap,
 };
-
-use super::{
-    INVALID_REGISTRATION, NOT_CONTROLLER, SUCCESS, UNSUPPORTED_VERSION, is_leader,
-    listeners::decode_controller_listeners, raft_error_code,
-    response::controller_registration_response,
-};
-use crate::{RaftError, kraft::KraftController};
 
 /// `MetadataVersion.IBP_3_7_IV0`, the first level that supports controller
 /// registrations.
@@ -124,10 +124,7 @@ fn decode_controller_features(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_protocol::owned::controller_registration_request;
-
-    use super::*;
+    use {super::*, assert2::check, krabka_protocol::owned::controller_registration_request};
 
     fn feature(name: &str, min: i16, max: i16) -> controller_registration_request::Feature {
         controller_registration_request::Feature {
@@ -217,11 +214,13 @@ mod tests {
     /// image holds afterwards.
     #[tokio::test]
     async fn any_controller_registers_from_metadata_version_15() {
-        use krabka_protocol::{
-            Encode as _, owned::controller_registration_response::ControllerRegistrationResponse,
+        use {
+            crate::server::test_support::{single_voter_engine, wait_for_leader},
+            krabka_protocol::{
+                Encode as _,
+                owned::controller_registration_response::ControllerRegistrationResponse,
+            },
         };
-
-        use crate::server::test_support::{single_voter_engine, wait_for_leader};
 
         let version = controller_registration_request::MAX_VERSION;
         let incarnation = uuid::Uuid::from_u128(0xC0);

@@ -6,10 +6,7 @@
 //! unit. [`record`] and [`percentiles`] are the seam that converts to and from
 //! the [`Time`] extents the rest of the driver passes around.
 
-use hdrhistogram::Histogram;
-use krabka_units::prelude::*;
-
-use crate::scenario::LatencyPercentiles;
+use {crate::scenario::LatencyPercentiles, hdrhistogram::Histogram, krabka_units::prelude::*};
 
 /// One per-task latency histogram. Use this constructor, because the
 /// bounds matter for accuracy.
@@ -44,15 +41,11 @@ pub fn percentiles(h: &Histogram<u64>) -> LatencyPercentiles {
 
 /// A histogram bucket value, which is a microsecond count, as the `i64` the
 /// [`Time`] seam takes.
-fn saturating_micros(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
-}
+fn saturating_micros(value: u64) -> i64 { i64::try_from(value).unwrap_or(i64::MAX) }
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn percentiles_report_recorded_extents() {

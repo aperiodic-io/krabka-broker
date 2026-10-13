@@ -2,11 +2,11 @@
 //! pulling the image, booting it with the dual-listener layout, running
 //! commands inside it, and removing it again.
 
-use std::process::Command;
-
-use assert2::assert;
-
-use crate::{CONTAINER, HOST_PORT};
+use {
+    crate::{CONTAINER, HOST_PORT},
+    assert2::assert,
+    std::process::Command,
+};
 
 pub(crate) fn docker_pull(image: &str) {
     eprintln!("CAPTURE docker pull {image} (large; may take minutes)...");
@@ -22,9 +22,7 @@ pub(crate) fn docker_pull(image: &str) {
     );
 }
 
-fn docker_rm_f(name: &str) {
-    let _ = Command::new("docker").args(["rm", "-f", name]).output();
-}
+fn docker_rm_f(name: &str) { let _ = Command::new("docker").args(["rm", "-f", name]).output(); }
 
 /// Boot single-node Kafka in `KRaft` mode with the dual listener layout.
 ///

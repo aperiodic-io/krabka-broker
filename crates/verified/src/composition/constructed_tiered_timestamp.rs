@@ -1,9 +1,10 @@
-use creusot_std::prelude::*;
-
-use super::{SparseTimestampWindow, constructed_index_retained_candidate};
-use crate::list_offsets::{
-    ListOffsetsSelectionDecision, ListOffsetsSelectionFacts, earliest_timestamp_candidate,
-    list_offsets_kind, list_offsets_selection_decision,
+use {
+    super::{SparseTimestampWindow, constructed_index_retained_candidate},
+    crate::list_offsets::{
+        ListOffsetsSelectionDecision, ListOffsetsSelectionFacts, earliest_timestamp_candidate,
+        list_offsets_kind, list_offsets_selection_decision,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Construct each tier's sparse index, select retained matches, merge the

@@ -4,11 +4,11 @@
 //! Both are field-for-field contracts with the JVM admin client, so the
 //! construction sits apart from the policy that decides which one to send.
 
-use krabka_protocol::owned::create_delegation_token_response::CreateDelegationTokenResponse;
-use krabka_security::KafkaPrincipal;
-
-use super::lifetime::TokenDeadlines;
-use crate::codes::NONE;
+use {
+    super::lifetime::TokenDeadlines, crate::codes::NONE,
+    krabka_protocol::owned::create_delegation_token_response::CreateDelegationTokenResponse,
+    krabka_security::KafkaPrincipal,
+};
 
 /// A refusal decided on the broker before Kafka forwards the request.
 ///

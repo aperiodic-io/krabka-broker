@@ -5,14 +5,15 @@
 //! It covers the high-watermark path with the cluster intact. The variant that
 //! kills the partition leader mid-burst lives beside it in `leader_crash`.
 
-use assert2::assert;
-
-use crate::{
-    jvm_acceptance::{KAFKA_IMAGE, consume_committed_at, docker_run_kafka_tool},
-    support::{
-        ContainerInput, JvmDockerSetup, init_jvm_tracing, jvm_docker_command, jvm_output_lines,
-        start_jvm_cluster,
+use {
+    crate::{
+        jvm_acceptance::{KAFKA_IMAGE, consume_committed_at, docker_run_kafka_tool},
+        support::{
+            ContainerInput, JvmDockerSetup, init_jvm_tracing, jvm_docker_command, jvm_output_lines,
+            start_jvm_cluster,
+        },
     },
+    assert2::assert,
 };
 
 // `acks=all` durability gate: 3-broker Krabka cluster, JVM

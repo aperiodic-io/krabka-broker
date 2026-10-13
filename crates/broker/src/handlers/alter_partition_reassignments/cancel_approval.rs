@@ -11,27 +11,27 @@
 //! and it holds back the `Applied` audit events until that append's outcome is
 //! known.
 
-use std::{
-    collections::HashSet,
-    ops::{Deref, DerefMut},
-};
-
-use krabka_metadata::{BreakGlassAction, MetadataImage, MetadataRecord};
-use krabka_protocol::owned::{
-    alter_partition_reassignments_request::ReassignablePartition,
-    alter_partition_reassignments_response::ReassignablePartitionResponse,
-};
-
-use super::{
-    process_one_partition,
-    response::{err_row, ok_row},
-};
-use crate::{
-    break_glass::handlers::batch::GatedBatch,
-    broker::Broker,
-    codes::POLICY_VIOLATION,
-    freeze::resolve::{FreezeMutationResolution, FreezeVerdict},
-    handlers::{RequestContext, partition_transition::audit_refusal},
+use {
+    super::{
+        process_one_partition,
+        response::{err_row, ok_row},
+    },
+    crate::{
+        break_glass::handlers::batch::GatedBatch,
+        broker::Broker,
+        codes::POLICY_VIOLATION,
+        freeze::resolve::{FreezeMutationResolution, FreezeVerdict},
+        handlers::{RequestContext, partition_transition::audit_refusal},
+    },
+    krabka_metadata::{BreakGlassAction, MetadataImage, MetadataRecord},
+    krabka_protocol::owned::{
+        alter_partition_reassignments_request::ReassignablePartition,
+        alter_partition_reassignments_response::ReassignablePartitionResponse,
+    },
+    std::{
+        collections::HashSet,
+        ops::{Deref, DerefMut},
+    },
 };
 
 /// Everything one alter row reads, and nothing it writes.
@@ -73,15 +73,11 @@ impl Default for ReassignBatch {
 impl Deref for ReassignBatch {
     type Target = GatedBatch;
 
-    fn deref(&self) -> &GatedBatch {
-        &self.gated
-    }
+    fn deref(&self) -> &GatedBatch { &self.gated }
 }
 
 impl DerefMut for ReassignBatch {
-    fn deref_mut(&mut self) -> &mut GatedBatch {
-        &mut self.gated
-    }
+    fn deref_mut(&mut self) -> &mut GatedBatch { &mut self.gated }
 }
 
 /// Process one alter row, and answer the response row it becomes.
@@ -171,20 +167,20 @@ use crate::handlers::partition_transition::partition_target as cancel_target;
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        break_glass::gate::tests::{APPROVED_PROPOSAL_ID, approved_proposal},
-        config::BreakGlassConfig,
-        handlers::alter_partition_reassignments::test_support::{
-            ReassignmentImageSetup, img_with, pending_reassignment_image,
+    use {
+        super::*,
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            break_glass::gate::tests::{APPROVED_PROPOSAL_ID, approved_proposal},
+            config::BreakGlassConfig,
+            handlers::alter_partition_reassignments::test_support::{
+                ReassignmentImageSetup, img_with, pending_reassignment_image,
+            },
+            test_support::{ReassignmentSetup, start_broker_no_audit_with},
         },
-        test_support::{ReassignmentSetup, start_broker_no_audit_with},
+        assert2::{assert, check},
+        std::sync::Arc,
+        uuid::Uuid,
     };
 
     const NOW_MS: i64 = 60_000;

@@ -30,8 +30,7 @@ mod test_support;
 #[cfg(test)]
 mod tests;
 
-use self::group::describe_group;
-use crate::codes;
+use {self::group::describe_group, crate::codes};
 
 context_handler! {
     // cargo-mutants: share-coordinator response projection; integration-tested.

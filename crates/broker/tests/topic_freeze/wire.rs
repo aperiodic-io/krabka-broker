@@ -8,22 +8,23 @@
 //! a case compares one whole struct instead of four fields that could each
 //! pass while the outcome is wrong.
 
-use assert2::assert;
-use bytes::Bytes;
-use krabka_broker::{BrokerHandle, codes};
-use krabka_client_core::Client;
-use krabka_protocol::{
-    owned::produce_response::PartitionProduceResponse, primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-
-use crate::{
-    control_plane::freeze_scope,
-    support::{
-        self,
-        produce::{SinglePartitionProduceSetup, send_batch},
-        records::value_record,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+use {
+    crate::{
+        control_plane::freeze_scope,
+        support::{
+            self,
+            produce::{SinglePartitionProduceSetup, send_batch},
+            records::value_record,
+            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        },
+    },
+    assert2::assert,
+    bytes::Bytes,
+    krabka_broker::{BrokerHandle, codes},
+    krabka_client_core::Client,
+    krabka_protocol::{
+        owned::produce_response::PartitionProduceResponse, primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
     },
 };
 
@@ -108,15 +109,11 @@ pub(super) async fn produce(
     topic: &str,
     topic_id: WireUuid,
 ) -> PartitionProduceResponse {
-    let resp = send_batch(
-        &client,
-        one_record("v"),
-        SinglePartitionProduceSetup {
-            topic: (topic).into(),
-            topic_id,
-            ..Default::default()
-        },
-    )
+    let resp = send_batch(&client, one_record("v"), SinglePartitionProduceSetup {
+        topic: (topic).into(),
+        topic_id,
+        ..Default::default()
+    })
     .await;
     resp.responses[0].partition_responses[0].clone()
 }

@@ -4,15 +4,15 @@
 //! reimplementing TLS or SASL here. Its contents can include passwords, so this
 //! module never logs or formats the parsed properties or resulting policy.
 
-use std::{collections::BTreeMap, path::PathBuf};
-
-use clap::Args;
-use krabka_client_core::security::{
-    ClientSecurity, KeyStore, SaslCredentials, TlsConnectorConfig, TrustStore,
+use {
+    crate::BackupError,
+    clap::Args,
+    krabka_client_core::security::{
+        ClientSecurity, KeyStore, SaslCredentials, TlsConnectorConfig, TrustStore,
+    },
+    krabka_security::{ListenerProtocol, SaslMechanism},
+    std::{collections::BTreeMap, path::PathBuf},
 };
-use krabka_security::{ListenerProtocol, SaslMechanism};
-
-use crate::BackupError;
 
 /// Kafka client properties shared by capture and offset restoration.
 #[derive(Debug, Args, Clone, Default)]
@@ -305,9 +305,10 @@ fn invalid<T>(message: &str) -> Result<T, BackupError> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     #[test]
     fn properties_support_comments_escapes_and_continuations() {

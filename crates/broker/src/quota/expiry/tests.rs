@@ -1,12 +1,13 @@
 //! A bucket that nothing charged for longer than the expiration is dropped
 //! along with the metric series it published, and an active one is left alone.
 
-use assert2::check;
-use krabka_metadata::EntityKey;
-use krabka_units::{millis, secs};
-
-use super::*;
-use crate::metrics::QuotaEntityLabel;
+use {
+    super::*,
+    crate::metrics::QuotaEntityLabel,
+    assert2::check,
+    krabka_metadata::EntityKey,
+    krabka_units::{millis, secs},
+};
 
 fn key(user: &str, client_id: &str) -> EntityKey {
     vec![

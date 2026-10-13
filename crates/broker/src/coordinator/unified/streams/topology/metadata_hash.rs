@@ -12,12 +12,12 @@
 //! `Utils.computeTopicHash`, which [`topic_hash`] implements for all three
 //! group types.
 
-use std::collections::BTreeSet;
-
-use krabka_metadata::MetadataImage;
-
-use super::configured::input_topics;
-use crate::coordinator::unified::{streams::persistence::StreamsGroupTopologyValue, topic_hash};
+use {
+    super::configured::input_topics,
+    crate::coordinator::unified::{streams::persistence::StreamsGroupTopologyValue, topic_hash},
+    krabka_metadata::MetadataImage,
+    std::collections::BTreeSet,
+};
 
 /// The names of the topics that `StreamsTopology.requiredTopics` returns: the
 /// source topics, the repartition source topics and the changelog topics of
@@ -47,16 +47,17 @@ pub fn metadata_hash(topology: &StreamsGroupTopologyValue, image: &MetadataImage
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord};
-
-    use super::*;
-    use crate::{
-        coordinator::unified::streams::{
-            persistence::StoredTopicInfo,
-            topology::test_support::{image_with, sub},
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::streams::{
+                persistence::StoredTopicInfo,
+                topology::test_support::{image_with, sub},
+            },
+            test_support::broker_registration,
         },
-        test_support::broker_registration,
+        assert2::check,
+        krabka_metadata::{BrokerRegistrationRecord, MetadataRecord},
     };
 
     fn topology() -> StreamsGroupTopologyValue {

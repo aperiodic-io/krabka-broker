@@ -5,9 +5,10 @@
 //! a trust set that cannot prove one has to report that rather than pass it,
 //! and the two ways it can fail carry different exit codes.
 
-use assert2::check;
-
-use crate::support::{BAD_SIGNATURE, frozen_cluster_with_stranger, verify_registry};
+use {
+    crate::support::{BAD_SIGNATURE, frozen_cluster_with_stranger, verify_registry},
+    assert2::check,
+};
 
 /// `freeze list --verify-signatures` says the registry is authentic from this
 /// machine, so a trust set that cannot prove an entry has to say so rather than

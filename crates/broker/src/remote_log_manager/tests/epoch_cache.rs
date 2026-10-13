@@ -8,17 +8,18 @@
 //! an archive that holds one segment of the lineage below the log start, one
 //! of another lineage above it, and one of the current lineage.
 
-use assert2::check;
-use fixtures::{batch, leading_partition_over, local_backends};
-use krabka_ids::LeaderEpoch;
-use krabka_log::{Log, RemoteTierFlags};
-use krabka_remote_storage::{
-    RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
+use {
+    super::*,
+    crate::{log_dir::partition_dir, remote_log_manager::test_support as fixtures},
+    assert2::check,
+    fixtures::{batch, leading_partition_over, local_backends},
+    krabka_ids::LeaderEpoch,
+    krabka_log::{Log, RemoteTierFlags},
+    krabka_remote_storage::{
+        RemoteLogSegmentId, RemoteLogSegmentMetadata, RemoteLogSegmentMetadataUpdate,
+    },
+    uuid::Uuid,
 };
-use uuid::Uuid;
-
-use super::*;
-use crate::{log_dir::partition_dir, remote_log_manager::test_support as fixtures};
 
 /// The id and the `(first offset, last offset, epoch)` of each archive segment.
 ///

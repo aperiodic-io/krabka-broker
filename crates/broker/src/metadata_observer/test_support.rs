@@ -4,11 +4,11 @@
 //! and the `ApiVersions` handshake every `MockBroker` an observer dials has to
 //! answer before it sees a request.
 
-use std::{path::PathBuf, sync::Arc};
-
-use krabka_units::{ByteSize, mebibytes, minutes};
-
-use super::ObserverConfig;
+use {
+    super::ObserverConfig,
+    krabka_units::{ByteSize, mebibytes, minutes},
+    std::{path::PathBuf, sync::Arc},
+};
 
 /// Per-fetch soft byte cap for every observer fixture: 1 MiB.
 pub(crate) const TEST_MAX_FETCH_BYTES: ByteSize = mebibytes(1);

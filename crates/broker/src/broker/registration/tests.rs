@@ -1,11 +1,12 @@
-use assert2::assert;
-use tempfile::tempdir;
-
-use super::*;
-use crate::{
-    config::{NodeRole, StretchProfile},
-    file_config::FileConfig,
-    host_port::local_host_name,
+use {
+    super::*,
+    crate::{
+        config::{NodeRole, StretchProfile},
+        file_config::FileConfig,
+        host_port::local_host_name,
+    },
+    assert2::assert,
+    tempfile::tempdir,
 };
 
 /// The gap `wait_for_self_registration_published` closes: a `submit_change`
@@ -16,15 +17,15 @@ use crate::{
 /// controller-registration record; this fixture reproduces the same gap for
 /// the broker-registration record `register_broker` submits.
 mod publish_race {
-    use std::{sync::Arc, time::Duration};
-
-    use assert2::assert;
-    use krabka_metadata::{MetadataImage, MetadataRecord, NodeId};
-    use tempfile::tempdir;
-    use tokio::sync::watch;
-
-    use super::{super::register_broker, self_registration_record};
-    use crate::{config::BrokerConfig, error::BrokerError, test_support::FakeMetadataSource};
+    use {
+        super::{super::register_broker, self_registration_record},
+        crate::{config::BrokerConfig, error::BrokerError, test_support::FakeMetadataSource},
+        assert2::assert,
+        krabka_metadata::{MetadataImage, MetadataRecord, NodeId},
+        std::{sync::Arc, time::Duration},
+        tempfile::tempdir,
+        tokio::sync::watch,
+    };
 
     fn registration_config(log_dir: &std::path::Path) -> BrokerConfig {
         BrokerConfig {
@@ -467,21 +468,22 @@ fn controller_registration_starts_at_kip_919_floor_and_is_idempotent() {
 /// nothing about whether the log this node brings back is the log its ELR
 /// membership claims, and only the clean-shutdown proof does.
 mod unclean_restart {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_metadata::{LeaderEpoch, MetadataRecord, NodeId, PartitionRecord};
-
-    use crate::{
-        authorizer::AllowAllAuthorizer,
-        broker::{Broker, registration::register_broker},
-        clean_shutdown::{take, write},
-        config::BrokerConfig,
-        elr::{TopicElr, state::PartitionElr},
-        test_support::{
-            IsrResponseCheck, LiveIsrSetup, accepted_isr_proposal, elr_topic_records,
-            start_broker_with_authorizer, started_controller_broker, wait_for_controller_leader,
+    use {
+        crate::{
+            authorizer::AllowAllAuthorizer,
+            broker::{Broker, registration::register_broker},
+            clean_shutdown::{take, write},
+            config::BrokerConfig,
+            elr::{TopicElr, state::PartitionElr},
+            test_support::{
+                IsrResponseCheck, LiveIsrSetup, accepted_isr_proposal, elr_topic_records,
+                start_broker_with_authorizer, started_controller_broker,
+                wait_for_controller_leader,
+            },
         },
+        assert2::assert,
+        krabka_metadata::{LeaderEpoch, MetadataRecord, NodeId, PartitionRecord},
+        std::sync::Arc,
     };
 
     const TOPIC: &str = "orders";
@@ -493,9 +495,7 @@ mod unclean_restart {
     /// The restarting broker. Node 1 is the controller and stays up.
     const RESTARTING: NodeId = NodeId(2);
 
-    fn nodes(ids: &[u64]) -> Vec<NodeId> {
-        ids.iter().copied().map(NodeId).collect()
-    }
+    fn nodes(ids: &[u64]) -> Vec<NodeId> { ids.iter().copied().map(NodeId).collect() }
 
     /// One RF=3 partition with a full ISR, and a `min.insync.replicas` of 2,
     /// which is what gives the partition an ELR to fall below.

@@ -13,8 +13,10 @@
 //! retention as well as compaction -- an `unlink` that fails with `EIO` takes
 //! the log directory offline just as a failed compaction rewrite does.
 
-use super::storage::{LogStorage, MaintenanceAck, maintain_log};
-use crate::replica_state::ReplicaState;
+use {
+    super::storage::{LogStorage, MaintenanceAck, maintain_log},
+    crate::replica_state::ReplicaState,
+};
 
 pub(super) async fn handle_retention(
     storage: LogStorage<'_>,
@@ -38,13 +40,13 @@ pub(super) async fn handle_retention(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use arc_swap::ArcSwap;
-
-    use super::*;
-    use crate::{
-        log_dir_status::LogDirRegistry, partition_writer::test_support::open_log_with_records,
+    use {
+        super::*,
+        crate::{
+            log_dir_status::LogDirRegistry, partition_writer::test_support::open_log_with_records,
+        },
+        arc_swap::ArcSwap,
+        std::sync::{Arc, Mutex},
     };
 
     #[tokio::test]

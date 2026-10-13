@@ -11,32 +11,32 @@
 //! The tests encode each response the way the wire carries it and decode it
 //! again, so the expected structs hold only what a client sees.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_protocol::{
-    owned::{
-        fetch_request::{FetchPartition, FetchRequest, FetchTopic},
-        fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+use {
+    super::{
+        FIRST_TOPIC_ID_VERSION, test_support::expected_refused_partition as refused_partition,
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordsPayload,
-};
-
-use super::{
-    FIRST_TOPIC_ID_VERSION, test_support::expected_refused_partition as refused_partition,
-};
-use crate::{
-    authorizer::AllowAllAuthorizer,
-    broker::BrokerHandle,
-    codes,
-    fetch_session::{FINAL_EPOCH, INITIAL_EPOCH, INVALID_SESSION_ID},
-    handlers::test_support::{
-        ClientTopicSetup, ReplicatedTopicSetup, check_cases, check_denied_topic_cases,
-        create_topic as create_topic_from_test_support, seed_partition_replicas,
+    crate::{
+        authorizer::AllowAllAuthorizer,
+        broker::BrokerHandle,
+        codes,
+        fetch_session::{FINAL_EPOCH, INITIAL_EPOCH, INVALID_SESSION_ID},
+        handlers::test_support::{
+            ClientTopicSetup, ReplicatedTopicSetup, check_cases, check_denied_topic_cases,
+            create_topic as create_topic_from_test_support, seed_partition_replicas,
+        },
+        test_support::{DenyAll, KafkaErrorCode, start_broker_with_authorizer_no_audit as start},
     },
-    test_support::{DenyAll, KafkaErrorCode, start_broker_with_authorizer_no_audit as start},
+    assert2::assert,
+    bytes::Bytes,
+    krabka_protocol::{
+        owned::{
+            fetch_request::{FetchPartition, FetchRequest, FetchTopic},
+            fetch_response::{FetchResponse, FetchableTopicResponse, PartitionData},
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordsPayload,
+    },
+    std::sync::Arc,
 };
 
 /// An id that no topic in these tests has.
@@ -59,9 +59,7 @@ use crate::handlers::test_support::{
 type Outcome = (i16, TopicRef, FetchResponse);
 
 /// The empty record set, as a client decodes it.
-fn no_records() -> RecordsPayload {
-    RecordsPayload::Legacy(Bytes::new())
-}
+fn no_records() -> RecordsPayload { RecordsPayload::Legacy(Bytes::new()) }
 
 /// The partition row of an empty topic that the consumer may read, as it
 /// decodes at `version`. The wire carries `log_start_offset` from v5 on. An
@@ -97,29 +95,22 @@ fn fetch_topic(name: &str, topic_id: WireUuid) -> FetchTopic {
 }
 
 async fn create_topic(broker: &BrokerHandle, name: &str) -> WireUuid {
-    create_topic_from_test_support(
-        broker,
-        ClientTopicSetup {
-            client_id: "fetch-resolution-test",
-            name,
-            ..Default::default()
-        },
-    )
+    create_topic_from_test_support(broker, ClientTopicSetup {
+        client_id: "fetch-resolution-test",
+        name,
+        ..Default::default()
+    })
     .await
 }
 
 /// Send one `Fetch` at `version` and return the response as a client decodes
 /// it.
 async fn fetch(broker: &BrokerHandle, version: i16, request: &FetchRequest) -> FetchResponse {
-    super::test_support::fetch_wire(
-        broker,
-        request,
-        super::test_support::FetchWireSetup {
-            version: krabka_ids::ApiVersion(version),
-            user: "consumer",
-            client_id: "consumer-client",
-        },
-    )
+    super::test_support::fetch_wire(broker, request, super::test_support::FetchWireSetup {
+        version: krabka_ids::ApiVersion(version),
+        user: "consumer",
+        client_id: "consumer-client",
+    })
     .await
 }
 
@@ -251,18 +242,14 @@ async fn every_unresolved_id_keeps_its_own_topic_row() {
 #[tokio::test]
 async fn a_fetch_session_repeats_unknown_topic_id() {
     let (broker, _dir) = start(Arc::new(AllowAllAuthorizer)).await;
-    let opened = fetch(
-        &broker,
-        MAX_VERSION,
-        &FetchRequest {
-            max_wait_ms: 0,
-            min_bytes: 0,
-            session_id: INVALID_SESSION_ID,
-            session_epoch: INITIAL_EPOCH,
-            topics: vec![fetch_topic("", UNKNOWN_ID)],
-            ..Default::default()
-        },
-    )
+    let opened = fetch(&broker, MAX_VERSION, &FetchRequest {
+        max_wait_ms: 0,
+        min_bytes: 0,
+        session_id: INVALID_SESSION_ID,
+        session_epoch: INITIAL_EPOCH,
+        topics: vec![fetch_topic("", UNKNOWN_ID)],
+        ..Default::default()
+    })
     .await;
     let session_id = opened.session_id;
     assert!(session_id != INVALID_SESSION_ID, "{opened:?}");
@@ -318,16 +305,13 @@ async fn a_partition_the_metadata_holds_and_this_broker_does_not_host_is_not_lea
     let (broker, _dir) = start(Arc::new(AllowAllAuthorizer)).await;
     // Node 1, this broker, is not a replica: node 2 leads and node 3 follows.
     let topic_id = uuid::Uuid::from_u128(0x51);
-    seed_partition_replicas(
-        &broker,
-        ReplicatedTopicSetup {
-            topic: "moved",
-            topic_id,
-            leader: krabka_audit::NodeId(2),
-            replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
-            leader_epoch: krabka_ids::LeaderEpoch(4),
-        },
-    )
+    seed_partition_replicas(&broker, ReplicatedTopicSetup {
+        topic: "moved",
+        topic_id,
+        leader: krabka_audit::NodeId(2),
+        replicas: &[krabka_audit::NodeId(2), krabka_audit::NodeId(3)],
+        leader_epoch: krabka_ids::LeaderEpoch(4),
+    })
     .await;
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while broker
@@ -391,21 +375,18 @@ async fn a_partition_the_metadata_holds_and_this_broker_does_not_host_is_not_lea
             },
             ..Default::default()
         };
-        expected.push((
-            version,
-            vec![FetchableTopicResponse {
-                topic: name,
-                topic_id: id,
-                partitions: vec![
-                    hosted_elsewhere,
-                    refused_partition(
-                        krabka_ids::PartitionIndex(ABSENT),
-                        crate::test_support::KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
-                    ),
-                ],
-                ..Default::default()
-            }],
-        ));
+        expected.push((version, vec![FetchableTopicResponse {
+            topic: name,
+            topic_id: id,
+            partitions: vec![
+                hosted_elsewhere,
+                refused_partition(
+                    krabka_ids::PartitionIndex(ABSENT),
+                    crate::test_support::KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
+                ),
+            ],
+            ..Default::default()
+        }]));
     }
     assert!(actual == expected);
     broker.shutdown().await;

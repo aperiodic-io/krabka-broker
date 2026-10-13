@@ -5,10 +5,11 @@
 //! helper: compaction is only observable here because the cleaner wakes far
 //! more often than it does by default.
 
-use std::net::SocketAddr;
-
-use krabka_broker::{Broker, BrokerConfig, BrokerHandle};
-use tempfile::TempDir;
+use {
+    krabka_broker::{Broker, BrokerConfig, BrokerHandle},
+    std::net::SocketAddr,
+    tempfile::TempDir,
+};
 
 /// Start a single PLAINTEXT broker with a 1s cleaner interval.
 pub(crate) async fn start_broker_with_fast_cleaner() -> (BrokerHandle, TempDir, SocketAddr) {

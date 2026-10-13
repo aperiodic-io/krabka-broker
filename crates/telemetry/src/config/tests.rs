@@ -1,5 +1,4 @@
-use super::*;
-use crate::test_support::env_from;
+use {super::*, crate::test_support::env_from};
 
 #[test]
 fn disabled_when_no_env() {

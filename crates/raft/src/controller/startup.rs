@@ -3,23 +3,26 @@
 //! recovers the engine, binds the controller listener, and the on-disk state
 //! probe the broker binary shares with that validation.
 
-use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
-
-use tokio::sync::{Mutex, watch};
-use tokio_util::sync::CancellationToken;
-use tracing::info;
-use uuid::Uuid;
-
-use super::{
-    ControllerHandle, checkpoint::load_latest_checkpoint, feature_check::unsupported_feature_level,
-};
-use crate::{
-    config::{BootstrapMode, ControllerConfig, UnstableFeatureVersions, metadata_partition_dir},
-    error::RaftError,
-    kraft::{Activation, KraftController},
-    network::{OutboundDialer, PlaintextDialer, RealPeerSender},
-    server,
-    snapshot::SnapshotReader,
+use {
+    super::{
+        ControllerHandle, checkpoint::load_latest_checkpoint,
+        feature_check::unsupported_feature_level,
+    },
+    crate::{
+        config::{
+            BootstrapMode, ControllerConfig, UnstableFeatureVersions, metadata_partition_dir,
+        },
+        error::RaftError,
+        kraft::{Activation, KraftController},
+        network::{OutboundDialer, PlaintextDialer, RealPeerSender},
+        server,
+        snapshot::SnapshotReader,
+    },
+    std::{collections::BTreeMap, net::SocketAddr, sync::Arc},
+    tokio::sync::{Mutex, watch},
+    tokio_util::sync::CancellationToken,
+    tracing::info,
+    uuid::Uuid,
 };
 
 /// Zero-sized factory for [`ControllerHandle`]s.
@@ -368,15 +371,17 @@ pub fn metadata_log_nonempty(dir: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use tempfile::TempDir;
-
-    use super::*;
-    use crate::{
-        controller::test_support::{
-            bootstrap_controller, joining_controller, submit_change_with_timeout, wait_for_leader,
+    use {
+        super::*,
+        crate::{
+            controller::test_support::{
+                bootstrap_controller, joining_controller, submit_change_with_timeout,
+                wait_for_leader,
+            },
+            metadata_partition_dir,
+            types::NodeId,
         },
-        metadata_partition_dir,
-        types::NodeId,
+        tempfile::TempDir,
     };
 
     #[test]

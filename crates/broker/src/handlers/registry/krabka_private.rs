@@ -1,14 +1,15 @@
 //! Registration table for the krabka-private apis, whose wire codes sit above
 //! the Kafka range and so name their `api_key` and `flexible_min` directly.
 
-use bytes::Bytes;
-use futures_util::future::BoxFuture;
-
-use super::{ContextHandler, DispatchEntry, DispatchRegistry};
-use crate::{
-    broker::Broker,
-    error::BrokerError,
-    handlers::{ApiKeyCode, ApiVersion, RequestContext},
+use {
+    super::{ContextHandler, DispatchEntry, DispatchRegistry},
+    crate::{
+        broker::Broker,
+        error::BrokerError,
+        handlers::{ApiKeyCode, ApiVersion, RequestContext},
+    },
+    bytes::Bytes,
+    futures_util::future::BoxFuture,
 };
 
 // `KRABKA_PRIVATE_API_KEY_FLOOR` for why.

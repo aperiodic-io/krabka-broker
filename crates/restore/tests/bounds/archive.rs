@@ -6,15 +6,16 @@
 //! with any one bound flag, which is why it sits apart from the flags under
 //! test.
 
-use assert2::assert;
-use bytes::Bytes;
-use krabka_log::{Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_remote_storage::{LocalTieredStorage, TopicIdPartition};
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use crate::archive_fixture::archive_segment;
+use {
+    crate::archive_fixture::archive_segment,
+    assert2::assert,
+    bytes::Bytes,
+    krabka_log::{Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_remote_storage::{LocalTieredStorage, TopicIdPartition},
+    tempfile::TempDir,
+    uuid::Uuid,
+};
 
 /// A `LogConfig` that rolls the active segment on every append past the
 /// first, so [`build_archive`] can seal each fixture batch into its own

@@ -26,17 +26,17 @@
 //! at once across every partition the broker leads, so that is the most runs
 //! that share a request.
 
-use std::sync::Arc;
-
-use futures_util::future::join_all;
-use krabka_log::Offset;
-use tokio::sync::Mutex;
-
-use super::{LeaderKey, SharePartitionLeaderManager};
-use crate::share_partition::{
-    dlq::DlqRequest,
-    group_settings::GroupShareSettings,
-    state::{AcquisitionState, DlqCause, DlqRange},
+use {
+    super::{LeaderKey, SharePartitionLeaderManager},
+    crate::share_partition::{
+        dlq::DlqRequest,
+        group_settings::GroupShareSettings,
+        state::{AcquisitionState, DlqCause, DlqRange},
+    },
+    futures_util::future::join_all,
+    krabka_log::Offset,
+    std::sync::Arc,
+    tokio::sync::Mutex,
 };
 
 /// The dead-letter writes that run at once on one broker.
@@ -144,30 +144,30 @@ impl SharePartitionLeaderManager {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use async_trait::async_trait;
-    use krabka_log::Offset;
-
-    use super::{MAX_CONCURRENT_DEAD_LETTER_WRITES, coalesce};
-    use crate::{
-        codes,
-        share_coordinator::coordinator::test_support::{
-            DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
-        },
-        share_partition::{
-            dlq::{DlqError, DlqRequest, DlqSink, test_support::RecordingDlq},
-            manager::test_support::manager_with_dlq,
-            state::{
-                AckType, AcquisitionState, DlqCause, DlqRange, RecordState,
-                test_support::{
-                    AcquiredWindowSetup, DeadLetterQueue, DeliveryCount, DlqRangeSetup,
-                    acquire_window, dlq_range as range,
+    use {
+        super::{MAX_CONCURRENT_DEAD_LETTER_WRITES, coalesce},
+        crate::{
+            codes,
+            share_coordinator::coordinator::test_support::{
+                DeliveryAttemptCount, FixtureDeliveryState, StateBatchSetup, state_batch,
+            },
+            share_partition::{
+                dlq::{DlqError, DlqRequest, DlqSink, test_support::RecordingDlq},
+                manager::test_support::manager_with_dlq,
+                state::{
+                    AckType, AcquisitionState, DlqCause, DlqRange, RecordState,
+                    test_support::{
+                        AcquiredWindowSetup, DeadLetterQueue, DeliveryCount, DlqRangeSetup,
+                        acquire_window, dlq_range as range,
+                    },
                 },
             },
+            test_support::RecordCount,
         },
-        test_support::RecordCount,
+        assert2::assert,
+        async_trait::async_trait,
+        krabka_log::Offset,
+        std::sync::Arc,
     };
 
     /// A sink that keeps each write in flight for a few polls, and remembers
@@ -204,14 +204,11 @@ mod tests {
         let cell = mgr.insert_for_test("g1", tid, 0, AcquisitionState::new(Offset(0)));
         {
             let mut state = cell.lock().await;
-            acquire_window(
-                &mut state,
-                AcquiredWindowSetup {
-                    end: Offset(i64::from(records.0)),
-                    record_limit: RecordCount(100),
-                    dead_letter_queue: DeadLetterQueue::Enabled,
-                },
-            );
+            acquire_window(&mut state, AcquiredWindowSetup {
+                end: Offset(i64::from(records.0)),
+                record_limit: RecordCount(100),
+                dead_letter_queue: DeadLetterQueue::Enabled,
+            });
         }
         cell
     }
@@ -500,13 +497,12 @@ mod tests {
 
         assert!(
             (states, dlq.requests())
-                == (
-                    vec![(3, RecordState::Acquired)],
-                    vec![request(ExpectedDlqRequestSetup {
+                == (vec![(3, RecordState::Acquired)], vec![request(
+                    ExpectedDlqRequestSetup {
                         bounds: Offset(0)..=Offset(2),
                         ..Default::default()
-                    })],
-                )
+                    }
+                )],)
         );
     }
 
@@ -561,23 +557,18 @@ mod tests {
         let key = ("g1".to_owned(), tid, 0);
         let ranges = {
             let mut state = cell.lock().await;
-            state.load_from(
-                Offset(0),
-                1,
-                1,
-                &[
-                    state_batch(StateBatchSetup {
-                        bounds: Offset(0)..=Offset(0),
-                        delivery: FixtureDeliveryState::Archiving,
-                        attempts: DeliveryAttemptCount(5),
-                    }),
-                    state_batch(StateBatchSetup {
-                        bounds: Offset(1)..=Offset(1),
-                        delivery: FixtureDeliveryState::Archiving,
-                        attempts: DeliveryAttemptCount(2),
-                    }),
-                ],
-            );
+            state.load_from(Offset(0), 1, 1, &[
+                state_batch(StateBatchSetup {
+                    bounds: Offset(0)..=Offset(0),
+                    delivery: FixtureDeliveryState::Archiving,
+                    attempts: DeliveryAttemptCount(5),
+                }),
+                state_batch(StateBatchSetup {
+                    bounds: Offset(1)..=Offset(1),
+                    delivery: FixtureDeliveryState::Archiving,
+                    attempts: DeliveryAttemptCount(2),
+                }),
+            ]);
             state.take_pending_dlq()
         };
 
@@ -587,21 +578,18 @@ mod tests {
 
         assert!(
             (states, written)
-                == (
-                    Vec::new(),
-                    vec![
-                        request(ExpectedDlqRequestSetup {
-                            bounds: Offset(0)..=Offset(0),
-                            delivery_count: DeliveryCount(5),
-                            cause: DlqCause::DeliveryCountExceeded
-                        }),
-                        request(ExpectedDlqRequestSetup {
-                            bounds: Offset(1)..=Offset(1),
-                            delivery_count: DeliveryCount(2),
-                            ..Default::default()
-                        }),
-                    ],
-                )
+                == (Vec::new(), vec![
+                    request(ExpectedDlqRequestSetup {
+                        bounds: Offset(0)..=Offset(0),
+                        delivery_count: DeliveryCount(5),
+                        cause: DlqCause::DeliveryCountExceeded
+                    }),
+                    request(ExpectedDlqRequestSetup {
+                        bounds: Offset(1)..=Offset(1),
+                        delivery_count: DeliveryCount(2),
+                        ..Default::default()
+                    }),
+                ],)
         );
     }
 }

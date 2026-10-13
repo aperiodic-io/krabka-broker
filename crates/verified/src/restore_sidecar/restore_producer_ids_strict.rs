@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::{Int, invariant};
-use super::{RestoreAbortedTxn, RestoreSegmentExtent};
+use {
+    super::{RestoreAbortedTxn, RestoreSegmentExtent},
+    creusot_std::prelude::*,
+};
 
 /// Compute the largest relative offset an archived sidecar may reference.
 ///

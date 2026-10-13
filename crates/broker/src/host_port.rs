@@ -57,15 +57,11 @@ pub(crate) fn local_host_name() -> Option<String> {
 /// WASI reports no host name. Its listeners come from the embedder, which
 /// binds them, so no wildcard bind needs one.
 #[cfg(target_family = "wasm")]
-pub(crate) fn local_host_name() -> Option<String> {
-    None
-}
+pub(crate) fn local_host_name() -> Option<String> { None }
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// A concrete bind advertises itself. A wildcard bind, IPv4 or IPv6,
     /// advertises the host name, and loopback only when there is no name.

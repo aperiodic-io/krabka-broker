@@ -3,17 +3,16 @@
 //! It matches the classic `RangeAssignor` semantics, which co-partition across
 //! topics that have equal partition counts.
 
-use std::collections::HashMap;
-
-use super::{Assignment, Assignor, GroupSpec, TopicMetadata};
+use {
+    super::{Assignment, Assignor, GroupSpec, TopicMetadata},
+    std::collections::HashMap,
+};
 
 #[derive(Debug)]
 pub struct RangeAssignor;
 
 impl Assignor for RangeAssignor {
-    fn name(&self) -> &'static str {
-        "range"
-    }
+    fn name(&self) -> &'static str { "range" }
 
     fn assign(&self, group: &GroupSpec, topics: &TopicMetadata) -> Assignment {
         let members = &group.members;
@@ -57,15 +56,14 @@ impl Assignor for RangeAssignor {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::primitives::uuid::Uuid;
+    use {
+        super::*,
+        crate::coordinator::unified::assignor::{MemberSubscription, SubscriptionType},
+        assert2::assert,
+        krabka_protocol::primitives::uuid::Uuid,
+    };
 
-    use super::*;
-    use crate::coordinator::unified::assignor::{MemberSubscription, SubscriptionType};
-
-    fn tid(b: u8) -> Uuid {
-        Uuid([b; 16])
-    }
+    fn tid(b: u8) -> Uuid { Uuid([b; 16]) }
     fn member(id: &str, topics: &[Uuid]) -> MemberSubscription {
         MemberSubscription {
             member_id: id.into(),

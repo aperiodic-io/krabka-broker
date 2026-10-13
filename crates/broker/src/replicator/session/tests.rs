@@ -3,9 +3,7 @@
 //! dropped is forgotten once, and a leader that refuses the session sends the
 //! follower back to a full request.
 
-use assert2::check;
-
-use super::*;
+use {super::*, assert2::check};
 
 fn key(topic: &str, partition: i32) -> SessionKey {
     SessionKey {

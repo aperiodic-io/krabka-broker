@@ -4,28 +4,28 @@
 //! to the RPC in [`super::marker_rpc`]. A marker counts as written only once
 //! it is committed on its partition, local or remote.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, atomic::Ordering},
-};
-
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_security::ListenerProtocol;
-
-use super::marker_rpc::send_write_txn_markers;
-use crate::{
-    broker::Broker,
-    coordinator::GroupCoordinator,
-    error::BrokerError,
-    network::client::InterBrokerClient,
-    partition::Partition,
-    partition_registry::PartitionRegistry,
-    txn::{
-        handlers::write_txn_markers::{
-            MARKER_COMMIT_TIMEOUT, MarkerAppend, append_marker_as_leader,
+use {
+    super::marker_rpc::send_write_txn_markers,
+    crate::{
+        broker::Broker,
+        coordinator::GroupCoordinator,
+        error::BrokerError,
+        network::client::InterBrokerClient,
+        partition::Partition,
+        partition_registry::PartitionRegistry,
+        txn::{
+            handlers::write_txn_markers::{
+                MARKER_COMMIT_TIMEOUT, MarkerAppend, append_marker_as_leader,
+            },
+            marker::{MarkerFailureClass, MarkerType, classify_marker_failure},
+            state::{TopicPartition, TxnEntry},
         },
-        marker::{MarkerFailureClass, MarkerType, classify_marker_failure},
-        state::{TopicPartition, TxnEntry},
+    },
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_security::ListenerProtocol,
+    std::{
+        collections::HashMap,
+        sync::{Arc, atomic::Ordering},
     },
 };
 
@@ -282,14 +282,15 @@ fn failure_severity(class: MarkerFailureClass) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_ids::PartitionIndex;
-
-    use super::*;
-    use crate::{
-        codes::NOT_LEADER_OR_FOLLOWER,
-        test_support::{StandalonePartitionSetup, broker_registration, open_partition},
-        txn::handlers::end_txn::test_support::{marker_entry, plaintext_client, tps},
+    use {
+        super::*,
+        crate::{
+            codes::NOT_LEADER_OR_FOLLOWER,
+            test_support::{StandalonePartitionSetup, broker_registration, open_partition},
+            txn::handlers::end_txn::test_support::{marker_entry, plaintext_client, tps},
+        },
+        assert2::assert,
+        krabka_ids::PartitionIndex,
     };
 
     fn marker_context<'a>(
@@ -337,13 +338,10 @@ mod tests {
         let client = plaintext_client();
         let partitions = std::sync::Arc::new(PartitionRegistry::new());
         let dir = tempfile::tempdir().unwrap();
-        let part = open_partition(
-            dir.path(),
-            StandalonePartitionSetup {
-                topic: "t",
-                ..Default::default()
-            },
-        );
+        let part = open_partition(dir.path(), StandalonePartitionSetup {
+            topic: "t",
+            ..Default::default()
+        });
         part.install_leader_change(2, 0).await;
         partitions.insert("t".into(), PartitionIndex(0), part.clone());
         let mut entry = marker_entry();
@@ -373,10 +371,12 @@ mod tests {
     /// its marker even though the remote, unreachable one fails.
     #[tokio::test]
     async fn marker_dispatch_appends_every_reachable_partition_despite_one_failing() {
-        use krabka_ids::PartitionIndex as PIdx;
-        use krabka_log::Offset;
-        use krabka_metadata::{
-            BrokerRegistrationRecord, MetadataRecord, PartitionRecord, TopicRecord,
+        use {
+            krabka_ids::PartitionIndex as PIdx,
+            krabka_log::Offset,
+            krabka_metadata::{
+                BrokerRegistrationRecord, MetadataRecord, PartitionRecord, TopicRecord,
+            },
         };
 
         let mut image = MetadataImage::default();
@@ -407,13 +407,10 @@ mod tests {
         let client = plaintext_client();
         let partitions = std::sync::Arc::new(PartitionRegistry::new());
         let dir = tempfile::tempdir().unwrap();
-        let local_partition = open_partition(
-            dir.path(),
-            StandalonePartitionSetup {
-                topic: "local-topic",
-                ..Default::default()
-            },
-        );
+        let local_partition = open_partition(dir.path(), StandalonePartitionSetup {
+            topic: "local-topic",
+            ..Default::default()
+        });
         local_partition.install_leader_change(1, 0).await;
         partitions.insert("local-topic".into(), PIdx(0), local_partition.clone());
 
@@ -459,8 +456,10 @@ mod tests {
     /// again to the next leader.
     #[tokio::test]
     async fn a_local_marker_counts_only_once_committed() {
-        use krabka_log::Offset;
-        use krabka_metadata::{MetadataRecord, PartitionRecord, TopicRecord};
+        use {
+            krabka_log::Offset,
+            krabka_metadata::{MetadataRecord, PartitionRecord, TopicRecord},
+        };
 
         let mut image = MetadataImage::default();
         image.apply(&MetadataRecord::V1Topic(TopicRecord {
@@ -493,13 +492,10 @@ mod tests {
         for (case, catches_up, written, failure) in cases {
             let partitions = std::sync::Arc::new(PartitionRegistry::new());
             let dir = tempfile::tempdir().expect("tempdir");
-            let part = open_partition(
-                dir.path(),
-                StandalonePartitionSetup {
-                    topic: "t",
-                    ..Default::default()
-                },
-            );
+            let part = open_partition(dir.path(), StandalonePartitionSetup {
+                topic: "t",
+                ..Default::default()
+            });
             part.install_leader_change(1, 0).await;
             // The follower has not fetched, so it holds the high watermark at
             // zero.

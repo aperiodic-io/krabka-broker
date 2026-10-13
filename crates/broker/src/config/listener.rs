@@ -2,15 +2,15 @@
 //! advertises, what it authenticates outbound connections with, and the
 //! check that the two agree.
 
-use std::{net::SocketAddr, path::PathBuf};
-
-use krabka_security::{ListenerProtocol, SaslMechanism, TlsConfig};
-
-use crate::{
-    BrokerError,
-    api_catalog::{ClientMetricsReceiver, ListenerKind},
-    config::{BrokerConfig, DEFAULT_CONNECTIONS_MAX_IDLE},
-    network::auth::SslPrincipalMapper,
+use {
+    crate::{
+        BrokerError,
+        api_catalog::{ClientMetricsReceiver, ListenerKind},
+        config::{BrokerConfig, DEFAULT_CONNECTIONS_MAX_IDLE},
+        network::auth::SslPrincipalMapper,
+    },
+    krabka_security::{ListenerProtocol, SaslMechanism, TlsConfig},
+    std::{net::SocketAddr, path::PathBuf},
 };
 
 /// A single named listener: the port the broker binds and the address it
@@ -298,13 +298,14 @@ impl BrokerConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        BrokerError as BrokerStartError, SslPrincipalMapper,
-        config::test_support::base,
-        test_support::{OAuthTokenContents, oauth_token_file},
+    use {
+        super::*,
+        crate::{
+            BrokerError as BrokerStartError, SslPrincipalMapper,
+            config::test_support::base,
+            test_support::{OAuthTokenContents, oauth_token_file},
+        },
+        assert2::assert,
     };
 
     #[test]
@@ -590,26 +591,20 @@ mod tests {
     /// out of a log, so redaction must not have swallowed them too.
     #[test]
     fn debug_keeps_the_passwordless_variants_legible() {
-        let gssapi = format!(
-            "{:?}",
-            InterBrokerCredentials::Gssapi {
-                keytab_path: "/etc/krabka/broker.keytab".into(),
-                client_principal: "krabka/broker-0@EXAMPLE.COM".into(),
-                service_name: "kafka".into(),
-                kdc_url: "tcp://kdc:88".into(),
-            }
-        );
+        let gssapi = format!("{:?}", InterBrokerCredentials::Gssapi {
+            keytab_path: "/etc/krabka/broker.keytab".into(),
+            client_principal: "krabka/broker-0@EXAMPLE.COM".into(),
+            service_name: "kafka".into(),
+            kdc_url: "tcp://kdc:88".into(),
+        });
         assert!(gssapi.contains("broker.keytab"), "{gssapi}");
         assert!(gssapi.contains("krabka/broker-0@EXAMPLE.COM"), "{gssapi}");
         assert!(gssapi.contains("kafka"), "{gssapi}");
         assert!(gssapi.contains("tcp://kdc:88"), "{gssapi}");
 
-        let oauth = format!(
-            "{:?}",
-            InterBrokerCredentials::OAuthBearer {
-                token_path: "/var/run/krabka/token".into(),
-            }
-        );
+        let oauth = format!("{:?}", InterBrokerCredentials::OAuthBearer {
+            token_path: "/var/run/krabka/token".into(),
+        });
         assert!(oauth.contains("/var/run/krabka/token"), "{oauth}");
     }
 
@@ -717,12 +712,13 @@ mod tests {
 
 #[cfg(test)]
 mod connections_max_idle_tests {
-    use assert2::assert;
-    use krabka_units::{Time, convert::TimeExt as _, millis, secs};
-
-    use crate::{
-        config::{BrokerConfig, DEFAULT_CONNECTIONS_MAX_IDLE},
-        test_support::listener_time_overrides,
+    use {
+        crate::{
+            config::{BrokerConfig, DEFAULT_CONNECTIONS_MAX_IDLE},
+            test_support::listener_time_overrides,
+        },
+        assert2::assert,
+        krabka_units::{Time, convert::TimeExt as _, millis, secs},
     };
 
     /// A broker-wide window of `idle` with the named per-listener overrides.
@@ -790,10 +786,11 @@ mod connections_max_idle_tests {
 
 #[cfg(test)]
 mod connections_max_reauth_tests {
-    use assert2::assert;
-    use krabka_units::{Time, convert::TimeExt as _, millis, secs};
-
-    use crate::{config::BrokerConfig, test_support::listener_time_overrides};
+    use {
+        crate::{config::BrokerConfig, test_support::listener_time_overrides},
+        assert2::assert,
+        krabka_units::{Time, convert::TimeExt as _, millis, secs},
+    };
 
     /// A broker-wide KIP-368 window with the named per-listener overrides.
     fn config(broker_wide: Option<Time>, overrides: &[(&str, Time)]) -> BrokerConfig {

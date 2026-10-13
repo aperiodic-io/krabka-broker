@@ -1,13 +1,13 @@
-use std::path::PathBuf;
-
-use assert2::{assert, check};
-use krabka_metadata::{BrokerRegistrationRecord, MetadataError};
-
-use super::*;
-use crate::{
-    config::NodeRole,
-    coordinator::AUDIT_TOPIC,
-    test_support::{FakeMetadataSource, broker_registration},
+use {
+    super::*,
+    crate::{
+        config::NodeRole,
+        coordinator::AUDIT_TOPIC,
+        test_support::{FakeMetadataSource, broker_registration},
+    },
+    assert2::{assert, check},
+    krabka_metadata::{BrokerRegistrationRecord, MetadataError},
+    std::path::PathBuf,
 };
 
 // The isolated controller of the Kafka system tests that surfaced the defect.

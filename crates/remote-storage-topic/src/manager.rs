@@ -25,13 +25,14 @@
 //! - Read calls: pure local lookups against the inner cache.
 //! - Drop / [`TopicBasedRemoteLogMetadataManager::shutdown`]: cancel the consumer pump.
 
-use std::sync::Arc;
-
-use krabka_remote_storage::{InmemoryRemoteLogMetadataManager, RemoteStorageError};
-use krabka_units::prelude::{StdDurationExt as _, TimeExt as _};
-use tokio::{runtime::Handle, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use {
+    krabka_remote_storage::{InmemoryRemoteLogMetadataManager, RemoteStorageError},
+    krabka_units::prelude::{StdDurationExt as _, TimeExt as _},
+    std::sync::Arc,
+    tokio::{runtime::Handle, task::JoinHandle},
+    tokio_util::sync::CancellationToken,
+    tracing::warn,
+};
 
 mod assignment;
 mod mutations;
@@ -41,10 +42,12 @@ mod rlmm;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use self::{mutations::MutationWaiters, pump::pump_loop};
-use crate::{
-    log::{AssignmentHandle, MetadataEventLog},
-    snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
+use {
+    self::{mutations::MutationWaiters, pump::pump_loop},
+    crate::{
+        log::{AssignmentHandle, MetadataEventLog},
+        snapshot::{SNAPSHOT_FILE_NAME, Snapshot},
+    },
 };
 
 /// Production [`RemoteLogMetadataManager`](krabka_remote_storage::RemoteLogMetadataManager)
@@ -93,9 +96,7 @@ impl TopicBasedRemoteLogMetadataManager {
     /// Actual partition count of the opened metadata topic. An existing
     /// topic's count takes precedence over its provisioning configuration.
     #[must_use]
-    pub fn metadata_partition_count(&self) -> i32 {
-        self.log.partition_count()
-    }
+    pub fn metadata_partition_count(&self) -> i32 { self.log.partition_count() }
 
     /// Load any on-disk snapshot into the cache and spawn the consumer
     /// pump with an empty assignment. The manager consumes nothing until the
@@ -239,9 +240,7 @@ impl TopicBasedRemoteLogMetadataManager {
     /// Cancel the consumer pump. Read methods continue to work against
     /// whatever the pump applied before shutdown. Pending and subsequent
     /// mutation methods return a closed-log error.
-    pub fn shutdown(&self) {
-        self.shutdown.cancel();
-    }
+    pub fn shutdown(&self) { self.shutdown.cancel(); }
 
     /// Cancel the pump and the snapshotter, then write a final snapshot that
     /// captures everything applied so far. It is safe to call this once on a

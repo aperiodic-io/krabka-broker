@@ -1,7 +1,8 @@
-use assert2::assert;
-
-use super::*;
-use crate::txn::marker::{MarkerType, build_marker_batch};
+use {
+    super::*,
+    crate::txn::marker::{MarkerType, build_marker_batch},
+    assert2::assert,
+};
 
 #[tokio::test]
 async fn timestamp_lookup_matches_the_first_record_in_the_isolation_prefix() {

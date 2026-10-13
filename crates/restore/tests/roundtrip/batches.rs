@@ -4,9 +4,11 @@
 //! multi-segment, so the tiny `segment_size` that forces the roll sits here
 //! beside the batch builders whose size it depends on.
 
-use bytes::Bytes;
-use krabka_log::LogConfig;
-use krabka_protocol::records::{Attributes, Record, RecordBatch};
+use {
+    bytes::Bytes,
+    krabka_log::LogConfig,
+    krabka_protocol::records::{Attributes, Record, RecordBatch},
+};
 
 /// A `LogConfig` whose `segment_size` is shrunk to a little over one byte, so
 /// a second `append` always rolls the batch that was active before it into

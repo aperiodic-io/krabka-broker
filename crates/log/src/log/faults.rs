@@ -7,32 +7,32 @@
 //! assertion that matters: a write that fails silently costs nothing until the
 //! next restart, which is where its cost is finally visible.
 
-use std::{
-    fs::File,
-    io::Write as _,
-    path::Path,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+use {
+    super::Log,
+    crate::{
+        config::LogConfig,
+        error::LogError,
+        io::{IoTarget, LogIo, file_io},
+        log::test_support::{
+            append_keyed_samples, compacting_segments, compaction_ctx, sample_batch,
+            sample_batch_with_epoch, synced_sample_log, tiny_segments, write_with_budget,
+        },
+        name,
     },
-    time::SystemTime,
-};
-
-use assert2::check;
-use krabka_ids::Offset;
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _, bytes};
-use tempfile::tempdir;
-
-use super::Log;
-use crate::{
-    config::LogConfig,
-    error::LogError,
-    io::{IoTarget, LogIo, file_io},
-    log::test_support::{
-        append_keyed_samples, compacting_segments, compaction_ctx, sample_batch,
-        sample_batch_with_epoch, synced_sample_log, tiny_segments, write_with_budget,
+    assert2::check,
+    krabka_ids::Offset,
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _, bytes},
+    std::{
+        fs::File,
+        io::Write as _,
+        path::Path,
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::SystemTime,
     },
-    name,
+    tempfile::tempdir,
 };
 
 /// A disk that fills under one file class: the first `prefix` bytes written to
@@ -128,9 +128,7 @@ impl LogIo for FailSegmentDeletionOnce {
 }
 
 /// The extension of `path`, if it has one.
-fn extension_of(path: &Path) -> Option<&str> {
-    path.extension().and_then(std::ffi::OsStr::to_str)
-}
+fn extension_of(path: &Path) -> Option<&str> { path.extension().and_then(std::ffi::OsStr::to_str) }
 
 /// `true` for a segment `.log`, whether it is still under its live name or has
 /// already been renamed to its `.deleted` tombstone. Both occupy the disk the

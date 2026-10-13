@@ -30,46 +30,46 @@
 //! `ShareGroupMetrics`: an attempt to produce it, the records of a round that
 //! is written, and a write that fails.
 
-use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
-
-use async_trait::async_trait;
-use exponential_backoff::Backoff;
-use krabka_compression::RecordDecompressionPolicy;
-use krabka_ids::PartitionIndex;
-use krabka_log::LogConfig;
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_protocol::{
-    owned::{
-        create_topics_response::CreateTopicsResponse, produce_request::ProduceRequest,
-        produce_response::ProduceResponse,
+use {
+    super::{
+        DlqError, DlqRequest, DlqSink,
+        coalesce::{Admitted, Coalescer, Produce, ProduceTransport},
+        record::{RangeContext, RoundBounds, build_round, destination_partition},
+        source::{Fetched, SourceTier, fetch},
+        validate::{ClusterSettings, GroupSettings, TopicState, validate},
     },
-    primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-use krabka_security::ListenerProtocol;
-use krabka_units::convert::ByteSizeExt as _;
-
-use super::{
-    DlqError, DlqRequest, DlqSink,
-    coalesce::{Admitted, Coalescer, Produce, ProduceTransport},
-    record::{RangeContext, RoundBounds, build_round, destination_partition},
-    source::{Fetched, SourceTier, fetch},
-    validate::{ClusterSettings, GroupSettings, TopicState, validate},
-};
-use crate::{
-    auto_topic_creation::AutoTopicCreation,
-    broker::registered_listener_endpoint,
-    codes,
-    config::BrokerConfig,
-    config_keys::{BrokerLogDefaults, resolve_max_message_bytes},
-    diskless::read::DisklessReadHandle,
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    remote_reader::RemoteReader,
-    time_util::now_ms,
-    topic_creator::TopicCreatorError,
+    crate::{
+        auto_topic_creation::AutoTopicCreation,
+        broker::registered_listener_endpoint,
+        codes,
+        config::BrokerConfig,
+        config_keys::{BrokerLogDefaults, resolve_max_message_bytes},
+        diskless::read::DisklessReadHandle,
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        remote_reader::RemoteReader,
+        time_util::now_ms,
+        topic_creator::TopicCreatorError,
+    },
+    async_trait::async_trait,
+    exponential_backoff::Backoff,
+    krabka_compression::RecordDecompressionPolicy,
+    krabka_ids::PartitionIndex,
+    krabka_log::LogConfig,
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_protocol::{
+        owned::{
+            create_topics_response::CreateTopicsResponse, produce_request::ProduceRequest,
+            produce_response::ProduceResponse,
+        },
+        primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
+    },
+    krabka_security::ListenerProtocol,
+    krabka_units::convert::ByteSizeExt as _,
+    std::{collections::HashMap, future::Future, sync::Arc, time::Duration},
 };
 
 /// The attempts of one request, and the pauses between them: Kafka's
@@ -269,9 +269,7 @@ trait Pooled: Clone {
 }
 
 impl Pooled for krabka_client_core::Connection {
-    fn is_open(&self) -> bool {
-        !self.is_closed()
-    }
+    fn is_open(&self) -> bool { !self.is_closed() }
 }
 
 /// One connection for each leader, dialled when a write first needs it and
@@ -631,15 +629,16 @@ impl DlqSink for DlqWriter {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{BrokerRegistrationRecord, MetadataRecord, PartitionRecord, TopicRecord};
-    use krabka_protocol::owned::{
-        create_topics_response::CreatableTopicResult,
-        produce_response::{PartitionProduceResponse, TopicProduceResponse},
+    use {
+        super::{super::coalesce::test_support::FakeBroker, *},
+        crate::test_support::{KafkaErrorCode, broker_registration},
+        assert2::assert,
+        krabka_metadata::{BrokerRegistrationRecord, MetadataRecord, PartitionRecord, TopicRecord},
+        krabka_protocol::owned::{
+            create_topics_response::CreatableTopicResult,
+            produce_response::{PartitionProduceResponse, TopicProduceResponse},
+        },
     };
-
-    use super::{super::coalesce::test_support::FakeBroker, *};
-    use crate::test_support::{KafkaErrorCode, broker_registration};
 
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum BrokerRegistration {
@@ -1042,13 +1041,10 @@ mod tests {
                 }
             }))
         });
-        let writes = coalesced_writes(
-            broker.clone(),
-            CoalescedWriteSetup {
-                first_records: RoundRecordCount(1),
-                second_records: RoundRecordCount(3),
-            },
-        );
+        let writes = coalesced_writes(broker.clone(), CoalescedWriteSetup {
+            first_records: RoundRecordCount(1),
+            second_records: RoundRecordCount(3),
+        });
         let leaders = std::cell::Cell::new(0_u64);
 
         let (done, retried) = futures_util::future::join(
@@ -1173,9 +1169,7 @@ mod tests {
     }
 
     impl Pooled for FakeConnection {
-        fn is_open(&self) -> bool {
-            self.open.load(std::sync::atomic::Ordering::SeqCst)
-        }
+        fn is_open(&self) -> bool { self.open.load(std::sync::atomic::Ordering::SeqCst) }
     }
 
     /// A dialler that counts its dials, and lets other tasks run mid-dial.
@@ -1198,9 +1192,7 @@ mod tests {
             })
         }
 
-        fn dials(&self) -> usize {
-            self.dials.load(std::sync::atomic::Ordering::SeqCst)
-        }
+        fn dials(&self) -> usize { self.dials.load(std::sync::atomic::Ordering::SeqCst) }
     }
 
     /// The produce requests to one leader share a connection, another leader

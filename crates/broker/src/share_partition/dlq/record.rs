@@ -10,12 +10,12 @@
 //! `max.message.bytes` goes out in several rounds, so [`build_round`] takes
 //! the offset to start from and reports the last offset it packed.
 
-use std::collections::BTreeMap;
-
-use bytes::Bytes;
-use krabka_protocol::records::{HEADER_LEN, Record, RecordBatch, RecordHeader};
-
-use crate::share_partition::state::DlqCause;
+use {
+    crate::share_partition::state::DlqCause,
+    bytes::Bytes,
+    krabka_protocol::records::{HEADER_LEN, Record, RecordBatch, RecordHeader},
+    std::collections::BTreeMap,
+};
 
 /// The topic the record came from.
 pub(super) const HEADER_TOPIC: &str = "__dlq.errors.topic";
@@ -177,9 +177,7 @@ pub(super) fn projected_cases_match<T: PartialEq>(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     fn context(cause: DlqCause) -> RangeContext<'static> {
         RangeContext {
@@ -298,13 +296,10 @@ mod tests {
     #[test]
     fn a_copied_record_carries_the_key_and_the_value() {
         let mut sources = BTreeMap::new();
-        sources.insert(
-            4,
-            SourceRecord {
-                key: Some(Bytes::from_static(b"k")),
-                value: Some(Bytes::from_static(b"v")),
-            },
-        );
+        sources.insert(4, SourceRecord {
+            key: Some(Bytes::from_static(b"k")),
+            value: Some(Bytes::from_static(b"v")),
+        });
 
         let round = build_round(&context(DlqCause::ClientReject), &sources, bounds(4, 5), 0);
 
@@ -357,13 +352,10 @@ mod tests {
     fn a_range_that_is_too_big_for_one_batch_goes_in_rounds() {
         let sources: BTreeMap<i64, SourceRecord> = (0..6)
             .map(|offset| {
-                (
-                    offset,
-                    SourceRecord {
-                        key: None,
-                        value: Some(Bytes::from(vec![7_u8; 100])),
-                    },
-                )
+                (offset, SourceRecord {
+                    key: None,
+                    value: Some(Bytes::from(vec![7_u8; 100])),
+                })
             })
             .collect();
         // Room for two records and not a third.

@@ -1,22 +1,19 @@
 //! SCRAM expression fixtures whose inferred phase type is private upstream.
 
-use moxy::{
-    ast::{Cursor, Expr, List, Parse, ParseError, Parser, Token},
-    token::TokenStream,
+use {
+    crate::fixtures::name,
+    moxy::{
+        ast::{Cursor, Expr, List, Parse, ParseError, Parser, Token},
+        token::TokenStream,
+    },
 };
-
-use crate::fixtures::name;
 
 struct Arguments(List<Expr, Token![,]>);
 
 impl Parse for Arguments {
-    fn peek(cursor: Cursor<'_>) -> bool {
-        cursor.is_empty() || Expr::peek(cursor)
-    }
+    fn peek(cursor: Cursor<'_>) -> bool { cursor.is_empty() || Expr::peek(cursor) }
 
-    fn parse(parser: &Parser) -> Result<Self, ParseError> {
-        List::parse_all(parser).map(Self)
-    }
+    fn parse(parser: &Parser) -> Result<Self, ParseError> { List::parse_all(parser).map(Self) }
 
     fn skip(cursor: Cursor<'_>) -> Option<Cursor<'_>> {
         let parser = Parser::from_cursor(cursor);

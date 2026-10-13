@@ -261,9 +261,7 @@ pub(crate) fn flatten_error(error: &regex::Error) -> String {
 ///
 /// Returns the reason, in the wording Kafka puts in its
 /// `INVALID_REGULAR_EXPRESSION` message.
-pub(crate) fn check(pattern: &str) -> Result<(), String> {
-    compile_full_match(pattern).map(|_| ())
-}
+pub(crate) fn check(pattern: &str) -> Result<(), String> { compile_full_match(pattern).map(|_| ()) }
 
 /// Compiles `pattern` for Kafka's `Matcher.matches()`, which matches the whole
 /// input.
@@ -296,9 +294,10 @@ pub(crate) fn compile_full_match(pattern: &str) -> Result<regex::Regex, String> 
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+    };
 
     /// The patterns Kafka's RE2J takes, and the ones it refuses.
     #[test]

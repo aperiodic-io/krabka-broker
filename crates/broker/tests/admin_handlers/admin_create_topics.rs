@@ -8,15 +8,16 @@
 //! list `describeConfigs` answers for the same topic, which is what this test
 //! pins.
 
-use assert2::{assert, check};
-use krabka_protocol::owned::{
-    create_topics_request::{CreatableTopicConfig, CreateTopicsRequest},
-    describe_configs_request::DescribeConfigsRequest,
-};
-
-use crate::{
-    RESOURCE_TYPE_TOPIC,
-    support::{configs::describe_resource, start_n_node_client},
+use {
+    crate::{
+        RESOURCE_TYPE_TOPIC,
+        support::{configs::describe_resource, start_n_node_client},
+    },
+    assert2::{assert, check},
+    krabka_protocol::owned::{
+        create_topics_request::{CreatableTopicConfig, CreateTopicsRequest},
+        describe_configs_request::DescribeConfigsRequest,
+    },
 };
 
 /// `ConfigSource.DYNAMIC_TOPIC_CONFIG`, the source a value the create request

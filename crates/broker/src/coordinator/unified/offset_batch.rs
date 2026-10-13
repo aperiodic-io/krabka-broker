@@ -5,8 +5,10 @@
 //! assembles its records through this builder, so the offset-delta
 //! bookkeeping of a batch has one home.
 
-use bytes::Bytes;
-use krabka_protocol::records::{Record, RecordBatch};
+use {
+    bytes::Bytes,
+    krabka_protocol::records::{Record, RecordBatch},
+};
 
 #[derive(Default)]
 pub(crate) struct OffsetRecordBatchBuilder {
@@ -38,11 +40,7 @@ impl OffsetRecordBatchBuilder {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_log::Log;
-
-    use super::*;
-    use crate::test_support::segment_age_fixture;
+    use {super::*, crate::test_support::segment_age_fixture, assert2::check, krabka_log::Log};
 
     #[test]
     fn coordinator_records_roll_only_after_the_segment_age_limit() {

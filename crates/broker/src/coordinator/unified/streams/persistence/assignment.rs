@@ -26,21 +26,22 @@
 //! Every role has its own revocation list, as in Kafka's
 //! `CurrentAssignmentBuilder`.
 
-use bytes::BufMut;
-use krabka_protocol::ProtocolError;
-
-use super::codec::{
-    decode_task_map, decode_task_map_with_epochs, encode_task_map, encode_task_map_with_epochs,
-};
-use crate::{
-    coordinator::unified::{
-        persistence::{
-            flex::{get_i8, value_codec},
-            get_i32,
-        },
-        streams::state::{StreamsMemberAssignmentState, TaskMap},
+use {
+    super::codec::{
+        decode_task_map, decode_task_map_with_epochs, encode_task_map, encode_task_map_with_epochs,
     },
-    error::BrokerError,
+    crate::{
+        coordinator::unified::{
+            persistence::{
+                flex::{get_i8, value_codec},
+                get_i32,
+            },
+            streams::state::{StreamsMemberAssignmentState, TaskMap},
+        },
+        error::BrokerError,
+    },
+    bytes::BufMut,
+    krabka_protocol::ProtocolError,
 };
 
 /// The member state as `org.apache.kafka.coordinator.group.streams.MemberState`
@@ -189,18 +190,18 @@ value_codec! {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::{
-        streams::persistence::{
-            KEY_STREAMS_CURRENT_MEMBER_ASSIGNMENT, KEY_STREAMS_TARGET_ASSIGNMENT_MEMBER,
-            StreamsGroupKey, encode_current_member_assignment_key,
-            encode_target_assignment_member_key, parse_streams_key,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            streams::persistence::{
+                KEY_STREAMS_CURRENT_MEMBER_ASSIGNMENT, KEY_STREAMS_TARGET_ASSIGNMENT_MEMBER,
+                StreamsGroupKey, encode_current_member_assignment_key,
+                encode_target_assignment_member_key, parse_streams_key,
+            },
+            test_support::{peek_version, wire_bytes},
         },
-        test_support::{peek_version, wire_bytes},
+        assert2::assert,
+        std::collections::BTreeMap,
     };
 
     fn active_tasks(partitions: &[i32]) -> BTreeMap<String, Vec<i32>> {

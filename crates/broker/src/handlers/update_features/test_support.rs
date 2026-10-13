@@ -5,21 +5,21 @@
 //! requests and assert on the same result rows, so the fixtures live in one
 //! module rather than being duplicated per test file.
 
-use std::{net::SocketAddr, sync::Arc};
-
-use krabka_protocol::owned::{
-    update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest},
-    update_features_response::UpdateFeaturesResponse,
-};
-use krabka_security::Principal;
-
-use super::answer;
-use crate::{
-    authorizer::Authorizer,
-    broker::{Broker, BrokerHandle},
-    features::{ELR_VERSION, METADATA_VERSION},
-    handlers::RequestContext,
-    test_support::{peer, principal, request_context, start_broker_no_audit_with},
+use {
+    super::answer,
+    crate::{
+        authorizer::Authorizer,
+        broker::{Broker, BrokerHandle},
+        features::{ELR_VERSION, METADATA_VERSION},
+        handlers::RequestContext,
+        test_support::{peer, principal, request_context, start_broker_no_audit_with},
+    },
+    krabka_protocol::owned::{
+        update_features_request::{FeatureUpdateKey, UpdateFeaturesRequest},
+        update_features_response::UpdateFeaturesResponse,
+    },
+    krabka_security::Principal,
+    std::{net::SocketAddr, sync::Arc},
 };
 
 pub(super) const VERSION: i16 = 1;

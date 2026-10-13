@@ -5,29 +5,29 @@
 //! cut that closes it. It is the one place that consumes an epoch, so it is
 //! separate from the group edits that only define what an epoch covers.
 
-use std::collections::BTreeMap;
-
-use krabka_log::Offset;
-use krabka_units::{Time, convert::TimeExt as _};
-use tracing::{info, warn};
-
-use super::{BarrierCoordinator, clamp_timeout};
-use crate::{
-    barrier::{
-        error::BarrierError,
-        injection::{MarkerFanout, freeze_targets},
-        marker::BarrierMarker,
-        metrics::InjectionReport,
-        persistence::{
-            CutStatus, CutValue, GroupValue, InjectionStartValue, RecordKey, encode_cut,
-            encode_group, encode_injection_start,
+use {
+    super::{BarrierCoordinator, clamp_timeout},
+    crate::{
+        barrier::{
+            error::BarrierError,
+            injection::{MarkerFanout, freeze_targets},
+            marker::BarrierMarker,
+            metrics::InjectionReport,
+            persistence::{
+                CutStatus, CutValue, GroupValue, InjectionStartValue, RecordKey, encode_cut,
+                encode_group, encode_injection_start,
+            },
+            state::{
+                GroupEntry, PendingInjection, TargetPartition, build_cut, expand_targets,
+                expired_cut_epochs, is_due, next_epoch, schedule_next,
+            },
         },
-        state::{
-            GroupEntry, PendingInjection, TargetPartition, build_cut, expand_targets,
-            expired_cut_epochs, is_due, next_epoch, schedule_next,
-        },
+        time_util::now_ms,
     },
-    time_util::now_ms,
+    krabka_log::Offset,
+    krabka_units::{Time, convert::TimeExt as _},
+    std::collections::BTreeMap,
+    tracing::{info, warn},
 };
 
 #[cfg(test)]
@@ -141,13 +141,10 @@ impl BarrierCoordinator {
 
         // The injection-start record lands before the first marker, so a crash
         // here cannot let another coordinator reuse this epoch.
-        self.append_records(
-            group,
-            vec![(
-                RecordKey::injection_start(group, epoch),
-                Some(encode_injection_start(&start)?.into()),
-            )],
-        )
+        self.append_records(group, vec![(
+            RecordKey::injection_start(group, epoch),
+            Some(encode_injection_start(&start)?.into()),
+        )])
         .await?;
         entry.pending = Some(PendingInjection {
             epoch,

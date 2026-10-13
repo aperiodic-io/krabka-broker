@@ -6,12 +6,12 @@
 //! is a trait the broker injects an implementation of. `PlaintextDialer` is
 //! what the controller uses when nothing is injected.
 
-use std::net::SocketAddr;
-
-use async_trait::async_trait;
-use krabka_client_core::{ClientError, Connection, ConnectionOptions};
-
-use crate::kraft::types::NodeId;
+use {
+    crate::kraft::types::NodeId,
+    async_trait::async_trait,
+    krabka_client_core::{ClientError, Connection, ConnectionOptions},
+    std::net::SocketAddr,
+};
 
 /// Outbound dialer the controller hands to the peer sender.
 ///

@@ -1,15 +1,16 @@
 #[cfg(unix)]
 mod unix_only {
-    use std::{io::Read as _, net::SocketAddr};
-
-    use axum::{
-        Router,
-        body::Body,
-        http::{Request, StatusCode},
-        routing::get,
-    };
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tower::ServiceExt; // for `oneshot`
+    use {
+        axum::{
+            Router,
+            body::Body,
+            http::{Request, StatusCode},
+            routing::get,
+        },
+        std::{io::Read as _, net::SocketAddr},
+        tokio::io::{AsyncReadExt, AsyncWriteExt},
+        tower::ServiceExt,
+    }; // for `oneshot`
 
     #[tokio::test]
     async fn cpu_profile_endpoint_returns_pprof_bytes() {

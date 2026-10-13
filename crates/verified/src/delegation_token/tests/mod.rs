@@ -1,6 +1,4 @@
-use assert2::check;
-
-use super::*;
+use {super::*, assert2::check};
 
 fn created(max_timestamp_ms: i64, initial_expiry_ms: i64) -> TokenCreateDecision {
     TokenCreateDecision::Create(TokenDeadlines {

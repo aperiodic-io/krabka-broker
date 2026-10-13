@@ -8,10 +8,11 @@
 //! or that another member of the same process still runs in another role, is
 //! held back, and the member waits in `UnreleasedTasks`.
 
-use std::collections::{HashMap, HashSet};
-
-use super::{
-    StreamsMemberAssignmentState, StreamsMemberState, TaskMap, task_map::normalize_task_map,
+use {
+    super::{
+        StreamsMemberAssignmentState, StreamsMemberState, TaskMap, task_map::normalize_task_map,
+    },
+    std::collections::{HashMap, HashSet},
 };
 
 /// The tasks of the three roles, in the order active, standby, warmup.
@@ -304,11 +305,7 @@ fn compute_next_assignment(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check, std::collections::BTreeMap};
 
     fn tasks_of(partitions: &[i32]) -> TaskMap {
         if partitions.is_empty() {

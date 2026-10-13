@@ -3,9 +3,7 @@
 //! The input is `OpenAPI` v3 output or schemars output. The CRD generator and
 //! the broker-config generator share this module.
 
-use std::fmt::Write;
-
-use serde_json::Value;
+use {serde_json::Value, std::fmt::Write};
 
 /// Render the `properties` of an object schema as a markdown table.
 ///
@@ -236,9 +234,7 @@ fn primitive_type(field: &Value) -> Option<String> {
     }
 }
 
-fn type_label(root: &Value, field: &Value) -> String {
-    type_label_at(root, field, 0)
-}
+fn type_label(root: &Value, field: &Value) -> String { type_label_at(root, field, 0) }
 
 fn type_label_at(root: &Value, field: &Value, depth: usize) -> String {
     if depth >= MAX_DEPTH {
@@ -278,10 +274,7 @@ fn required_fields(schema: &Value) -> Vec<&str> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use serde_json::json;
-
-    use super::*;
+    use {super::*, assert2::check, serde_json::json};
 
     #[test]
     fn renders_nested_object_with_types_and_defaults() {

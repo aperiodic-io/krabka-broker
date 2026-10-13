@@ -2,13 +2,14 @@
 //! on the bus, and everything the harness tracks for one node. They share a file
 //! because the bus and the node bookkeeping are meaningless apart.
 
-use krabka_raft::kraft::{
-    QuorumStateMachine,
-    event::Event,
-    types::{NodeId, SimInstant},
+use {
+    super::node_log::SimNodeLog,
+    krabka_raft::kraft::{
+        QuorumStateMachine,
+        event::Event,
+        types::{NodeId, SimInstant},
+    },
 };
-
-use super::node_log::SimNodeLog;
 
 /// A message in flight on the bus: a destination node plus the event that node
 /// observes. The `src` field is recorded for partition filtering.

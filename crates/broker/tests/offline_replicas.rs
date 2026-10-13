@@ -23,32 +23,32 @@
 
 mod kafka_wire;
 
-use std::{collections::HashSet, net::SocketAddr, time::Duration};
-
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_broker::{Broker, BrokerHandle};
-use krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        describe_topic_partitions_request::{DescribeTopicPartitionsRequest, TopicRequest},
-        describe_topic_partitions_response::{
-            DescribeTopicPartitionsResponse, DescribeTopicPartitionsResponsePartition,
-        },
-        metadata_request::MetadataRequest,
-        metadata_response::{MetadataResponse, MetadataResponsePartition},
+use {
+    crate::support::{
+        discovery::named_topic_metadata,
+        registered_cluster, shutdown_cluster,
+        storage::two_dir_config,
+        topics::{ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor},
+        wire::ApiRequestSetup,
     },
-};
-use tempfile::TempDir;
-use tokio::net::TcpStream;
-
-use crate::support::{
-    discovery::named_topic_metadata,
-    registered_cluster, shutdown_cluster,
-    storage::two_dir_config,
-    topics::{ConfiguredTopicSetup, TopicPartitionCount, TopicReplicationFactor},
-    wire::ApiRequestSetup,
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_broker::{Broker, BrokerHandle},
+    krabka_ids::{ApiKey as WireApiKey, ApiVersion as WireApiVersion},
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            describe_topic_partitions_request::{DescribeTopicPartitionsRequest, TopicRequest},
+            describe_topic_partitions_response::{
+                DescribeTopicPartitionsResponse, DescribeTopicPartitionsResponsePartition,
+            },
+            metadata_request::MetadataRequest,
+            metadata_response::{MetadataResponse, MetadataResponsePartition},
+        },
+    },
+    std::{collections::HashSet, net::SocketAddr, time::Duration},
+    tempfile::TempDir,
+    tokio::net::TcpStream,
 };
 
 const CLIENT_ID: &str = "krabka-offline-replicas-test";
@@ -100,9 +100,7 @@ async fn start_two_dir_broker() -> (BrokerHandle, TempDir, TempDir, SocketAddr) 
     (handle, primary, extra, addr)
 }
 
-async fn create_topic(addr: SocketAddr) {
-    create_topic_named(addr, TOPIC, PARTITIONS, 1).await;
-}
+async fn create_topic(addr: SocketAddr) { create_topic_named(addr, TOPIC, PARTITIONS, 1).await; }
 
 async fn create_topic_named(addr: SocketAddr, name: &str, partitions: i32, replication: i16) {
     let mut stream = TcpStream::connect(addr).await.unwrap();

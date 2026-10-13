@@ -6,46 +6,46 @@
 //! async wrappers around it flush the records it produces and drive the
 //! in-place upgrade a heartbeat against a classic group triggers.
 
-use std::time::Instant;
-
-use krabka_protocol::owned::{
-    consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
-    consumer_group_heartbeat_response::{
-        Assignment as RespAssignment, ConsumerGroupHeartbeatResponse,
+use {
+    self::identity::{
+        HeartbeatError, LEAVE_GROUP_MEMBER_EPOCH, LEAVE_GROUP_STATIC_MEMBER_EPOCH, Resolved,
+        resolve_leaving_member, resolve_member,
     },
-};
-use tokio::sync::oneshot;
-
-use self::identity::{
-    HeartbeatError, LEAVE_GROUP_MEMBER_EPOCH, LEAVE_GROUP_STATIC_MEMBER_EPOCH, Resolved,
-    resolve_leaving_member, resolve_member,
-};
-use super::{
-    ActorServices, ErrorCode, FALLBACK_HEARTBEAT_INTERVAL_MS, MetadataProvider, chrono_now_ms,
-    downgrade::{downgrade_fencing, downgrades_without},
-    member_state::{
-        MemberChange, MemberUpdate, after_member_update, check_subscribed_topic_regex,
-        reported_owned, try_build_member, update_member_state,
+    super::{
+        ActorServices, ErrorCode, FALLBACK_HEARTBEAT_INTERVAL_MS, MetadataProvider, chrono_now_ms,
+        downgrade::{downgrade_fencing, downgrades_without},
+        member_state::{
+            MemberChange, MemberUpdate, after_member_update, check_subscribed_topic_regex,
+            reported_owned, try_build_member, update_member_state,
+        },
+        pending_records::PendingRecords,
+        persistence::{Recorder, current_assignment_value, flush_pending, target_assignment_value},
+        regex_resolution::{
+            RegexResolution, Resolutions, apply_regex_result, delete_unsubscribed_regexes,
+        },
     },
-    pending_records::PendingRecords,
-    persistence::{Recorder, current_assignment_value, flush_pending, target_assignment_value},
-    regex_resolution::{
-        RegexResolution, Resolutions, apply_regex_result, delete_unsubscribed_regexes,
+    crate::{
+        codes,
+        coordinator::unified::{
+            ClientIdentity,
+            config::NextGenConfig,
+            consumer_state::GroupState,
+            first_join_member_id,
+            group::{CoordinatorGroup, GroupKind},
+            migration, reconciler,
+            regex_resolver::TopicRegexResolver,
+            registry::consumer_group_not_found,
+        },
+        error::BrokerError,
     },
-};
-use crate::{
-    codes,
-    coordinator::unified::{
-        ClientIdentity,
-        config::NextGenConfig,
-        consumer_state::GroupState,
-        first_join_member_id,
-        group::{CoordinatorGroup, GroupKind},
-        migration, reconciler,
-        regex_resolver::TopicRegexResolver,
-        registry::consumer_group_not_found,
+    krabka_protocol::owned::{
+        consumer_group_heartbeat_request::ConsumerGroupHeartbeatRequest,
+        consumer_group_heartbeat_response::{
+            Assignment as RespAssignment, ConsumerGroupHeartbeatResponse,
+        },
     },
-    error::BrokerError,
+    std::time::Instant,
+    tokio::sync::oneshot,
 };
 
 mod identity;
@@ -598,9 +598,7 @@ fn base_resp(error_code: ErrorCode, member_epoch: i32) -> ConsumerGroupHeartbeat
     }
 }
 
-fn error_resp(error_code: ErrorCode) -> ConsumerGroupHeartbeatResponse {
-    base_resp(error_code, 0)
-}
+fn error_resp(error_code: ErrorCode) -> ConsumerGroupHeartbeatResponse { base_resp(error_code, 0) }
 
 /// The `INVALID_REGULAR_EXPRESSION` (128) rejection Kafka answers to a
 /// heartbeat whose `SubscribedTopicRegex` does not compile. Kafka carries the

@@ -6,12 +6,13 @@
 //! `block_in_place`, `spawn_blocking` or the calling thread by runtime and
 //! target, so callers on the produce and flusher paths can stay `async`.
 
-use krabka_ids::Offset;
-
-use super::{BatchBytes, read_log_batches_exact};
-use crate::{
-    blocking::run_blocking, error::BrokerError, partition_writer::storage_failure_error,
-    wal::quorum::log_view::ShardLog,
+use {
+    super::{BatchBytes, read_log_batches_exact},
+    crate::{
+        blocking::run_blocking, error::BrokerError, partition_writer::storage_failure_error,
+        wal::quorum::log_view::ShardLog,
+    },
+    krabka_ids::Offset,
 };
 
 pub(in crate::wal::quorum) async fn sync_replica(
@@ -61,11 +62,11 @@ pub(super) fn sync_replica_blocking(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use krabka_log::{Log, LogConfig};
-
-    use super::*;
+    use {
+        super::*,
+        krabka_log::{Log, LogConfig},
+        std::sync::{Arc, Mutex},
+    };
 
     #[test]
     fn sync_replica_verifies_an_existing_batch() {

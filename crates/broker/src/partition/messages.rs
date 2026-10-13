@@ -2,17 +2,17 @@
 //! outcome types they carry. They live apart from the partition handle because
 //! a request handler builds one without holding that handle.
 
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
+use {
+    crate::error::BrokerError,
+    krabka_compression::CompressionType,
+    krabka_log::{Log, Offset, VerbatimBatch},
+    krabka_protocol::records::RecordBatch,
+    std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
+    tokio::sync::oneshot,
 };
-
-use krabka_compression::CompressionType;
-use krabka_log::{Log, Offset, VerbatimBatch};
-use krabka_protocol::records::RecordBatch;
-use tokio::sync::oneshot;
-
-use crate::error::BrokerError;
 
 /// The records to append for a single produce job. This is either the
 /// producer's verbatim wire bytes (zero-copy passthrough fast path) or a fully
@@ -271,9 +271,7 @@ pub enum SwapOutcome {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
+    use {super::*, assert2::check};
 
     #[test]
     fn commit_marker_record_count_uses_batch_offset_span() {

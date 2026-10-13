@@ -3,10 +3,7 @@
 //! The bounds sit next to the assertions that prove a run was exhaustive,
 //! because a truncated search proves nothing and the two must move together.
 
-use stateright::Checker;
-
-use super::model::ClientServerFailoverModel;
-use crate::model_check::run_bfs;
+use {super::model::ClientServerFailoverModel, crate::model_check::run_bfs, stateright::Checker};
 
 const MAX_DEPTH: usize = 36;
 const MAX_STATES: usize = 120_000;

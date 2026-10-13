@@ -5,15 +5,16 @@
 //! The relayed variant that leaves every broker running and cuts the network
 //! instead is `LinkedCluster`, in the `linked` module.
 
-use krabka_broker::{BrokerConfig, BrokerHandle};
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-use tempfile::TempDir;
-
-use crate::{
-    NODE_A,
-    produce::initialize_sites,
-    profile::{apply_stretch_config, wait_for_stretch_metadata},
-    support, within,
+use {
+    crate::{
+        NODE_A,
+        produce::initialize_sites,
+        profile::{apply_stretch_config, wait_for_stretch_metadata},
+        support, within,
+    },
+    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    tempfile::TempDir,
 };
 
 /// A running three-site cluster. Handles are taken out as sites are stopped,
@@ -58,9 +59,7 @@ impl Cluster {
             .unwrap_or_else(|| panic!("broker {index} is still running"))
     }
 
-    pub fn addr(&self, index: usize) -> String {
-        self.configs[index].listen_addr.to_string()
-    }
+    pub fn addr(&self, index: usize) -> String { self.configs[index].listen_addr.to_string() }
 
     /// Lose a site: stop its broker and let it leave the cluster.
     pub async fn stop(&mut self, index: usize) {

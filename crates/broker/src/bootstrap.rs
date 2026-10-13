@@ -11,14 +11,14 @@
 //!   [`u32_le` length][serde_wincode-encoded MetadataRecord]
 //! repeated until EOF.
 
-use std::path::{Path, PathBuf};
-
-use krabka_format::{ClusterId, DirectoryId, META_PROPERTIES, MetaProperties};
-use krabka_metadata::MetadataRecord;
-use serde_wincode::SerdeCompat;
-use wincode::Deserialize;
-
-use crate::{NodeId, error::BrokerError};
+use {
+    crate::{NodeId, error::BrokerError},
+    krabka_format::{ClusterId, DirectoryId, META_PROPERTIES, MetaProperties},
+    krabka_metadata::MetadataRecord,
+    serde_wincode::SerdeCompat,
+    std::path::{Path, PathBuf},
+    wincode::Deserialize,
+};
 
 /// The identity of this node that its metadata log directory records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -382,12 +382,13 @@ pub fn load_bootstrap_records(log_dir: &Path) -> Result<Vec<MetadataRecord>, Bro
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_metadata::ScramCredentialRecord;
-    use krabka_security::SaslMechanism;
-
-    use super::*;
-    use crate::test_support::write_bootstrap_records;
+    use {
+        super::*,
+        crate::test_support::write_bootstrap_records,
+        assert2::{assert, check},
+        krabka_metadata::ScramCredentialRecord,
+        krabka_security::SaslMechanism,
+    };
 
     /// The metadata partition may sit in the metadata log directory, whether
     /// or not that is a data directory, and in no data directory besides.
@@ -480,17 +481,14 @@ mod tests {
             kraft_version: krabka_metadata::KRaftVersionRange::default(),
         }]);
         // Frame the records exactly like `krabka format` does.
-        write_bootstrap_records(
-            dir.path(),
-            &[
-                MetadataRecord::V1KRaftVersion(krabka_metadata::KRaftVersionRecord {
-                    kraft_version: 1,
-                }),
-                MetadataRecord::V1Voters(VotersRecord {
-                    voters: seeded.clone(),
-                }),
-            ],
-        );
+        write_bootstrap_records(dir.path(), &[
+            MetadataRecord::V1KRaftVersion(krabka_metadata::KRaftVersionRecord {
+                kraft_version: 1,
+            }),
+            MetadataRecord::V1Voters(VotersRecord {
+                voters: seeded.clone(),
+            }),
+        ]);
 
         let records = load_bootstrap_records(dir.path()).unwrap();
         assert!(records.len() == 2);

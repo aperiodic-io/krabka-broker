@@ -4,21 +4,21 @@
 //! lookup asks the remote tier first, then compares overlapping local records
 //! so an upload gap cannot hide an earlier match.
 
-use std::{future::Future, time::Duration};
-
-use krabka_ids::Offset;
-use krabka_remote_storage::{RemoteStorageError, TopicIdPartition};
-use krabka_units::prelude::ByteSizeExt;
-use krabka_verified::list_offsets::earliest_timestamp_candidate;
-use tokio::time::Instant;
-
-use super::{
-    remote::await_remote,
-    sentinels::{UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
-};
-use crate::{
-    broker::Broker, codes, diskless::read::DisklessReadHandle, partition::Partition,
-    remote_reader::RemoteReader,
+use {
+    super::{
+        remote::await_remote,
+        sentinels::{UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
+    },
+    crate::{
+        broker::Broker, codes, diskless::read::DisklessReadHandle, partition::Partition,
+        remote_reader::RemoteReader,
+    },
+    krabka_ids::Offset,
+    krabka_remote_storage::{RemoteStorageError, TopicIdPartition},
+    krabka_units::prelude::ByteSizeExt,
+    krabka_verified::list_offsets::earliest_timestamp_candidate,
+    std::{future::Future, time::Duration},
+    tokio::time::Instant,
 };
 
 /// Resolve a positive request timestamp to `(offset, record timestamp)`, or to
@@ -208,21 +208,22 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::BytesMut;
-    use krabka_protocol::owned::list_offsets_response::ListOffsetsPartitionResponse;
-    use krabka_remote_storage::{
-        LogSegmentData, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
-        RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, TopicIdPartition,
-    };
-
-    use super::*;
-    use crate::{
-        broker::{Broker, BrokerHandle},
-        codes,
-        handlers::list_offsets::test_support::{list_one, remote_topic},
-        partition::{Partition, test_support::test_partition},
-        remote_reader::RemoteReader,
+    use {
+        super::*,
+        crate::{
+            broker::{Broker, BrokerHandle},
+            codes,
+            handlers::list_offsets::test_support::{list_one, remote_topic},
+            partition::{Partition, test_support::test_partition},
+            remote_reader::RemoteReader,
+        },
+        assert2::assert,
+        bytes::BytesMut,
+        krabka_protocol::owned::list_offsets_response::ListOffsetsPartitionResponse,
+        krabka_remote_storage::{
+            LogSegmentData, RemoteLogSegmentDetails, RemoteLogSegmentId, RemoteLogSegmentMetadata,
+            RemoteLogSegmentMetadataUpdate, RemoteLogSegmentState, TopicIdPartition,
+        },
     };
 
     struct BrokerPartition {
@@ -267,9 +268,10 @@ mod tests {
     /// through would come back as that match.
     #[tokio::test]
     async fn a_record_the_remote_tier_refuses_answers_invalid_record_and_not_the_local_match() {
-        use std::sync::{Arc, Mutex};
-
-        use krabka_protocol::records::{Record, RecordBatch};
+        use {
+            krabka_protocol::records::{Record, RecordBatch},
+            std::sync::{Arc, Mutex},
+        };
 
         let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
         {
@@ -347,12 +349,12 @@ mod tests {
         }
     }
 
-    use std::ops::RangeInclusive;
-
-    use krabka_ids::Offset;
-    use krabka_units::{ByteSize, bytes};
-
-    use crate::test_support::UnixMillis;
+    use {
+        crate::test_support::UnixMillis,
+        krabka_ids::Offset,
+        krabka_units::{ByteSize, bytes},
+        std::ops::RangeInclusive,
+    };
 
     #[derive(krabka_macros::FieldDefaults)]
     struct TimestampSegmentSetup {
@@ -415,10 +417,11 @@ mod tests {
 
     #[tokio::test]
     async fn archived_timestamp_survives_reopen_and_respects_a_checkpointed_delete_floor() {
-        use krabka_log::{Log, LogConfig};
-        use krabka_protocol::records::{Record, RecordBatch};
-
-        use crate::remote_log_manager::{ProducerSnapshotExport, export_segment_data};
+        use {
+            crate::remote_log_manager::{ProducerSnapshotExport, export_segment_data},
+            krabka_log::{Log, LogConfig},
+            krabka_protocol::records::{Record, RecordBatch},
+        };
 
         const TOPIC: &str = "timestamp-reopened-archive";
         let topic = remote_partition_topic(TOPIC).await;
@@ -438,13 +441,10 @@ mod tests {
                 last_offset_delta: 1,
                 base_timestamp: timestamp,
                 max_timestamp: timestamp,
-                records: vec![
-                    Record::default(),
-                    Record {
-                        offset_delta: 1,
-                        ..Record::default()
-                    },
-                ],
+                records: vec![Record::default(), Record {
+                    offset_delta: 1,
+                    ..Record::default()
+                }],
                 ..RecordBatch::default()
             })
             .unwrap();
@@ -461,16 +461,12 @@ mod tests {
             let data = export_segment_data(&export, ProducerSnapshotExport::Include, || {
                 bytes::Bytes::from_static(b"0\n1\n0 0\n")
             });
-            copy_timestamp_segment(
-                reader,
-                &data,
-                TimestampSegmentSetup {
-                    topic_partition: TopicIdPartition::new(id, TOPIC, 0),
-                    bounds: export.base_offset..=export.last_offset,
-                    size: export.size,
-                    ..TimestampSegmentSetup::default()
-                },
-            );
+            copy_timestamp_segment(reader, &data, TimestampSegmentSetup {
+                topic_partition: TopicIdPartition::new(id, TOPIC, 0),
+                bounds: export.base_offset..=export.last_offset,
+                size: export.size,
+                ..TimestampSegmentSetup::default()
+            });
         }
         log.delete_local_segments_through(Offset(4)).unwrap();
         drop(log);
@@ -518,8 +514,10 @@ mod tests {
 
     #[tokio::test]
     async fn positive_timestamp_wire_response_returns_exact_remote_record() {
-        use bytes::Bytes;
-        use krabka_protocol::records::{Record, RecordBatch};
+        use {
+            bytes::Bytes,
+            krabka_protocol::records::{Record, RecordBatch},
+        };
 
         const TOPIC: &str = "list-offsets-remote-timestamp";
 

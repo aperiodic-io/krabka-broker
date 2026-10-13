@@ -60,9 +60,7 @@ group_record_keys! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
+    use {super::*, assert2::assert};
 
     /// `ConsumerGroupPartitionMetadataKey`: an `i16` key version of 4, then
     /// the group id as a non-flexible string.

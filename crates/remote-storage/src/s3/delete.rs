@@ -5,12 +5,13 @@
 //! nothing else. A WORM archive never reaches the sweep, because a store that
 //! is never asked cannot be talked into obliging.
 
-use krabka_object_store::{ObjectOps, ObjectStoreError};
-
-use super::S3RemoteStorage;
-use crate::{
-    error::RemoteStorageError, metadata::RemoteLogSegmentMetadata,
-    storage_manager::segment_suffixes, worm::WormError,
+use {
+    super::S3RemoteStorage,
+    crate::{
+        error::RemoteStorageError, metadata::RemoteLogSegmentMetadata,
+        storage_manager::segment_suffixes, worm::WormError,
+    },
+    krabka_object_store::{ObjectOps, ObjectStoreError},
 };
 
 impl S3RemoteStorage {
@@ -42,18 +43,19 @@ impl S3RemoteStorage {
 #[cfg(test)]
 mod tests {
 
-    use assert2::{assert, check};
-    use krabka_object_store::fault::StoreOp;
-    use tempfile::TempDir;
-
-    use super::{ObjectOps, RemoteStorageError, S3RemoteStorage, WormError};
-    use crate::{
-        s3::test_support::{
-            SeededCopySetup, StampedMetadataSetup, counting_rsm, memory_worm_archive, rsm,
-            sample_data, sample_metadata, seeded_blocking, stamped_metadata,
+    use {
+        super::{ObjectOps, RemoteStorageError, S3RemoteStorage, WormError},
+        crate::{
+            s3::test_support::{
+                SeededCopySetup, StampedMetadataSetup, counting_rsm, memory_worm_archive, rsm,
+                sample_data, sample_metadata, seeded_blocking, stamped_metadata,
+            },
+            storage_manager::{IndexType, RemoteStorageManager},
+            test_support::TransactionIndex,
         },
-        storage_manager::{IndexType, RemoteStorageManager},
-        test_support::TransactionIndex,
+        assert2::{assert, check},
+        krabka_object_store::fault::StoreOp,
+        tempfile::TempDir,
     };
 
     /// Every key the backing store currently holds, sorted.

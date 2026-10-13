@@ -17,10 +17,7 @@
 //! bit layout of the `attributes` byte and its compression mapping, `encode`
 //! sizes and writes a message, and `decode` parses one frame back.
 
-use bytes::Bytes;
-use krabka_compression::CompressionType;
-
-use crate::error::LegacyRecordsError;
+use {crate::error::LegacyRecordsError, bytes::Bytes, krabka_compression::CompressionType};
 
 mod attributes;
 mod decode;

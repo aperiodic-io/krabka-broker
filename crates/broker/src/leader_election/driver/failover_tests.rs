@@ -3,21 +3,22 @@
 //! level-triggered sweep that re-drives a failover the edge could not
 //! complete and then stops walking the image once nothing is stuck.
 
-use assert2::assert;
-use krabka_metadata::{LeaderEpoch, PartitionRecord};
-
-use super::*;
-use crate::{
-    heartbeat::controller_state::{LivenessTransition, TestClock},
-    leader_election::test_support::{
-        ElectionSetup, ExpectedPartitionSetup, expected_partition, fake_source, img_with_partition,
-        liveness_with_alive, liveness_with_dead, one_partition_change, recovery_handle_for_tests,
-        register_brokers, stalled_fake_source,
+use {
+    super::*,
+    crate::{
+        heartbeat::controller_state::{LivenessTransition, TestClock},
+        leader_election::test_support::{
+            ElectionSetup, ExpectedPartitionSetup, expected_partition, fake_source,
+            img_with_partition, liveness_with_alive, liveness_with_dead, one_partition_change,
+            recovery_handle_for_tests, register_brokers, stalled_fake_source,
+        },
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        test_support::FakeMetadataSource,
+        unclean_recovery::UncleanRecoveryHandle,
     },
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    test_support::FakeMetadataSource,
-    unclean_recovery::UncleanRecoveryHandle,
+    assert2::assert,
+    krabka_metadata::{LeaderEpoch, PartitionRecord},
 };
 
 struct SweepFixture {

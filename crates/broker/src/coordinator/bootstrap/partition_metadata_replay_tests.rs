@@ -6,15 +6,17 @@
 //! the log does not hold. A value that does not decode, or whose version is
 //! not 0, fails the load.
 
-use assert2::check;
-use bytes::Bytes;
-
-use super::test_support::replay_log;
-use crate::coordinator::unified::{
-    GroupSeed,
-    persistence_next_gen::{
-        GroupMetadataValue, NextGenKey, PartitionMetadataValue, SubscribedTopicMetadata, encode_key,
+use {
+    super::test_support::replay_log,
+    crate::coordinator::unified::{
+        GroupSeed,
+        persistence_next_gen::{
+            GroupMetadataValue, NextGenKey, PartitionMetadataValue, SubscribedTopicMetadata,
+            encode_key,
+        },
     },
+    assert2::check,
+    bytes::Bytes,
 };
 
 /// One replayed record: its key, and its value or `None` for a tombstone.
@@ -31,17 +33,11 @@ enum Outcome {
     Group(Box<GroupSeed>),
 }
 
-fn key(kind: fn(String) -> NextGenKey) -> Bytes {
-    encode_key(&kind("g".into())).unwrap()
-}
+fn key(kind: fn(String) -> NextGenKey) -> Bytes { encode_key(&kind("g".into())).unwrap() }
 
-fn partition_metadata(group_id: String) -> NextGenKey {
-    NextGenKey::PartitionMetadata { group_id }
-}
+fn partition_metadata(group_id: String) -> NextGenKey { NextGenKey::PartitionMetadata { group_id } }
 
-fn group_metadata(group_id: String) -> NextGenKey {
-    NextGenKey::GroupMetadata { group_id }
-}
+fn group_metadata(group_id: String) -> NextGenKey { NextGenKey::GroupMetadata { group_id } }
 
 fn value() -> Bytes {
     PartitionMetadataValue {

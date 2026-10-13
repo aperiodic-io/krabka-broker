@@ -1,16 +1,16 @@
 //! The first compaction pass. It builds the key-to-newest-offset dedup map
 //! over the sealed segments, before any rewrite starts.
 
-use std::collections::HashMap;
-
-use bytes::Bytes;
-use krabka_ids::Offset;
-use krabka_units::prelude::ByteSize;
-use tracing::instrument;
-
-use super::{CleanedTransactionMetadata, batch_reader::read_all_batches, should_index_key};
-use crate::{
-    error::LogError, record_limit::check_records_read, segment::Segment, txn_index::AbortedTxn,
+use {
+    super::{CleanedTransactionMetadata, batch_reader::read_all_batches, should_index_key},
+    crate::{
+        error::LogError, record_limit::check_records_read, segment::Segment, txn_index::AbortedTxn,
+    },
+    bytes::Bytes,
+    krabka_ids::Offset,
+    krabka_units::prelude::ByteSize,
+    std::collections::HashMap,
+    tracing::instrument,
 };
 
 /// Build a map of `key → latest absolute offset` across the given sealed
@@ -78,18 +78,19 @@ pub fn build_offset_map(
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use krabka_ids::Offset;
-    use krabka_protocol::records::{Attributes, RecordBatch};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::{
-        ProducerId,
-        compact::test_support::{
-            TransactionalRecordSetup, control_batch, make_record, superseded_records,
-            transactional_record, write_sealed_batches, write_sealed_segment,
+    use {
+        super::*,
+        crate::{
+            ProducerId,
+            compact::test_support::{
+                TransactionalRecordSetup, control_batch, make_record, superseded_records,
+                transactional_record, write_sealed_batches, write_sealed_segment,
+            },
         },
+        bytes::Bytes,
+        krabka_ids::Offset,
+        krabka_protocol::records::{Attributes, RecordBatch},
+        tempfile::tempdir,
     };
 
     fn offset_map_for(segments: &[&Segment], aborted: Vec<AbortedTxn>) -> HashMap<Bytes, Offset> {
@@ -144,16 +145,16 @@ mod tests {
     #[test]
     fn build_offset_map_across_segments_uses_newest() {
         let dir = tempdir().unwrap();
-        let first_segment = write_sealed_segment(
-            dir.path(),
+        let first_segment = write_sealed_segment(dir.path(), 0, vec![make_record(
             0,
-            vec![make_record(0, Some(b"k1"), Some(b"v1"))],
-        );
-        let second_segment = write_sealed_segment(
-            dir.path(),
-            10,
-            vec![make_record(0, Some(b"k1"), Some(b"v2"))],
-        );
+            Some(b"k1"),
+            Some(b"v1"),
+        )]);
+        let second_segment = write_sealed_segment(dir.path(), 10, vec![make_record(
+            0,
+            Some(b"k1"),
+            Some(b"v2"),
+        )]);
         let map = offset_map_for(&[&first_segment, &second_segment], vec![]);
         assert2::assert!(map == maplit::hashmap! {Bytes::from_static(b"k1") => Offset(10)});
     }
@@ -166,28 +167,25 @@ mod tests {
     #[test]
     fn an_aborted_batch_never_enters_the_map() {
         let dir = tempdir().unwrap();
-        let seg = write_sealed_batches(
-            dir.path(),
-            &[
-                transactional_record(TransactionalRecordSetup {
-                    offset: Offset(5),
-                    payload: (b"k", b"committed"),
-                    ..Default::default()
-                }),
-                control_batch(6, 1000, 1 /* COMMIT */),
-                transactional_record(TransactionalRecordSetup {
-                    offset: Offset(10),
-                    producer: ProducerId(2000),
-                    payload: (b"k", b"aborted"),
-                }),
-                transactional_record(TransactionalRecordSetup {
-                    offset: Offset(11),
-                    producer: ProducerId(2000),
-                    payload: (b"only-aborted", b"v"),
-                }),
-                control_batch(12, 2000, 0 /* ABORT */),
-            ],
-        );
+        let seg = write_sealed_batches(dir.path(), &[
+            transactional_record(TransactionalRecordSetup {
+                offset: Offset(5),
+                payload: (b"k", b"committed"),
+                ..Default::default()
+            }),
+            control_batch(6, 1000, 1 /* COMMIT */),
+            transactional_record(TransactionalRecordSetup {
+                offset: Offset(10),
+                producer: ProducerId(2000),
+                payload: (b"k", b"aborted"),
+            }),
+            transactional_record(TransactionalRecordSetup {
+                offset: Offset(11),
+                producer: ProducerId(2000),
+                payload: (b"only-aborted", b"v"),
+            }),
+            control_batch(12, 2000, 0 /* ABORT */),
+        ]);
         let aborted = vec![crate::test_support::aborted_txn(
             crate::test_support::AbortedTxnSetup {
                 producer: ProducerId(2000),

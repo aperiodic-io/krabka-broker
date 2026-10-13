@@ -8,14 +8,14 @@
 //! two states that carry the same tick carry the same instant and the state
 //! fingerprint stays canonical.
 
-use std::{
-    sync::OnceLock,
-    time::{Duration, Instant},
+use {
+    crate::coordinator::unified::classic_state::Member,
+    bytes::Bytes,
+    std::{
+        sync::OnceLock,
+        time::{Duration, Instant},
+    },
 };
-
-use bytes::Bytes;
-
-use crate::coordinator::unified::classic_state::Member;
 
 fn epoch() -> Instant {
     static EPOCH: OnceLock<Instant> = OnceLock::new();
@@ -29,14 +29,10 @@ pub(super) fn at(clock: i64) -> Instant {
 }
 
 pub(super) fn mk_member(mid: &str, iid: Option<&str>, clock: i64) -> Member {
-    let mut m = Member::new(
-        mid,
-        "c",
-        "h",
-        SESSION,
-        Duration::from_secs(10),
-        vec![("range".to_string(), Bytes::new())],
-    )
+    let mut m = Member::new(mid, "c", "h", SESSION, Duration::from_secs(10), vec![(
+        "range".to_string(),
+        Bytes::new(),
+    )])
     .with_instance_id(iid.map(str::to_string));
     m.last_heartbeat = at(clock);
     m

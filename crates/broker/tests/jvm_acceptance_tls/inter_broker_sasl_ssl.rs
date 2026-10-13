@@ -7,12 +7,13 @@
 //! longest case in the suite and the only one that asserts rf=2, so it stands
 //! apart from the `SASL_PLAINTEXT` variant it otherwise resembles.
 
-use krabka_security::ListenerProtocol;
-
-use crate::jvm_acceptance::{
-    ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, assert_console_produced,
-    nc_check_connectivity, numbered_payload, prepare_jks_truststore, produce_console,
-    provision_ssl_topic, start_two_sasl_ssl_brokers_with_controller_protocol,
+use {
+    crate::jvm_acceptance::{
+        ADMIN, ADMIN_PASS, ALICE, ALICE_PASS, KAFKA_IMAGE_TXN, assert_console_produced,
+        nc_check_connectivity, numbered_payload, prepare_jks_truststore, produce_console,
+        provision_ssl_topic, start_two_sasl_ssl_brokers_with_controller_protocol,
+    },
+    krabka_security::ListenerProtocol,
 };
 
 /// Two-broker `SASL_SSL` cluster with `controller_listener_protocol =

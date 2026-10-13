@@ -20,13 +20,13 @@
 //! Both brokers are plaintext and neither has a principal to authenticate, so
 //! unlike the rest of this suite the invocation needs no client configuration.
 
-use std::collections::BTreeSet;
-
-use assert2::assert;
-
-use crate::{
-    acl_output::parse_acls,
-    oracle::{CliRun, OracleComparison},
+use {
+    crate::{
+        acl_output::parse_acls,
+        oracle::{CliRun, OracleComparison},
+    },
+    assert2::assert,
+    std::collections::BTreeSet,
 };
 
 /// The package every Kafka client-facing exception is rendered under. The
@@ -67,10 +67,11 @@ async fn acl_list_is_refused_as_apache_kafka_refuses_it_with_no_authorizer() {
 
     let mut refusals: Vec<BTreeSet<String>> = Vec::new();
     for side in [&oracle_side, &krabka_side] {
-        let listed = side.run(
-            "kafka-acls",
-            &["--bootstrap-server", side.bootstrap(), "--list"],
-        );
+        let listed = side.run("kafka-acls", &[
+            "--bootstrap-server",
+            side.bootstrap(),
+            "--list",
+        ]);
         assert!(
             !listed.succeeded(),
             "{}: --list must be refused when no authorizer is configured:\n{}",

@@ -13,15 +13,15 @@
 //! The test is gated to non-Windows to match the multi-broker convention established by the existing integration suites.`debug_assert!` races on the hosted Windows
 //! task scheduler are unrelated to the protocol under test.
 
-use std::{net::SocketAddr, time::Duration};
-
-use assert2::assert;
-use krabka_broker::BrokerHandle;
-use krabka_metadata::NodeId as MetadataNodeId;
-
-use crate::support::{
-    registered_cluster, shutdown_cluster,
-    topics::{CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor},
+use {
+    crate::support::{
+        registered_cluster, shutdown_cluster,
+        topics::{CreateTopicSetup, TopicPartitionCount, TopicReplicationFactor},
+    },
+    assert2::assert,
+    krabka_broker::BrokerHandle,
+    krabka_metadata::NodeId as MetadataNodeId,
+    std::{net::SocketAddr, time::Duration},
 };
 
 mod kafka_wire;
@@ -143,15 +143,12 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
     let addr = cluster[raft_leader_idx].1.listen_addr;
     let topic: &str = "drain-me";
     let partitions: i32 = 4;
-    create_topic(
-        addr,
-        CreateTopicSetup {
-            topic,
-            num_partitions: TopicPartitionCount(partitions),
-            replication_factor: TopicReplicationFactor(3),
-            ..Default::default()
-        },
-    )
+    create_topic(addr, CreateTopicSetup {
+        topic,
+        num_partitions: TopicPartitionCount(partitions),
+        replication_factor: TopicReplicationFactor(3),
+        ..Default::default()
+    })
     .await;
     for p in 0..partitions {
         for (h, _, _) in &cluster {
@@ -166,19 +163,16 @@ async fn controlled_shutdown_drains_leadership_and_returns_ok() {
     let mut replicas: Vec<u64> = (1..=3).collect();
     // Put target first so its `replicas[0]` is itself (preferred).
     replicas.sort_by_key(|n| i32::from(*n != target_node_id));
-    force_leadership_for_test(
-        &cluster[raft_leader_idx].0,
-        ForcedLeadershipSetup {
-            topic,
-            partitions: TopicPartitionCount(partitions),
-            leader: krabka_metadata::NodeId(target_node_id.0),
-            replicas: replicas
-                .iter()
-                .copied()
-                .map(krabka_metadata::NodeId)
-                .collect(),
-        },
-    )
+    force_leadership_for_test(&cluster[raft_leader_idx].0, ForcedLeadershipSetup {
+        topic,
+        partitions: TopicPartitionCount(partitions),
+        leader: krabka_metadata::NodeId(target_node_id.0),
+        replicas: replicas
+            .iter()
+            .copied()
+            .map(krabka_metadata::NodeId)
+            .collect(),
+    })
     .await;
 
     // Sanity: target leads everything before we start. Use the raft

@@ -51,10 +51,11 @@ pub fn parse_quorum_voter(entry: &str) -> Result<(krabka_raft::NodeId, String), 
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::file_config::{FileConfig, test_support::configured_unwrap_parse};
+    use {
+        super::*,
+        crate::file_config::{FileConfig, test_support::configured_unwrap_parse},
+        assert2::assert,
+    };
 
     #[test]
     fn quorum_voters_keep_wire_order_and_hosts_without_dns_resolution() {

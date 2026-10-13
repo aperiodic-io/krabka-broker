@@ -29,58 +29,58 @@
 //!   misses feed `Event::FetchTimeout` to start an election;
 //! - the leader re-broadcasts `BeginQuorumEpoch` to voters each heartbeat tick.
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
-
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use krabka_ids::Offset;
-use krabka_metadata::{
-    MetadataImage, MetadataRecord, VoterSet, VotersRecord, from_kraft_value, to_kraft_values,
-};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{
-        k_raft_version_record::KRaftVersionRecord as WireKRaftVersionRecord,
-        voters_record::{
-            Endpoint as WireVoterEndpoint, KRaftVersionFeature as WireKRaftVersionFeature,
-            Voter as WireVoter, VotersRecord as WireVotersRecord,
+use {
+    crate::{
+        OffsetReservation, SubmitChangeResult,
+        config::{
+            ControllerFetchMissLimit, DEFAULT_METADATA_RAFT_FETCH_MAX, MetadataLogConfig,
+            MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax,
+        },
+        error::{MetadataReplayError, RaftError},
+        kraft::{
+            action::{Action, TimerKind},
+            core::QuorumStateMachine,
+            event::{Event, LogEnd},
+            log::KraftLog,
+            role::{ReplicaProgress, Role},
+            snapshot_fetch::{MetadataSnapshotFetchMax, SnapshotFetchState, SnapshotFetchStep},
+            transport::{
+                Command, Inbound, MetadataFetchSlice, PeerSender, QuorumStateSnapshot, TimerTick,
+                api_key, wire,
+            },
+            types::{Epoch, LogView, NodeId, QuorumState, ReplicaKey, SimInstant},
+        },
+        reconfig::ReconfigOutcome,
+    },
+    base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD},
+    krabka_ids::Offset,
+    krabka_metadata::{
+        MetadataImage, MetadataRecord, VoterSet, VotersRecord, from_kraft_value, to_kraft_values,
+    },
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            k_raft_version_record::KRaftVersionRecord as WireKRaftVersionRecord,
+            voters_record::{
+                Endpoint as WireVoterEndpoint, KRaftVersionFeature as WireKRaftVersionFeature,
+                Voter as WireVoter, VotersRecord as WireVotersRecord,
+            },
+        },
+        records::{
+            Record, RecordBatch,
+            metadata::control::{ControlRecord, ControlRecordType, control_record_key},
         },
     },
-    records::{
-        Record, RecordBatch,
-        metadata::control::{ControlRecord, ControlRecordType, control_record_key},
+    krabka_units::{
+        fmt::Human as _,
+        prelude::{ByteSize, Time, TimeExt as _},
     },
-};
-use krabka_units::{
-    fmt::Human as _,
-    prelude::{ByteSize, Time, TimeExt as _},
-};
-use tokio::{
-    sync::{mpsc, oneshot, watch},
-    time::{Duration, Instant},
-};
-use uuid::Uuid;
-
-use crate::{
-    OffsetReservation, SubmitChangeResult,
-    config::{
-        ControllerFetchMissLimit, DEFAULT_METADATA_RAFT_FETCH_MAX, MetadataLogConfig,
-        MetadataRaftCommandQueueCapacity, MetadataRaftFetchMax,
+    std::{collections::BTreeMap, path::PathBuf, sync::Arc},
+    tokio::{
+        sync::{mpsc, oneshot, watch},
+        time::{Duration, Instant},
     },
-    error::{MetadataReplayError, RaftError},
-    kraft::{
-        action::{Action, TimerKind},
-        core::QuorumStateMachine,
-        event::{Event, LogEnd},
-        log::KraftLog,
-        role::{ReplicaProgress, Role},
-        snapshot_fetch::{MetadataSnapshotFetchMax, SnapshotFetchState, SnapshotFetchStep},
-        transport::{
-            Command, Inbound, MetadataFetchSlice, PeerSender, QuorumStateSnapshot, TimerTick,
-            api_key, wire,
-        },
-        types::{Epoch, LogView, NodeId, QuorumState, ReplicaKey, SimInstant},
-    },
-    reconfig::ReconfigOutcome,
+    uuid::Uuid,
 };
 
 mod activation;

@@ -163,10 +163,11 @@ pub(crate) struct ControllerDialer {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::test_support::{VoterImageSetup, voter_image};
+    use {
+        super::*,
+        crate::test_support::{VoterImageSetup, voter_image},
+        assert2::assert,
+    };
 
     fn endpoints(named: &[(&str, &str, u16)]) -> Vec<krabka_metadata::VoterEndpoint> {
         named

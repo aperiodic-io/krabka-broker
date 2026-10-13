@@ -8,10 +8,11 @@
 //!
 //! [`InProcessMetadataEventLog::subscribe`]: super::InProcessMetadataEventLog
 
-use std::sync::Arc;
-
-use super::{InProcessInner, PartitionCursor};
-use crate::log::{AssignmentHandle, PartitionStart};
+use {
+    super::{InProcessInner, PartitionCursor},
+    crate::log::{AssignmentHandle, PartitionStart},
+    std::sync::Arc,
+};
 
 pub(super) struct InProcessAssignmentHandle {
     pub(super) inner: Arc<InProcessInner>,
@@ -68,13 +69,10 @@ impl AssignmentHandle for InProcessAssignmentHandle {
         // order: stream::select must not interleave a live record ahead of
         // undrained backlog.
         let next_live = i64::try_from(records.len()).expect("len fits in i64");
-        assigned.insert(
-            start.partition,
-            PartitionCursor {
-                next: next_live,
-                via_inject: true,
-            },
-        );
+        assigned.insert(start.partition, PartitionCursor {
+            next: next_live,
+            via_inject: true,
+        });
     }
 
     fn remove(&self, partition: i32) {
@@ -115,12 +113,13 @@ impl AssignmentHandle for InProcessAssignmentHandle {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use bytes::Bytes;
-    use futures_util::StreamExt;
-
-    use super::*;
-    use crate::log::{InProcessMetadataEventLog, MetadataEventLog};
+    use {
+        super::*,
+        crate::log::{InProcessMetadataEventLog, MetadataEventLog},
+        assert2::{assert, check},
+        bytes::Bytes,
+        futures_util::StreamExt,
+    };
 
     #[tokio::test]
     async fn add_mid_stream_delivers_backlog_then_live() {

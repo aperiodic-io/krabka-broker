@@ -9,40 +9,37 @@
 //! produce validates against it. A topic that overrides the key keeps its own
 //! value.
 
-use std::sync::Arc;
-
-use assert2::assert;
-use bytes::Bytes;
-use krabka_compression::CompressionType;
-use krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord};
-use krabka_protocol::{
-    owned::produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
-    records::{Attributes, Record, RecordBatch, RecordsPayload},
-};
-
-use crate::{
-    api_catalog::UnstableApiVersions,
-    authorizer::AllowAllAuthorizer,
-    broker::BrokerHandle,
-    codes,
-    handlers::test_support::{
-        ClientTopicSetup, create_topic as create_topic_from_test_support, produce_wire,
+use {
+    crate::{
+        api_catalog::UnstableApiVersions,
+        authorizer::AllowAllAuthorizer,
+        broker::BrokerHandle,
+        codes,
+        handlers::test_support::{
+            ClientTopicSetup, create_topic as create_topic_from_test_support, produce_wire,
+        },
+        test_support::{start_broker_no_audit_with, start_broker_with_authorizer_no_audit},
     },
-    test_support::{start_broker_no_audit_with, start_broker_with_authorizer_no_audit},
+    assert2::assert,
+    bytes::Bytes,
+    krabka_compression::CompressionType,
+    krabka_metadata::{BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord},
+    krabka_protocol::{
+        owned::produce_request::{PartitionProduceData, ProduceRequest, TopicProduceData},
+        records::{Attributes, Record, RecordBatch, RecordsPayload},
+    },
+    std::sync::Arc,
 };
 
 /// The `Produce` version these tests speak.
 const VERSION: i16 = 9;
 
 async fn create_topic(broker: &BrokerHandle, name: &str) {
-    create_topic_from_test_support(
-        broker,
-        ClientTopicSetup {
-            client_id: "broker-default-test",
-            name,
-            ..Default::default()
-        },
-    )
+    create_topic_from_test_support(broker, ClientTopicSetup {
+        client_id: "broker-default-test",
+        name,
+        ..Default::default()
+    })
     .await;
 }
 
@@ -130,14 +127,11 @@ async fn a_dynamic_message_max_bytes_governs_a_topic_that_sets_no_cap() {
     assert!(produce_error_code(&broker, "orders", batch).await == codes::NONE);
 
     // This node's own value wins over the cluster's.
-    set_broker_config(
-        &broker,
-        BrokerConfigSetup {
-            node,
-            value: "1100000",
-            ..Default::default()
-        },
-    )
+    set_broker_config(&broker, BrokerConfigSetup {
+        node,
+        value: "1100000",
+        ..Default::default()
+    })
     .await;
     assert!(produce_error_code(&broker, "orders", batch).await == codes::MESSAGE_TOO_LARGE);
 
@@ -170,28 +164,22 @@ async fn a_dynamic_max_decompressed_message_bytes_refuses_an_oversized_compresse
 
     // A cluster-wide 512 refuses the compressed record and not the small one,
     // and not the same record sent uncompressed.
-    set_broker_config(
-        &broker,
-        BrokerConfigSetup {
-            name: key,
-            value: "512",
-            ..Default::default()
-        },
-    )
+    set_broker_config(&broker, BrokerConfigSetup {
+        name: key,
+        value: "512",
+        ..Default::default()
+    })
     .await;
     assert!(gzip(record).await == codes::INVALID_RECORD);
     assert!(gzip(64).await == codes::NONE);
     assert!(produce_error_code(&broker, "orders", record).await == codes::NONE);
 
     // This node's own value wins over the cluster's.
-    set_broker_config(
-        &broker,
-        BrokerConfigSetup {
-            node,
-            name: key,
-            value: "8192",
-        },
-    )
+    set_broker_config(&broker, BrokerConfigSetup {
+        node,
+        name: key,
+        value: "8192",
+    })
     .await;
     assert!(gzip(record).await == codes::NONE);
 
@@ -204,14 +192,11 @@ async fn a_dynamic_max_decompressed_message_bytes_refuses_an_oversized_compresse
 async fn a_default_broker_ignores_max_decompressed_message_bytes() {
     let (broker, _dir) = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
     create_topic(&broker, "orders").await;
-    set_broker_config(
-        &broker,
-        BrokerConfigSetup {
-            name: "max.decompressed.message.bytes",
-            value: "512",
-            ..Default::default()
-        },
-    )
+    set_broker_config(&broker, BrokerConfigSetup {
+        name: "max.decompressed.message.bytes",
+        value: "512",
+        ..Default::default()
+    })
     .await;
 
     let code = produce_error_code_compressed(&broker, "orders", 4_096, CompressionType::Gzip).await;

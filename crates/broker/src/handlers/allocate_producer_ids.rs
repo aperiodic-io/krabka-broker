@@ -1,16 +1,17 @@
 //! `AllocateProducerIds` (`api_key=67`). Reserves one durable, cluster-wide
 //! producer-ID block for a registered broker.
 
-use krabka_metadata::NodeId;
-use krabka_protocol::owned::{
-    allocate_producer_ids_request::AllocateProducerIdsRequest,
-    allocate_producer_ids_response::AllocateProducerIdsResponse,
-};
-
-use crate::{
-    broker::Broker,
-    codes,
-    producer_id_manager::{ProducerIdAllocationError, allocate_block},
+use {
+    crate::{
+        broker::Broker,
+        codes,
+        producer_id_manager::{ProducerIdAllocationError, allocate_block},
+    },
+    krabka_metadata::NodeId,
+    krabka_protocol::owned::{
+        allocate_producer_ids_request::AllocateProducerIdsRequest,
+        allocate_producer_ids_response::AllocateProducerIdsResponse,
+    },
 };
 
 context_handler! {
@@ -83,10 +84,11 @@ async fn serve(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::test_support::{dispatch_wire, peer, principal, request_context};
+    use {
+        super::*,
+        crate::test_support::{dispatch_wire, peer, principal, request_context},
+        assert2::{assert, check},
+    };
 
     /// Serves a request as a principal that the default `AllowAllAuthorizer`
     /// allows.

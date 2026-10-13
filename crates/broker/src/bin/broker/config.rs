@@ -1,12 +1,12 @@
 //! The `BrokerConfig` the broker starts from, built out of the parsed command
 //! line.
 
-use std::net::SocketAddr;
-
-use krabka_broker::{BootstrapMode, BrokerConfig, file_config::FileConfig};
-use krabka_log::LogConfig;
-
-use crate::cli::Args;
+use {
+    crate::cli::Args,
+    krabka_broker::{BootstrapMode, BrokerConfig, file_config::FileConfig},
+    krabka_log::LogConfig,
+    std::net::SocketAddr,
+};
 
 /// Parse `--process-roles` string values into `NodeRole`s.
 pub fn parse_roles_arg(roles: &[String]) -> Result<Vec<krabka_broker::config::NodeRole>, String> {
@@ -140,11 +140,7 @@ impl Args {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use clap::Parser as _;
-
-    use super::*;
-    use crate::test_support::env_guard;
+    use {super::*, crate::test_support::env_guard, assert2::assert, clap::Parser as _};
 
     #[test]
     fn parse_roles_arg_maps_strings() {

@@ -1,10 +1,11 @@
-use assert2::assert;
-use proptest::prelude::*;
-
-use super::{
-    ProducerDecision, ProducerReloadRange, ProducerSnapshotEntryFacts,
-    loaded_snapshot_bounds_truncated_retry, oracle_next_producer_decision, oracle_retry_matches,
-    oracle_sequence as sequence, recovered_window_row as row,
+use {
+    super::{
+        ProducerDecision, ProducerReloadRange, ProducerSnapshotEntryFacts,
+        loaded_snapshot_bounds_truncated_retry, oracle_next_producer_decision,
+        oracle_retry_matches, oracle_sequence as sequence, recovered_window_row as row,
+    },
+    assert2::assert,
+    proptest::prelude::*,
 };
 
 type Row = ProducerSnapshotEntryFacts;

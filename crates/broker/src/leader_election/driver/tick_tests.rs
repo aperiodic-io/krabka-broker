@@ -4,22 +4,23 @@
 //! fencing state each tick publishes for the nodes that do not hold the
 //! registry.
 
-use assert2::assert;
-
-use super::*;
-use crate::{
-    heartbeat::{
-        controller_state::TestClock,
-        fencing::{RegistrationChange, registration_change},
+use {
+    super::*,
+    crate::{
+        heartbeat::{
+            controller_state::TestClock,
+            fencing::{RegistrationChange, registration_change},
+        },
+        leader_election::test_support::{
+            ElectionSetup, expected_clean_election, fencing_updates, img_with_partition,
+            one_partition_change, partition_batches, recovery_handle_for_tests, register_brokers,
+        },
+        metadata_source::MetadataSource,
+        metrics::BrokerMetrics,
+        test_support::FakeMetadataSource,
+        unclean_recovery::UncleanRecoveryHandle,
     },
-    leader_election::test_support::{
-        ElectionSetup, expected_clean_election, fencing_updates, img_with_partition,
-        one_partition_change, partition_batches, recovery_handle_for_tests, register_brokers,
-    },
-    metadata_source::MetadataSource,
-    metrics::BrokerMetrics,
-    test_support::FakeMetadataSource,
-    unclean_recovery::UncleanRecoveryHandle,
+    assert2::assert,
 };
 
 struct TickFixture {

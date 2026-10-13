@@ -5,9 +5,10 @@
 //! that a proposal nobody opened is refused rather than reported as an empty
 //! success.
 
-use assert2::check;
-
-use crate::support::{KEY_ID, REFUSED, cli, cluster, only_proposal};
+use {
+    crate::support::{KEY_ID, REFUSED, cli, cluster, only_proposal},
+    assert2::check,
+};
 
 /// The break-glass loop: open a proposal, read it back, fail to approve it
 /// alone, and withdraw it.
@@ -20,21 +21,18 @@ async fn the_break_glass_loop_runs_end_to_end() {
     let (_broker, _dir, bootstrap, key) = cluster().await;
 
     check!(
-        cli(
-            &bootstrap,
-            &[
-                "break-glass",
-                "propose",
-                "--action",
-                "delete-topic",
-                "--target",
-                "doomed",
-                "--reason",
-                "the topic holds test data only",
-                "--ttl",
-                "30m",
-            ],
-        )
+        cli(&bootstrap, &[
+            "break-glass",
+            "propose",
+            "--action",
+            "delete-topic",
+            "--target",
+            "doomed",
+            "--reason",
+            "the topic holds test data only",
+            "--ttl",
+            "30m",
+        ],)
         .await
             == 0,
         "propose"
@@ -47,10 +45,12 @@ async fn the_break_glass_loop_runs_end_to_end() {
 
     let proposal = only_proposal(&bootstrap).await.to_string();
     check!(
-        cli(
-            &bootstrap,
-            &["break-glass", "approve", "--proposal", &proposal],
-        )
+        cli(&bootstrap, &[
+            "break-glass",
+            "approve",
+            "--proposal",
+            &proposal
+        ],)
         .await
             == REFUSED,
         "the proposer cannot also approve"
@@ -58,29 +58,28 @@ async fn the_break_glass_loop_runs_end_to_end() {
     // The same refusal holds with a signature, because the distinct-principal
     // rule is checked before the signature is worth anything.
     check!(
-        cli(
-            &bootstrap,
-            &[
-                "break-glass",
-                "approve",
-                "--proposal",
-                &proposal,
-                "--sign-with",
-                key.pkcs8.to_str().expect("utf-8 path"),
-                "--key-id",
-                KEY_ID,
-            ],
-        )
+        cli(&bootstrap, &[
+            "break-glass",
+            "approve",
+            "--proposal",
+            &proposal,
+            "--sign-with",
+            key.pkcs8.to_str().expect("utf-8 path"),
+            "--key-id",
+            KEY_ID,
+        ],)
         .await
             == REFUSED,
         "a signed self-approval is still a self-approval"
     );
 
     check!(
-        cli(
-            &bootstrap,
-            &["break-glass", "withdraw", "--proposal", &proposal],
-        )
+        cli(&bootstrap, &[
+            "break-glass",
+            "withdraw",
+            "--proposal",
+            &proposal
+        ],)
         .await
             == 0,
         "the proposer may withdraw"
@@ -88,10 +87,12 @@ async fn the_break_glass_loop_runs_end_to_end() {
     // A withdrawn proposal is spent. Nothing can approve it afterwards, which
     // is what makes a withdraw worth having.
     check!(
-        cli(
-            &bootstrap,
-            &["break-glass", "approve", "--proposal", &proposal],
-        )
+        cli(&bootstrap, &[
+            "break-glass",
+            "approve",
+            "--proposal",
+            &proposal
+        ],)
         .await
             == REFUSED,
         "a withdrawn proposal cannot be approved"
@@ -105,19 +106,23 @@ async fn a_proposal_that_does_not_exist_is_refused() {
     let absent = uuid::Uuid::new_v4().to_string();
 
     check!(
-        cli(
-            &bootstrap,
-            &["break-glass", "approve", "--proposal", &absent],
-        )
+        cli(&bootstrap, &[
+            "break-glass",
+            "approve",
+            "--proposal",
+            &absent
+        ],)
         .await
             == REFUSED,
         "approve"
     );
     check!(
-        cli(
-            &bootstrap,
-            &["break-glass", "withdraw", "--proposal", &absent],
-        )
+        cli(&bootstrap, &[
+            "break-glass",
+            "withdraw",
+            "--proposal",
+            &absent
+        ],)
         .await
             == REFUSED,
         "withdraw"

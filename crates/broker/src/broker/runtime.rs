@@ -3,58 +3,61 @@
 //! gauges, maintenance, remote storage, and the config-driven watchers -- and
 //! collects their handles into one value the final assembly step consumes.
 
-use std::{net::SocketAddr, sync::Arc};
-
-use krabka_ids::PartitionIndex;
-use krabka_units::{Time, convert::TimeExt};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
-
-use super::inter_broker_listener_protocol;
-use crate::{
-    break_glass::{
-        metrics::record_proposal_states,
-        sweep::{
-            BreakGlassController, PROPOSAL_RETENTION, SWEEP_INTERVAL, run as run_break_glass_sweep,
+use {
+    super::inter_broker_listener_protocol,
+    crate::{
+        break_glass::{
+            metrics::record_proposal_states,
+            sweep::{
+                BreakGlassController, PROPOSAL_RETENTION, SWEEP_INTERVAL,
+                run as run_break_glass_sweep,
+            },
+        },
+        broker::{
+            DisklessRuntime,
+            adapters::ControllerAdapter,
+            audit::start_audit_pipeline,
+            gauges::spawn_broker_gauge_updater,
+            liveness::{LivenessStartup, start_liveness_services},
+            maintenance::{spawn_cluster_data_maintenance, spawn_storage_security_maintenance},
+            observability::{ObservabilityStartup, start_observability},
+            remote_storage::{RemoteStorageStartup, start_remote_storage},
+            replication::{ReplicatorStorage, spawn_replicator_supervisor},
+            rlmm::{KafkaSwapKickoff, kafka_swap_kickoff},
+        },
+        client_metrics::ClientMetrics,
+        config::BrokerConfig,
+        cordoned_log_dirs::spawn_watcher,
+        delegation_token_cleanup::{
+            DelegationTokenController, run as run_delegation_token_cleanup,
+        },
+        diskless::read::DisklessReadHandle,
+        error::BrokerError,
+        fetch_session::FetchSessionCache,
+        health::HealthState,
+        log_dir_id::LogDirIds,
+        log_dir_status::LogDirRegistry,
+        metadata_source::{MetadataSource, watch_image_loop},
+        metrics::{BrokerMetrics, spawn_metric_series_evictor},
+        network::client::InterBrokerClient,
+        partition_registry::PartitionRegistry,
+        producer_state::ProducerState,
+        quota::{QuotaBuckets, run as run_quota_refresh, run_expiry},
+        remote_reader::RemoteReader,
+        share_coordinator::coordinator::ShareCoordinator,
+        throttle::{ThrottleState, apply_image, run as run_throttle},
+        time_util::now_ms,
+        tls_reload::run as run_tls_reload,
+        txn::{
+            completion::run, coordinator::TxnCoordinator, expiration::run as run_txn_expiration,
+            id_expiration::run as run_txn_id_expiration,
         },
     },
-    broker::{
-        DisklessRuntime,
-        adapters::ControllerAdapter,
-        audit::start_audit_pipeline,
-        gauges::spawn_broker_gauge_updater,
-        liveness::{LivenessStartup, start_liveness_services},
-        maintenance::{spawn_cluster_data_maintenance, spawn_storage_security_maintenance},
-        observability::{ObservabilityStartup, start_observability},
-        remote_storage::{RemoteStorageStartup, start_remote_storage},
-        replication::{ReplicatorStorage, spawn_replicator_supervisor},
-        rlmm::{KafkaSwapKickoff, kafka_swap_kickoff},
-    },
-    client_metrics::ClientMetrics,
-    config::BrokerConfig,
-    cordoned_log_dirs::spawn_watcher,
-    delegation_token_cleanup::{DelegationTokenController, run as run_delegation_token_cleanup},
-    diskless::read::DisklessReadHandle,
-    error::BrokerError,
-    fetch_session::FetchSessionCache,
-    health::HealthState,
-    log_dir_id::LogDirIds,
-    log_dir_status::LogDirRegistry,
-    metadata_source::{MetadataSource, watch_image_loop},
-    metrics::{BrokerMetrics, spawn_metric_series_evictor},
-    network::client::InterBrokerClient,
-    partition_registry::PartitionRegistry,
-    producer_state::ProducerState,
-    quota::{QuotaBuckets, run as run_quota_refresh, run_expiry},
-    remote_reader::RemoteReader,
-    share_coordinator::coordinator::ShareCoordinator,
-    throttle::{ThrottleState, apply_image, run as run_throttle},
-    time_util::now_ms,
-    tls_reload::run as run_tls_reload,
-    txn::{
-        completion::run, coordinator::TxnCoordinator, expiration::run as run_txn_expiration,
-        id_expiration::run as run_txn_id_expiration,
-    },
+    krabka_ids::PartitionIndex,
+    krabka_units::{Time, convert::TimeExt},
+    std::{net::SocketAddr, sync::Arc},
+    tokio::task::JoinHandle,
+    tokio_util::sync::CancellationToken,
 };
 
 struct RuntimeCaches {
@@ -371,15 +374,16 @@ pub(super) async fn start_broker_runtime(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use crate::{
-        Broker,
-        config::{
-            BrokerConfig,
-            NodeRole::{Broker as BrokerRole, Controller},
-            RemoteStorageBackend,
+    use {
+        crate::{
+            Broker,
+            config::{
+                BrokerConfig,
+                NodeRole::{Broker as BrokerRole, Controller},
+                RemoteStorageBackend,
+            },
         },
+        assert2::check,
     };
 
     /// KIP-405 tiering runs on a node with the broker role only. A

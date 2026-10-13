@@ -5,11 +5,12 @@
 //! last one is what proves the trust set holds every configured key rather
 //! than one.
 
-use assert2::check;
-use krabka_metadata::TopicFreezeRecord;
-
-use super::{ALICE, BOB, BOB_KEY, CLUSTER_ID, PROPOSAL, check_against, record, signed, trust};
-use crate::freeze::signing::verify_freeze_signature;
+use {
+    super::{ALICE, BOB, BOB_KEY, CLUSTER_ID, PROPOSAL, check_against, record, signed, trust},
+    crate::freeze::signing::verify_freeze_signature,
+    assert2::check,
+    krabka_metadata::TopicFreezeRecord,
+};
 
 #[test]
 fn a_good_signature_verifies() {
@@ -22,15 +23,11 @@ fn a_good_signature_verifies() {
 #[test]
 fn a_signature_survives_a_thaw_that_names_its_proposal() {
     let trust = trust();
-    let thaw = signed(
-        &trust.alice,
-        CLUSTER_ID,
-        &TopicFreezeRecord {
-            frozen: false,
-            proposal_id: PROPOSAL,
-            ..record()
-        },
-    );
+    let thaw = signed(&trust.alice, CLUSTER_ID, &TopicFreezeRecord {
+        frozen: false,
+        proposal_id: PROPOSAL,
+        ..record()
+    });
 
     check!(verify_freeze_signature(&check_against(&trust, ALICE), &thaw) == Ok(()));
 }
@@ -44,15 +41,11 @@ fn a_signature_survives_a_thaw_that_names_its_proposal() {
 #[test]
 fn a_second_operator_signs_a_valid_freeze() {
     let trust = trust();
-    let record = signed(
-        &trust.bob,
-        CLUSTER_ID,
-        &TopicFreezeRecord {
-            key_id: BOB_KEY.to_owned(),
-            set_by: BOB.to_owned(),
-            ..record()
-        },
-    );
+    let record = signed(&trust.bob, CLUSTER_ID, &TopicFreezeRecord {
+        key_id: BOB_KEY.to_owned(),
+        set_by: BOB.to_owned(),
+        ..record()
+    });
 
     check!(verify_freeze_signature(&check_against(&trust, BOB), &record) == Ok(()));
 }

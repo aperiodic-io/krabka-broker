@@ -1,10 +1,10 @@
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
-
-use assert2::assert;
-use krabka_protocol::{Encode as _, owned::describe_quorum_request::DescribeQuorumRequest};
-
-use super::*;
-use crate::{ClusterGrants, ClusterOperation};
+use {
+    super::*,
+    crate::{ClusterGrants, ClusterOperation},
+    assert2::assert,
+    krabka_protocol::{Encode as _, owned::describe_quorum_request::DescribeQuorumRequest},
+    std::sync::atomic::{AtomicI64, AtomicUsize, Ordering},
+};
 
 struct CountingGrants(Arc<AtomicUsize>);
 

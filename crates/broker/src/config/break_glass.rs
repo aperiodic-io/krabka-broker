@@ -2,11 +2,12 @@
 //! transition, and what the background unclean-recovery path does where there
 //! is nobody to ask.
 
-use krabka_units::Time;
-use schemars::JsonSchema;
-use serde::Deserialize;
-
-use crate::config::{DEFAULT_BREAK_GLASS_PROPOSAL_TTL, DEFAULT_BREAK_GLASS_REQUIRED_APPROVALS};
+use {
+    crate::config::{DEFAULT_BREAK_GLASS_PROPOSAL_TTL, DEFAULT_BREAK_GLASS_REQUIRED_APPROVALS},
+    krabka_units::Time,
+    schemars::JsonSchema,
+    serde::Deserialize,
+};
 
 /// Runtime `[break_glass]` policy: who may approve a privileged transition,
 /// how many of them it takes, and which actions also demand a signature.

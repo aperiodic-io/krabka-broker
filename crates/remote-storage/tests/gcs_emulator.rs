@@ -46,19 +46,21 @@
 //! `crates/object-store`'s `put_from_path` tests, and the MinIO-backed
 //! S3 suites. No GCS emulator can execute it.
 
-use std::{
-    process::{Command, Stdio},
-    time::Duration,
+use {
+    assert2::{assert, check},
+    krabka_ids::LeaderEpoch,
+    krabka_remote_storage::{
+        GcsConfig, IndexType, LOG_FILE_SUFFIX, RemoteLogSegmentDetails, RemoteLogSegmentId,
+        RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError,
+        RemoteStorageManager as _, S3RemoteStorage, TopicIdPartition, WormConfig,
+        partition_dir_name, segment_file_name,
+    },
+    std::{
+        process::{Command, Stdio},
+        time::Duration,
+    },
+    uuid::Uuid,
 };
-
-use assert2::{assert, check};
-use krabka_ids::LeaderEpoch;
-use krabka_remote_storage::{
-    GcsConfig, IndexType, LOG_FILE_SUFFIX, RemoteLogSegmentDetails, RemoteLogSegmentId,
-    RemoteLogSegmentMetadata, RemoteLogSegmentState, RemoteStorageError, RemoteStorageManager as _,
-    S3RemoteStorage, TopicIdPartition, WormConfig, partition_dir_name, segment_file_name,
-};
-use uuid::Uuid;
 
 /// The emulator image, pinned by the same digest table the broker's container
 /// suites load from (`//bazel/images`).
@@ -143,9 +145,7 @@ impl FakeGcs {
     }
 
     /// The base URL `GcsConfig::endpoint` points at.
-    fn endpoint(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
+    fn endpoint(&self) -> String { format!("http://127.0.0.1:{}", self.port) }
 
     /// Poll the control plane until the emulator answers a real Cloud Storage
     /// request, so the first backend call does not race container startup.
@@ -171,9 +171,7 @@ impl FakeGcs {
     }
 
     /// The control-plane collection buckets are listed from and created in.
-    fn buckets_url(&self) -> String {
-        format!("{}/storage/v1/b?project=krabka", self.endpoint())
-    }
+    fn buckets_url(&self) -> String { format!("{}/storage/v1/b?project=krabka", self.endpoint()) }
 
     /// Create a bucket through the emulator's JSON control plane, which is the
     /// one operation no `object_store` API reaches. Returns the bucket name.

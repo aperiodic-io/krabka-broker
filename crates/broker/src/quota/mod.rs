@@ -1,11 +1,13 @@
 //! KIP-13 + KIP-124 + KIP-257 client quotas.
 
-use krabka_metadata::MetadataImage;
-use krabka_units::{
-    ByteRate, Time,
-    convert::{ByteRateExt as _, TimeExt},
+use {
+    krabka_metadata::MetadataImage,
+    krabka_units::{
+        ByteRate, Time,
+        convert::{ByteRateExt as _, TimeExt},
+    },
+    num_traits::cast::{NumCast, ToPrimitive as _},
 };
-use num_traits::cast::{NumCast, ToPrimitive as _};
 
 mod buckets;
 mod controller_mutation;
@@ -16,21 +18,24 @@ mod producer;
 mod request;
 mod throttle_slot;
 
-pub use buckets::QuotaBuckets;
-pub use controller_mutation::consume_controller_mutation_quota;
-pub(crate) use controller_mutation::{ControllerMutationQuota, QuotaRequest};
-pub use ip_names::{IpNames, parse_ip_literal};
-pub(crate) use lookup::entity_field;
-pub use lookup::{lookup_ip_quota, lookup_ip_quota_with_key, lookup_quota, lookup_quota_with_key};
-pub use producer::consume_producer_quota;
-pub use request::consume_request_quota;
-pub(crate) use throttle_slot::ThrottleSlot;
+pub use {
+    buckets::QuotaBuckets,
+    controller_mutation::consume_controller_mutation_quota,
+    ip_names::{IpNames, parse_ip_literal},
+    lookup::{lookup_ip_quota, lookup_ip_quota_with_key, lookup_quota, lookup_quota_with_key},
+    producer::consume_producer_quota,
+    request::consume_request_quota,
+};
+pub(crate) use {
+    controller_mutation::{ControllerMutationQuota, QuotaRequest},
+    lookup::entity_field,
+    throttle_slot::ThrottleSlot,
+};
 
 mod refresh;
+use crate::throttle::MICROS_PER_TOKEN;
 pub(crate) use expiry::run as run_expiry;
 pub use refresh::run;
-
-use crate::throttle::MICROS_PER_TOKEN;
 
 /// Result of consuming a client quota, carrying the delay and the resolved
 /// entity identity (`user` and `client_id`) that the match was charged to (#418).
@@ -45,9 +50,7 @@ pub struct QuotaDelay {
 impl QuotaDelay {
     /// No throttle, charged to nobody.
     #[must_use]
-    pub fn zero() -> Self {
-        Self::new(<Time as TimeExt>::ZERO, None, None)
-    }
+    pub fn zero() -> Self { Self::new(<Time as TimeExt>::ZERO, None, None) }
 
     /// A throttle of `delay`, charged to the principal and client id whose
     /// quota produced it (KIP-599 labels the applied throttle by entity).
@@ -62,15 +65,11 @@ impl QuotaDelay {
 }
 
 impl PartialEq<Time> for QuotaDelay {
-    fn eq(&self, other: &Time) -> bool {
-        self.delay == *other
-    }
+    fn eq(&self, other: &Time) -> bool { self.delay == *other }
 }
 
 impl PartialEq<QuotaDelay> for Time {
-    fn eq(&self, other: &QuotaDelay) -> bool {
-        *self == other.delay
-    }
+    fn eq(&self, other: &QuotaDelay) -> bool { *self == other.delay }
 }
 
 impl PartialOrd<Time> for QuotaDelay {
@@ -184,9 +183,7 @@ pub(crate) fn throttle_time_ms(delay: Time) -> i32 {
 /// `controller_mutation_rate` through the same token arithmetic, and those are
 /// not byte throughputs. Their raw magnitudes therefore cross into the
 /// bucket's dimension here, in one place, instead of at each call site.
-pub(crate) fn bucket_rate(raw: f64) -> ByteRate {
-    ByteRate::from_bytes_per_sec_f64(raw)
-}
+pub(crate) fn bucket_rate(raw: f64) -> ByteRate { ByteRate::from_bytes_per_sec_f64(raw) }
 
 /// A configured rate as a whole token count, truncated toward zero.
 ///
@@ -206,14 +203,14 @@ pub(crate) fn positive_f64_to_u64(value: f64) -> u64 {
 /// Kafka can express. `NumCast` never fails for `u64` into `f64`. The fallback
 /// keeps the quota path total instead of panicking on a value that cannot
 /// occur.
-pub(crate) fn u64_to_f64(value: u64) -> f64 {
-    NumCast::from(value).unwrap_or(f64::INFINITY)
-}
+pub(crate) fn u64_to_f64(value: u64) -> f64 { NumCast::from(value).unwrap_or(f64::INFINITY) }
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use krabka_metadata::{ClientQuotaRecord, MetadataImage, MetadataRecord, QuotaEntity};
-    use krabka_units::{Time, convert::TimeExt, secs};
+    use {
+        krabka_metadata::{ClientQuotaRecord, MetadataImage, MetadataRecord, QuotaEntity},
+        krabka_units::{Time, convert::TimeExt, secs},
+    };
 
     /// A named input builder for one quota kind's rate tests.
     macro_rules! image_builder {
@@ -232,9 +229,8 @@ pub(crate) mod test_support {
             }
         };
     }
-    pub(crate) use image_builder;
-
     use crate::throttle::TokenBucket;
+    pub(crate) use image_builder;
 
     /// Independent expected throttles for producer and consumer quotas.
     pub(crate) fn fractional_bandwidth_cases() -> [(f64, u64, Time); 7] {
@@ -384,19 +380,19 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+    use {
+        super::{
+            test_support::{QuotaRecordSetup, QuotaValue, image_with_quota},
+            *,
+        },
+        crate::throttle::MICROS_PER_TOKEN,
+        assert2::{assert, check},
+        krabka_units::secs,
+        std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
     };
-
-    use assert2::{assert, check};
-    use krabka_units::secs;
-
-    use super::{
-        test_support::{QuotaRecordSetup, QuotaValue, image_with_quota},
-        *,
-    };
-    use crate::throttle::MICROS_PER_TOKEN;
 
     /// `throttle_time_ms` rounds to the nearest millisecond, half up, as
     /// Kafka's `Math.round` does: 0.4 ms reports `0`, 0.6 ms and 1.6 ms report

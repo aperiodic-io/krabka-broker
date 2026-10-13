@@ -1,6 +1,4 @@
-use creusot_std::prelude::*;
-
-use crate::consensus::count_ge_prefix;
+use {crate::consensus::count_ge_prefix, creusot_std::prelude::*};
 
 // cargo-mutants: #[cfg(creusot)] induction over actual vote count, absent at runtime.
 #[cfg_attr(test, mutants::skip)]

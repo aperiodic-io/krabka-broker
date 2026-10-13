@@ -1,23 +1,22 @@
 //! Unit tests for the topic and partition map plumbing and for the
 //! produce-path dedup, commit, truncate, and snapshot behaviour of
 //! `ProducerState`.
-use assert2::{assert, check};
-
-use super::*;
-use crate::{
-    producer_state::test_support::{
-        ProducerBatchSetup, ProducerCommitSetup, ProducerEpoch, ProducerSequence, SequenceDelta,
-        commit_fixture, opened_log, producer_batch,
+use {
+    super::*,
+    crate::{
+        producer_state::test_support::{
+            ProducerBatchSetup, ProducerCommitSetup, ProducerEpoch, ProducerSequence,
+            SequenceDelta, commit_fixture, opened_log, producer_batch,
+        },
+        test_support::{EmptyPayloadBatchSetup, UnixMillis, default_records_batch},
     },
-    test_support::{EmptyPayloadBatchSetup, UnixMillis, default_records_batch},
+    assert2::{assert, check},
 };
 
 async fn mirror_marker(state: &ProducerState) {
     state
-        .mirror_log_entries(
-            "t",
-            PartitionIndex(0),
-            vec![krabka_log::ProducerSnapshotEntry {
+        .mirror_log_entries("t", PartitionIndex(0), vec![
+            krabka_log::ProducerSnapshotEntry {
                 producer_id: krabka_log::ProducerId(1000),
                 producer_epoch: 4,
                 last_sequence: -1,
@@ -26,8 +25,8 @@ async fn mirror_marker(state: &ProducerState) {
                 timestamp: -1,
                 coordinator_epoch: 0,
                 current_txn_first_offset: None,
-            }],
-        )
+            },
+        ])
         .await;
 }
 
@@ -80,15 +79,12 @@ async fn a_late_commit_at_an_older_epoch_does_not_undo_a_marker() {
     mirror_marker(&s).await;
 
     // The stale, pre-marker commit for epoch 3 resolves after the marker.
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            epoch: ProducerEpoch(3),
-            delta: SequenceDelta(2),
-            offset: krabka_log::Offset(10),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        epoch: ProducerEpoch(3),
+        delta: SequenceDelta(2),
+        offset: krabka_log::Offset(10),
+        ..Default::default()
+    })
     .await;
 
     assert!(
@@ -123,29 +119,23 @@ async fn only_an_exact_retry_of_the_last_batch_is_duplicate() {
 #[tokio::test]
 async fn sequence_rollover_appends_and_commits_without_overflow() {
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            sequence: ProducerSequence(i32::MAX - 1),
-            delta: SequenceDelta(1),
-            offset: krabka_log::Offset(10),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        sequence: ProducerSequence(i32::MAX - 1),
+        delta: SequenceDelta(1),
+        offset: krabka_log::Offset(10),
+        ..Default::default()
+    })
     .await;
 
     check!(s.check("t", PartitionIndex(0), 1000, 0, 0, 0).await == Decision::Append);
     check!(s.check("t", PartitionIndex(0), 1000, 0, 1, 0).await == Decision::OutOfOrder);
 
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            delta: SequenceDelta(2),
-            offset: krabka_log::Offset(12),
-            timestamp: UnixMillis(2),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        delta: SequenceDelta(2),
+        offset: krabka_log::Offset(12),
+        timestamp: UnixMillis(2),
+        ..Default::default()
+    })
     .await;
     let entry = s.snapshot("t", PartitionIndex(0)).await[0].1;
     check!(entry.last_sequence == 2);
@@ -155,15 +145,12 @@ async fn sequence_rollover_appends_and_commits_without_overflow() {
 #[tokio::test]
 async fn batch_can_cross_sequence_rollover() {
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            sequence: ProducerSequence(i32::MAX - 1),
-            delta: SequenceDelta(2),
-            offset: krabka_log::Offset(20),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        sequence: ProducerSequence(i32::MAX - 1),
+        delta: SequenceDelta(2),
+        offset: krabka_log::Offset(20),
+        ..Default::default()
+    })
     .await;
 
     check!(
@@ -183,14 +170,11 @@ async fn truncate_drops_dedup_entry_above_offset_so_retry_reappends() {
     // (await_hw_at_least(1471700)) waits forever for a high watermark the
     // log can never reach, stalling the producer.
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            delta: SequenceDelta(13),
-            offset: krabka_log::Offset(1_471_686),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        delta: SequenceDelta(13),
+        offset: krabka_log::Offset(1_471_686),
+        ..Default::default()
+    })
     .await;
     assert!(
         s.check("t", PartitionIndex(0), 1000, 0, 0, 13).await
@@ -210,13 +194,10 @@ async fn truncate_keeps_dedup_entry_below_offset() {
     // A batch whose records survive the truncation (last_offset < offset)
     // must stay deduplicated.
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            offset: krabka_log::Offset(100),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        offset: krabka_log::Offset(100),
+        ..Default::default()
+    })
     .await; // last_offset 104
     s.truncate("t", PartitionIndex(0), 200).await;
     assert!(
@@ -276,27 +257,21 @@ async fn out_of_order_when_gap() {
 }
 
 async fn commit_epoch_five_prefix(state: &ProducerState) {
-    commit_fixture(
-        state,
-        ProducerCommitSetup {
-            epoch: ProducerEpoch(5),
-            delta: SequenceDelta(2),
-            ..Default::default()
-        },
-    )
+    commit_fixture(state, ProducerCommitSetup {
+        epoch: ProducerEpoch(5),
+        delta: SequenceDelta(2),
+        ..Default::default()
+    })
     .await;
 }
 
 #[tokio::test]
 async fn lower_epoch_is_fenced() {
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            epoch: ProducerEpoch(5),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        epoch: ProducerEpoch(5),
+        ..Default::default()
+    })
     .await;
     let d = s.check("t", PartitionIndex(0), 1000, 4, 5, 2).await;
     assert!(d == Decision::Fenced);
@@ -335,16 +310,13 @@ async fn higher_epoch_continuing_sequence_is_out_of_order() {
     commit_epoch_five_prefix(&s).await;
     check!(s.check("t", PartitionIndex(0), 1000, 6, 3, 0).await == Decision::OutOfOrder);
     check!(s.check("t", PartitionIndex(0), 1000, 6, 0, 0).await == Decision::Append);
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            epoch: ProducerEpoch(6),
-            delta: SequenceDelta(0),
-            offset: krabka_log::Offset(10),
-            timestamp: UnixMillis(2),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        epoch: ProducerEpoch(6),
+        delta: SequenceDelta(0),
+        offset: krabka_log::Offset(10),
+        timestamp: UnixMillis(2),
+        ..Default::default()
+    })
     .await;
     let dup = s.check("t", PartitionIndex(0), 1000, 6, 0, 0).await;
     assert!(dup == Decision::Duplicate { base_offset: 10 });
@@ -353,29 +325,23 @@ async fn higher_epoch_continuing_sequence_is_out_of_order() {
 #[tokio::test]
 async fn snapshot_reports_committed_entries() {
     let s = ProducerState::new();
-    commit_fixture(
-        &s,
-        ProducerCommitSetup {
-            partition: PartitionIndex(3),
-            offset: krabka_log::Offset(7),
-            ..Default::default()
-        },
-    )
+    commit_fixture(&s, ProducerCommitSetup {
+        partition: PartitionIndex(3),
+        offset: krabka_log::Offset(7),
+        ..Default::default()
+    })
     .await;
     let snap = s.snapshot("t", PartitionIndex(3)).await;
-    let expected = vec![(
-        1000,
-        ProducerEntry {
-            epoch: 0,
-            last_sequence: 4,
-            last_offset: 11,
-            base_offset: 7,
-            last_timestamp: 1,
-            entry_timestamp: 1,
-            current_txn_first_offset: None,
-            earlier: crate::producer_state::NO_EARLIER_BATCHES,
-        },
-    )];
+    let expected = vec![(1000, ProducerEntry {
+        epoch: 0,
+        last_sequence: 4,
+        last_offset: 11,
+        base_offset: 7,
+        last_timestamp: 1,
+        entry_timestamp: 1,
+        current_txn_first_offset: None,
+        earlier: crate::producer_state::NO_EARLIER_BATCHES,
+    })];
     assert!(snap == expected);
     // Untouched partition / topic report empty without panicking.
     for (topic, partition) in [("t", PartitionIndex(0)), ("other", PartitionIndex(3))] {
@@ -421,24 +387,18 @@ async fn a_marker_mirror_keeps_the_earlier_batches_only_at_the_same_epoch() {
     ];
     for (name, entry, want, last_timestamp) in cases {
         let s = ProducerState::new();
-        commit_fixture(
-            &s,
-            ProducerCommitSetup {
-                delta: SequenceDelta(0),
-                ..Default::default()
-            },
-        )
+        commit_fixture(&s, ProducerCommitSetup {
+            delta: SequenceDelta(0),
+            ..Default::default()
+        })
         .await;
-        commit_fixture(
-            &s,
-            ProducerCommitSetup {
-                sequence: ProducerSequence(1),
-                delta: SequenceDelta(0),
-                offset: krabka_log::Offset(1),
-                timestamp: UnixMillis(2),
-                ..Default::default()
-            },
-        )
+        commit_fixture(&s, ProducerCommitSetup {
+            sequence: ProducerSequence(1),
+            delta: SequenceDelta(0),
+            offset: krabka_log::Offset(1),
+            timestamp: UnixMillis(2),
+            ..Default::default()
+        })
         .await;
         s.mirror_log_entries("t", PartitionIndex(0), vec![entry])
             .await;
@@ -579,10 +539,10 @@ async fn replay_chooses_first_retained_alias_after_sequence_wrap() {
     log.sync().unwrap();
     assert!(krabka_log::name::producer_snapshot_path(dir.path(), 1).exists());
     drop(log);
-    remove_snapshots(
-        dir.path(),
-        [i64::from(i32::MAX) + 1, i64::from(i32::MAX) + 2],
-    );
+    remove_snapshots(dir.path(), [
+        i64::from(i32::MAX) + 1,
+        i64::from(i32::MAX) + 2,
+    ]);
     let log = krabka_log::Log::open(dir.path(), config).unwrap();
     assert!(log.recovered_producers()[0].earlier.len() == 2);
     let state = ProducerState::new();

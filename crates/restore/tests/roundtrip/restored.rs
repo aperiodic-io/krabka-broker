@@ -1,8 +1,9 @@
 //! Shared restore setup for bootstrap and report assertions.
 
-use std::path::Path;
-
-use crate::args::{ControllerListener, RestoreOptions, restore_args};
+use {
+    crate::args::{ControllerListener, RestoreOptions, restore_args},
+    std::path::Path,
+};
 
 /// Restore an archive into a fresh child directory with the requested cluster id.
 pub(crate) async fn restore_fixture(

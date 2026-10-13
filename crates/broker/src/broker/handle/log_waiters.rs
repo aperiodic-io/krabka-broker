@@ -3,11 +3,11 @@
 //! Each waits on the partition's own notify rather than sleeping, so they are
 //! kept together with the offset accessors they pair with.
 
-use std::sync::atomic::Ordering;
-
-use krabka_ids::PartitionIndex;
-
-use crate::broker::{BrokerHandle, TEST_AWAITER_TIMEOUT};
+use {
+    crate::broker::{BrokerHandle, TEST_AWAITER_TIMEOUT},
+    krabka_ids::PartitionIndex,
+    std::sync::atomic::Ordering,
+};
 
 #[cfg(any(test, feature = "test-helpers"))]
 #[derive(Clone, Copy)]
@@ -226,15 +226,15 @@ impl BrokerHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::check;
-    use krabka_units::{kibibytes, mebibytes, secs};
-
-    use super::*;
-    use crate::{
-        broker::test_support::{LocalPartitionSetup, local_partition_with_records},
-        test_support::start_broker_with,
+    use {
+        super::*,
+        crate::{
+            broker::test_support::{LocalPartitionSetup, local_partition_with_records},
+            test_support::start_broker_with,
+        },
+        assert2::check,
+        krabka_units::{kibibytes, mebibytes, secs},
+        std::sync::Arc,
     };
 
     #[tokio::test]
@@ -243,13 +243,10 @@ mod tests {
         let broker = handle.broker_arc_for_test();
 
         let helper_topic = "handle-partition-helper-mutant-topic";
-        let helper_part = local_partition_with_records(
-            dir.path(),
-            LocalPartitionSetup {
-                topic: helper_topic,
-                ..Default::default()
-            },
-        );
+        let helper_part = local_partition_with_records(dir.path(), LocalPartitionSetup {
+            topic: helper_topic,
+            ..Default::default()
+        });
         let helper_config = krabka_log::LogConfig {
             retention: Some(secs(123)),
             segment_size: kibibytes(4),

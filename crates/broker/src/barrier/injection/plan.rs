@@ -5,13 +5,13 @@
 //! functions over a metadata image and a list of targets. None of them touches
 //! a log or a transport, so a unit test drives each one on its own.
 
-use std::collections::BTreeMap;
-
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_units::{Time, convert::TimeExt as _};
-use tracing::warn;
-
-use crate::barrier::{persistence::TopicTarget, state::TargetPartition};
+use {
+    crate::barrier::{persistence::TopicTarget, state::TargetPartition},
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_units::{Time, convert::TimeExt as _},
+    std::collections::BTreeMap,
+    tracing::warn,
+};
 
 /// Freeze the target set of one injection from the metadata image.
 ///
@@ -67,12 +67,13 @@ pub(crate) fn backoff_for(attempt: u32, base: Time, max: Time) -> Time {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use krabka_units::millis;
-    use uuid::Uuid;
-
-    use super::*;
-    use crate::barrier::{injection::test_support::at, test_support::topic_records};
+    use {
+        super::*,
+        crate::barrier::{injection::test_support::at, test_support::topic_records},
+        assert2::{assert, check},
+        krabka_units::millis,
+        uuid::Uuid,
+    };
 
     #[test]
     fn a_frozen_target_set_takes_the_partition_count_of_the_image() {

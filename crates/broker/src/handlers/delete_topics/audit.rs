@@ -5,11 +5,12 @@
 //! emits its `AdminOperation` record after commit and cleanup, even when the
 //! client stops waiting before the commit completes.
 
-use krabka_protocol::owned::delete_topics_response::DeletableTopicResult;
-
-use crate::{
-    codes,
-    handlers::{RequestContext, audit_admin_success, audit_resource},
+use {
+    crate::{
+        codes,
+        handlers::{RequestContext, audit_admin_success, audit_resource},
+    },
+    krabka_protocol::owned::delete_topics_response::DeletableTopicResult,
 };
 
 /// Picks the audit resources for the topics this request actually deleted.
@@ -38,11 +39,10 @@ pub(super) fn audit_deleted_topics(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-    use super::*;
-    use crate::handlers::delete_topics::wire::delete_topic_result;
+    use {
+        super::*, crate::handlers::delete_topics::wire::delete_topic_result, assert2::assert,
+        krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    };
 
     #[test]
     fn deleted_topic_resources_include_only_successful_named_topics() {

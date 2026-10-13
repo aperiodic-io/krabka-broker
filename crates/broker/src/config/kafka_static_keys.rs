@@ -17,22 +17,22 @@
 //! configuration, and reports at `STATIC_BROKER_CONFIG` once its value leaves
 //! Kafka's default.
 
-use std::time::Duration;
-
-use krabka_units::{
-    ByteSize, Time,
-    convert::{ByteSizeExt as _, TimeExt as _},
-};
-
-use super::BrokerConfig;
-use crate::{
-    api_catalog::UnstableApiVersions,
-    config_keys::{
-        broker_dynamic::{TOPIC_DEFAULT_SYNONYMS, topic_broker_synonyms},
-        group::KAFKA_GROUP_KEYS,
-        in_topic_unit,
-        kafka_broker::lookup,
+use {
+    super::BrokerConfig,
+    crate::{
+        api_catalog::UnstableApiVersions,
+        config_keys::{
+            broker_dynamic::{TOPIC_DEFAULT_SYNONYMS, topic_broker_synonyms},
+            group::KAFKA_GROUP_KEYS,
+            in_topic_unit,
+            kafka_broker::lookup,
+        },
     },
+    krabka_units::{
+        ByteSize, Time,
+        convert::{ByteSizeExt as _, TimeExt as _},
+    },
+    std::time::Duration,
 };
 
 /// One `KafkaConfig` key and how this node states its value.
@@ -46,23 +46,15 @@ pub(crate) struct KafkaStaticKey {
     pub(crate) value: fn(&BrokerConfig) -> String,
 }
 
-fn ms(duration: Duration) -> String {
-    duration.as_millis().to_string()
-}
+fn ms(duration: Duration) -> String { duration.as_millis().to_string() }
 
-fn time_ms(time: Time) -> String {
-    time.millis_i64().to_string()
-}
+fn time_ms(time: Time) -> String { time.millis_i64().to_string() }
 
-fn size(bytes: ByteSize) -> String {
-    bytes.bytes_u64().to_string()
-}
+fn size(bytes: ByteSize) -> String { bytes.bytes_u64().to_string() }
 
 /// An `INT` key that krabka holds as a wider count: Kafka's parse refuses
 /// anything past `Integer.MAX_VALUE`, and its own unlimited is that value.
-fn int(count: usize) -> String {
-    i32::try_from(count).unwrap_or(i32::MAX).to_string()
-}
+fn int(count: usize) -> String { i32::try_from(count).unwrap_or(i32::MAX).to_string() }
 
 macro_rules! keys {
     ($($name:literal, $field:expr, |$c:ident| $value:expr;)*) => {
@@ -356,10 +348,11 @@ impl KafkaStaticKey {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::{api_catalog::UnstableApiVersions, file_config::RuntimeFileConfig};
+    use {
+        super::*,
+        crate::{api_catalog::UnstableApiVersions, file_config::RuntimeFileConfig},
+        assert2::check,
+    };
 
     /// The keys whose value a default `BrokerConfig` runs differently from
     /// Kafka 4.3.1's default: the 1 MiB socket buffers that the network layer

@@ -1,12 +1,13 @@
-use creusot_std::prelude::*;
-
-use super::{
-    TransactionCompletionDecision, TransactionPidInstallDecision,
-    TransactionReaperCompletionDecision, TransactionRegistrationDecision,
-    TransactionRegistrationFacts, TransactionSnapshot, transaction_completion_decision,
-};
 #[cfg(creusot)]
 use super::{is_identity, snapshot_eq};
+use {
+    super::{
+        TransactionCompletionDecision, TransactionPidInstallDecision,
+        TransactionReaperCompletionDecision, TransactionRegistrationDecision,
+        TransactionRegistrationFacts, TransactionSnapshot, transaction_completion_decision,
+    },
+    creusot_std::prelude::*,
+};
 
 /// Recheck a prepared snapshot after the abort- or commit-marker fan-out.
 ///

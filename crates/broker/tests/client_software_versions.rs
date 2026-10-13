@@ -12,21 +12,21 @@
 
 mod support;
 
-use std::{io, net::SocketAddr};
-
-use assert2::assert;
-use bytes::BytesMut;
-use krabka_broker::Broker;
-use krabka_protocol::{Encode, owned::api_versions_response::ApiVersionsResponse};
-use tokio::net::TcpStream;
-
-use crate::support::{
-    client::{metrics_config, scrape_metrics},
-    discovery::api_versions_request_for,
-    wire::{
-        CorrelationId, HeaderEncoding, WireFrameSetup, decode_response_frame, read_frame,
-        request_body_capacity, request_frame, write_frame,
+use {
+    crate::support::{
+        client::{metrics_config, scrape_metrics},
+        discovery::api_versions_request_for,
+        wire::{
+            CorrelationId, HeaderEncoding, WireFrameSetup, decode_response_frame, read_frame,
+            request_body_capacity, request_frame, write_frame,
+        },
     },
+    assert2::assert,
+    bytes::BytesMut,
+    krabka_broker::Broker,
+    krabka_protocol::{Encode, owned::api_versions_response::ApiVersionsResponse},
+    std::{io, net::SocketAddr},
+    tokio::net::TcpStream,
 };
 
 const INVALID_REQUEST: i16 = 42;
@@ -88,9 +88,7 @@ async fn send_api_versions(
     decode_response_frame(&resp, version, false, "ApiVersionsResponse decode")
 }
 
-async fn scrape(addr: SocketAddr) -> String {
-    scrape_metrics(addr).await
-}
+async fn scrape(addr: SocketAddr) -> String { scrape_metrics(addr).await }
 
 // ── KIP-511 validation paths ────────────────────────────────────────────────
 

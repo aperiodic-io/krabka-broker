@@ -1,17 +1,18 @@
 //! What a reopened log knows about the segments it did not write.
 
-use std::{
-    path::Path,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+use {
+    assert2::check,
+    bytes::Bytes,
+    krabka_ids::Offset,
+    krabka_log::{CleanupPolicy, CompactionContext, Log, LogConfig},
+    krabka_protocol::records::{Record, RecordBatch},
+    krabka_units::prelude::{TimeExt as _, bytes, days, gibibytes, hours},
+    std::{
+        path::Path,
+        time::{Duration, SystemTime, UNIX_EPOCH},
+    },
+    tempfile::tempdir,
 };
-
-use assert2::check;
-use bytes::Bytes;
-use krabka_ids::Offset;
-use krabka_log::{CleanupPolicy, CompactionContext, Log, LogConfig};
-use krabka_protocol::records::{Record, RecordBatch};
-use krabka_units::prelude::{TimeExt as _, bytes, days, gibibytes, hours};
-use tempfile::tempdir;
 
 fn epoch_millis(at: SystemTime) -> i64 {
     i64::try_from(

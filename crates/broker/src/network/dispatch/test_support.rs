@@ -2,17 +2,17 @@
 
 pub(super) const DEFAULT_MAX_FRAME_BYTES: usize = 100 * 1024 * 1024;
 
-use std::{net::SocketAddr, sync::Arc};
-
-use krabka_security::{ListenerProtocol, Principal, SaslMechanism};
-use tokio::net::{TcpListener, TcpStream};
-use tokio_util::codec::Framed;
-
-use crate::{
-    SslPrincipalMapper,
-    broker::Broker,
-    config::ListenerSpec,
-    network::codec::{KafkaCodec, frame},
+use {
+    crate::{
+        SslPrincipalMapper,
+        broker::Broker,
+        config::ListenerSpec,
+        network::codec::{KafkaCodec, frame},
+    },
+    krabka_security::{ListenerProtocol, Principal, SaslMechanism},
+    std::{net::SocketAddr, sync::Arc},
+    tokio::net::{TcpListener, TcpStream},
+    tokio_util::codec::Framed,
 };
 
 /// Bind the real serve loop and return its future so callers can instrument

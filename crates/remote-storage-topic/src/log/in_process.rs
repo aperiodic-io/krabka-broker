@@ -9,22 +9,25 @@
 //! which live record a subscription sees. They are descendants of this module
 //! so the state can stay private to this file.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex, atomic::AtomicU64},
+use {
+    self::{handle::InProcessAssignmentHandle, live::filtered_broadcast},
+    super::{
+        AssignmentHandle, MetadataEventLog, MetadataEventRecord, MetadataEventStream,
+        PartitionStart, RangeVisitor,
+    },
+    crate::error::MetadataLogError,
+    async_trait::async_trait,
+    bytes::Bytes,
+    futures_util::{
+        StreamExt,
+        stream::{self, unfold},
+    },
+    std::{
+        collections::HashMap,
+        sync::{Arc, Mutex, atomic::AtomicU64},
+    },
+    tokio::sync::{broadcast, mpsc},
 };
-
-use async_trait::async_trait;
-use bytes::Bytes;
-use futures_util::{StreamExt, stream, stream::unfold};
-use tokio::sync::{broadcast, mpsc};
-
-use self::{handle::InProcessAssignmentHandle, live::filtered_broadcast};
-use super::{
-    AssignmentHandle, MetadataEventLog, MetadataEventRecord, MetadataEventStream, PartitionStart,
-    RangeVisitor,
-};
-use crate::error::MetadataLogError;
 
 mod handle;
 mod live;
@@ -139,9 +142,7 @@ impl InProcessMetadataEventLog {
 
 #[async_trait]
 impl MetadataEventLog for InProcessMetadataEventLog {
-    fn partition_count(&self) -> i32 {
-        self.inner.partition_count
-    }
+    fn partition_count(&self) -> i32 { self.inner.partition_count }
 
     async fn publish(&self, partition: i32, event: Bytes) -> Result<i64, MetadataLogError> {
         self.append(partition, None, Some(event))
@@ -184,15 +185,12 @@ impl MetadataEventLog for InProcessMetadataEventLog {
             for record in records.iter().skip(begin) {
                 snapshot.push(record.clone());
             }
-            assigned.insert(
-                ps.partition,
-                PartitionCursor {
-                    next: i64::try_from(records.len()).expect("len fits in i64"),
-                    // Initially-assigned: backlog rides the chained
-                    // snapshot stream, so live records can go direct.
-                    via_inject: false,
-                },
-            );
+            assigned.insert(ps.partition, PartitionCursor {
+                next: i64::try_from(records.len()).expect("len fits in i64"),
+                // Initially-assigned: backlog rides the chained
+                // snapshot stream, so live records can go direct.
+                via_inject: false,
+            });
         }
 
         let (inject_tx, inject_rx) = mpsc::unbounded_channel::<MetadataEventRecord>();
@@ -267,10 +265,11 @@ impl MetadataEventLog for InProcessMetadataEventLog {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-    use futures_util::StreamExt;
-
-    use super::*;
+    use {
+        super::*,
+        assert2::{assert, check},
+        futures_util::StreamExt,
+    };
 
     #[tokio::test]
     async fn publish_assigns_monotonic_offsets() {

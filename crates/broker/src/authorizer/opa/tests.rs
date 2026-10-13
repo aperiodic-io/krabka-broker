@@ -5,21 +5,21 @@
 //! The tests for the Kafka-to-OPA vocabulary mapping live beside that mapping
 //! in [`super::wire`].
 
-use std::{collections::HashSet, net::SocketAddr, time::Duration};
-
-use assert2::assert;
-use krabka_authz::{AuthorizationRequest, AuthorizationResult, Authorizer};
-use krabka_metadata::{AclOperation, MetadataImage, ResourceType};
-use krabka_security::Principal;
-use krabka_units::{millis, minutes, secs};
-use qubit_clock::ManualMonotonicClock;
-use uuid::Uuid;
-use wiremock::{
-    Mock, MockServer, ResponseTemplate,
-    matchers::{body_json, method},
+use {
+    super::*,
+    assert2::assert,
+    krabka_authz::{AuthorizationRequest, AuthorizationResult, Authorizer},
+    krabka_metadata::{AclOperation, MetadataImage, ResourceType},
+    krabka_security::Principal,
+    krabka_units::{millis, minutes, secs},
+    qubit_clock::ManualMonotonicClock,
+    std::{collections::HashSet, net::SocketAddr, time::Duration},
+    uuid::Uuid,
+    wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_json, method},
+    },
 };
-
-use super::*;
 
 fn opa_decision_response(allow: bool) -> wiremock::ResponseTemplate {
     wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({ "result": allow }))
@@ -39,17 +39,11 @@ async fn mount_decision(mock: &MockServer, allow: bool, body: Option<serde_json:
 }
 use crate::test_support::sasl_principal;
 
-fn test_principal(name: &str) -> Principal {
-    sasl_principal(name)
-}
+fn test_principal(name: &str) -> Principal { sasl_principal(name) }
 
-fn img() -> MetadataImage {
-    MetadataImage::new(Uuid::nil())
-}
+fn img() -> MetadataImage { MetadataImage::new(Uuid::nil()) }
 
-fn host() -> SocketAddr {
-    "1.2.3.4:9092".parse().unwrap()
-}
+fn host() -> SocketAddr { "1.2.3.4:9092".parse().unwrap() }
 
 fn req<'a>(p: &'a Principal, h: &'a SocketAddr, topic: &'a str) -> AuthorizationRequest<'a> {
     AuthorizationRequest {
@@ -61,13 +55,9 @@ fn req<'a>(p: &'a Principal, h: &'a SocketAddr, topic: &'a str) -> Authorization
     }
 }
 
-fn opa_url(server: &MockServer) -> String {
-    format!("{}/v1/data/kafka/authz/allow", server.uri())
-}
+fn opa_url(server: &MockServer) -> String { format!("{}/v1/data/kafka/authz/allow", server.uri()) }
 
-fn supers(names: &[&str]) -> HashSet<String> {
-    names.iter().map(|s| (*s).to_string()).collect()
-}
+fn supers(names: &[&str]) -> HashSet<String> { names.iter().map(|s| (*s).to_string()).collect() }
 
 fn authorizer(super_users: HashSet<String>, url: String, allow_on_error: bool) -> OpaAuthorizer {
     OpaAuthorizer::new(super_users, url, allow_on_error, 100, minutes(1), secs(5)).unwrap()

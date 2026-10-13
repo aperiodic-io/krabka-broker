@@ -39,17 +39,17 @@
 mod jvm_acceptance;
 mod support;
 
-use std::{io::Write as _, process::Stdio};
-
-use assert2::{assert, check};
-use jvm_acceptance::{
-    KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image, start_host_broker,
-};
-use krabka_broker::BrokerHandle;
-use krabka_log::DeliveryPolicy;
-
-use crate::support::{
-    ContainerInput, JvmDockerSetup, jvm_docker_command, topics::CreateTopicSetup,
+use {
+    crate::support::{
+        ContainerInput, JvmDockerSetup, jvm_docker_command, topics::CreateTopicSetup,
+    },
+    assert2::{assert, check},
+    jvm_acceptance::{
+        KAFKA_IMAGE_TXN, broker0_advertised, docker_run_kafka_tool_with_image, start_host_broker,
+    },
+    krabka_broker::BrokerHandle,
+    krabka_log::DeliveryPolicy,
+    std::{io::Write as _, process::Stdio},
 };
 
 const SCHEDULED_TOPIC: &str = "jvm-deliver-at-time-scheduled";
@@ -167,14 +167,11 @@ async fn create_topic(bootstrap: &str, topic: &str, mode: &str) {
     let client =
         support::client::connect_with_context(bootstrap, None, "client for the host listener")
             .await;
-    support::client::create_configured_topic(
-        &client,
-        CreateTopicSetup {
-            topic,
-            configs: &[("delivery.mode", mode)],
-            ..Default::default()
-        },
-    )
+    support::client::create_configured_topic(&client, CreateTopicSetup {
+        topic,
+        configs: &[("delivery.mode", mode)],
+        ..Default::default()
+    })
     .await;
 }
 
@@ -259,24 +256,21 @@ fn probe_readings(stdout: &str) -> Vec<String> {
 
 // Read the scheduled topic with the stock console consumer, one record.
 fn jvm_console_consume(bootstrap: &str) -> Vec<String> {
-    let out = docker_run_kafka_tool_with_image(
-        KAFKA_IMAGE_TXN,
-        &[
-            "kafka-console-consumer",
-            "--bootstrap-server",
-            bootstrap,
-            "--topic",
-            SCHEDULED_TOPIC,
-            "--partition",
-            "0",
-            "--offset",
-            "earliest",
-            "--max-messages",
-            "1",
-            "--timeout-ms",
-            "30000",
-        ],
-    );
+    let out = docker_run_kafka_tool_with_image(KAFKA_IMAGE_TXN, &[
+        "kafka-console-consumer",
+        "--bootstrap-server",
+        bootstrap,
+        "--topic",
+        SCHEDULED_TOPIC,
+        "--partition",
+        "0",
+        "--offset",
+        "earliest",
+        "--max-messages",
+        "1",
+        "--timeout-ms",
+        "30000",
+    ]);
     support::jvm_output_lines(&out)
 }
 

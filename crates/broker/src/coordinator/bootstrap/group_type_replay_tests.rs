@@ -8,19 +8,20 @@
 //! puts a classic group in place of whatever held the id, and its tombstone
 //! removes the group of any type.
 
-use assert2::check;
-use bytes::Bytes;
-
-use super::test_support::{classic_group_record, replay_log};
-use crate::{
-    coordinator::{
-        persistence::{GroupMetadataValue as ClassicGroupMetadataValue, OffsetCommitValue},
-        unified::{
-            persistence_next_gen::{GroupMetadataValue, NextGenKey, encode_key},
-            share::persistence::{ShareGroupKey, ShareGroupMetadataValue, encode_share_key},
+use {
+    super::test_support::{classic_group_record, replay_log},
+    crate::{
+        coordinator::{
+            persistence::{GroupMetadataValue as ClassicGroupMetadataValue, OffsetCommitValue},
+            unified::{
+                persistence_next_gen::{GroupMetadataValue, NextGenKey, encode_key},
+                share::persistence::{ShareGroupKey, ShareGroupMetadataValue, encode_share_key},
+            },
         },
+        error::BrokerError,
     },
-    error::BrokerError,
+    assert2::check,
+    bytes::Bytes,
 };
 
 /// One replayed record: its key, and its value or `None` for a tombstone.
@@ -90,9 +91,7 @@ fn classic_group() -> LogRecord {
     (key, Some(value))
 }
 
-fn classic_tombstone() -> LogRecord {
-    (ClassicGroupMetadataValue::encode_key("g").unwrap(), None)
-}
+fn classic_tombstone() -> LogRecord { (ClassicGroupMetadataValue::encode_key("g").unwrap(), None) }
 
 fn replay(records: Vec<LogRecord>) -> Held {
     let (coordinator, replayed) = replay_log(records);

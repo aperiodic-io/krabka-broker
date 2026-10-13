@@ -9,13 +9,13 @@
 //! An override that does not parse falls back to the default; the config
 //! RPCs validate a value before they store it.
 
-use std::time::Duration;
-
-use krabka_metadata::MetadataImage;
-
-use crate::{
-    coordinator::unified::{config::clamp_to_range, share::config::ShareGroupConfig},
-    features::share_dlq_supported,
+use {
+    crate::{
+        coordinator::unified::{config::clamp_to_range, share::config::ShareGroupConfig},
+        features::share_dlq_supported,
+    },
+    krabka_metadata::MetadataImage,
+    std::time::Duration,
 };
 
 /// Kafka's `GroupConfig.SHARE_RECORD_LOCK_DURATION_MS_CONFIG`.
@@ -125,11 +125,12 @@ impl GroupShareSettings {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use krabka_metadata::{GroupConfigRecord, MetadataRecord};
-
-    use super::*;
-    use crate::{features::SHARE_VERSION, test_support::string_pairs};
+    use {
+        super::*,
+        crate::{features::SHARE_VERSION, test_support::string_pairs},
+        assert2::assert,
+        krabka_metadata::{GroupConfigRecord, MetadataRecord},
+    };
 
     fn image(configs: &[(&str, &str)]) -> MetadataImage {
         let mut image = MetadataImage::new(uuid::Uuid::nil());
@@ -173,13 +174,10 @@ mod tests {
                     ..broker
                 },
             ),
-            (
-                &[(KEY_DELIVERY_COUNT_LIMIT, "2")],
-                GroupShareSettings {
-                    delivery_count_limit: 2,
-                    ..broker
-                },
-            ),
+            (&[(KEY_DELIVERY_COUNT_LIMIT, "2")], GroupShareSettings {
+                delivery_count_limit: 2,
+                ..broker
+            }),
             (
                 &[(KEY_PARTITION_MAX_RECORD_LOCKS, "500")],
                 GroupShareSettings {
@@ -215,20 +213,14 @@ mod tests {
         let defaults = ShareGroupConfig::default();
         let broker = GroupShareSettings::resolve(&image(&[]), "g", &defaults);
         let rows: Vec<(&[(&str, &str)], GroupShareSettings)> = vec![
-            (
-                &[(KEY_RECORD_LOCK_DURATION_MS, "1")],
-                GroupShareSettings {
-                    record_lock_duration: defaults.min_record_lock_duration,
-                    ..broker
-                },
-            ),
-            (
-                &[(KEY_RECORD_LOCK_DURATION_MS, "-7")],
-                GroupShareSettings {
-                    record_lock_duration: defaults.min_record_lock_duration,
-                    ..broker
-                },
-            ),
+            (&[(KEY_RECORD_LOCK_DURATION_MS, "1")], GroupShareSettings {
+                record_lock_duration: defaults.min_record_lock_duration,
+                ..broker
+            }),
+            (&[(KEY_RECORD_LOCK_DURATION_MS, "-7")], GroupShareSettings {
+                record_lock_duration: defaults.min_record_lock_duration,
+                ..broker
+            }),
             (
                 &[(KEY_RECORD_LOCK_DURATION_MS, "3600000")],
                 GroupShareSettings {
@@ -236,13 +228,10 @@ mod tests {
                     ..broker
                 },
             ),
-            (
-                &[(KEY_DELIVERY_COUNT_LIMIT, "1")],
-                GroupShareSettings {
-                    delivery_count_limit: defaults.min_delivery_count_limit,
-                    ..broker
-                },
-            ),
+            (&[(KEY_DELIVERY_COUNT_LIMIT, "1")], GroupShareSettings {
+                delivery_count_limit: defaults.min_delivery_count_limit,
+                ..broker
+            }),
             (
                 &[(KEY_DELIVERY_COUNT_LIMIT, "100000")],
                 GroupShareSettings {

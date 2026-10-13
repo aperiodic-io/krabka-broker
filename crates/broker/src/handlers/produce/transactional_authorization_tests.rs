@@ -11,22 +11,24 @@
 //! whose authorizer grants ACLs by the principal's name, so each case names
 //! exactly the resource-type/operation pairs it holds.
 
-use assert2::assert;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Offset, ProducerId};
-use krabka_protocol::owned::{
-    create_topics_request::{self},
-    init_producer_id_request::InitProducerIdRequest,
-};
-
-use super::{test_support::one_transactional_batch, *};
-use crate::{
-    broker::{Broker, BrokerHandle},
-    codes,
-    handlers::test_support::{CreateTopicSetup, configured_topic_request},
-    test_support::{
-        KafkaErrorCode, RepeatedRecordsSetup, decode_response, dispatch_context, encode_request,
-        peer, principal, repeated_records_batch, start_transaction_grant_broker,
+use {
+    super::{test_support::one_transactional_batch, *},
+    crate::{
+        broker::{Broker, BrokerHandle},
+        codes,
+        handlers::test_support::{CreateTopicSetup, configured_topic_request},
+        test_support::{
+            KafkaErrorCode, RepeatedRecordsSetup, decode_response, dispatch_context,
+            encode_request, peer, principal, repeated_records_batch,
+            start_transaction_grant_broker,
+        },
+    },
+    assert2::assert,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Offset, ProducerId},
+    krabka_protocol::owned::{
+        create_topics_request::{self},
+        init_producer_id_request::InitProducerIdRequest,
     },
 };
 
@@ -299,16 +301,12 @@ async fn transactional_id_write_gates_exactly_on_the_batch_not_the_request_field
         } else {
             plain_batch()
         };
-        let actual = drive(
-            &broker,
-            case.grants,
-            ProduceRequestSetup {
-                version: case.version,
-                topic_id,
-                transactional_id: case.transactional_id,
-                records,
-            },
-        )
+        let actual = drive(&broker, case.grants, ProduceRequestSetup {
+            version: case.version,
+            topic_id,
+            transactional_id: case.transactional_id,
+            records,
+        })
         .await;
         let expected_row = if case.expected.0 == codes::NONE {
             let row = PartitionProduceResponse {
@@ -349,19 +347,15 @@ async fn transactional_denial_precedes_topic_resolution_at_v13() {
 
     let unknown_id = WireUuid([0x0b; 16]);
     let version = ProduceApiVersion(13);
-    let actual = drive(
-        &broker,
-        "Topic:Write",
-        ProduceRequestSetup {
-            version,
-            topic_id: unknown_id,
-            transactional_id: Some(TXN_ID),
-            records: one_transactional_batch()
-                .producer_id(ProducerId(999).0)
-                .producer_epoch(0)
-                .call(),
-        },
-    )
+    let actual = drive(&broker, "Topic:Write", ProduceRequestSetup {
+        version,
+        topic_id: unknown_id,
+        transactional_id: Some(TXN_ID),
+        records: one_transactional_batch()
+            .producer_id(ProducerId(999).0)
+            .producer_epoch(0)
+            .call(),
+    })
     .await;
     let expected = ProduceResponse {
         responses: vec![TopicProduceResponse {

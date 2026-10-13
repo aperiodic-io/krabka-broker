@@ -4,14 +4,15 @@
 //! non-vacuity witnesses. The block lives alone in this file because a trait
 //! implementation cannot be split across modules.
 
-use stateright::{Model, Property};
-
-use super::{
-    invariants::{Invariant, live_keys},
-    pass::compact_pass,
-    state::{Cleaner, CompactAction, CompactModel, CompactState, Entry, EntryKind},
+use {
+    super::{
+        invariants::{Invariant, live_keys},
+        pass::compact_pass,
+        state::{Cleaner, CompactAction, CompactModel, CompactState, Entry, EntryKind},
+    },
+    crate::compact::TxnDataState,
+    stateright::{Model, Property},
 };
-use crate::compact::TxnDataState;
 
 impl CompactState {
     /// Whether `rule` holds for the pass that produced this state. A state
@@ -33,8 +34,8 @@ impl CompactState {
 }
 
 impl Model for CompactModel {
-    type State = CompactState;
     type Action = CompactAction;
+    type State = CompactState;
 
     fn init_states(&self) -> Vec<Self::State> {
         vec![CompactState {

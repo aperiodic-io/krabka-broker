@@ -2,13 +2,14 @@
 //! the chain a request can ask for, and the typed metadata the registry row
 //! supplies.
 
-use assert2::assert;
-use krabka_protocol::owned::describe_configs_response::{
-    DescribeConfigsResourceResult, DescribeConfigsSynonym,
+use {
+    super::{super::wire::CONFIG_SOURCE_DEFAULT, *},
+    assert2::assert,
+    krabka_protocol::owned::describe_configs_response::{
+        DescribeConfigsResourceResult, DescribeConfigsSynonym,
+    },
+    krabka_units::{Time, millis, secs},
 };
-use krabka_units::{Time, millis, secs};
-
-use super::{super::wire::CONFIG_SOURCE_DEFAULT, *};
 
 /// A request that asks for values alone, the way a plain `--describe` does.
 const VALUES_ONLY: EntryOptions = EntryOptions {
@@ -23,9 +24,7 @@ const WITH_SYNONYMS: EntryOptions = EntryOptions {
 };
 
 /// No `configuration_keys` filter: every key the broker offers.
-fn everything(_: &str) -> bool {
-    true
-}
+fn everything(_: &str) -> bool { true }
 
 /// One case's static configs, owning the override map that the borrowed
 /// [`StaticBrokerConfigs`] view points at.
@@ -127,10 +126,10 @@ fn the_idle_windows_source_is_its_provenance_and_not_its_value() {
 #[test]
 fn a_set_idle_window_and_its_listener_overrides_report_as_static() {
     let entries = idle_window_entries(
-        config_with(
-            Some(secs(30)),
-            &[("PLAINTEXT", millis(15_000)), ("EXTERNAL", secs(45))],
-        )
+        config_with(Some(secs(30)), &[
+            ("PLAINTEXT", millis(15_000)),
+            ("EXTERNAL", secs(45)),
+        ])
         .statics(),
         &everything,
         VALUES_ONLY,
@@ -172,46 +171,31 @@ fn requested_synonyms_carry_the_chain_the_container_reports() {
     let listener_static = synonym(listener_key, "15000", CONFIG_SOURCE_STATIC_BROKER);
 
     let cases = [
-        (
-            "broker-wide unset",
-            None,
-            vec![
-                (
-                    CONNECTIONS_MAX_IDLE_MS,
-                    "600000",
-                    CONFIG_SOURCE_DEFAULT,
-                    vec![broker_wide_default.clone()],
-                ),
-                (
-                    listener_key,
-                    "15000",
-                    CONFIG_SOURCE_STATIC_BROKER,
-                    vec![listener_static.clone(), broker_wide_default.clone()],
-                ),
-            ],
-        ),
-        (
-            "broker-wide set",
-            Some(secs(30)),
-            vec![
-                (
-                    CONNECTIONS_MAX_IDLE_MS,
-                    "30000",
-                    CONFIG_SOURCE_STATIC_BROKER,
-                    vec![broker_wide_static.clone(), broker_wide_default.clone()],
-                ),
-                (
-                    listener_key,
-                    "15000",
-                    CONFIG_SOURCE_STATIC_BROKER,
-                    vec![
-                        listener_static.clone(),
-                        broker_wide_static.clone(),
-                        broker_wide_default.clone(),
-                    ],
-                ),
-            ],
-        ),
+        ("broker-wide unset", None, vec![
+            (
+                CONNECTIONS_MAX_IDLE_MS,
+                "600000",
+                CONFIG_SOURCE_DEFAULT,
+                vec![broker_wide_default.clone()],
+            ),
+            (listener_key, "15000", CONFIG_SOURCE_STATIC_BROKER, vec![
+                listener_static.clone(),
+                broker_wide_default.clone(),
+            ]),
+        ]),
+        ("broker-wide set", Some(secs(30)), vec![
+            (
+                CONNECTIONS_MAX_IDLE_MS,
+                "30000",
+                CONFIG_SOURCE_STATIC_BROKER,
+                vec![broker_wide_static.clone(), broker_wide_default.clone()],
+            ),
+            (listener_key, "15000", CONFIG_SOURCE_STATIC_BROKER, vec![
+                listener_static.clone(),
+                broker_wide_static.clone(),
+                broker_wide_default.clone(),
+            ]),
+        ]),
     ];
 
     for (case, idle, want) in cases {

@@ -1,32 +1,30 @@
-use std::{sync::Arc, time::Duration};
-
-use assert2::{assert, check};
-use krabka_ids::{Offset, PartitionIndex};
-use krabka_log::DeliveryPolicy;
-use krabka_metadata::NodeId;
-use krabka_units::{millis, secs};
-use qubit_clock::{ManualMonotonicClock, MonotonicClock as _, Timer, WallClock};
-use tokio_util::sync::CancellationToken;
-
-use super::*;
-use crate::{
-    delivery::{
-        PartitionDelivery,
-        metrics::NoDeliveryMetrics,
-        test_support::{
-            BOUND_MS, NOW_MS, RecordingMetrics, ScheduleSetup, register, scheduled_partition,
-            wait_parked, wait_until, wall_at,
+use {
+    super::*,
+    crate::{
+        delivery::{
+            PartitionDelivery,
+            metrics::NoDeliveryMetrics,
+            test_support::{
+                BOUND_MS, NOW_MS, RecordingMetrics, ScheduleSetup, register, scheduled_partition,
+                wait_parked, wait_until, wall_at,
+            },
         },
+        partition::Partition,
+        test_support::{BrokenTimer, TimerFailure, UnixMillis},
     },
-    partition::Partition,
-    test_support::{BrokenTimer, TimerFailure, UnixMillis},
+    assert2::{assert, check},
+    krabka_ids::{Offset, PartitionIndex},
+    krabka_log::DeliveryPolicy,
+    krabka_metadata::NodeId,
+    krabka_units::{millis, secs},
+    qubit_clock::{ManualMonotonicClock, MonotonicClock as _, Timer, WallClock},
+    std::{sync::Arc, time::Duration},
+    tokio_util::sync::CancellationToken,
 };
 
 const THIS_BROKER: u64 = 7;
 
-fn key(topic: &str) -> PartitionKey {
-    (topic.to_owned(), PartitionIndex(0))
-}
+fn key(topic: &str) -> PartitionKey { (topic.to_owned(), PartitionIndex(0)) }
 
 #[test]
 fn the_heap_answers_the_earliest_deadline_still_recorded() {
@@ -144,9 +142,7 @@ impl Harness {
         partition
     }
 
-    fn spawn(&self) -> tokio::task::JoinHandle<()> {
-        self.spawn_on(self.timeline.new_timer())
-    }
+    fn spawn(&self) -> tokio::task::JoinHandle<()> { self.spawn_on(self.timeline.new_timer()) }
 
     /// Spawns the scheduler on `timer` rather than on the harness timeline, so
     /// that a test can hand the loop a ticker that gives out.

@@ -37,25 +37,28 @@
 
 mod support;
 
-use std::{io, net::SocketAddr, path::Path, time::Duration};
-
-use assert2::assert;
-use bytes::{Buf, BufMut, BytesMut};
-use krabka_broker::{
-    Broker, BrokerConfig, BrokerHandle,
-    metrics::{ConnectionCloseReason, ConnectionCloseReasonLabel},
-};
-use krabka_protocol::{
-    Decode, Encode,
-    owned::{api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse},
-};
-use krabka_security::{ClientAuthMode, ListenerProtocol, TlsConfig};
-use krabka_units::Time;
-use support::listeners::loopback_listener;
-use tempfile::TempDir;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+use {
+    assert2::assert,
+    bytes::{Buf, BufMut, BytesMut},
+    krabka_broker::{
+        Broker, BrokerConfig, BrokerHandle,
+        metrics::{ConnectionCloseReason, ConnectionCloseReasonLabel},
+    },
+    krabka_protocol::{
+        Decode, Encode,
+        owned::{
+            api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
+        },
+    },
+    krabka_security::{ClientAuthMode, ListenerProtocol, TlsConfig},
+    krabka_units::Time,
+    std::{io, net::SocketAddr, path::Path, time::Duration},
+    support::listeners::loopback_listener,
+    tempfile::TempDir,
+    tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
+    },
 };
 
 /// The dev server certificate scenario 4's TLS listener presents. Nothing
@@ -181,7 +184,7 @@ async fn assert_connection_closed(stream: &mut TcpStream) {
 #[tokio::test(flavor = "current_thread")]
 async fn silent_plaintext_connection_is_closed_past_the_idle_window() {
     let (idle_cfg, log_dir) = config_with_idle_window(krabka_units::secs(60));
-    let fixture = Fixture::start(idle_cfg, log_dir, "PLAINTEXT").await;
+    let fixture = Box::pin(Fixture::start(idle_cfg, log_dir, "PLAINTEXT")).await;
 
     let mut stream = fixture.connect().await;
     assert!(fixture.idle_closes() == 0);
@@ -200,7 +203,7 @@ async fn silent_plaintext_connection_is_closed_past_the_idle_window() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_connection_speaking_each_half_window_is_never_closed() {
     let (cfg, log_dir) = config_with_idle_window(krabka_units::secs(60));
-    let fixture = Fixture::start(cfg, log_dir, "PLAINTEXT").await;
+    let fixture = Box::pin(Fixture::start(cfg, log_dir, "PLAINTEXT")).await;
 
     let mut stream = fixture.connect().await;
     for corr_id in 0..4 {
@@ -226,7 +229,7 @@ async fn a_per_listener_override_expires_its_listener_before_the_broker_wide_win
     let mut cfg = BrokerConfig::for_tests(log_dir.path().to_path_buf());
     cfg.connections_max_idle_overrides =
         std::iter::once(("EXTERNAL".to_string(), krabka_units::secs(20))).collect();
-    let fixture = Fixture::start(cfg, log_dir, "EXTERNAL").await;
+    let fixture = Box::pin(Fixture::start(cfg, log_dir, "EXTERNAL")).await;
 
     let mut stream = fixture.connect().await;
     advance(Duration::from_secs(21)).await;

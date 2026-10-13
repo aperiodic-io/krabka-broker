@@ -1,9 +1,10 @@
-use assert2::assert;
-use krabka_ids::PartitionIndex;
-use krabka_log::{Log, LogConfig, Offset};
-use krabka_units::prelude::bytes;
-
-use super::{Checked, Decision, ProducerState, RetainedBatch, SequenceContext};
+use {
+    super::{Checked, Decision, ProducerState, RetainedBatch, SequenceContext},
+    assert2::assert,
+    krabka_ids::PartitionIndex,
+    krabka_log::{Log, LogConfig, Offset},
+    krabka_units::prelude::bytes,
+};
 
 /// `state.check_batch` for partition `t-0` outside a transaction, as every
 /// test in this module and in `truncation_replay` asks it.

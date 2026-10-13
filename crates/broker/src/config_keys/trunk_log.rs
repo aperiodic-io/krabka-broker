@@ -10,16 +10,17 @@
 //! topic override, this node's dynamic config, the cluster-wide default and
 //! then Kafka's own default.
 
-use krabka_metadata::{MetadataImage, NodeId};
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use super::{
-    MAX_DECOMPRESSED_MESSAGE_BYTES, REMOTE_COPY_LAG_BYTES, REMOTE_COPY_LAG_MS,
-    SOFT_MAX_ARRAY_LENGTH,
-    lookup::{topic_node_or_cluster_default, topic_node_or_cluster_synonym},
-    parse::{int_value, long_value},
+use {
+    super::{
+        MAX_DECOMPRESSED_MESSAGE_BYTES, REMOTE_COPY_LAG_BYTES, REMOTE_COPY_LAG_MS,
+        SOFT_MAX_ARRAY_LENGTH,
+        lookup::{topic_node_or_cluster_default, topic_node_or_cluster_synonym},
+        parse::{int_value, long_value},
+    },
+    crate::api_catalog::UnstableApiVersions,
+    krabka_metadata::{MetadataImage, NodeId},
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
 };
-use crate::api_catalog::UnstableApiVersions;
 
 /// The broker key of `remote.copy.lag.ms`: `RemoteLogManagerConfig.LOG_REMOTE_COPY_LAG_MS_PROP`.
 const LOG_REMOTE_COPY_LAG_MS: &str = "log.remote.copy.lag.ms";
@@ -114,13 +115,14 @@ pub(crate) fn resolve_remote_copy_lag(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_metadata::{
-        BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord, TopicConfigRecord,
+    use {
+        super::*,
+        crate::test_support::single_partition_topic,
+        assert2::check,
+        krabka_metadata::{
+            BrokerConfigRecord, DEFAULT_BROKER_CONFIG_NODE_ID, MetadataRecord, TopicConfigRecord,
+        },
     };
-
-    use super::*;
-    use crate::test_support::single_partition_topic;
 
     const NODE: NodeId = NodeId(1);
 
@@ -210,12 +212,10 @@ mod tests {
     fn a_copy_lag_resolves_topic_then_node_then_cluster_under_the_broker_keys() {
         let cluster = DEFAULT_BROKER_CONFIG_NODE_ID;
         for (label, overrides, broker, expected) in [
-            (
-                "Kafka's defaults",
-                vec![],
-                vec![],
-                RemoteCopyLag { ms: 0, bytes: -1 },
-            ),
+            ("Kafka's defaults", vec![], vec![], RemoteCopyLag {
+                ms: 0,
+                bytes: -1,
+            }),
             (
                 "the topic's own lag",
                 vec![

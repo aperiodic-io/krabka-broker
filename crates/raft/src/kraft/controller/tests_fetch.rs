@@ -2,32 +2,32 @@
 //! a response, the replies a follower and a leaderless node serve, and the
 //! requests the engine emits while replicating or transferring a snapshot.
 
-use std::time::Duration as StdDuration;
-
-use assert2::assert;
-
-use super::*;
-use crate::{
-    error::RaftError,
-    kraft::{
-        controller::{
-            offsets::metadata_fetch_offset_below_log_start,
-            records::{decode_batches, encode_batches},
-            replication::{
-                FetchBatchDisposition, classify_fetch_batch, fetch_epoch_for_request,
-                should_serve_fetch_records, should_start_snapshot_fetch,
-                snapshot_fetch_response_invalid,
+use {
+    super::*,
+    crate::{
+        error::RaftError,
+        kraft::{
+            controller::{
+                offsets::metadata_fetch_offset_below_log_start,
+                records::{decode_batches, encode_batches},
+                replication::{
+                    FetchBatchDisposition, classify_fetch_batch, fetch_epoch_for_request,
+                    should_serve_fetch_records, should_start_snapshot_fetch,
+                    snapshot_fetch_response_invalid,
+                },
+                test_support::{
+                    CapturedPeerSend, EngineSetup, build_engine_only, elect_single_voter_engine,
+                    one_offset_batch, record_peer_sends, recv_peer_send, recv_peer_send_with_api,
+                    submit_change_with_timeout, topic_record,
+                },
             },
-            test_support::{
-                CapturedPeerSend, EngineSetup, build_engine_only, elect_single_voter_engine,
-                one_offset_batch, record_peer_sends, recv_peer_send, recv_peer_send_with_api,
-                submit_change_with_timeout, topic_record,
-            },
+            event::SuccessorRank,
+            transport::{PeerSender, wire::FETCH_VERSION},
+            types::LogOffsetMetadata,
         },
-        event::SuccessorRank,
-        transport::{PeerSender, wire::FETCH_VERSION},
-        types::LogOffsetMetadata,
     },
+    assert2::assert,
+    std::time::Duration as StdDuration,
 };
 
 #[test]
@@ -75,9 +75,7 @@ fn leader_answer(leader_id: NodeId, leader_epoch: Epoch) -> wire::FetchAnswer {
 }
 
 /// The endpoint every test voter announces (`test_support::voter_set`).
-fn test_endpoint() -> (String, u16) {
-    ("127.0.0.1".to_string(), 9_093)
-}
+fn test_endpoint() -> (String, u16) { ("127.0.0.1".to_string(), 9_093) }
 
 /// A Fetch request from `from` in `current_leader_epoch`, at offset 0.
 fn fetch_request(from: NodeId, current_leader_epoch: i32) -> bytes::Bytes {
@@ -800,13 +798,10 @@ async fn leaderless_observer_discovers_the_leader_through_a_follower_redirect() 
     });
     let transport = Arc::new(EndpointRecorder::default());
     observer.peers = transport.clone();
-    assert2::assert!(matches!(
-        observer.core.role(),
-        Role::Observer {
-            leader_id: None,
-            ..
-        }
-    ));
+    assert2::assert!(matches!(observer.core.role(), Role::Observer {
+        leader_id: None,
+        ..
+    }));
     let epoch = observer.core.quorum_state().leader_epoch;
     let leader_endpoint = wire::QuorumLeader {
         leader_id: Some(NodeId(2)),
@@ -822,13 +817,10 @@ async fn leaderless_observer_discovers_the_leader_through_a_follower_redirect() 
     })
     .encode();
     observer.on_fetch_response(NodeId(1), &redirect);
-    assert2::assert!(matches!(
-        observer.core.role(),
-        Role::Observer {
-            leader_id: Some(NodeId(2)),
-            ..
-        }
-    ));
+    assert2::assert!(matches!(observer.core.role(), Role::Observer {
+        leader_id: Some(NodeId(2)),
+        ..
+    }));
     assert2::assert!(
         *transport.endpoints.lock().expect("endpoint lock")
             == vec![(NodeId(2), "controller-2:9093".to_string())]

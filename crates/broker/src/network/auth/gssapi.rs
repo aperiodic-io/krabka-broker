@@ -5,20 +5,21 @@
 //! the context establishment, the security-layer negotiation and the principal
 //! mapping sit together here.
 
-use krabka_protocol::owned::{
-    sasl_authenticate_request::SaslAuthenticateRequest,
-    sasl_authenticate_response::SaslAuthenticateResponse,
-};
 pub use krabka_security::gssapi::server::GssapiServerExchange;
-use krabka_security::{Principal, SaslMechanism};
-use krabka_units::{ByteSize, Time, kibibytes};
-
-use super::{
-    kerberos_name::{KerberosNameError, KerberosRule, short_name},
-    response::{fail_authenticate, sasl_ok},
-    state::{ConnectionAuth, SaslExchange, session_expiry},
+use {
+    super::{
+        kerberos_name::{KerberosNameError, KerberosRule, short_name},
+        response::{fail_authenticate, sasl_ok},
+        state::{ConnectionAuth, SaslExchange, session_expiry},
+    },
+    crate::time_util::now_ms,
+    krabka_protocol::owned::{
+        sasl_authenticate_request::SaslAuthenticateRequest,
+        sasl_authenticate_response::SaslAuthenticateResponse,
+    },
+    krabka_security::{Principal, SaslMechanism},
+    krabka_units::{ByteSize, Time, kibibytes},
 };
-use crate::time_util::now_ms;
 
 /// Broker-side SASL/GSSAPI configuration.
 ///
@@ -228,11 +229,12 @@ fn map_gssapi_principal(raw: &str, config: &GssapiConfig) -> Result<String, Kerb
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::network::auth::test_support::{
-        assert_failed_authenticate_response, assert_success_authenticate_response,
+    use {
+        super::*,
+        crate::network::auth::test_support::{
+            assert_failed_authenticate_response, assert_success_authenticate_response,
+        },
+        assert2::{assert, check},
     };
 
     fn gssapi_config(
@@ -309,11 +311,9 @@ mod tests {
 
     #[test]
     fn handle_authenticate_gssapi_round1_bad_keytab_fails_and_leaves_state_untouched() {
-        let config = gssapi_config(
-            "/nonexistent.keytab",
-            Some("KRABKA.TEST"),
-            vec![KerberosRule::Default],
-        );
+        let config = gssapi_config("/nonexistent.keytab", Some("KRABKA.TEST"), vec![
+            KerberosRule::Default,
+        ]);
         let mut auth = gssapi_pending();
         let req = SaslAuthenticateRequest {
             auth_bytes: bytes::Bytes::from_static(b"AP-REQ"),
@@ -323,13 +323,10 @@ mod tests {
         let resp = handle_authenticate_gssapi(&req, &mut auth, &config, None);
 
         assert_failed_authenticate_response(&resp, None);
-        assert!(matches!(
-            auth,
-            ConnectionAuth::Negotiating {
-                exchange: SaslExchange::GssapiPending,
-                ..
-            }
-        ));
+        assert!(matches!(auth, ConnectionAuth::Negotiating {
+            exchange: SaslExchange::GssapiPending,
+            ..
+        }));
     }
 
     /// Establishes the GSS context on the first token with no trailing
@@ -345,6 +342,7 @@ mod tests {
         {
             Ok(krabka_security::gssapi::AcceptStep::Established(None))
         }
+
         fn wrap(
             &self,
             plaintext: &[u8],
@@ -352,9 +350,11 @@ mod tests {
         ) -> Result<Vec<u8>, krabka_security::gssapi::GssError> {
             Ok(plaintext.to_vec())
         }
+
         fn unwrap(&self, token: &[u8]) -> Result<Vec<u8>, krabka_security::gssapi::GssError> {
             Ok(token.to_vec())
         }
+
         fn src_principal(&self) -> Result<String, krabka_security::gssapi::GssError> {
             Ok("alice@KRABKA.TEST".to_string())
         }
@@ -364,11 +364,9 @@ mod tests {
     fn handle_authenticate_gssapi_subsequent_round_completes_and_authenticates() {
         use krabka_security::gssapi::server::{GssapiServerExchange, ServerStep};
 
-        let config = gssapi_config(
-            "/unused.keytab",
-            Some("KRABKA.TEST"),
-            vec![KerberosRule::Default],
-        );
+        let config = gssapi_config("/unused.keytab", Some("KRABKA.TEST"), vec![
+            KerberosRule::Default,
+        ]);
 
         // Drive the exchange to `AwaitingChoice` up front (mirroring round
         // 1's work), so this test targets `handle_authenticate_gssapi`'s
@@ -478,11 +476,9 @@ mod tests {
 
     #[test]
     fn map_gssapi_principal_uppercases_realm_before_default_rule() {
-        let config = gssapi_config(
-            "/unused.keytab",
-            Some("KRABKA.TEST"),
-            vec![KerberosRule::Default],
-        );
+        let config = gssapi_config("/unused.keytab", Some("KRABKA.TEST"), vec![
+            KerberosRule::Default,
+        ]);
 
         let short = map_gssapi_principal("alice@krabka.test", &config).expect("map principal");
 

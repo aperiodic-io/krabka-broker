@@ -1,27 +1,27 @@
 //! Validation and materialization of captured committed diskless-WAL state.
 
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
-
-use bytes::Bytes;
-use krabka_ids::Offset;
-use krabka_log::{Log, LogConfig, name};
-use krabka_protocol::records::{RecordBatchBorrowed, validate_one_v2_batch};
-use krabka_remote_storage::{
-    ObjectEntry, TopicIdPartition, TrustedManifestKeys,
-    diskless::{CAPTURE_HEAD_NAME, CapturedWalRange, DisklessWalCapture, parse_wal_object},
-};
-use object_store::path::Path as ObjectPath;
-
-use crate::{
-    ArchiveInventory, ArchiveStore, PartitionInventory, RestoreArgs, RestoreError,
-    args::PartitionRef,
-    bound::Predicates,
-    materialize::prepare::{BatchTally, PrepareBatchSetup, PreparedBatch, prepare_batch},
-    report::{DisklessPartitionReport, DisklessRestoreReport},
-    verify::{MAX_LOG_BYTES, fetch_capped},
+use {
+    crate::{
+        ArchiveInventory, ArchiveStore, PartitionInventory, RestoreArgs, RestoreError,
+        args::PartitionRef,
+        bound::Predicates,
+        materialize::prepare::{BatchTally, PrepareBatchSetup, PreparedBatch, prepare_batch},
+        report::{DisklessPartitionReport, DisklessRestoreReport},
+        verify::{MAX_LOG_BYTES, fetch_capped},
+    },
+    bytes::Bytes,
+    krabka_ids::Offset,
+    krabka_log::{Log, LogConfig, name},
+    krabka_protocol::records::{RecordBatchBorrowed, validate_one_v2_batch},
+    krabka_remote_storage::{
+        ObjectEntry, TopicIdPartition, TrustedManifestKeys,
+        diskless::{CAPTURE_HEAD_NAME, CapturedWalRange, DisklessWalCapture, parse_wal_object},
+    },
+    object_store::path::Path as ObjectPath,
+    std::{
+        collections::{HashMap, HashSet},
+        path::Path,
+    },
 };
 
 pub(super) async fn load(path: Option<&Path>) -> Result<Option<DisklessWalCapture>, RestoreError> {
@@ -414,10 +414,7 @@ async fn fetch_object(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::load;
-    use crate::RestoreError;
+    use {super::load, crate::RestoreError, assert2::check};
 
     #[tokio::test]
     async fn a_capture_with_a_missing_or_unknown_version_is_refused() {

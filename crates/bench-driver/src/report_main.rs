@@ -1,11 +1,12 @@
 //! `krabka-bench-report` walks a directory of `RunOutput` JSON files and
 //! writes a Markdown side-by-side comparison.
 
-use std::path::PathBuf;
-
-use anyhow::{Context, Result};
-use clap::Parser;
-use krabka_bench_driver::report;
+use {
+    anyhow::{Context, Result},
+    clap::Parser,
+    krabka_bench_driver::report,
+    std::path::PathBuf,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "krabka-bench-report", version, about)]

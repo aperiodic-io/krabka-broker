@@ -5,18 +5,19 @@
 //! observed here over a real freeze, a real approval and a real refusal, on
 //! the same cluster the audit cases use.
 
-use assert2::check;
-use krabka_protocol::owned::delete_topics_request::{DeleteTopicState, DeleteTopicsRequest};
-
-use crate::{
-    freeze_workflow::{
-        FREEZE_REASON, FROZEN_TARGET, PROPOSE_REASON, SignedFreeze, THAW_REASON,
-        boot_workflow_cluster, now_ms, propose_thaw, send_signed_freeze, settle_proposal,
+use {
+    crate::{
+        freeze_workflow::{
+            FREEZE_REASON, FROZEN_TARGET, PROPOSE_REASON, SignedFreeze, THAW_REASON,
+            boot_workflow_cluster, now_ms, propose_thaw, send_signed_freeze, settle_proposal,
+        },
+        support::{
+            self,
+            topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
+        },
     },
-    support::{
-        self,
-        topics::{ConfiguredTopicSetup, creatable_topic, create_topic_request},
-    },
+    assert2::check,
+    krabka_protocol::owned::delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
 };
 
 /// Verifies that the KFC-9 metric families move on a real request.

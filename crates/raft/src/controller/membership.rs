@@ -3,11 +3,13 @@
 //! area for an observer awaiting promotion, and the whole-set membership delta
 //! that is reconciled into a single one of those engine commands.
 
-use super::ControllerHandle;
-use crate::{
-    error::RaftError,
-    reconfig::{AddVoter, ReconfigOutcome, RemoveVoter, UpdateVoter, VoterChange},
-    types::{Node, NodeId},
+use {
+    super::ControllerHandle,
+    crate::{
+        error::RaftError,
+        reconfig::{AddVoter, ReconfigOutcome, RemoveVoter, UpdateVoter, VoterChange},
+        types::{Node, NodeId},
+    },
 };
 
 impl ControllerHandle {
@@ -147,10 +149,9 @@ impl ControllerHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use super::*;
-    use crate::controller::test_support::bootstrap_controller;
+    use {
+        super::*, crate::controller::test_support::bootstrap_controller, std::collections::BTreeSet,
+    };
 
     #[tokio::test]
     async fn change_membership_validates_delta_count() {

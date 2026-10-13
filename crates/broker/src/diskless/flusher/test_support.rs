@@ -2,25 +2,25 @@
 //! three-record batch to seed a log with, and a spawned `Partition` backed by
 //! that log on disk.
 
-use std::{
-    path::Path,
-    sync::{Arc, atomic::Ordering},
-};
-
-use krabka_log::{Log, LogConfig};
-use krabka_metadata::NodeId;
-use krabka_protocol::records::RecordBatch;
-
-use crate::{
-    broker::spawn_partition,
-    diskless::index_log::DisklessIndexLog,
-    log_dir_status::LogDirRegistry,
-    partition::Partition,
-    producer_state::ProducerState,
-    test_support::{
-        RecordCount, RepeatedRecordsSetup, StorageMode, UnixMillis, repeated_records_batch,
+use {
+    crate::{
+        broker::spawn_partition,
+        diskless::index_log::DisklessIndexLog,
+        log_dir_status::LogDirRegistry,
+        partition::Partition,
+        producer_state::ProducerState,
+        test_support::{
+            RecordCount, RepeatedRecordsSetup, StorageMode, UnixMillis, repeated_records_batch,
+        },
+        time_util::now_ms,
     },
-    time_util::now_ms,
+    krabka_log::{Log, LogConfig},
+    krabka_metadata::NodeId,
+    krabka_protocol::records::RecordBatch,
+    std::{
+        path::Path,
+        sync::{Arc, atomic::Ordering},
+    },
 };
 
 /// A batch of `count` records, stamped with the wall clock the way a real

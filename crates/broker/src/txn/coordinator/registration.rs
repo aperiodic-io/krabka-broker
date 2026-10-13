@@ -4,24 +4,25 @@
 //! producer identity, moves the entry to `Ongoing`, and records the partitions
 //! the transaction writes.
 
-use krabka_log::ProducerId;
-use krabka_verified::transaction::{
-    TransactionRegistrationDecision, TransactionRegistrationFacts,
-    TransactionRegistrationIdentityFacts, TransactionRegistrationIdentityMatchFacts,
-    TransactionRegistrationOwnershipFacts, TransactionRegistrationStateFacts,
-    transaction_partition_registration,
-};
-
-use super::TxnCoordinator;
-use crate::{
-    codes::{
-        CONCURRENT_TRANSACTIONS, COORDINATOR_LOAD_IN_PROGRESS, INVALID_PRODUCER_EPOCH,
-        INVALID_PRODUCER_ID_MAPPING, INVALID_REQUEST, NONE, NOT_COORDINATOR, PRODUCER_FENCED,
+use {
+    super::TxnCoordinator,
+    crate::{
+        codes::{
+            CONCURRENT_TRANSACTIONS, COORDINATOR_LOAD_IN_PROGRESS, INVALID_PRODUCER_EPOCH,
+            INVALID_PRODUCER_ID_MAPPING, INVALID_REQUEST, NONE, NOT_COORDINATOR, PRODUCER_FENCED,
+        },
+        txn::{
+            state::{TopicPartition, TxnState},
+            util::{PRODUCER_FENCED_MIN_VERSION, now_millis},
+            version::TxnVersion,
+        },
     },
-    txn::{
-        state::{TopicPartition, TxnState},
-        util::{PRODUCER_FENCED_MIN_VERSION, now_millis},
-        version::TxnVersion,
+    krabka_log::ProducerId,
+    krabka_verified::transaction::{
+        TransactionRegistrationDecision, TransactionRegistrationFacts,
+        TransactionRegistrationIdentityFacts, TransactionRegistrationIdentityMatchFacts,
+        TransactionRegistrationOwnershipFacts, TransactionRegistrationStateFacts,
+        transaction_partition_registration,
     },
 };
 
@@ -202,23 +203,23 @@ fn registration_code(decision: TransactionRegistrationDecision, version: i16) ->
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use krabka_ids::PartitionIndex;
-    use krabka_log::ProducerId;
-    use tokio::sync::Mutex;
-
-    use super::{TxnCoordinator, TxnState, TxnVersion};
-    use crate::{
-        codes::{INVALID_PRODUCER_EPOCH, PRODUCER_FENCED},
-        partition::Partition,
-        test_support::{StandalonePartitionSetup, open_partition},
-        txn::{
-            bootstrap,
-            coordinator::test_support::test_coordinator,
-            state::{TopicPartition, TxnEntry},
+    use {
+        super::{TxnCoordinator, TxnState, TxnVersion},
+        crate::{
+            codes::{INVALID_PRODUCER_EPOCH, PRODUCER_FENCED},
+            partition::Partition,
+            test_support::{StandalonePartitionSetup, open_partition},
+            txn::{
+                bootstrap,
+                coordinator::test_support::test_coordinator,
+                state::{TopicPartition, TxnEntry},
+            },
         },
+        assert2::{assert, check},
+        krabka_ids::PartitionIndex,
+        krabka_log::ProducerId,
+        std::sync::Arc,
+        tokio::sync::Mutex,
     };
 
     fn partition(topic: &str, index: i32) -> TopicPartition {
@@ -244,14 +245,11 @@ mod tests {
         transactional_id: &str,
     ) -> Arc<Partition> {
         let index = coordinator.partition_for(transactional_id);
-        let opened = open_partition(
-            directory,
-            StandalonePartitionSetup {
-                topic: bootstrap::TOPIC,
-                partition: krabka_ids::PartitionIndex(index.get()),
-                ..Default::default()
-            },
-        );
+        let opened = open_partition(directory, StandalonePartitionSetup {
+            topic: bootstrap::TOPIC,
+            partition: krabka_ids::PartitionIndex(index.get()),
+            ..Default::default()
+        });
         coordinator
             .partitions
             .insert(bootstrap::TOPIC.into(), index, Arc::clone(&opened));

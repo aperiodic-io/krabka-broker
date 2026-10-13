@@ -8,22 +8,22 @@
 //! once it breaches `local.retention.ms`. The copy then uploads the sealed
 //! records, and the next check drops them from local disk.
 
-use std::time::{Duration, Instant};
-
-use assert2::{assert, check};
-use krabka_broker::BrokerHandle;
-use krabka_client_core::Client;
-use krabka_protocol::owned::list_offsets_request::ListOffsetsRequest;
-
-use crate::{
-    rlmm_cluster::{await_activation, build_client, start_broker_with_topic_rlmm},
-    rlmm_round_trip::remote_log_files,
-    run_broker_test,
-    support::{
-        offsets::{list_offset_partition, single_partition_list_offsets},
-        topics::topic_configs,
+use {
+    crate::{
+        rlmm_cluster::{await_activation, build_client, start_broker_with_topic_rlmm},
+        rlmm_round_trip::remote_log_files,
+        run_broker_test,
+        support::{
+            offsets::{list_offset_partition, single_partition_list_offsets},
+            topics::topic_configs,
+        },
+        topic_fixture::create_configured_topic,
     },
-    topic_fixture::create_configured_topic,
+    assert2::{assert, check},
+    krabka_broker::BrokerHandle,
+    krabka_client_core::Client,
+    krabka_protocol::owned::list_offsets_request::ListOffsetsRequest,
+    std::time::{Duration, Instant},
 };
 
 const TOPIC: &str = "tiered-idle-partition-itest";

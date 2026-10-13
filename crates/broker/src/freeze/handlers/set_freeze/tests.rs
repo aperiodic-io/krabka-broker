@@ -4,25 +4,25 @@
 //! connection, so a test can present a record she signed as well as one the
 //! trust set refuses.
 
-use std::net::SocketAddr;
-
-use krabka_metadata::{MetadataImage, PatternType, TopicFreezeRecord};
-use krabka_protocol::krabka::freeze::SetTopicFreezeRequest;
-use krabka_security::Principal;
-use ring::signature::Ed25519KeyPair;
-use tempfile::TempDir;
-use uuid::Uuid;
-
-use crate::{
-    cluster_id::encode,
-    config::BrokerConfig,
-    freeze::signing::freeze_signing_bytes,
-    handlers::RequestContext,
-    operator_keys::{OperatorKeyEntry, OperatorKeys},
-    test_support::{
-        FrozenTopicsImageSetup, OperatorKeyFileSetup, ed25519_public_key_file, frozen_topics_image,
-        principal, start_broker_no_audit_with,
+use {
+    crate::{
+        cluster_id::encode,
+        config::BrokerConfig,
+        freeze::signing::freeze_signing_bytes,
+        handlers::RequestContext,
+        operator_keys::{OperatorKeyEntry, OperatorKeys},
+        test_support::{
+            FrozenTopicsImageSetup, OperatorKeyFileSetup, ed25519_public_key_file,
+            frozen_topics_image, principal, start_broker_no_audit_with,
+        },
     },
+    krabka_metadata::{MetadataImage, PatternType, TopicFreezeRecord},
+    krabka_protocol::krabka::freeze::SetTopicFreezeRequest,
+    krabka_security::Principal,
+    ring::signature::Ed25519KeyPair,
+    std::net::SocketAddr,
+    tempfile::TempDir,
+    uuid::Uuid,
 };
 
 /// Alice's identity and request context, with caller-owned borrowed storage.
@@ -61,9 +61,7 @@ fn image(entries: &[(&str, PatternType)]) -> MetadataImage {
     frozen_topics_image(entries, FrozenTopicsImageSetup { cluster: CLUSTER })
 }
 
-fn peer() -> SocketAddr {
-    "10.0.0.1:51120".parse().expect("peer address")
-}
+fn peer() -> SocketAddr { "10.0.0.1:51120".parse().expect("peer address") }
 
 fn context<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> RequestContext<'a> {
     RequestContext::new(

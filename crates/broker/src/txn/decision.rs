@@ -6,13 +6,14 @@
 //! stateright model can drive. See `decision_model.rs` and the design:
 //! `crates/broker/docs/transaction-coordinator-design.md`.
 
-use krabka_log::ProducerId;
-
-use super::{
-    handlers::end_txn::{ReacquireDecision, validate_complete_reacquire},
-    state::{TxnEntry, TxnState},
+use {
+    super::{
+        handlers::end_txn::{ReacquireDecision, validate_complete_reacquire},
+        state::{TxnEntry, TxnState},
+    },
+    crate::codes,
+    krabka_log::ProducerId,
 };
-use crate::codes;
 
 /// Phase 1 of `EndTxn`: validates the `Ongoing → Prepare{Commit,Abort}`
 /// transition and applies it to `entry`.

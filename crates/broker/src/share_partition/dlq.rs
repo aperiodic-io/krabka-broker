@@ -23,10 +23,7 @@
 //! Whether a write succeeds does not decide the record's fate. Kafka archives
 //! the record whatever [`DlqSink::write`] answers, and logs a failure.
 
-use async_trait::async_trait;
-use krabka_log::Offset;
-
-use crate::share_partition::state::DlqCause;
+use {crate::share_partition::state::DlqCause, async_trait::async_trait, krabka_log::Offset};
 
 mod coalesce;
 mod record;
@@ -75,9 +72,7 @@ pub trait DlqSink: Send + Sync {
 
 #[cfg(test)]
 pub mod test_support {
-    use std::sync::Mutex;
-
-    use super::*;
+    use {super::*, std::sync::Mutex};
 
     /// A sink that records what it was asked to write, and fails on demand.
     #[derive(Default)]

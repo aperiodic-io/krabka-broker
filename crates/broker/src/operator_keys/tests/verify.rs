@@ -3,11 +3,12 @@
 //! A signature verifies only under the key that made it, only for the
 //! principal that key speaks for, and only over the message that was signed.
 
-use assert2::check;
-use tempfile::TempDir;
-
-use super::{entry, fresh_key, write_key_file};
-use crate::operator_keys::OperatorKeys;
+use {
+    super::{entry, fresh_key, write_key_file},
+    crate::operator_keys::OperatorKeys,
+    assert2::check,
+    tempfile::TempDir,
+};
 
 #[test]
 fn verify_accepts_only_the_bound_principal_and_the_signing_key() {

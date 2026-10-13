@@ -6,9 +6,7 @@
 //! layers over whichever of the two backends is selected and cannot be used
 //! with the local filesystem backend.
 
-use krabka_units::Time;
-use schemars::JsonSchema;
-use serde::Deserialize;
+use {krabka_units::Time, schemars::JsonSchema, serde::Deserialize};
 
 /// TOML shape of `[remote_storage.s3]`. Maps to
 /// [`krabka_remote_storage::S3Config`].
@@ -162,12 +160,13 @@ pub struct FileWormConfig {
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::{
-        config::{BrokerConfig, RemoteStorageBackend},
-        file_config::{FileConfig, FileConfigError, test_support::configured_unwrap_parse},
+    use {
+        super::*,
+        crate::{
+            config::{BrokerConfig, RemoteStorageBackend},
+            file_config::{FileConfig, FileConfigError, test_support::configured_unwrap_parse},
+        },
+        assert2::{assert, check},
     };
 
     fn configured_s3(source: &str) -> krabka_remote_storage::S3Config {

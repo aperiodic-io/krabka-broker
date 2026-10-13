@@ -7,17 +7,19 @@
 //! handlers in the sibling modules read and write these types, so they live
 //! apart from any one mechanism.
 
-use krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse;
-use krabka_security::{AuthMethod, Principal, SaslMechanism, ScramServerExchange};
-use krabka_verified::{
-    authz::{
-        RequestAuthState, request_auth_admission, sasl_session_expiry, session_expired_for_request,
+use {
+    super::response::fail_authenticate_with,
+    crate::handlers::ApiKeyCode,
+    krabka_protocol::owned::sasl_authenticate_response::SaslAuthenticateResponse,
+    krabka_security::{AuthMethod, Principal, SaslMechanism, ScramServerExchange},
+    krabka_verified::{
+        authz::{
+            RequestAuthState, request_auth_admission, sasl_session_expiry,
+            session_expired_for_request,
+        },
+        delegation_token::{TokenApi, TokenApiAdmission, token_api_admission},
     },
-    delegation_token::{TokenApi, TokenApiAdmission, token_api_admission},
 };
-
-use super::response::fail_authenticate_with;
-use crate::handlers::ApiKeyCode;
 
 // Several variants and the `principal` accessor are exercised by the PLAIN,
 // SCRAM, and admin paths — keep the surface in one place.
@@ -307,9 +309,7 @@ impl SaslExchange {
 
 impl ConnectionAuth {
     #[must_use]
-    pub fn is_authenticated(&self) -> bool {
-        matches!(self, Self::Authenticated { .. })
-    }
+    pub fn is_authenticated(&self) -> bool { matches!(self, Self::Authenticated { .. }) }
 
     #[must_use]
     pub fn principal(&self) -> Option<&Principal> {
@@ -429,13 +429,14 @@ pub(super) fn authenticate_with_reauth(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::{
-        codes::SASL_AUTHENTICATION_FAILED,
-        network::auth::test_support::{authenticated, oauth_reauthenticating},
-        test_support::{principal, sasl_principal},
+    use {
+        super::*,
+        crate::{
+            codes::SASL_AUTHENTICATION_FAILED,
+            network::auth::test_support::{authenticated, oauth_reauthenticating},
+            test_support::{principal, sasl_principal},
+        },
+        assert2::{assert, check},
     };
 
     /// The request gate follows Kafka's `SaslServerAuthenticator`: before a
@@ -465,21 +466,15 @@ mod tests {
         }
         // (state, [SaslHandshake, ApiVersions, SaslAuthenticate, Produce, Metadata])
         let cases: [(&str, ConnectionAuth, [bool; 5]); 4] = [
-            (
-                "anonymous",
-                ConnectionAuth::Anonymous,
-                [true, true, false, false, false],
-            ),
-            (
-                "negotiating",
-                negotiating(),
-                [false, false, true, false, false],
-            ),
-            (
-                "reauthenticating",
-                reauthenticating(),
-                [false, false, true, false, false],
-            ),
+            ("anonymous", ConnectionAuth::Anonymous, [
+                true, true, false, false, false,
+            ]),
+            ("negotiating", negotiating(), [
+                false, false, true, false, false,
+            ]),
+            ("reauthenticating", reauthenticating(), [
+                false, false, true, false, false,
+            ]),
             (
                 "reauth bad mechanism",
                 ConnectionAuth::ReauthBadMechanism,
@@ -496,22 +491,16 @@ mod tests {
     fn unauthenticated_states_have_no_principal() {
         let cases = [
             ("anonymous", ConnectionAuth::Anonymous),
-            (
-                "negotiating_plain",
-                ConnectionAuth::Negotiating {
-                    mechanism: SaslMechanism::Plain,
-                    exchange: SaslExchange::Plain,
-                    pending_token_expiry_ms: None,
-                },
-            ),
-            (
-                "negotiating_scram_pending",
-                ConnectionAuth::Negotiating {
-                    mechanism: SaslMechanism::ScramSha512,
-                    exchange: SaslExchange::ScramPending,
-                    pending_token_expiry_ms: None,
-                },
-            ),
+            ("negotiating_plain", ConnectionAuth::Negotiating {
+                mechanism: SaslMechanism::Plain,
+                exchange: SaslExchange::Plain,
+                pending_token_expiry_ms: None,
+            }),
+            ("negotiating_scram_pending", ConnectionAuth::Negotiating {
+                mechanism: SaslMechanism::ScramSha512,
+                exchange: SaslExchange::ScramPending,
+                pending_token_expiry_ms: None,
+            }),
         ];
         for (name, a) in cases {
             assert!(!a.is_authenticated(), "{name}");
@@ -543,31 +532,25 @@ mod tests {
 
         let rejected = [
             ("anonymous state", ConnectionAuth::Anonymous),
-            (
-                "negotiating state",
-                ConnectionAuth::Negotiating {
-                    mechanism: SaslMechanism::Plain,
-                    exchange: SaslExchange::Plain,
-                    pending_token_expiry_ms: None,
-                },
-            ),
-            (
-                "reauthenticating state",
-                ConnectionAuth::Reauthenticating {
-                    previous: AuthenticatedSnapshot {
-                        principal: Principal {
-                            name: "alice".into(),
-                            auth_method: AuthMethod::SaslOAuthBearer,
-                            groups: vec![],
-                        },
-                        mechanism: SaslMechanism::OAuthBearer,
-                        expires_at_ms: Some(2_000_000),
-                        authenticated_via_token: false,
+            ("negotiating state", ConnectionAuth::Negotiating {
+                mechanism: SaslMechanism::Plain,
+                exchange: SaslExchange::Plain,
+                pending_token_expiry_ms: None,
+            }),
+            ("reauthenticating state", ConnectionAuth::Reauthenticating {
+                previous: AuthenticatedSnapshot {
+                    principal: Principal {
+                        name: "alice".into(),
+                        auth_method: AuthMethod::SaslOAuthBearer,
+                        groups: vec![],
                     },
-                    exchange: SaslExchange::OAuthBearer,
-                    pending_token_expiry_ms: None,
+                    mechanism: SaslMechanism::OAuthBearer,
+                    expires_at_ms: Some(2_000_000),
+                    authenticated_via_token: false,
                 },
-            ),
+                exchange: SaslExchange::OAuthBearer,
+                pending_token_expiry_ms: None,
+            }),
             (
                 "authenticated anonymous principal",
                 authenticated(AuthMethod::Anonymous, SaslMechanism::Plain, false),
@@ -789,9 +772,7 @@ mod tests {
         }
     }
 
-    fn alice() -> Principal {
-        sasl_principal("alice")
-    }
+    fn alice() -> Principal { sasl_principal("alice") }
 
     /// The session a re-authentication is measured against: SCRAM-SHA-256
     /// under a delegation token, so that a restore which drops either the
@@ -912,23 +893,17 @@ mod tests {
     fn begin_reauth_only_fires_for_a_reauthenticating_connection() {
         let cases = [
             ("anonymous", ConnectionAuth::Anonymous),
-            (
-                "negotiating",
-                ConnectionAuth::Negotiating {
-                    mechanism: SaslMechanism::Plain,
-                    exchange: SaslExchange::Plain,
-                    pending_token_expiry_ms: None,
-                },
-            ),
-            (
-                "authenticated",
-                ConnectionAuth::Authenticated {
-                    principal: alice(),
-                    mechanism: SaslMechanism::Plain,
-                    expires_at_ms: Some(9_000),
-                    authenticated_via_token: false,
-                },
-            ),
+            ("negotiating", ConnectionAuth::Negotiating {
+                mechanism: SaslMechanism::Plain,
+                exchange: SaslExchange::Plain,
+                pending_token_expiry_ms: None,
+            }),
+            ("authenticated", ConnectionAuth::Authenticated {
+                principal: alice(),
+                mechanism: SaslMechanism::Plain,
+                expires_at_ms: Some(9_000),
+                authenticated_via_token: false,
+            }),
         ];
         for (case, mut auth) in cases {
             let before = std::mem::discriminant(&auth);

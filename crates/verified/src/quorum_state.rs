@@ -136,11 +136,12 @@ pub fn quorum_state_load_decision(
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::{
-        QuorumStateLoadDecision, QuorumStateWriteDecision, quorum_state_load_decision,
-        quorum_state_write_decision,
+    use {
+        super::{
+            QuorumStateLoadDecision, QuorumStateWriteDecision, quorum_state_load_decision,
+            quorum_state_write_decision,
+        },
+        assert2::check,
     };
 
     #[test]

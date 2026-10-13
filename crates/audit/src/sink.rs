@@ -1,13 +1,13 @@
 //! The audit sink abstraction and an in-memory test sink.
 
-use std::sync::Mutex;
-
-use async_trait::async_trait;
-
-use crate::{
-    chain::to_hex,
-    event::{AuditEvent, AuditEventClass},
-    ocsf::{ProductInfo, to_ocsf},
+use {
+    crate::{
+        chain::to_hex,
+        event::{AuditEvent, AuditEventClass},
+        ocsf::{ProductInfo, to_ocsf},
+    },
+    async_trait::async_trait,
+    std::sync::Mutex,
 };
 
 /// Record-header key for the per-broker chain sequence number in decimal ASCII.
@@ -173,10 +173,7 @@ impl AuditSink for MemorySink {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-
-    use super::*;
-    use crate::test_support::authentication;
+    use {super::*, crate::test_support::authentication, assert2::check};
 
     #[test]
     fn io_error_displays() {

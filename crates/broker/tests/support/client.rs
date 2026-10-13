@@ -1,28 +1,29 @@
 //! Client connections and topic creation shared by coordinator suites.
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
-
-use assert2::assert;
-use krabka_broker::{BrokerConfig, BrokerHandle};
-use krabka_client_core::{Client, Connection, ConnectionOptions};
-use krabka_protocol::{
-    owned::produce_response::PartitionProduceResponse, primitives::uuid::Uuid as WireUuid,
-    records::RecordBatch,
-};
-use krabka_raft::{KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse};
-use krabka_security::ListenerProtocol;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-};
-
-use crate::support::{
-    produce::{
-        ProduceAcknowledgements, ProduceTimeoutMillis, SinglePartitionProduceSetup, send_batch,
+use {
+    crate::support::{
+        produce::{
+            ProduceAcknowledgements, ProduceTimeoutMillis, SinglePartitionProduceSetup, send_batch,
+        },
+        records::{batch_from_records, value_record},
+        topics::{
+            CreateTopicRequestSetup, CreateTopicSetup, CreateTopicsTimeoutMillis,
+            TopicPartitionCount, TopicReplicationFactor, configured_topic_request,
+            create_topic_request_with_setup,
+        },
     },
-    records::{batch_from_records, value_record},
-    topics::{
-        CreateTopicRequestSetup, CreateTopicSetup, CreateTopicsTimeoutMillis, TopicPartitionCount,
-        TopicReplicationFactor, configured_topic_request, create_topic_request_with_setup,
+    assert2::assert,
+    krabka_broker::{BrokerConfig, BrokerHandle},
+    krabka_client_core::{Client, Connection, ConnectionOptions},
+    krabka_protocol::{
+        owned::produce_response::PartitionProduceResponse, primitives::uuid::Uuid as WireUuid,
+        records::RecordBatch,
+    },
+    krabka_raft::{KrabkaMetadataFetchRequest, KrabkaMetadataFetchResponse},
+    krabka_security::ListenerProtocol,
+    std::{net::SocketAddr, path::PathBuf, sync::Arc},
+    tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
     },
 };
 pub async fn connect(bootstrap: &str, client_id: &str) -> Arc<Client> {
@@ -70,14 +71,11 @@ pub async fn connect_owned(bootstrap: impl AsRef<str>, client_id: &str, context:
     connect_with_context(bootstrap, Some(client_id), context).await
 }
 pub async fn create_topic(client: &Client, topic: &str, partitions: i32) {
-    create_topic_with(
-        client,
-        CreateTopicSetup {
-            topic,
-            num_partitions: TopicPartitionCount(partitions),
-            ..Default::default()
-        },
-    )
+    create_topic_with(client, CreateTopicSetup {
+        topic,
+        num_partitions: TopicPartitionCount(partitions),
+        ..Default::default()
+    })
     .await;
 }
 
@@ -114,27 +112,20 @@ pub async fn http_get(addr: SocketAddr, path: &str, flush: bool) -> String {
 
 pub async fn create_topic_with(client: &Client, setup: CreateTopicSetup<'_>) -> WireUuid {
     let mut request = configured_topic_request(setup);
-    create_topic_spec(
-        client,
-        request.topics.remove(0),
-        CreateTopicRequestSetup {
-            timeout: CreateTopicsTimeoutMillis(request.timeout_ms),
-        },
-    )
+    create_topic_spec(client, request.topics.remove(0), CreateTopicRequestSetup {
+        timeout: CreateTopicsTimeoutMillis(request.timeout_ms),
+    })
     .await
 }
 
 /// The three-replica topic used by witness and stretched-quorum scenarios.
 pub async fn create_replicated_topic(client: &Client, topic: &str) -> WireUuid {
-    create_topic_with(
-        client,
-        CreateTopicSetup {
-            topic,
-            replication_factor: TopicReplicationFactor(3),
-            timeout: krabka_units::millis(10_000),
-            ..Default::default()
-        },
-    )
+    create_topic_with(client, CreateTopicSetup {
+        topic,
+        replication_factor: TopicReplicationFactor(3),
+        timeout: krabka_units::millis(10_000),
+        ..Default::default()
+    })
     .await
 }
 
@@ -195,17 +186,13 @@ pub async fn produce_batch(
     batch: RecordBatch,
     setup: BatchProduceSetup<'_>,
 ) -> PartitionProduceResponse {
-    let response = send_batch(
-        &client,
-        batch,
-        SinglePartitionProduceSetup {
-            topic: setup.topic.to_owned(),
-            topic_id: setup.topic_id,
-            acknowledgements: setup.acknowledgements,
-            timeout: setup.timeout,
-            ..Default::default()
-        },
-    )
+    let response = send_batch(&client, batch, SinglePartitionProduceSetup {
+        topic: setup.topic.to_owned(),
+        topic_id: setup.topic_id,
+        acknowledgements: setup.acknowledgements,
+        timeout: setup.timeout,
+        ..Default::default()
+    })
     .await;
     response.responses[0].partition_responses[0].clone()
 }
@@ -242,13 +229,10 @@ pub async fn metadata_fetch(
     client_id: &str,
     from: i64,
 ) -> KrabkaMetadataFetchResponse {
-    let connection = Connection::connect(
-        controller,
-        ConnectionOptions {
-            client_id: client_id.to_owned(),
-            ..Default::default()
-        },
-    )
+    let connection = Connection::connect(controller, ConnectionOptions {
+        client_id: client_id.to_owned(),
+        ..Default::default()
+    })
     .await
     .expect("dial the controller listener");
     let mut body = Vec::new();
@@ -297,9 +281,7 @@ pub async fn create_configured_topic(client: &Client, setup: CreateTopicSetup<'_
 ///
 /// # Panics
 /// Panics if the connection cannot be built.
-pub async fn connect_c1(bootstrap: &str) -> Arc<Client> {
-    connect(bootstrap, "c1").await
-}
+pub async fn connect_c1(bootstrap: &str) -> Arc<Client> { connect(bootstrap, "c1").await }
 
 /// Client identity and diagnostics for a configured broker fixture.
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]

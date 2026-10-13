@@ -5,16 +5,17 @@
 //! inclusivity of the boundary itself and that everything after it is absent
 //! from the restored log.
 
-use assert2::{assert, check};
-use krabka_ids::Offset;
-use krabka_log::LogConfig;
-use krabka_protocol::records::RecordBatch;
-use krabka_restore::{RestoreError, restore};
-
-use crate::{
-    archive::build_archive,
-    fixtures::{BASE_TIMESTAMP, plain_batch, timestamped_record, value_record},
-    harness::{reopen, restore_args, run_restore},
+use {
+    crate::{
+        archive::build_archive,
+        fixtures::{BASE_TIMESTAMP, plain_batch, timestamped_record, value_record},
+        harness::{reopen, restore_args, run_restore},
+    },
+    assert2::{assert, check},
+    krabka_ids::Offset,
+    krabka_log::LogConfig,
+    krabka_protocol::records::RecordBatch,
+    krabka_restore::{RestoreError, restore},
 };
 
 // ---------------------------------------------------------------------

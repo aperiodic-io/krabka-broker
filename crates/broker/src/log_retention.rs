@@ -17,14 +17,14 @@
 //! This file holds the ticker and the configuration it reads; the sweep is in
 //! [`sweep`].
 
-use std::sync::Arc;
-
-use krabka_units::convert::TimeExt as _;
-use tokio_util::sync::CancellationToken;
-use tracing::debug;
-
-use self::sweep::tick_all;
-use crate::{metrics::BrokerMetrics, partition_registry::PartitionRegistry, time_util};
+use {
+    self::sweep::tick_all,
+    crate::{metrics::BrokerMetrics, partition_registry::PartitionRegistry, time_util},
+    krabka_units::convert::TimeExt as _,
+    std::sync::Arc,
+    tokio_util::sync::CancellationToken,
+    tracing::debug,
+};
 
 mod sweep;
 

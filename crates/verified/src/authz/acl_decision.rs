@@ -1,16 +1,15 @@
-use creusot_std::prelude::*;
-
-use super::{
-    AclDecision, AclDefault, AclFacts, AclOperationKind, AclPatternKind, AclResourceFacts,
-    AclResourceTypeMatch, RequestAuthState,
+use {
+    super::{
+        AclDecision, AclDefault, AclFacts, AclOperationKind, AclPatternKind, AclResourceFacts,
+        AclResourceTypeMatch, RequestAuthState,
+    },
+    creusot_std::prelude::*,
 };
 
 /// Match a principal or host by exact equality or its axis-specific wildcard.
 #[ensures(result == (wildcard || exact))]
 #[must_use]
-pub fn acl_identity_match(wildcard: bool, exact: bool) -> bool {
-    wildcard || exact
-}
+pub fn acl_identity_match(wildcard: bool, exact: bool) -> bool { wildcard || exact }
 
 /// Match an ACL resource type and literal or prefixed name pattern.
 ///

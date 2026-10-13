@@ -1,6 +1,7 @@
-use creusot_std::prelude::*;
-
-use super::{TokenCreateDecision, TokenDeadlines, TokenExpireDecision, TokenRenewDecision};
+use {
+    super::{TokenCreateDecision, TokenDeadlines, TokenExpireDecision, TokenRenewDecision},
+    creusot_std::prelude::*,
+};
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]

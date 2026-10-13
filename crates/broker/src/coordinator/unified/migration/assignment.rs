@@ -4,18 +4,18 @@
 //! Both migration directions and every classic RPC an upgraded group serves
 //! read the same translation, so it lives in one place.
 
-use std::collections::HashMap;
-
-use bytes::{BufMut, Bytes, BytesMut};
-use krabka_protocol::{
-    Encode,
-    owned::consumer_protocol_assignment::{
-        ConsumerProtocolAssignment, MAX_VERSION as ASSIGNMENT_MAX_VERSION, TopicPartition,
+use {
+    crate::coordinator::unified::reconciler::ReconcileInput,
+    bytes::{BufMut, Bytes, BytesMut},
+    krabka_protocol::{
+        Encode,
+        owned::consumer_protocol_assignment::{
+            ConsumerProtocolAssignment, MAX_VERSION as ASSIGNMENT_MAX_VERSION, TopicPartition,
+        },
+        primitives::uuid::Uuid,
     },
-    primitives::uuid::Uuid,
+    std::collections::HashMap,
 };
-
-use crate::coordinator::unified::reconciler::ReconcileInput;
 
 /// Translates a member's server-side target, which maps topic ID to
 /// partitions, into a classic `ConsumerProtocolAssignment` wire blob of
@@ -90,11 +90,7 @@ pub(crate) fn embedded_protocol_version(blob: &[u8]) -> Option<i16> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-    use bytes::Buf;
-    use krabka_protocol::Decode;
-
-    use super::*;
+    use {super::*, assert2::assert, bytes::Buf, krabka_protocol::Decode};
 
     #[test]
     fn target_translates_to_consumer_assignment_blob() {

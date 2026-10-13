@@ -1,12 +1,13 @@
-use assert2::assert;
-use krabka_ids::{Offset, ProducerId};
-use krabka_log::{Log, LogConfig};
-use krabka_verified::producer::{
-    ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, producer_decision,
+use {
+    super::{args_from, batch, record, record_with_key, topic_id_partition, verified_segment},
+    crate::{bound::Predicates, materialize::write_segment},
+    assert2::assert,
+    krabka_ids::{Offset, ProducerId},
+    krabka_log::{Log, LogConfig},
+    krabka_verified::producer::{
+        ProducerDecision, ProducerEntryFacts, RetainedSequenceRange, producer_decision,
+    },
 };
-
-use super::{args_from, batch, record, record_with_key, topic_id_partition, verified_segment};
-use crate::{bound::Predicates, materialize::write_segment};
 
 #[tokio::test]
 async fn filtered_and_empty_restore_batches_preserve_retry_coordinates_after_reopen() {
@@ -16,22 +17,19 @@ async fn filtered_and_empty_restore_batches_preserve_retry_coordinates_after_reo
             let args = args_from(&["--exclude-key", "^drop$"], target.path());
             let partition = topic_id_partition("orders", 0);
             let predicates = Predicates::from_args(&args).unwrap();
-            let mut original = batch(
-                9,
-                vec![
-                    if empty {
-                        record_with_key(0, "drop")
-                    } else {
-                        record(0, "head")
-                    },
-                    if empty {
-                        record_with_key(1, "drop")
-                    } else {
-                        record(1, "middle")
-                    },
-                    record_with_key(2, "drop"),
-                ],
-            );
+            let mut original = batch(9, vec![
+                if empty {
+                    record_with_key(0, "drop")
+                } else {
+                    record(0, "head")
+                },
+                if empty {
+                    record_with_key(1, "drop")
+                } else {
+                    record(1, "middle")
+                },
+                record_with_key(2, "drop"),
+            ]);
             original.producer_id = 7;
             original.producer_epoch = 2;
             original.base_sequence = sequence;

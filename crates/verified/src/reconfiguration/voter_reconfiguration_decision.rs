@@ -1,6 +1,3 @@
-#[cfg(creusot)]
-use creusot_std::prelude::*;
-
 use super::{
     CurrentVoterSet, ReconfigurationLeadership, TargetMembership, TargetVoter, VoterChangeKind,
     VoterChangeRequest, VoterReconfigurationDecision, VoterReconfigurationPlan,
@@ -10,6 +7,8 @@ use super::{
     admitted_plan, is_admit, may_reconfigure, update_key_matches, voter_reconfiguration_rejection,
     voter_set_removes,
 };
+#[cfg(creusot)]
+use creusot_std::prelude::*;
 
 /// Admit one fresh KIP-853 operation and construct its exact result shape.
 ///

@@ -1,24 +1,24 @@
 //! Tests for the local partition directories that [`super::bootstrap`] opens,
 //! and for the topic configs of the coordinator topics.
 
-use std::sync::Arc;
-
-use assert2::{assert, check};
-use krabka_ids::PartitionIndex;
-use krabka_metadata::{MetadataRecord, TopicRecord};
-use krabka_protocol::owned::create_topics_request::CreateTopicsRequest;
-use tempfile::tempdir;
-
-use super::{
-    OFFSETS_PARTITION, OFFSETS_TOPIC, bootstrap,
-    test_support::{controller_with_leader, test_coordinator},
-};
-use crate::{
-    auto_topic_creation::creatable_topic, broker::Broker, config::BrokerConfig,
-    coordinator::GroupCoordinator, log_dir, log_dir_status::LogDirRegistry,
-    metadata_source::MetadataSource, partition_registry::PartitionRegistry,
-    producer_state::ProducerState, share_coordinator::bootstrap::TOPIC as SHARE_TOPIC,
-    topic_creator::TopicCreator, txn::bootstrap::TOPIC as TXN_TOPIC,
+use {
+    super::{
+        OFFSETS_PARTITION, OFFSETS_TOPIC, bootstrap,
+        test_support::{controller_with_leader, test_coordinator},
+    },
+    crate::{
+        auto_topic_creation::creatable_topic, broker::Broker, config::BrokerConfig,
+        coordinator::GroupCoordinator, log_dir, log_dir_status::LogDirRegistry,
+        metadata_source::MetadataSource, partition_registry::PartitionRegistry,
+        producer_state::ProducerState, share_coordinator::bootstrap::TOPIC as SHARE_TOPIC,
+        topic_creator::TopicCreator, txn::bootstrap::TOPIC as TXN_TOPIC,
+    },
+    assert2::{assert, check},
+    krabka_ids::PartitionIndex,
+    krabka_metadata::{MetadataRecord, TopicRecord},
+    krabka_protocol::owned::create_topics_request::CreateTopicsRequest,
+    std::sync::Arc,
+    tempfile::tempdir,
 };
 
 krabka_macros::single_replica_partition_fixture!(partition_record);
@@ -166,34 +166,25 @@ async fn internal_topics_are_created_with_kafkas_topic_configs() {
 
     let image = handle.controller_image_for_test();
     for (topic, expected) in [
-        (
-            OFFSETS_TOPIC,
-            vec![
-                ("cleanup.policy", "compact"),
-                ("compression.type", "producer"),
-                ("segment.bytes", "104857600"),
-            ],
-        ),
-        (
-            TXN_TOPIC,
-            vec![
-                ("cleanup.policy", "compact"),
-                ("compression.type", "uncompressed"),
-                ("min.insync.replicas", "2"),
-                ("segment.bytes", "104857600"),
-                ("unclean.leader.election.enable", "false"),
-            ],
-        ),
-        (
-            SHARE_TOPIC,
-            vec![
-                ("cleanup.policy", "delete"),
-                ("compression.type", "producer"),
-                ("min.insync.replicas", "2"),
-                ("retention.ms", "-1"),
-                ("segment.bytes", "104857600"),
-            ],
-        ),
+        (OFFSETS_TOPIC, vec![
+            ("cleanup.policy", "compact"),
+            ("compression.type", "producer"),
+            ("segment.bytes", "104857600"),
+        ]),
+        (TXN_TOPIC, vec![
+            ("cleanup.policy", "compact"),
+            ("compression.type", "uncompressed"),
+            ("min.insync.replicas", "2"),
+            ("segment.bytes", "104857600"),
+            ("unclean.leader.election.enable", "false"),
+        ]),
+        (SHARE_TOPIC, vec![
+            ("cleanup.policy", "delete"),
+            ("compression.type", "producer"),
+            ("min.insync.replicas", "2"),
+            ("retention.ms", "-1"),
+            ("segment.bytes", "104857600"),
+        ]),
     ] {
         let expected: std::collections::BTreeMap<String, String> = expected
             .into_iter()

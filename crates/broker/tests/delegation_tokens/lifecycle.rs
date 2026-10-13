@@ -7,24 +7,25 @@
 //! lettered (a) to (h) in the test body and in the suite-level documentation
 //! on the crate root.
 
-use assert2::{assert, check};
-use base64::Engine;
-use krabka_protocol::owned::{
-    create_delegation_token_request::{CreatableRenewers, CreateDelegationTokenRequest},
-    describe_delegation_token_request::{
-        DescribeDelegationTokenOwner, DescribeDelegationTokenRequest,
+use {
+    crate::{
+        cluster::{start_broker, wait_for_token, wait_for_token_gone},
+        rpc::{
+            check_created_identity, send_create_delegation_token, send_describe_delegation_token,
+            send_expire_delegation_token, send_renew_delegation_token,
+        },
+        wire::{sasl_plain_authenticate, sasl_scram_sha256_authenticate, token_session},
     },
-    expire_delegation_token_request::ExpireDelegationTokenRequest,
-    renew_delegation_token_request::RenewDelegationTokenRequest,
-};
-
-use crate::{
-    cluster::{start_broker, wait_for_token, wait_for_token_gone},
-    rpc::{
-        check_created_identity, send_create_delegation_token, send_describe_delegation_token,
-        send_expire_delegation_token, send_renew_delegation_token,
+    assert2::{assert, check},
+    base64::Engine,
+    krabka_protocol::owned::{
+        create_delegation_token_request::{CreatableRenewers, CreateDelegationTokenRequest},
+        describe_delegation_token_request::{
+            DescribeDelegationTokenOwner, DescribeDelegationTokenRequest,
+        },
+        expire_delegation_token_request::ExpireDelegationTokenRequest,
+        renew_delegation_token_request::RenewDelegationTokenRequest,
     },
-    wire::{sasl_plain_authenticate, sasl_scram_sha256_authenticate, token_session},
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,15 +113,11 @@ async fn delegation_token_lifecycle_end_to_end() {
             .await
             .map_err(|e| format!("bob PLAIN auth: {e}"))?;
         // A renew period above the 24h default is capped at the default.
-        let renew_resp = send_renew_delegation_token(
-            &mut bob,
-            300,
-            &RenewDelegationTokenRequest {
-                hmac: hmac_bytes.clone(),
-                renew_period_ms: 30 * 24 * 60 * 60 * 1_000, // 30d (> 7d ceiling)
-                ..Default::default()
-            },
-        )
+        let renew_resp = send_renew_delegation_token(&mut bob, 300, &RenewDelegationTokenRequest {
+            hmac: hmac_bytes.clone(),
+            renew_period_ms: 30 * 24 * 60 * 60 * 1_000, // 30d (> 7d ceiling)
+            ..Default::default()
+        })
         .await
         .map_err(|e| format!("RenewDelegationToken(bob): {e}"))?;
         check!(
@@ -147,20 +144,17 @@ async fn delegation_token_lifecycle_end_to_end() {
 
         // ── (f) alice describes with an explicit owner filter — should see
         //         exactly the one token she owns.
-        let describe_resp = send_describe_delegation_token(
-            &mut alice,
-            400,
-            &DescribeDelegationTokenRequest {
+        let describe_resp =
+            send_describe_delegation_token(&mut alice, 400, &DescribeDelegationTokenRequest {
                 owners: Some(vec![DescribeDelegationTokenOwner {
                     principal_type: "User".to_string(),
                     principal_name: "alice".to_string(),
                     ..Default::default()
                 }]),
                 ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| format!("DescribeDelegationToken(alice): {e}"))?;
+            })
+            .await
+            .map_err(|e| format!("DescribeDelegationToken(alice): {e}"))?;
         check!(
             describe_resp.error_code == 0,
             "Describe must succeed; got {}",
@@ -176,17 +170,14 @@ async fn delegation_token_lifecycle_end_to_end() {
         check!(describe_resp.tokens[0].principal_name == "alice");
 
         // ── (g) alice expires the token (negative period = immediate delete).
-        let expire_resp = send_expire_delegation_token(
-            &mut alice,
-            500,
-            &ExpireDelegationTokenRequest {
+        let expire_resp =
+            send_expire_delegation_token(&mut alice, 500, &ExpireDelegationTokenRequest {
                 hmac: hmac_bytes.clone(),
                 expiry_time_period_ms: -1,
                 ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| format!("ExpireDelegationToken(alice): {e}"))?;
+            })
+            .await
+            .map_err(|e| format!("ExpireDelegationToken(alice): {e}"))?;
         assert!(
             expire_resp.error_code == 0,
             "Expire must succeed; got {}",

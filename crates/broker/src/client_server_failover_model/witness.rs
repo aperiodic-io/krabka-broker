@@ -21,11 +21,7 @@ pub const WITNESS_UNKNOWN_RETRY_AFTER_FAILOVER: u16 = 1 << 12;
 pub struct Witnesses(pub u16);
 
 impl Witnesses {
-    pub fn mark(&mut self, bit: u16) {
-        self.0 |= bit;
-    }
+    pub fn mark(&mut self, bit: u16) { self.0 |= bit; }
 
-    pub fn seen(self, bit: u16) -> bool {
-        self.0 & bit != 0
-    }
+    pub fn seen(self, bit: u16) -> bool { self.0 & bit != 0 }
 }

@@ -7,18 +7,18 @@
 //! come back out of the image on every broker's reconcile pass. A test that
 //! stuffs the flag straight into a `Partition` proves none of that.
 
-use std::time::{Duration, Instant};
-
-use assert2::assert;
-use krabka_broker::NodeId;
-use krabka_client_core::Client;
-use krabka_protocol::primitives::uuid::Uuid as WireUuid;
-
-use crate::{
-    CLIENT_PRINCIPAL, PASSWORD, RECORDS, TOPIC, VOTERS,
-    cluster::{DisklessCluster, start_flushing_cluster, wait_for},
-    support::{self, topics::diskless_topic_request},
-    wire::{produce_all, value_at},
+use {
+    crate::{
+        CLIENT_PRINCIPAL, PASSWORD, RECORDS, TOPIC, VOTERS,
+        cluster::{DisklessCluster, start_flushing_cluster, wait_for},
+        support::{self, topics::diskless_topic_request},
+        wire::{produce_all, value_at},
+    },
+    assert2::assert,
+    krabka_broker::NodeId,
+    krabka_client_core::Client,
+    krabka_protocol::primitives::uuid::Uuid as WireUuid,
+    std::time::{Duration, Instant},
 };
 
 /// Create the suite's diskless topic and return its assigned id.

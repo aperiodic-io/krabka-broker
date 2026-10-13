@@ -1,15 +1,16 @@
 //! Live-broker tests for the `LeaveGroup` handler.
 
-use assert2::assert;
-use krabka_protocol::owned::{
-    leave_group_request::MemberIdentity,
-    leave_group_response::{LeaveGroupResponse, MemberResponse},
-};
-
-use super::*;
-use crate::{
-    broker::Broker,
-    test_support::{DenyAll, peer, principal, start_broker_no_audit_with},
+use {
+    super::*,
+    crate::{
+        broker::Broker,
+        test_support::{DenyAll, peer, principal, start_broker_no_audit_with},
+    },
+    assert2::assert,
+    krabka_protocol::owned::{
+        leave_group_request::MemberIdentity,
+        leave_group_response::{LeaveGroupResponse, MemberResponse},
+    },
 };
 
 async fn leave(broker: &Broker, request: &LeaveGroupRequest, version: i16) -> LeaveGroupResponse {

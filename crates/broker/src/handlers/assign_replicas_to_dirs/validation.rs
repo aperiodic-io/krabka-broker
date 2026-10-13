@@ -7,9 +7,10 @@
 //! the current metadata image, so the handler stays a straight line of
 //! decisions.
 
-use krabka_metadata::{MetadataImage, NodeId};
-
-use crate::codes;
+use {
+    crate::codes,
+    krabka_metadata::{MetadataImage, NodeId},
+};
 
 /// Checks the reporting broker's registration and epoch. A `broker_id` that
 /// names no registration -- a negative wire value included, since none is
@@ -40,10 +41,7 @@ pub(super) fn check_broker_epoch(
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::handlers::test_support::registered_broker_image;
+    use {super::*, crate::handlers::test_support::registered_broker_image, assert2::assert};
 
     #[test]
     fn check_broker_epoch_rejects_unregistered_and_stale_brokers() {

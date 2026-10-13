@@ -12,15 +12,16 @@
 //! correlation_id(i32) client_id(NULLABLE_STRING)`. Flexible APIs add tagged
 //! fields. The body is decoded by the selected controller or Admin handler.
 
-use std::{net::SocketAddr, sync::Arc};
-
-use krabka_units::prelude::ByteSizeExt as _;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpListener,
+use {
+    krabka_units::prelude::ByteSizeExt as _,
+    std::{net::SocketAddr, sync::Arc},
+    tokio::{
+        io::{AsyncRead, AsyncWrite},
+        net::TcpListener,
+    },
+    tokio_util::sync::CancellationToken,
+    tracing::{error, info},
 };
-use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
 
 mod api_versions;
 mod authorization;
@@ -45,25 +46,27 @@ pub use self::api_versions::{
     is_valid_client_info, supported_feature_key, supported_feature_keys,
     unsupported_version_response,
 };
-use self::{
-    api_versions::{API_KEY_API_VERSIONS, api_versions_response},
-    describe_cluster::{
-        API_KEY_DESCRIBE_CLUSTER, CONTROLLER_LISTENER_NAME, describe_cluster_response_body,
+use {
+    self::{
+        api_versions::{API_KEY_API_VERSIONS, api_versions_response},
+        describe_cluster::{
+            API_KEY_DESCRIBE_CLUSTER, CONTROLLER_LISTENER_NAME, describe_cluster_response_body,
+        },
+        dispatch::{dispatch_with_router, is_native_raft_api},
+        framing::{
+            is_eof, read_one_request, write_response, write_response_frame,
+            write_response_no_tagged_fields,
+        },
+        kip853::{
+            API_KEY_ADD_RAFT_VOTER, API_KEY_DESCRIBE_QUORUM, API_KEY_REMOVE_RAFT_VOTER,
+            API_KEY_UPDATE_RAFT_VOTER, kip853_admin_response,
+        },
     },
-    dispatch::{dispatch_with_router, is_native_raft_api},
-    framing::{
-        is_eof, read_one_request, write_response, write_response_frame,
-        write_response_no_tagged_fields,
+    crate::{
+        ClusterGrants, ConnectionLimiter, ControllerAdminRouter, ControllerApiVersions,
+        ListenerLimits, RaftHandshakeError, RaftListenerHandshake, RaftShardRouter,
+        UnstableApiVersions, error::RaftError, kraft::KraftController,
     },
-    kip853::{
-        API_KEY_ADD_RAFT_VOTER, API_KEY_DESCRIBE_QUORUM, API_KEY_REMOVE_RAFT_VOTER,
-        API_KEY_UPDATE_RAFT_VOTER, kip853_admin_response,
-    },
-};
-use crate::{
-    ClusterGrants, ConnectionLimiter, ControllerAdminRouter, ControllerApiVersions, ListenerLimits,
-    RaftHandshakeError, RaftListenerHandshake, RaftShardRouter, UnstableApiVersions,
-    error::RaftError, kraft::KraftController,
 };
 
 /// The listener's own `ApiVersions` answer, handed to the handshake for the

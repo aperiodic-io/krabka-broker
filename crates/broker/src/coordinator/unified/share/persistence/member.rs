@@ -46,11 +46,12 @@ value_codec! {
 
 #[cfg(test)]
 mod tests {
-    use assert2::assert;
-
-    use super::*;
-    use crate::coordinator::unified::share::persistence::{
-        KEY_SHARE_MEMBER_METADATA, ShareGroupKey,
+    use {
+        super::*,
+        crate::coordinator::unified::share::persistence::{
+            KEY_SHARE_MEMBER_METADATA, ShareGroupKey,
+        },
+        assert2::assert,
     };
 
     #[test]

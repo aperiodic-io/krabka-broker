@@ -18,24 +18,25 @@
 //! `network::dispatch` intercepts this RPC inline for the per-group `Read`
 //! ACL gate, which needs the principal and the peer `SocketAddr`.
 
-use krabka_metadata::AclOperation;
-use krabka_protocol::{
-    owned::{
-        alter_share_group_offsets_request::AlterShareGroupOffsetsRequest,
-        alter_share_group_offsets_response::{
-            AlterShareGroupOffsetsResponse, AlterShareGroupOffsetsResponsePartition,
-            AlterShareGroupOffsetsResponseTopic,
-        },
+use {
+    crate::{
+        codes,
+        coordinator::unified::{GroupType, share::actor::ShareGroupActorMessage},
+        error::BrokerError,
+        handlers::ErrorResponse as _,
+        task_util::{AskError, ask},
     },
-    primitives::uuid::Uuid,
-};
-
-use crate::{
-    codes,
-    coordinator::unified::{GroupType, share::actor::ShareGroupActorMessage},
-    error::BrokerError,
-    handlers::ErrorResponse as _,
-    task_util::{AskError, ask},
+    krabka_metadata::AclOperation,
+    krabka_protocol::{
+        owned::{
+            alter_share_group_offsets_request::AlterShareGroupOffsetsRequest,
+            alter_share_group_offsets_response::{
+                AlterShareGroupOffsetsResponse, AlterShareGroupOffsetsResponsePartition,
+                AlterShareGroupOffsetsResponseTopic,
+            },
+        },
+        primitives::uuid::Uuid,
+    },
 };
 
 context_handler! {
@@ -261,45 +262,55 @@ context_handler! {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::assert;
-    use krabka_protocol::{
-        owned::{
-            alter_share_group_offsets_request::{
-                AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestPartition,
-                AlterShareGroupOffsetsRequestTopic,
+    use {
+        super::handle as alter_share_group_offsets_handle,
+        crate::{
+            authorizer::{AuthorizationResult, Authorizer},
+            broker::BrokerHandle,
+            codes,
+            coordinator::unified::{
+                GroupType, ShareGroupSeed, share::actor::ShareGroupActorMessage,
             },
-            alter_share_group_offsets_response::{
-                self, AlterShareGroupOffsetsResponse, AlterShareGroupOffsetsResponsePartition,
-                AlterShareGroupOffsetsResponseTopic,
+            handlers::{
+                RequestContext,
+                create_topics::handle as create_topics_handle,
+                test_support::{CreateTopicSetup, configured_topic_request},
             },
-            create_topics_response,
-            share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+            share_coordinator::{
+                coordinator::message::UNKNOWN_TOPIC_OR_PARTITION,
+                handlers::test_support::lead_share_state_partitions,
+            },
+            test_support::{
+                DenyAll, ShareApiSupport, ShareBrokerSetup, start_share_broker, test_ctx,
+            },
         },
-        primitives::uuid::Uuid,
-    };
-
-    use super::handle as alter_share_group_offsets_handle;
-    use crate::{
-        authorizer::{AuthorizationResult, Authorizer},
-        broker::BrokerHandle,
-        codes,
-        coordinator::unified::{GroupType, ShareGroupSeed, share::actor::ShareGroupActorMessage},
-        handlers::{
-            RequestContext,
-            create_topics::handle as create_topics_handle,
-            test_support::{CreateTopicSetup, configured_topic_request},
+        assert2::assert,
+        krabka_protocol::{
+            owned::{
+                alter_share_group_offsets_request::{
+                    AlterShareGroupOffsetsRequest, AlterShareGroupOffsetsRequestPartition,
+                    AlterShareGroupOffsetsRequestTopic,
+                },
+                alter_share_group_offsets_response::{
+                    self, AlterShareGroupOffsetsResponse, AlterShareGroupOffsetsResponsePartition,
+                    AlterShareGroupOffsetsResponseTopic,
+                },
+                create_topics_response,
+                share_group_heartbeat_request::ShareGroupHeartbeatRequest,
+            },
+            primitives::uuid::Uuid,
         },
-        share_coordinator::{
-            coordinator::message::UNKNOWN_TOPIC_OR_PARTITION,
-            handlers::test_support::lead_share_state_partitions,
-        },
-        test_support::{DenyAll, ShareApiSupport, ShareBrokerSetup, start_share_broker, test_ctx},
+        std::sync::Arc,
     };
 
     macro_rules! joining_share_member {
-        (($tx:ident, $rx:ident, $response:ident), $actor:expr, $group:expr, $member:expr, $topics:expr) => {
+        (
+            ($tx:ident, $rx:ident, $response:ident),
+            $actor:expr,
+            $group:expr,
+            $member:expr,
+            $topics:expr
+        ) => {
             let ($tx, $rx) = tokio::sync::oneshot::channel();
             $actor
                 .tx
@@ -532,14 +543,10 @@ mod tests {
             let broker = broker_handle.broker_arc_for_test();
             test_ctx!(ctx, "alice");
             if topic_exists {
-                create_topic(
-                    &broker_handle,
-                    &ctx,
-                    CreateTopicSetup {
-                        topic: topic_name,
-                        ..Default::default()
-                    },
-                )
+                create_topic(&broker_handle, &ctx, CreateTopicSetup {
+                    topic: topic_name,
+                    ..Default::default()
+                })
                 .await;
                 lead_share_state_partitions(&broker).await;
             }
@@ -651,14 +658,10 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        create_topic(
-            &broker_handle,
-            &ctx,
-            CreateTopicSetup {
-                topic: "new-topic",
-                ..Default::default()
-            },
-        )
+        create_topic(&broker_handle, &ctx, CreateTopicSetup {
+            topic: "new-topic",
+            ..Default::default()
+        })
         .await;
         lead_share_state_partitions(&broker).await;
         let topic_id = broker
@@ -713,13 +716,9 @@ mod tests {
         // `(topic_id, partition)` already in `state.initialized`.
         let actor = broker.group_coordinator.get_or_create_share("g-new");
         for member_id in ["m1", "m2"] {
-            joining_share_member!(
-                (tx, rx, resp),
-                actor,
-                "g-new",
-                member_id,
-                vec!["new-topic".into()]
-            );
+            joining_share_member!((tx, rx, resp), actor, "g-new", member_id, vec![
+                "new-topic".into()
+            ]);
             assert!(resp.error_code == codes::NONE, "{resp:?}");
         }
         let (_, _, start_offset_after, _) = persister
@@ -772,14 +771,10 @@ mod tests {
             share_allow_all,
             context(ctx, "alice")
         );
-        create_topic(
-            &broker_handle,
-            &ctx,
-            CreateTopicSetup {
-                topic: "reset-topic",
-                ..Default::default()
-            },
-        )
+        create_topic(&broker_handle, &ctx, CreateTopicSetup {
+            topic: "reset-topic",
+            ..Default::default()
+        })
         .await;
         lead_share_state_partitions(&broker).await;
         let persister = broker

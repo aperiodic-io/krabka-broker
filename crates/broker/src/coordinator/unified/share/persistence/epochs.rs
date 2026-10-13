@@ -20,11 +20,12 @@
 //!
 //! Both records end with the message's tagged-field count.
 
-use bytes::BufMut;
-
-use crate::coordinator::unified::persistence::{
-    flex::{epoch_value, value_codec},
-    get_i32, get_i64,
+use {
+    crate::coordinator::unified::persistence::{
+        flex::{epoch_value, value_codec},
+        get_i32, get_i64,
+    },
+    bytes::BufMut,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,14 +63,15 @@ epoch_value!(
 
 #[cfg(test)]
 mod tests {
-    use assert2::{assert, check};
-
-    use super::*;
-    use crate::coordinator::unified::{
-        share::persistence::{
-            KEY_SHARE_GROUP_METADATA, KEY_SHARE_TARGET_ASSIGNMENT_METADATA, ShareGroupKey,
+    use {
+        super::*,
+        crate::coordinator::unified::{
+            share::persistence::{
+                KEY_SHARE_GROUP_METADATA, KEY_SHARE_TARGET_ASSIGNMENT_METADATA, ShareGroupKey,
+            },
+            test_support::{AssignmentMetadataGoldenSetup, assignment_metadata_golden_cases},
         },
-        test_support::{AssignmentMetadataGoldenSetup, assignment_metadata_golden_cases},
+        assert2::{assert, check},
     };
 
     /// i16 version | i32 `Epoch` | i64 `MetadataHash` | uvarint tagged count, as

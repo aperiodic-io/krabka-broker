@@ -1,9 +1,4 @@
-use std::sync::Arc;
-
-use assert2::assert;
-
-use super::*;
-use crate::network::auth::AuthenticatedSnapshot;
+use {super::*, crate::network::auth::AuthenticatedSnapshot, assert2::assert, std::sync::Arc};
 
 #[derive(Debug)]
 struct CompletingIntrospection {

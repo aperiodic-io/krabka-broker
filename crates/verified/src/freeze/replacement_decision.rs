@@ -1,8 +1,9 @@
-use creusot_std::prelude::*;
-
 #[cfg(creusot)]
 use super::logic;
-use super::{FreezeReplacementDecision, FreezeReplacementFacts, FreezeStoredState};
+use {
+    super::{FreezeReplacementDecision, FreezeReplacementFacts, FreezeStoredState},
+    creusot_std::prelude::*,
+};
 
 /// The replacement rule. A thaw of a scope with no committed freeze is
 /// `Missing`, and a record no newer than the committed one at its exact key is

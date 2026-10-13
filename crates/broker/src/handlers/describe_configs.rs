@@ -90,11 +90,13 @@
 //! `ConfigHelperUtils.toDescribeConfigsResult` does. The synthesised key obeys
 //! that filter like every stored key.
 
-use krabka_protocol::owned::{
-    describe_configs_request::DescribeConfigsRequest,
-    describe_configs_response::{DescribeConfigsResponse, DescribeConfigsResult},
+use {
+    krabka_protocol::owned::{
+        describe_configs_request::DescribeConfigsRequest,
+        describe_configs_response::{DescribeConfigsResponse, DescribeConfigsResult},
+    },
+    krabka_units::convert::TimeExt as _,
 };
-use krabka_units::convert::TimeExt as _;
 
 mod authz;
 mod entry;
@@ -105,13 +107,6 @@ mod wire;
 #[cfg(test)]
 mod test_support;
 
-use self::{
-    authz::{denied_result, resource_authz_failure},
-    entry::EntryOptions,
-    resources::{
-        BrokerLoggers, ServingBroker, StaticBrokerConfigs, StaticBrokerSetting, describe_one,
-    },
-};
 pub(crate) use self::{
     resources::{effective_topic_configs, static_settings},
     wire::{
@@ -119,7 +114,16 @@ pub(crate) use self::{
         RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
     },
 };
-use crate::{broker::Broker, handlers::RequestContext};
+use {
+    self::{
+        authz::{denied_result, resource_authz_failure},
+        entry::EntryOptions,
+        resources::{
+            BrokerLoggers, ServingBroker, StaticBrokerConfigs, StaticBrokerSetting, describe_one,
+        },
+    },
+    crate::{broker::Broker, handlers::RequestContext},
+};
 
 pub(crate) fn handle(
     broker: &Broker,

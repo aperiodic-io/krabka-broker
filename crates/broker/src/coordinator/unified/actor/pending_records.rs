@@ -4,20 +4,21 @@
 //! as the single `RecordBatch` that `OffsetsLog::append` takes, and applies the
 //! same delta to the coordinator's respawn cache once the append succeeds.
 
-use krabka_protocol::records::RecordBatch;
-
-use crate::{
-    coordinator::unified::{
-        GroupCoordinator, OffsetRecordBatchBuilder,
-        member_records::{MemberRecordFamilies, MemberRecordLists},
-        persistence::{GroupMetadataValue as ClassicGroupMetadataValue, Key, encode_key},
-        persistence_next_gen::{
-            CurrentMemberAssignmentValue, GroupMetadataValue, MemberMetadataValue, NextGenKey,
-            RegularExpressionValue, TargetAssignmentMemberValue, TargetAssignmentMetadataValue,
-            encode_key as encode_next_gen_key,
+use {
+    crate::{
+        coordinator::unified::{
+            GroupCoordinator, OffsetRecordBatchBuilder,
+            member_records::{MemberRecordFamilies, MemberRecordLists},
+            persistence::{GroupMetadataValue as ClassicGroupMetadataValue, Key, encode_key},
+            persistence_next_gen::{
+                CurrentMemberAssignmentValue, GroupMetadataValue, MemberMetadataValue, NextGenKey,
+                RegularExpressionValue, TargetAssignmentMemberValue, TargetAssignmentMetadataValue,
+                encode_key as encode_next_gen_key,
+            },
         },
+        error::BrokerError,
     },
-    error::BrokerError,
+    krabka_protocol::records::RecordBatch,
 };
 
 /// The key of the deprecated k4 `ConsumerGroupPartitionMetadata` record.
@@ -136,9 +137,9 @@ pub(crate) struct PendingRecords {
 }
 
 impl MemberRecordFamilies for PendingRecords {
+    type Current = CurrentMemberAssignmentValue;
     type Metadata = MemberMetadataValue;
     type Target = TargetAssignmentMemberValue;
-    type Current = CurrentMemberAssignmentValue;
 
     fn member_record_families(&mut self) -> MemberRecordLists<'_, Self> {
         (
@@ -407,23 +408,23 @@ impl PendingRecords {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
-
-    use assert2::assert;
-
-    use super::*;
-    use crate::{
-        coordinator::unified::{
-            ClientIdentity, GroupSeed,
-            actor::{
-                persistence::full_pending_records,
-                test_support::{ConsumerMemberSetup, make_coordinator, subscribed_member},
+    use {
+        super::*,
+        crate::{
+            coordinator::unified::{
+                ClientIdentity, GroupSeed,
+                actor::{
+                    persistence::full_pending_records,
+                    test_support::{ConsumerMemberSetup, make_coordinator, subscribed_member},
+                },
+                consumer_state::{ClassicMemberFacade, GroupState},
+                persistence::MAX_STRING_BYTES,
+                persistence_next_gen::MemberAssignmentState,
             },
-            consumer_state::{ClassicMemberFacade, GroupState},
-            persistence::MAX_STRING_BYTES,
-            persistence_next_gen::MemberAssignmentState,
+            error::BrokerError,
         },
-        error::BrokerError,
+        assert2::assert,
+        std::time::{Duration, Instant},
     };
 
     #[test]

@@ -4,20 +4,20 @@
 //! the log. None of them is durable state, because the schedule is the records
 //! themselves: a restart or a leader change derives the same answer again.
 
-use std::sync::{
-    Arc, Mutex, PoisonError,
-    atomic::{AtomicI64, Ordering},
-};
-
-use arc_swap::ArcSwapOption;
-use krabka_ids::Offset;
-use krabka_log::{DeliveryPolicy, Log};
-use qubit_clock::{StdWallClock, WallClock};
-use tokio::sync::Notify;
-
-use crate::{
-    delivery::{PartitionDelivery, waker::DeliveryWaker},
-    time_util,
+use {
+    crate::{
+        delivery::{PartitionDelivery, waker::DeliveryWaker},
+        time_util,
+    },
+    arc_swap::ArcSwapOption,
+    krabka_ids::Offset,
+    krabka_log::{DeliveryPolicy, Log},
+    qubit_clock::{StdWallClock, WallClock},
+    std::sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicI64, Ordering},
+    },
+    tokio::sync::Notify,
 };
 
 /// The delivery watermark mirror, the long-poll wake, and the scheduler poke of
@@ -55,9 +55,7 @@ pub(crate) struct DeliveryHandles {
 
 impl DeliveryHandles {
     /// Handles that read the system clock.
-    pub(crate) fn new() -> Self {
-        Self::with_clock(Arc::new(StdWallClock::new()))
-    }
+    pub(crate) fn new() -> Self { Self::with_clock(Arc::new(StdWallClock::new())) }
 
     /// Handles that read `clock`. A test passes a wall clock it pins or drives
     /// itself -- a [`FixedWallClock`](qubit_clock::FixedWallClock), or the
@@ -73,9 +71,7 @@ impl DeliveryHandles {
     }
 
     /// Delivery watermark as the last publish left it, with no lock and no I/O.
-    pub(crate) fn watermark(&self) -> Offset {
-        Offset(self.watermark.load(Ordering::Acquire))
-    }
+    pub(crate) fn watermark(&self) -> Offset { Offset(self.watermark.load(Ordering::Acquire)) }
 
     /// Recompute `log`'s delivery watermark against `now_ms`, publish it to the
     /// mirror, and wake a long poll when it moved forward.
@@ -122,9 +118,7 @@ impl DeliveryHandles {
     /// already has, and it must take its reading from the same clock the
     /// writer and the scheduler read, or a test that drives a manual timeline
     /// across an activation boundary cannot reach the fetch path at all.
-    pub(crate) fn now_ms(&self) -> i64 {
-        time_util::epoch_millis(self.clock.now())
-    }
+    pub(crate) fn now_ms(&self) -> i64 { time_util::epoch_millis(self.clock.now()) }
 
     /// Install the scheduler's poke, so an append to this partition can re-arm
     /// the task. Idempotent: re-installing the same waker stores nothing.
@@ -150,9 +144,7 @@ impl DeliveryHandles {
 }
 
 impl Default for DeliveryHandles {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl std::fmt::Debug for DeliveryHandles {
@@ -166,13 +158,14 @@ impl std::fmt::Debug for DeliveryHandles {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
-    use krabka_log::LogConfig;
-    use qubit_clock::{FixedWallClock, ManualMonotonicClock};
-    use tempfile::tempdir;
-
-    use super::*;
-    use crate::delivery::test_support::{BOUND_MS, NOW_MS, batch_at, wall_at};
+    use {
+        super::*,
+        crate::delivery::test_support::{BOUND_MS, NOW_MS, batch_at, wall_at},
+        assert2::check,
+        krabka_log::LogConfig,
+        qubit_clock::{FixedWallClock, ManualMonotonicClock},
+        tempfile::tempdir,
+    };
 
     fn log_of(policy: DeliveryPolicy, activations: &[i64]) -> (tempfile::TempDir, Mutex<Log>) {
         let dir = tempdir().expect("log root");
@@ -213,10 +206,10 @@ mod tests {
 
     #[test]
     fn a_scheduled_topic_reports_the_pending_count_and_the_next_deadline() {
-        let (_dir, log) = log_of(
-            DeliveryPolicy::Scheduled,
-            &[NOW_MS - 60_000, NOW_MS + 10_000],
-        );
+        let (_dir, log) = log_of(DeliveryPolicy::Scheduled, &[
+            NOW_MS - 60_000,
+            NOW_MS + 10_000,
+        ]);
         let handles = handles_at(NOW_MS);
 
         check!(

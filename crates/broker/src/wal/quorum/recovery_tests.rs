@@ -2,13 +2,14 @@
 //! configured count creates, how an existing source log bootstraps them, and
 //! which prefix a reopen recovers or discards.
 
-use assert2::assert;
-use krabka_ids::Offset;
-use krabka_kraft_core::NodeId;
-use krabka_units::{ByteSize, convert::ByteSizeExt as _};
-
-use super::test_support::{append_source, batch, open_log, partition_store, source_log};
-use crate::wal::WalStore;
+use {
+    super::test_support::{append_source, batch, open_log, partition_store, source_log},
+    crate::wal::WalStore,
+    assert2::assert,
+    krabka_ids::Offset,
+    krabka_kraft_core::NodeId,
+    krabka_units::{ByteSize, convert::ByteSizeExt as _},
+};
 
 #[test]
 fn partition_quorum_uses_configured_local_replica_count() {

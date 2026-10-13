@@ -37,8 +37,10 @@
 //! and `delete` hold one storage operation each, and `manager` binds those
 //! three to the trait.
 
-use krabka_object_store::{GcsConfig, ObjectStoreClient, S3Config};
-use krabka_units::prelude::{ByteSize, ByteSizeExt as _};
+use {
+    krabka_object_store::{GcsConfig, ObjectStoreClient, S3Config},
+    krabka_units::prelude::{ByteSize, ByteSizeExt as _},
+};
 
 mod client;
 mod copy;
@@ -115,18 +117,18 @@ impl std::fmt::Debug for S3RemoteStorage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use assert2::{assert, check};
-    use krabka_units::prelude::ByteSizeExt as _;
-    use object_store::memory::InMemory;
-    use tempfile::TempDir;
-
-    use super::{
-        S3RemoteStorage, size_from_usize,
-        test_support::{rsm, worm_config},
+    use {
+        super::{
+            S3RemoteStorage, size_from_usize,
+            test_support::{rsm, worm_config},
+        },
+        crate::s3::test_support::WormAccess,
+        assert2::{assert, check},
+        krabka_units::prelude::ByteSizeExt as _,
+        object_store::memory::InMemory,
+        std::sync::Arc,
+        tempfile::TempDir,
     };
-    use crate::s3::test_support::WormAccess;
 
     /// `usize::MAX` has no `u64` image on a hypothetical 128-bit target. The
     /// lift saturates and does not wrap to a tiny chunk size.

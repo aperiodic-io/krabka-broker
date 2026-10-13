@@ -10,12 +10,13 @@
 //! config stays in place. This keeps the broker in service with the old cert
 //! instead of dropping connections.
 
-use std::{path::Path, sync::Arc, time::SystemTime};
-
-use krabka_security::{DynamicServerConfig, TlsConfig};
-use krabka_units::{Time, convert::TimeExt};
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use {
+    krabka_security::{DynamicServerConfig, TlsConfig},
+    krabka_units::{Time, convert::TimeExt},
+    std::{path::Path, sync::Arc, time::SystemTime},
+    tokio_util::sync::CancellationToken,
+    tracing::{debug, info, warn},
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct PathMtimes {
@@ -24,9 +25,7 @@ struct PathMtimes {
     client_ca: Option<SystemTime>,
 }
 
-fn read_mtime(p: &Path) -> Option<SystemTime> {
-    std::fs::metadata(p).ok()?.modified().ok()
-}
+fn read_mtime(p: &Path) -> Option<SystemTime> { std::fs::metadata(p).ok()?.modified().ok() }
 
 fn snapshot_mtimes(cfg: &TlsConfig) -> PathMtimes {
     PathMtimes {
@@ -82,22 +81,20 @@ pub(crate) async fn run(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        time::Duration,
+    use {
+        super::*,
+        crate::test_support::localhost_ecdsa_pair,
+        assert2::assert,
+        krabka_security::ClientAuthMode,
+        krabka_units::secs,
+        std::{
+            fs,
+            path::{Path, PathBuf},
+            time::Duration,
+        },
     };
 
-    use assert2::assert;
-    use krabka_security::ClientAuthMode;
-    use krabka_units::secs;
-
-    use super::*;
-    use crate::test_support::localhost_ecdsa_pair;
-
-    fn install_provider() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
+    fn install_provider() { let _ = rustls::crypto::ring::default_provider().install_default(); }
 
     fn generated_pair() -> (String, String) {
         let (cert, key) = localhost_ecdsa_pair();

@@ -1,9 +1,8 @@
 #[cfg(creusot)]
-use creusot_std::prelude::*;
-
-#[cfg(creusot)]
 use super::epoch::{epoch_archive_valid, epoch_window_valid};
 use super::*;
+#[cfg(creusot)]
+use creusot_std::prelude::*;
 
 type EpochSnapshotReplay = (i32, FetchWatermarks, FetchVisibility, Option<usize>, i64);
 
