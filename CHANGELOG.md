@@ -23,6 +23,22 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
 
 ## [Unreleased]
 
+### Added
+
+- Produce-time record deduplication ([KFC-10](docs/KFCs/KFC-10-produce-time-record-deduplication.md)).
+  A topic that sets `dedup.window.ms` drops a record when a record with the
+  same key, or with the same value of the header that `dedup.key.header`
+  names, was written within that many milliseconds. The first record wins. A
+  dropped record leaves a gap in the offsets as compaction does, so the
+  produce response stays exact and idempotent producers keep working.
+  Transactional produce bypasses it. The `[runtime]` settings
+  `dedup_max_entries_per_partition` and `dedup_max_entries` bound the
+  in-memory index, and nine `krabka_broker_dedup_*` metrics report drops,
+  saturation, clock skew and rebuild cost. Nothing new is written to disk.
+  Set the two topic configs only after every broker runs this release: an
+  older broker refuses `IncrementalAlterConfigs` on a topic that carries
+  them.
+
 ## [1.0.3] - 2026-10-12
 
 1.0.3 changes no on-disk format and adds no setting, so it upgrades from 1.0.2

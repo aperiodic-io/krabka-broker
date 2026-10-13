@@ -74,6 +74,7 @@ The Rejected Alternatives section is not decoration. Most readers arrive with an
 | [KFC-7](KFC-7-broker-side-schema-validation.md) | Broker-side schema validation | Adopted |
 | [KFC-8](KFC-8-clock-confidence-signal.md) | Clock confidence as a first-class signal | Adopted |
 | [KFC-9](KFC-9-topic-write-freeze-and-break-glass-workflows.md) | Topic write-freeze and break-glass workflows | Adopted |
+| [KFC-10](KFC-10-produce-time-record-deduplication.md) | Produce-time record deduplication | Draft |
 
 ## Style
 
