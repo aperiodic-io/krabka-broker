@@ -110,7 +110,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
 mod tests {
     use {
         super::expand,
-        crate::meta::{assert_rejected_structs, compact},
+        crate::meta::{RejectedStruct, assert_rejected_structs, compact},
         assert2::assert,
         moxy::ast::ItemStruct,
     };
@@ -134,30 +134,30 @@ mod tests {
     fn rejects_wrong_shape_metadata_and_target_expressions() {
         assert_rejected_structs(
             &[
-                (
-                    "missing metadata",
-                    "struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }",
-                ),
-                (
-                    "same targets",
-                    "#[wire_state_batch(read = wire::Batch, write = wire::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }",
-                ),
-                (
-                    "target expression",
-                    "#[wire_state_batch(read = read::Batch + other, write = write::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }",
-                ),
-                (
-                    "generic target",
-                    "#[wire_state_batch(read = read::Batch<T>, write = write::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }",
-                ),
-                (
-                    "missing field",
-                    "#[wire_state_batch(read = read::Batch, write = write::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8 }",
-                ),
-                (
-                    "tuple source",
-                    "#[wire_state_batch(read = read::Batch, write = write::Batch)] struct Batch(Offset);",
-                ),
+                RejectedStruct {
+                    label: "missing metadata",
+                    declaration: "struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }",
+                },
+                RejectedStruct {
+                    label: "same targets",
+                    declaration: "#[wire_state_batch(read = wire::Batch, write = wire::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }",
+                },
+                RejectedStruct {
+                    label: "target expression",
+                    declaration: "#[wire_state_batch(read = read::Batch + other, write = write::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }",
+                },
+                RejectedStruct {
+                    label: "generic target",
+                    declaration: "#[wire_state_batch(read = read::Batch<T>, write = write::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8, delivery_count: i16 }",
+                },
+                RejectedStruct {
+                    label: "missing field",
+                    declaration: "#[wire_state_batch(read = read::Batch, write = write::Batch)] struct Batch { first_offset: Offset, last_offset: Offset, delivery_state: i8 }",
+                },
+                RejectedStruct {
+                    label: "tuple source",
+                    declaration: "#[wire_state_batch(read = read::Batch, write = write::Batch)] struct Batch(Offset);",
+                },
             ],
             expand,
         );

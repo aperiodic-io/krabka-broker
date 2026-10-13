@@ -14,7 +14,7 @@ use {
     crate::coordinator::unified::{
         actor::reconciliation_model_support::{
             advertised_disjoint, apply_client_move, apply_member_heartbeat, client_moves,
-            exclusive_ownership, overlaps_others, owned_map,
+            exclusive_ownership, owned_map,
         },
         persistence_next_gen::MemberAssignmentState,
     },
@@ -52,7 +52,7 @@ impl Model for ReconModel {
         // Non-vacuity: a handoff state is reachable (a partition is in one
         // member's target while another member currently owns it).
         sometimes "handoff_witness" => |s| {
-            overlaps_others(s.members.iter().map(|member| (&member.id, &member.target)), &s.client_owned)
+            s.handoff_witness()
         },
         // Non-vacuity: a fully-converged state is reachable (every member
         // owns exactly its target and is Stable).
@@ -62,8 +62,8 @@ impl Model for ReconModel {
                     let owned: Vec<i32> = s
                         .client_owned
                         .iter()
-                        .find(|(k, _)| k == &m.id)
-                        .map(|(_, v)| v.clone())
+                        .find(|row| row.member_id == m.id)
+                        .map(|row| row.partitions.clone())
                         .unwrap_or_default();
                     m.assignment_state == MemberAssignmentState::Stable && owned == m.target
                 })

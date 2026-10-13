@@ -8,7 +8,7 @@
 
 use {
     crate::{
-        cluster::{Cluster, boot},
+        cluster::{Cluster, ClusterClients, boot, client_fixture},
         principals::{ALICE, BOB, CAROL, MALLORY, principal},
         proposals::{ACTION_DELETE_TOPIC, TTL_CONFIGURED, approve, open, propose, stored},
         support,
@@ -32,8 +32,10 @@ use {
 /// stored nothing, would pass the rest of this file untouched.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_proposal_two_approvals_and_the_transition_they_authorize() {
-    crate::cluster::client_fixture!(cluster = boot();
-        alice => ALICE, bob => BOB, carol => CAROL; topic(alice, "doomed", 1));
+    let ClusterClients {
+        cluster,
+        clients: [alice, bob, carol],
+    } = client_fixture(boot().await, [ALICE, BOB, CAROL], "doomed", 1).await;
 
     let id = open(&alice, ACTION_DELETE_TOPIC, "doomed").await;
 
@@ -109,8 +111,10 @@ struct ProposedDelete {
 }
 
 async fn proposed_delete_fixture() -> ProposedDelete {
-    crate::cluster::client_fixture!(cluster = boot();
-        alice => ALICE, bob => BOB; topic(alice, "doomed", 1));
+    let ClusterClients {
+        cluster,
+        clients: [alice, bob],
+    } = client_fixture(boot().await, [ALICE, BOB], "doomed", 1).await;
     let id = open(&alice, ACTION_DELETE_TOPIC, "doomed").await;
     ProposedDelete {
         cluster,
@@ -169,8 +173,10 @@ async fn one_principal_cannot_stand_in_for_two() {
 /// (1007), because the proposer already counts as one of the two people.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_proposer_cannot_approve_their_own_proposal() {
-    crate::cluster::client_fixture!(cluster = boot();
-        alice => ALICE; topic(alice, "doomed", 1));
+    let ClusterClients {
+        cluster,
+        clients: [alice],
+    } = client_fixture(boot().await, [ALICE], "doomed", 1).await;
 
     let id = open(&alice, ACTION_DELETE_TOPIC, "doomed").await;
     let refused = approve(&alice, id).await;
@@ -199,8 +205,10 @@ async fn the_proposer_cannot_approve_their_own_proposal() {
 /// two people and a stranger.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_principal_outside_the_approver_set_is_refused() {
-    crate::cluster::client_fixture!(cluster = boot();
-        alice => ALICE, mallory => MALLORY; topic(alice, "doomed", 1));
+    let ClusterClients {
+        cluster,
+        clients: [alice, mallory],
+    } = client_fixture(boot().await, [ALICE, MALLORY], "doomed", 1).await;
 
     let opened = propose(&mallory, ACTION_DELETE_TOPIC, "doomed", TTL_CONFIGURED).await;
     check!(

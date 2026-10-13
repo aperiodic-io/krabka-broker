@@ -8,12 +8,13 @@ use {
     super::{
         super::checks::{FreezeEnv, check_signature, is_signed, prepare, record_of},
         ALICE, ALICE_KEY, ALICE_NAME, AliceKeyConfiguration, PROPOSAL, alice_key_configuration,
-        freeze_request, sign,
+        freeze_fixture, freeze_request, image, sign, with_alice_freeze_env,
     },
     crate::{
         break_glass::handlers::principal_name,
         codes,
         config::{BrokerConfig, FreezeConfig},
+        operator_keys::OperatorKey,
         test_support::KafkaErrorCode,
         time_util::now_ms,
     },
@@ -90,31 +91,34 @@ fn a_signature_is_named_by_either_half_of_the_pair() {
 /// exists to avoid.
 #[test]
 fn the_freeze_path_names_the_author_the_way_the_break_glass_path_does() {
-    let AliceKeyConfiguration {
-        dir: _dir, config, ..
-    } = alice_key_configuration();
-    freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
+    with_alice_freeze_env(
+        || image(&[]),
+        |fixture, env| {
+            let ctx = env.ctx;
+            let config = env.config;
 
-    // What the listener actually authenticated, and what each path makes of it.
-    check!(principal.name == ALICE_NAME);
-    check!(principal_name(&ctx) == ALICE);
+            // What the listener actually authenticated, and what each path makes of it.
+            check!(fixture.principal.name == ALICE_NAME);
+            check!(principal_name(ctx) == ALICE);
 
-    let accepted = prepare(&env, &freeze_request("orders", PATTERN_TYPE_LITERAL))
-        .expect("an unsigned freeze is accepted by default");
+            let accepted = prepare(env, &freeze_request("orders", PATTERN_TYPE_LITERAL))
+                .expect("an unsigned freeze is accepted by default");
 
-    // The record carries the Kafka form, so the one configured entry --
-    // bound to `User:alice` -- is the entry that verifies it.
-    check!(accepted.record.set_by == ALICE);
-    // The audit event names her the same way, so an auditor can join a
-    // freeze to the break-glass approval that authorized it by principal.
-    check!(crate::break_glass::handlers::principal_name(&ctx) == accepted.record.set_by);
-    check!(config.operator_keys.get(ALICE_KEY).is_some());
-    check!(
-        config
-            .operator_keys
-            .get(ALICE_KEY)
-            .map(crate::operator_keys::OperatorKey::principal)
-            == Some(accepted.record.set_by.as_str())
+            // The record carries the Kafka form, so the one configured entry --
+            // bound to `User:alice` -- is the entry that verifies it.
+            check!(accepted.record.set_by == ALICE);
+            // The audit event names her the same way, so an auditor can join a
+            // freeze to the break-glass approval that authorized it by principal.
+            check!(principal_name(ctx) == accepted.record.set_by);
+            check!(config.operator_keys.get(ALICE_KEY).is_some());
+            check!(
+                config
+                    .operator_keys
+                    .get(ALICE_KEY)
+                    .map(OperatorKey::principal)
+                    == Some(accepted.record.set_by.as_str())
+            );
+        },
     );
 }
 
@@ -125,7 +129,8 @@ fn an_unsigned_freeze_is_accepted_by_default_and_refused_under_require_signature
         config: base,
         ..
     } = alice_key_configuration();
-    freeze_fixture!(image, principal, peer, ctx; &[]);
+    let fixture = freeze_fixture(image(&[]));
+    let ctx = fixture.context();
 
     for (label, requirement, expected) in [
         (
@@ -142,7 +147,7 @@ fn an_unsigned_freeze_is_accepted_by_default_and_refused_under_require_signature
         let config = signature_requirement(&base, requirement);
         let env = FreezeEnv {
             config: &config,
-            image: &image,
+            image: &fixture.image,
             ctx: &ctx,
         };
         let record = record_of(
@@ -162,7 +167,8 @@ fn an_unsigned_thaw_is_refused_whatever_require_signature_says() {
         config: base,
         ..
     } = alice_key_configuration();
-    freeze_fixture!(image, principal, peer, ctx; &[("orders", PatternType::Literal)]);
+    let fixture = freeze_fixture(image(&[("orders", PatternType::Literal)]));
+    let ctx = fixture.context();
 
     for requirement in [
         SignatureRequirement::Optional,
@@ -171,7 +177,7 @@ fn an_unsigned_thaw_is_refused_whatever_require_signature_says() {
         let config = signature_requirement(&base, requirement);
         let env = FreezeEnv {
             config: &config,
-            image: &image,
+            image: &fixture.image,
             ctx: &ctx,
         };
         let record = record_of(
@@ -198,7 +204,9 @@ fn a_signed_freeze_verifies_and_a_tampered_one_answers_one_code() {
         config,
         pair: alice,
     } = alice_key_configuration();
-    freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
+    let fixture = freeze_fixture(image(&[]));
+    let ctx = fixture.context();
+    let env = fixture.environment(&config, &ctx);
     let good = TopicFreezeRecord {
         key_id: ALICE_KEY.to_owned(),
         set_at_ms: now_ms(),

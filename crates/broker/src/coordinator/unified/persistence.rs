@@ -42,64 +42,6 @@ use {
 
 pub(crate) mod flex;
 
-/// Encode and append one nonempty actor delta before publishing its cache update.
-/// Each protocol supplies its original borrowed or consuming encoder and cache operation,
-/// and the reference it takes its state by: a `&mut` state lets the cache operation also
-/// apply what the appended records mean to the live actor state.
-macro_rules! flush_pending_records {
-    (
-        $state:ident :
-        $state_type:ty,
-        $pending:ident :
-        $pending_type:ty;
-        $log:ident,
-        $coordinator:ident,
-        $now:ident; group
-        $group:expr; encode
-        $encode:expr; cache
-        $cache:expr;
-    ) => {
-        pub(super) async fn flush_pending(
-            $state: $state_type,
-            $pending: $pending_type,
-            $log: &dyn $crate::coordinator::unified::offsets_log::OffsetsLog,
-            $coordinator: &$crate::coordinator::unified::GroupCoordinator,
-            $now: i64,
-        ) -> Result<(), $crate::error::BrokerError> {
-            if $pending.is_empty() {
-                return Ok(());
-            }
-            let batch = $encode?;
-            $log.append($group, batch).await?;
-            $cache;
-            Ok(())
-        }
-    };
-}
-pub(super) use flush_pending_records;
-
-/// The shared durable offset fields, keeping the runtime entry and wire value
-/// as distinct concrete types with their original documentation and derives.
-macro_rules! committed_offset_type {
-    ($(#[$meta:meta])* $visibility:vis struct $name:ident {
-        $(#[$expiry:meta])* expire_timestamp_ms,
-        $(#[$topic:meta])* topic_id,
-    }) => {
-        $(#[$meta])*
-        $visibility struct $name {
-            pub offset: ::krabka_log::Offset,
-            pub leader_epoch: i32,
-            pub metadata: String,
-            pub commit_timestamp_ms: i64,
-            $(#[$expiry])*
-            pub expire_timestamp_ms: Option<i64>,
-            $(#[$topic])*
-            pub topic_id: Option<::uuid::Uuid>,
-        }
-    };
-}
-pub(super) use committed_offset_type;
-
 /// Discriminator that [`parse_key`] returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Key {
@@ -217,18 +159,20 @@ pub fn encode_key(key: &Key) -> Result<Bytes, BrokerError> {
     }
 }
 
-committed_offset_type! {
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct OffsetCommitValue {
-        /// KIP-211: the per-commit expiry a v2-v4 `OffsetCommitRequest` asked for
-        /// through `retention_time_ms`, as an absolute wall-clock millisecond.
-        /// `None` means the commit takes the broker's `offsets.retention.minutes`.
-        expire_timestamp_ms,
-        /// The id of the committed topic, Kafka's `OffsetCommitValue.topicId`
-        /// (version 4, tagged field 0). `None` is Kafka's zero id: the topic was
-        /// unknown at commit time, or the record predates version 4.
-        topic_id,
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OffsetCommitValue {
+    pub offset: krabka_log::Offset,
+    pub leader_epoch: i32,
+    pub metadata: String,
+    pub commit_timestamp_ms: i64,
+    /// KIP-211: the per-commit expiry a v2-v4 `OffsetCommitRequest` asked for
+    /// through `retention_time_ms`, as an absolute wall-clock millisecond.
+    /// `None` means the commit takes the broker's `offsets.retention.minutes`.
+    pub expire_timestamp_ms: Option<i64>,
+    /// The id of the committed topic, Kafka's `OffsetCommitValue.topicId`
+    /// (version 4, tagged field 0). `None` is Kafka's zero id: the topic was
+    /// unknown at commit time, or the record predates version 4.
+    pub topic_id: Option<uuid::Uuid>,
 }
 
 impl OffsetCommitValue {
@@ -541,56 +485,6 @@ pub(crate) fn put_nullable_string<B: BufMut>(
 }
 
 pub(crate) fn put_bytes<B: BufMut>(buf: &mut B, b: &Bytes) { string_bytes::put_bytes(buf, b); }
-
-#[cfg(test)]
-macro_rules! key_string_boundaries {
-    ($pending:ty, $factory:expr) => {
-        #[test]
-        fn a_key_string_over_32767_bytes_does_not_encode() {
-            type Field = (&'static str, fn(&mut $pending, String));
-            let fields: [Field; 3] = [
-                ("member id of a member record", |pending, value| {
-                    pending.member_metadata[0].0 = value
-                }),
-                ("member id of a target assignment", |pending, value| {
-                    pending.target_per_member[0].0 = value
-                }),
-                ("member id of a current assignment", |pending, value| {
-                    pending.current_per_member[0].0 = value
-                }),
-            ];
-            let limit = $crate::coordinator::unified::persistence::MAX_STRING_BYTES;
-            for (name, set) in fields {
-                for (length, encodes) in [(limit, true), (limit + 1, false)] {
-                    let mut pending: $pending = ($factory)();
-                    set(&mut pending, "a".repeat(length));
-                    let outcome = pending.into_batch("g", 0);
-                    assert2::assert!(outcome.is_ok() == encodes, "{name} of {length} bytes");
-                    assert2::assert!(
-                        encodes || matches!(outcome, Err($crate::error::BrokerError::Protocol(_))),
-                        "{name} of {length} bytes is a protocol error"
-                    );
-                }
-            }
-            for (length, encodes) in [(limit, true), (limit + 1, false)] {
-                let outcome = ($factory)().into_batch(&"g".repeat(length), 0);
-                assert2::assert!(outcome.is_ok() == encodes, "group id of {length} bytes");
-            }
-        }
-    };
-}
-#[cfg(test)]
-pub(crate) use key_string_boundaries;
-
-/// Validate the three per-member record families of an atomic migration.
-macro_rules! assert_member_record_count {
-    ($pending:expr, $count:expr) => {
-        assert2::debug_assert!($pending.member_metadata.len() == $count);
-        assert2::debug_assert!($pending.target_per_member.len() == $count);
-        assert2::debug_assert!($pending.current_per_member.len() == $count);
-    };
-}
-pub(crate) use assert_member_record_count;
 
 /// The topics in id order and the partitions ascending, so that two equal
 /// assignments give equal records.

@@ -1,14 +1,16 @@
 //! Shared independent ACL wire models and live-handler metadata fixtures.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker;
 use {
     crate::{
-        authorizer::{Authorizer, SimpleAclAuthorizer},
-        broker::BrokerHandle,
+        authorizer::{AllowAllAuthorizer, Authorizer, SimpleAclAuthorizer},
+        broker::{Broker, BrokerHandle},
         handlers::acl_wire::binding_filter::AclBindingFilter,
-        test_support::allow_acl,
+        test_support::{allow_acl, start_broker_with_authorizer_no_audit},
     },
     krabka_metadata::{AclEntry, MetadataRecord},
-    std::sync::Arc,
+    std::{future::Future, sync::Arc},
 };
 
 pub(super) const RESOURCE_TYPE_TOPIC: i8 = 2;
@@ -50,20 +52,6 @@ pub(super) fn expected_deleted_orders_acl()
     )
 }
 
-/// Retain the broker and directory while the unconfigured authorizer's ACL is seeded.
-macro_rules! security_disabled_acl_fixture {
-    ($bindings:tt) => {
-        seeded_acl_fixture!(
-            $bindings,
-            crate::test_support::start_broker_with_authorizer_no_audit(std::sync::Arc::new(
-                crate::authorizer::AllowAllAuthorizer
-            )),
-            vec![crate::handlers::acl_test_support::alice_orders_acl()],
-            "admin"
-        );
-    };
-}
-
 /// Two independent topic ACLs for matching and deletion fixtures.
 pub(super) fn orders_payments_acls() -> Vec<AclEntry> {
     vec![
@@ -90,28 +78,64 @@ pub(super) async fn seed_acls(handle: &BrokerHandle, entries: Vec<AclEntry>) {
         .expect("seed ACLs");
 }
 
+/// Evaluate ACL entries after startup, then expose the retained broker resources.
+#[bon::builder]
+pub(super) async fn start_seeded_acls(
+    start: impl Future<Output = StartedBroker>,
+    entries: impl FnOnce() -> Vec<AclEntry>,
+) -> StartedBroker {
+    let started = start.await;
+    seed_acls(&started.broker, entries()).await;
+    started
+}
+
+/// The configured ACL authorizer, with entries evaluated after broker startup.
+#[bon::builder]
+pub(super) fn start_configured_acls(
+    entries: impl FnOnce() -> Vec<AclEntry>,
+) -> impl Future<Output = StartedBroker> {
+    let start = start_broker_with_authorizer_no_audit(configured_authorizer());
+    start_seeded_acls().start(start).entries(entries).call()
+}
+
+pub(super) fn start_orders_acl() -> impl Future<Output = StartedBroker> {
+    start_configured_acls()
+        .entries(|| vec![alice_orders_acl()])
+        .call()
+}
+pub(super) fn start_orders_payments_acls() -> impl Future<Output = StartedBroker> {
+    start_configured_acls().entries(orders_payments_acls).call()
+}
+pub(super) async fn start_security_disabled_acls() -> StartedBroker {
+    start_seeded_acls()
+        .start(start_broker_with_authorizer_no_audit(Arc::new(
+            AllowAllAuthorizer,
+        )))
+        .entries(|| vec![alice_orders_acl()])
+        .call()
+        .await
+}
+
+/// Commit the nonempty ACL entries selected by a caller's case.
+pub(crate) async fn seed_case_acls(broker: &Broker, entries: Vec<AclEntry>) {
+    broker
+        .controller
+        .submit_change(
+            entries
+                .into_iter()
+                .map(MetadataRecord::V1AccessControlEntry)
+                .collect(),
+        )
+        .await
+        .expect("seed acls");
+}
+
 pub(super) fn all_acls(handle: &BrokerHandle) -> Vec<AclEntry> {
     handle
         .controller_image_for_test()
         .all_acls()
         .cloned()
         .collect()
-}
-
-/// The empty-string filter used to verify that emptiness never means wildcard.
-macro_rules! empty_match_acl_filter {
-    ($ty:ident) => {
-        $ty {
-            resource_type_filter: crate::handlers::acl_test_support::RESOURCE_TYPE_TOPIC,
-            resource_name_filter: Some(String::new()),
-            pattern_type_filter: crate::handlers::acl_test_support::PATTERN_TYPE_MATCH,
-            principal_filter: Some(String::new()),
-            host_filter: None,
-            operation: crate::handlers::acl_test_support::OPERATION_ANY,
-            permission_type: crate::handlers::acl_test_support::PERMISSION_ANY,
-            ..Default::default()
-        }
-    };
 }
 
 pub(super) fn expected_empty_match_filter() -> AclBindingFilter {
@@ -128,40 +152,3 @@ pub(super) fn expected_empty_match_filter() -> AclBindingFilter {
         permission_type: AxisFilter::Any,
     }
 }
-
-/// Keep seeded ACLs visible before acquiring the handler's broker and context.
-macro_rules! seeded_acl_fixture {
-    (
-        ($handle:ident, $directory:ident, $broker:ident, $context:ident),
-        $start:expr,
-        $entries:expr,
-        $user:expr
-    ) => {
-        let ($handle, $directory) = $start.await;
-        crate::handlers::acl_test_support::seed_acls(&$handle, $entries).await;
-        let $broker = $handle.broker_arc_for_test();
-        krabka_macros::request_test_identity! {
-            bind($context);
-            user [$user];
-        };
-    };
-}
-
-/// Seed a table case's ACLs without submitting or consuming an empty case.
-macro_rules! seed_case_acls {
-    ($broker:expr, $entries:expr) => {
-        if !$entries.is_empty() {
-            $broker
-                .controller
-                .submit_change(
-                    $entries
-                        .into_iter()
-                        .map(krabka_metadata::MetadataRecord::V1AccessControlEntry)
-                        .collect(),
-                )
-                .await
-                .expect("seed acls");
-        }
-    };
-}
-pub(crate) use seed_case_acls;

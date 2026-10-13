@@ -2,7 +2,8 @@
 use super::timestamp::time_archive_valid;
 use {
     super::{
-        restore_index_frontier, time_index_lookup, validated_remote_and_local_time_starts_agree,
+        TimeEntry, restore_index_frontier, time_index_lookup,
+        validated_remote_and_local_time_starts_agree,
     },
     creusot_std::prelude::*,
 };
@@ -38,18 +39,18 @@ pub fn time_segment_valid(base: Int, end: Int) -> bool {
 #[cfg_attr(test, mutants::skip)]
 #[logic(open)]
 pub fn time_cursor_matches(
-    entries: Seq<(i64, u32)>,
+    entries: Seq<TimeEntry>,
     target: Int,
     relative: Int,
     strict: bool,
 ) -> bool {
     pearlite! {
         (relative == 0 && forall<i: Int> 0 <= i && i < entries.len()
-            ==> if strict { entries[i].0@ >= target } else { entries[i].0@ > target })
-        || exists<i: Int> 0 <= i && i < entries.len() && relative == entries[i].1@
-            && (if strict { entries[i].0@ < target } else { entries[i].0@ <= target })
+            ==> if strict { entries[i].key@ >= target } else { entries[i].key@ > target })
+        || exists<i: Int> 0 <= i && i < entries.len() && relative == entries[i].coordinate@
+            && (if strict { entries[i].key@ < target } else { entries[i].key@ <= target })
             && forall<j: Int> i < j && j < entries.len()
-                ==> if strict { entries[j].0@ >= target } else { entries[j].0@ > target }
+                ==> if strict { entries[j].key@ >= target } else { entries[j].key@ > target }
     }
 }
 
@@ -70,7 +71,7 @@ pub fn time_cursor_matches(
         && time_cursor_matches(entries@, lower_target@, scan@ - segment_base@, true),
 })]
 pub(super) fn validated_time_cursors_are_monotone(
-    entries: &[(i64, u32)],
+    entries: &[TimeEntry],
     segment_base: i64,
     segment_end: i64,
     lower_target: i64,

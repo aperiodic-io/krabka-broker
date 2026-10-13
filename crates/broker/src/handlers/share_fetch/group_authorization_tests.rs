@@ -11,16 +11,18 @@
 //! Each table crosses the group grant with the topic grant. One broker serves
 //! every case, and the principal name selects the grants.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AuthorizationResult,
-        broker::BrokerHandle,
+        broker::{Broker, BrokerHandle},
         codes,
         handlers::test_support::{StartedBroker, create_topic as create_topic_from_test_support},
         share_partition::session::FetchPartitions,
         test_support::{
-            decode_response, encode_request, peer, principal, request_context,
-            start_broker_no_audit_with, try_dispatch_context,
+            decode_response, encode_request, initialize_share_state, peer, principal,
+            request_context, start_broker_no_audit_with, try_dispatch_context,
         },
     },
     assert2::assert,
@@ -41,7 +43,7 @@ use {
         primitives::uuid::Uuid as WireUuid,
         records::RecordsPayload,
     },
-    std::sync::Arc,
+    std::{net::SocketAddr, sync::Arc},
 };
 
 /// The share group that every request names.
@@ -89,7 +91,7 @@ impl Grants {
 #[derive(Debug)]
 struct GrantsByName;
 
-test_authorizer!(GrantsByName, (self, _source, request), {
+krabka_macros::test_authorizer!(GrantsByName, request; {
     let Some(grants) = Grants::ALL
         .into_iter()
         .find(|grants| grants.principal_name() == request.principal.name)
@@ -111,7 +113,7 @@ test_authorizer!(GrantsByName, (self, _source, request), {
 });
 
 async fn start() -> StartedBroker {
-    let (broker, dir) =
+    let HandlerStartedBroker { broker, dir } =
         start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(GrantsByName)).await;
     StartedBroker { broker, dir }
 }
@@ -141,58 +143,49 @@ struct Outcome<T> {
     response: T,
 }
 
-/// Shared topic, share state, runtime and peer; locals remain in each test scope.
-macro_rules! authorization_fixture {
-    (($broker:ident, $dir:ident, $topic_id:ident, $shared:ident, $address:ident)) => {
-        let StartedBroker {
-            broker: $broker,
-            dir: $dir,
-        } = start().await;
-        let $topic_id = create_topic(&$broker, "share-authorization").await;
-        crate::test_support::initialize_share_state(
-            &$broker,
-            GROUP,
-            uuid::Uuid::from_bytes($topic_id.0),
-            0,
-        )
-        .await;
-        let $shared = $broker.broker_arc_for_test();
-        let $address = peer();
-    };
+/// Shared topic, share state, runtime and peer retained through each authorization table.
+struct AuthorizationFixture {
+    address: SocketAddr,
+    shared: Arc<Broker>,
+    topic_id: WireUuid,
+    _directory: tempfile::TempDir,
+    handle: BrokerHandle,
 }
 
-/// Each API's independent error model pins all fields left empty by a group denial.
-macro_rules! expected_group_denial {
-    ($response:ident) => {
-        $response {
-            throttle_time_ms: 0,
-            error_code: codes::GROUP_AUTHORIZATION_FAILED,
-            error_message: None,
-            acquisition_lock_timeout_ms: 0,
-            responses: Vec::new(),
-            node_endpoints: Vec::new(),
-            ..Default::default()
-        }
-    };
+async fn authorization_fixture() -> AuthorizationFixture {
+    let StartedBroker {
+        broker: handle,
+        dir: directory,
+    } = start().await;
+    let topic_id = create_topic(&handle, "share-authorization").await;
+    initialize_share_state(&handle, GROUP, uuid::Uuid::from_bytes(topic_id.0), 0).await;
+    let shared = handle.broker_arc_for_test();
+    let address = peer();
+    AuthorizationFixture {
+        address,
+        shared,
+        topic_id,
+        _directory: directory,
+        handle,
+    }
 }
-
 #[tokio::test]
 async fn share_fetch_checks_group_read_before_topic_read() {
-    authorization_fixture!((broker, _dir, topic_id, shared, address));
+    let fixture = authorization_fixture().await;
 
     let mut actual: Vec<Outcome<ShareFetchResponse>> = Vec::new();
     let mut expected: Vec<Outcome<ShareFetchResponse>> = Vec::new();
     for version in versions() {
         for grants in Grants::ALL {
             let user = principal(&grants.principal_name());
-            let ctx = request_context(&user, &address, "share-client");
+            let ctx = request_context(&user, &fixture.address, "share-client");
             let request = super::test_fetch_request()
                 .group_id(GROUP.into())
                 .member_id(format!("member-{version}-{}", grants.principal_name()))
-                .topic_id(topic_id.0)
+                .topic_id(fixture.topic_id.0)
                 .call();
             let response = try_dispatch_context(
-                &shared,
+                &fixture.shared,
                 krabka_protocol::owned::share_fetch_request::API_KEY,
                 version,
                 &encode_request(&request, version),
@@ -210,7 +203,7 @@ async fn share_fetch_checks_group_read_before_topic_read() {
                 ShareFetchResponse {
                     acquisition_lock_timeout_ms: LOCK_TIMEOUT_MS,
                     responses: vec![ShareFetchableTopicResponse {
-                        topic_id,
+                        topic_id: fixture.topic_id,
                         partitions: vec![PartitionData {
                             partition_index: 0,
                             error_code: if grants.topic_read {
@@ -227,7 +220,7 @@ async fn share_fetch_checks_group_read_before_topic_read() {
                 }
             } else {
                 // `ShareFetchResponse.of(error, throttleTimeMs, empty, List.of(), 0)`.
-                expected_group_denial!(ShareFetchResponse)
+                krabka_macros::share_group_denial!(ShareFetchResponse)
             };
             expected.push(Outcome {
                 version,
@@ -236,15 +229,15 @@ async fn share_fetch_checks_group_read_before_topic_read() {
             });
         }
     }
-    broker.shutdown().await;
+    fixture.handle.shutdown().await;
 
     assert!(actual == expected);
 }
 
 #[tokio::test]
 async fn share_acknowledge_checks_group_read_before_topic_read() {
-    authorization_fixture!((broker, _dir, topic_id, shared, address));
-    let topic = uuid::Uuid::from_bytes(topic_id.0);
+    let fixture = authorization_fixture().await;
+    let topic = uuid::Uuid::from_bytes(fixture.topic_id.0);
 
     let mut actual: Vec<Outcome<ShareAcknowledgeResponse>> = Vec::new();
     let mut expected: Vec<Outcome<ShareAcknowledgeResponse>> = Vec::new();
@@ -254,11 +247,12 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
     ] {
         for grants in Grants::ALL {
             let user = principal(&grants.principal_name());
-            let ctx = request_context(&user, &address, "share-client");
+            let ctx = request_context(&user, &fixture.address, "share-client");
             let member = format!("member-{version}-{}", grants.principal_name());
             // Open the share session directly, so that every case acknowledges
             // at epoch 1 in a session that exists.
-            shared
+            fixture
+                .shared
                 .share_partition_leaders
                 .update_fetch_session(
                     (GROUP, &member),
@@ -276,7 +270,7 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
                 member_id: Some(member),
                 share_session_epoch: 1,
                 topics: vec![AcknowledgeTopic {
-                    topic_id,
+                    topic_id: fixture.topic_id,
                     partitions: vec![AcknowledgePartition {
                         partition_index: 0,
                         ..Default::default()
@@ -286,7 +280,7 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
                 ..Default::default()
             };
             let response = try_dispatch_context(
-                &shared,
+                &fixture.shared,
                 krabka_protocol::owned::share_acknowledge_request::API_KEY,
                 version,
                 &encode_request(&request, version),
@@ -306,7 +300,7 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
                     // version decodes the field's default, 0.
                     acquisition_lock_timeout_ms: if version >= 2 { LOCK_TIMEOUT_MS } else { 0 },
                     responses: vec![ShareAcknowledgeTopicResponse {
-                        topic_id,
+                        topic_id: fixture.topic_id,
                         partitions: vec![share_acknowledge_response::PartitionData {
                             partition_index: 0,
                             error_code: if grants.topic_read {
@@ -323,7 +317,7 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
             } else {
                 // `ShareAcknowledgeRequest.getErrorResponse` sets the throttle
                 // time and the error code, and nothing else.
-                expected_group_denial!(ShareAcknowledgeResponse)
+                krabka_macros::share_group_denial!(ShareAcknowledgeResponse)
             };
             expected.push(Outcome {
                 version,
@@ -332,7 +326,7 @@ async fn share_acknowledge_checks_group_read_before_topic_read() {
             });
         }
     }
-    broker.shutdown().await;
+    fixture.handle.shutdown().await;
 
     assert!(actual == expected);
 }

@@ -41,109 +41,25 @@ use {
 /// producer (`linger: 0`) are runnable. A zero-length measurement window or a
 /// zero-byte record is not.
 mod bounded {
-    /// Defines a `#[serde(with = ...)]` module that reads a quantity's human form
-    /// and then rejects a magnitude this field cannot run.
-    ///
-    /// Serialization delegates to the unbounded sibling, because a value that
-    /// the read path admitted is in range on the way out by construction.
-    macro_rules! bounded_module {
-        (
-            $(#[$meta:meta])*
-            $name:ident, $quantity:ty, $encode:path, $decode:path,
-            $admits:expr, $requirement:literal
-        ) => {
-            $(#[$meta])*
-            pub mod $name {
-                use krabka_units::{fmt::Human as _, prelude::*};
-                use serde::{Deserializer, Serializer, de::Error as _};
 
-                /// Writes the quantity as its human string form.
-                ///
-                /// # Errors
-                ///
-                /// Whatever the serializer reports for a string.
-                pub fn serialize<S: Serializer>(
-                    value: &$quantity,
-                    serializer: S,
-                ) -> Result<S::Ok, S::Error> {
-                    $encode(value, serializer)
-                }
+    krabka_macros::bounded_unit_modules! {
+    /// A size that must be positive: a record or a producer batch.
+     pub mod positive_size: ByteSize [codec = krabka_units::serde_units::human::byte_size, bound = "positive", requirement = "a positive size"];
 
-                /// Reads the quantity from its human string form and bounds it.
-                ///
-                /// # Errors
-                ///
-                /// If the value is not a quantity of this dimension carrying an
-                /// explicit unit, or its magnitude is one this field cannot run.
-                pub fn deserialize<'de, D: Deserializer<'de>>(
-                    deserializer: D,
-                ) -> Result<$quantity, D::Error> {
-                    let value = $decode(deserializer)?;
-                    let admits: fn($quantity) -> bool = $admits;
-                    if admits(value) {
-                        return Ok(value);
-                    }
-                    Err(D::Error::custom(format!(
-                        "must be {}, got {}",
-                        $requirement,
-                        value.human()
-                    )))
-                }
-            }
-        };
+    /// A size that may be zero: a key length, where zero means keyless.
+     pub mod nonnegative_size: ByteSize [codec = krabka_units::serde_units::human::byte_size, bound = "nonnegative", requirement = "a size of zero or more"];
+
+    /// An extent that must be positive: a measurement window.
+     pub mod positive_time: Time [codec = krabka_units::serde_units::human::time, bound = "positive", requirement = "a positive extent"];
+
+    /// An extent that may be zero: a warmup that is skipped, a producer that
+            /// does not linger, a kill scheduled at the very start of the run.
+     pub mod nonnegative_time: Time [codec = krabka_units::serde_units::human::time, bound = "nonnegative", requirement = "an extent of zero or more"];
+
+    /// An event rate that must be positive. A paced producer that asks for
+            /// no messages at all never sends one, and no scenario means that.
+     pub mod positive_rate: Frequency [codec = krabka_units::serde_units::human::frequency, bound = "positive", requirement = "a positive rate"];
     }
-
-    bounded_module!(
-        /// A size that must be positive: a record or a producer batch.
-        positive_size,
-        ByteSize,
-        krabka_units::serde_units::human::byte_size::serialize,
-        krabka_units::serde_units::human::byte_size::deserialize,
-        |value: ByteSize| value > ByteSize::ZERO,
-        "a positive size"
-    );
-
-    bounded_module!(
-        /// A size that may be zero: a key length, where zero means keyless.
-        nonnegative_size,
-        ByteSize,
-        krabka_units::serde_units::human::byte_size::serialize,
-        krabka_units::serde_units::human::byte_size::deserialize,
-        |value: ByteSize| value >= ByteSize::ZERO,
-        "a size of zero or more"
-    );
-
-    bounded_module!(
-        /// An extent that must be positive: a measurement window.
-        positive_time,
-        Time,
-        krabka_units::serde_units::human::time::serialize,
-        krabka_units::serde_units::human::time::deserialize,
-        |value: Time| value > Time::ZERO,
-        "a positive extent"
-    );
-
-    bounded_module!(
-        /// An extent that may be zero: a warmup that is skipped, a producer that
-        /// does not linger, a kill scheduled at the very start of the run.
-        nonnegative_time,
-        Time,
-        krabka_units::serde_units::human::time::serialize,
-        krabka_units::serde_units::human::time::deserialize,
-        |value: Time| value >= Time::ZERO,
-        "an extent of zero or more"
-    );
-
-    bounded_module!(
-        /// An event rate that must be positive. A paced producer that asks for
-        /// no messages at all never sends one, and no scenario means that.
-        positive_rate,
-        Frequency,
-        krabka_units::serde_units::human::frequency::serialize,
-        krabka_units::serde_units::human::frequency::deserialize,
-        |value: Frequency| value > Frequency::ZERO,
-        "a positive rate"
-    );
 }
 
 /// Which Kafka stack the scenario runs against. This is metadata only. The

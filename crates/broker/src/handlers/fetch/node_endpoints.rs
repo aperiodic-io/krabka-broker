@@ -6,11 +6,6 @@
 //! client cannot resolve, and the consumer falls back to the full `Metadata`
 //! round-trip that KIP-951 exists to remove.
 
-use {
-    crate::handlers::leader_endpoints,
-    krabka_protocol::owned::fetch_response::{FetchableTopicResponse, NodeEndpoint},
-};
-
 /// The endpoint of every node named by a `CurrentLeader` hint in `responses`,
 /// one entry per node id and ordered by it.
 ///
@@ -23,30 +18,41 @@ use {
 /// A node the image does not know contributes no entry: there is no address to
 /// advertise for it, and Kafka likewise skips a leader that its metadata cache
 /// cannot resolve to a live node.
-pub(super) fn fetch_node_endpoints(
-    image: &krabka_metadata::MetadataImage,
-    connection_listener_name: &str,
-    inter_broker_listener_name: &str,
-    responses: &[FetchableTopicResponse],
-) -> Vec<NodeEndpoint> {
-    leader_endpoints(
-        image,
-        connection_listener_name,
-        inter_broker_listener_name,
-        responses
-            .iter()
-            .flat_map(|topic| topic.partitions.iter())
-            .map(|partition| partition.current_leader.leader_id),
-    )
-}
+pub(super) use crate::handlers::node_endpoints::topic_endpoints as fetch_node_endpoints;
 
 #[cfg(test)]
-crate::handlers::node_endpoints::test_support::endpoint_tests!(
-    fetch_response,
-    fetch_node_endpoints,
-    FetchableTopicResponse,
-    topic,
-    partitions,
-    PartitionData,
-    partition_index
-);
+mod tests {
+    use {
+        crate::{
+            codes,
+            handlers::node_endpoints::test_support::{check_endpoints, hinted_partitions},
+        },
+        krabka_protocol::owned::fetch_response::{
+            FetchableTopicResponse, LeaderIdAndEpoch, PartitionData,
+        },
+    };
+
+    #[test]
+    fn one_entry_per_hinted_node_on_the_connection_listener() {
+        check_endpoints(
+            |image, listener, leader_ids| {
+                let response = FetchableTopicResponse {
+                    topic: "orders".to_owned(),
+                    partitions: hinted_partitions(leader_ids, |hint| PartitionData {
+                        partition_index: hint.index,
+                        error_code: codes::NOT_LEADER_OR_FOLLOWER,
+                        current_leader: LeaderIdAndEpoch {
+                            leader_id: hint.leader_id,
+                            leader_epoch: 7,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                };
+                super::fetch_node_endpoints(image, listener, "INTERNAL", &[response])
+            },
+            |expected| expected.fetch,
+        );
+    }
+}

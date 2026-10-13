@@ -7,7 +7,8 @@ use {
     super::{
         super::checks::{FreezeEnv, check_approval, consumed_proposal_id, record_of},
         ALICE, AliceKeyConfiguration, AliceKeys, PROPOSAL, alice_key_configuration,
-        config_with_alice, freeze_request, image, with_freeze_env,
+        config_with_alice, freeze_fixture, freeze_request, image, with_alice_freeze_env,
+        with_freeze_env,
     },
     crate::{
         codes,
@@ -28,7 +29,9 @@ fn a_thaw_with_no_proposal_needs_a_break_glass_approval() {
     let AliceKeyConfiguration {
         dir: _dir, config, ..
     } = alice_key_configuration();
-    freeze_fixture!(image, principal, peer, ctx; &[("orders", PatternType::Literal)] ; env, config);
+    let fixture = freeze_fixture(image(&[("orders", PatternType::Literal)]));
+    let ctx = fixture.context();
+    let env = fixture.environment(&config, &ctx);
     let thaw = TopicFreezeRecord {
         frozen: false,
         proposal_id: Uuid::nil(),
@@ -46,17 +49,18 @@ fn a_thaw_with_no_proposal_needs_a_break_glass_approval() {
 
 #[test]
 fn a_freeze_needs_no_proposal() {
-    let AliceKeyConfiguration {
-        dir: _dir, config, ..
-    } = alice_key_configuration();
-    freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
-    let record = record_of(
-        &freeze_request("orders", PATTERN_TYPE_LITERAL),
-        PatternType::Literal,
-        ALICE,
-    );
+    with_alice_freeze_env(
+        || image(&[]),
+        |_fixture, env| {
+            let record = record_of(
+                &freeze_request("orders", PATTERN_TYPE_LITERAL),
+                PatternType::Literal,
+                ALICE,
+            );
 
-    check!(check_approval(&env, &record) == Ok(None));
+            check!(check_approval(env, &record) == Ok(None));
+        },
+    );
 }
 
 #[test]

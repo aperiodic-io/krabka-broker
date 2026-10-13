@@ -13,8 +13,8 @@ proptest! {
             running_maximum_index_entry(&offsets, &timestamps, *indexed, *through)).collect();
         let expected = timestamps.iter().position(|timestamp| *timestamp >= target);
         assert!(indexed_timestamp_scan_finds_first(&entries, &offsets, &timestamps, target) == expected);
-        assert!(constructed_time_index_preserves_first(&offsets, &timestamps, &rows, target) == (entries.clone(), expected));
-        let (count, floor) = validated_time_scan::prefix_oracle(&entries, target);
+        assert!(constructed_time_index_preserves_first(&offsets, &timestamps, &rows, target) == ConstructedTimeIndex { entries: entries.clone(), selected: expected });
+        let validated_time_scan::TimePrefix { count, floor } = validated_time_scan::prefix_oracle(&entries, target);
         assert!(remote_timestamp_scan_preserves_first(&entries, &offsets, &timestamps, target) == (count, floor, expected));
         assert!(validated_remote_and_local_time_starts_agree(&entries, i64::from(u32::MAX), target) == Ok((count, floor, floor)));
     }

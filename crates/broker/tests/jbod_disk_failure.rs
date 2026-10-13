@@ -52,7 +52,7 @@ const CLIENT_ID: &str = "krabka-jbod-disk-failure-test";
 const PRODUCE_VERSION: i16 = 9; // flexible, acks=1
 
 // Flexible headers and correlation ID 1 for every request in this suite.
-crate::flexible_round_trip_fixture!(round_trip, CLIENT_ID, 1);
+krabka_macros::wire_test_driver!(flexible round_trip, CLIENT_ID, 1);
 
 /// Lists the partition indices of `topic` whose data dir lives directly under
 /// `dir`.

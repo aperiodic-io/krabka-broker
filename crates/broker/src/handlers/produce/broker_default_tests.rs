@@ -9,6 +9,8 @@
 //! produce validates against it. A topic that overrides the key keeps its own
 //! value.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         api_catalog::UnstableApiVersions,
@@ -108,7 +110,8 @@ async fn produce_error_code_compressed(
 /// batch is 1.5 MiB, over the built-in 1048588-byte cap.
 #[tokio::test]
 async fn a_dynamic_message_max_bytes_governs_a_topic_that_sets_no_cap() {
-    let (broker, _dir) = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
     create_topic(&broker, "orders").await;
     let node = krabka_metadata::NodeId(broker.broker_arc_for_test().config.node_id.0);
     let batch = 1_572_864;
@@ -140,7 +143,7 @@ async fn a_dynamic_message_max_bytes_governs_a_topic_that_sets_no_cap() {
 /// beats the cluster's.
 #[tokio::test]
 async fn a_dynamic_max_decompressed_message_bytes_refuses_an_oversized_compressed_record() {
-    let (broker, _dir) = start_broker_no_audit_with(|config| {
+    let HandlerStartedBroker { broker, dir: _dir } = start_broker_no_audit_with(|config| {
         config.authorizer = Arc::new(AllowAllAuthorizer);
         config.features.unstable_api_versions = UnstableApiVersions::Enabled;
     })
@@ -185,7 +188,8 @@ async fn a_dynamic_max_decompressed_message_bytes_refuses_an_oversized_compresse
 /// not serve trunk's keys ignores a stored value.
 #[tokio::test]
 async fn a_default_broker_ignores_max_decompressed_message_bytes() {
-    let (broker, _dir) = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
     create_topic(&broker, "orders").await;
     set_broker_config()
         .broker(&broker)

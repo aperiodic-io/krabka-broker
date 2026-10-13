@@ -9,8 +9,8 @@ use {
         harness::{create_topic, topic_id_for},
         support::{
             classic::{
-                ClassicJoinSetup, ClassicTimeouts, classic_join_request, classic_sync_request,
-                required_member_id, sync_assignment,
+                ClassicJoinSetup, ClassicTimeouts, classic_join_request, classic_join_request_from,
+                classic_sync_request, required_member_id, sync_assignment,
             },
             offsets::{
                 offset_commit_partition, offset_commit_topic, offset_fetch_group,
@@ -63,7 +63,7 @@ async fn join_group_single_member_completes_after_deadline() {
     // First call to obtain a server-assigned member_id.
     let r1 = p
         .client
-        .send(crate::classic_join_request_from!(join_setup()))
+        .send(classic_join_request_from(join_setup()))
         .await
         .expect("JoinGroup1");
     // Retry with the assigned member_id. The handler will block ~1.5s
@@ -100,7 +100,7 @@ async fn full_group_flow_join_sync_heartbeat_commit_fetch_leave() {
     // Step 1: empty member_id → broker returns one.
     let r1 = p
         .client
-        .send(crate::classic_join_request_from!(join_setup()))
+        .send(classic_join_request_from(join_setup()))
         .await
         .unwrap();
     let mid = required_member_id(r1.error_code, r1.member_id.clone());

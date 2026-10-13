@@ -11,6 +11,8 @@
 //! whose authorizer grants ACLs by the principal's name, so each case names
 //! exactly the resource-type/operation pairs it holds.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{test_support::one_transactional_batch, *},
     crate::{
@@ -67,7 +69,10 @@ const TXN_ID: &str = "t1";
 const ADMIN_GRANTS: &str = "Cluster:Create";
 
 async fn boot() -> StartedBroker {
-    let (handle, dir) = start_transaction_grant_broker().await;
+    let HandlerStartedBroker {
+        broker: handle,
+        dir,
+    } = start_transaction_grant_broker().await;
     handle.wait_until_controller_leader().await;
     handle.wait_until_brokers_registered(1).await;
     let broker = handle.broker_arc_for_test();

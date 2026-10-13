@@ -1,6 +1,8 @@
 //! End-to-end tests for the `UpdateFeatures` handler, which drive a live
 //! broker and so are kept out of the module root.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::*,
     crate::{
@@ -144,7 +146,10 @@ async fn requests_apply_atomically_with_kafkas_response_shape() {
         ),
     ];
     for (case, version, updates, validate, expected, group_after) in cases {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         let req = UpdateFeaturesRequest {
             feature_updates: updates,
             validate_only: validate,
@@ -185,7 +190,10 @@ async fn wait_for_group_version_off(broker: &Broker) {
 async fn handle_persists_a_lossless_metadata_downgrade() {
     // 4.4-IV0 is a Kafka trunk level: the controller supports it only under
     // `unstable.feature.versions.enable`.
-    let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.features.unstable_feature_versions = krabka_raft::UnstableFeatureVersions::Enabled;
     })

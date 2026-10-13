@@ -199,7 +199,7 @@ mod tests {
                 .call()
                 .await;
 
-            let changes = crate::coordinator::test_support::schedule_commit_changes!(case, partition;
+            let changes = krabka_macros::schedule_commit_changes!(case, partition;
                 captures {} leader(leader, epoch) {
                     partition.install_leader_change(leader, epoch).await;
                 } notify {

@@ -68,34 +68,7 @@ pub(super) fn committed_topics<T>(
     by_topic
 }
 
-/// The two wire shapes carry identical committed and invalid-offset fields.
-/// Missing rows carry offset/epoch -1 and an empty metadata string, never null,
-/// as Kafka's offset manager and topic-authorization refusals both require.
-macro_rules! partition_rows {
-    ($($row:ident => ($missing:ident, $stable:ident)),+ $(,)?) => {
-        $(pub(super) fn $missing(partition_index: i32, error_code: i16) -> wire::$row {
-            wire::$row {
-                partition_index,
-                committed_offset: -1,
-                committed_leader_epoch: -1,
-                metadata: Some(String::new()),
-                error_code,
-                ..Default::default()
-            }
-        }
-        pub(super) fn $stable(partition_index: i32, entry: &OffsetEntry) -> wire::$row {
-            wire::$row {
-                partition_index,
-                committed_offset: entry.offset.0,
-                committed_leader_epoch: entry.leader_epoch,
-                metadata: Some(entry.metadata.clone()),
-                error_code: crate::codes::NONE,
-                ..Default::default()
-            }
-        })+
-    };
-}
-partition_rows!(
-    OffsetFetchResponsePartition => (missing_legacy_row, stable_legacy_row),
-    OffsetFetchResponsePartitions => (missing_group_row, stable_group_row),
-);
+// The two wire shapes carry identical committed and invalid-offset fields.
+// Missing rows carry offset/epoch -1 and an empty metadata string, never null.
+krabka_macros::offset_fetch_rows! { wire::OffsetFetchResponsePartition { missing: missing_legacy_row, stable: stable_legacy_row }
+wire::OffsetFetchResponsePartitions { missing: missing_group_row, stable: stable_group_row } }

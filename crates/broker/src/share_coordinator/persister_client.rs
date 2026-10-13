@@ -71,21 +71,6 @@ use {
     std::{sync::Arc, time::Duration},
 };
 
-/// The persister RPCs share a singleton topic/partition envelope.
-macro_rules! one_partition_request {
-    ($request:ident, $topic:ident, $partition_type:ident; $group:expr, $topic_id:expr; $($fields:tt)*) => {
-        $request {
-            group_id: ($group).to_string(),
-            topics: vec![$topic {
-                topic_id: krabka_protocol::primitives::uuid::Uuid(*($topic_id).as_bytes()),
-                partitions: vec![$partition_type { $($fields)* ..Default::default() }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-    };
-}
-
 /// Group-coordinator-side client for the share-state persister. `Broker::start`
 /// constructs it after both the [`ShareCoordinator`] and the
 /// `GroupCoordinator` exist, and hands it to the `GroupCoordinator` so its
@@ -182,11 +167,16 @@ impl SharePersister {
                 });
         }
 
-        let req = one_partition_request!(InitializeShareGroupStateRequest, InitializeStateData, InitPartitionData; group, topic_id;
-            partition,
-            state_epoch,
-            start_offset: start_offset.0,
-        );
+        let req = krabka_macros::share_state_request! {
+            InitializeShareGroupStateRequest, InitializeStateData, InitPartitionData;
+            group [group];
+            topic [topic_id];
+            fields {
+                partition,
+                state_epoch,
+                start_offset: start_offset.0,
+            };
+        };
         self.send_to_leader(state_partition, req, "InitializeShareGroupState", partition)
             .await
     }
@@ -222,9 +212,14 @@ impl SharePersister {
                     )
                 })
         } else {
-            let req = one_partition_request!(DeleteShareGroupStateRequest, DeleteStateData, DeletePartitionData; group, topic_id;
-                partition,
-            );
+            let req = krabka_macros::share_state_request! {
+                DeleteShareGroupStateRequest, DeleteStateData, DeletePartitionData;
+                group [group];
+                topic [topic_id];
+                fields {
+                    partition,
+                };
+            };
             self.send_to_leader(state_partition, req, "DeleteShareGroupState", partition)
                 .await
         };
@@ -387,10 +382,15 @@ impl SharePersister {
                 });
         }
 
-        let req = one_partition_request!(ReadShareGroupStateRequest, ReadStateData, ReadPartitionData; group, topic_id;
-            partition,
-            leader_epoch,
-        );
+        let req = krabka_macros::share_state_request! {
+            ReadShareGroupStateRequest, ReadStateData, ReadPartitionData;
+            group [group];
+            topic [topic_id];
+            fields {
+                partition,
+                leader_epoch,
+            };
+        };
         let resp = self.send_to_leader_resp(state_partition, req).await?;
         let pr = checked_partition(
             resp.results.into_iter().flat_map(|topic| topic.partitions),
@@ -450,9 +450,14 @@ impl SharePersister {
                 });
         }
 
-        let req = one_partition_request!(ReadShareGroupStateSummaryRequest, ReadStateSummaryData, ReadSummaryPartitionData; group, topic_id;
-            partition,
-        );
+        let req = krabka_macros::share_state_request! {
+            ReadShareGroupStateSummaryRequest, ReadStateSummaryData, ReadSummaryPartitionData;
+            group [group];
+            topic [topic_id];
+            fields {
+                partition,
+            };
+        };
         let resp = self.send_to_leader_resp(state_partition, req).await?;
         let pr = checked_partition(
             resp.results.into_iter().flat_map(|topic| topic.partitions),
@@ -534,17 +539,22 @@ impl SharePersister {
                 });
         }
 
-        let req = one_partition_request!(WriteShareGroupStateRequest, WriteStateData, WritePartitionData; group, topic_id;
-            partition,
-            state_epoch,
-            leader_epoch,
-            start_offset: start_offset.0,
-            delivery_complete_count,
-            state_batches: batches
-                .into_iter()
-                .map(ProtoStateBatch::from)
-                .collect(),
-        );
+        let req = krabka_macros::share_state_request! {
+            WriteShareGroupStateRequest, WriteStateData, WritePartitionData;
+            group [group];
+            topic [topic_id];
+            fields {
+                partition,
+                state_epoch,
+                leader_epoch,
+                start_offset: start_offset.0,
+                delivery_complete_count,
+                state_batches: batches
+                    .into_iter()
+                    .map(ProtoStateBatch::from)
+                    .collect(),
+            };
+        };
         self.send_to_leader(state_partition, req, "WriteShareGroupState", partition)
             .await
     }
@@ -665,25 +675,7 @@ trait PartitionResults {
     fn partition_results(self) -> Vec<PartitionRow>;
 }
 
-macro_rules! impl_partition_results {
-    ($($response:ty),+ $(,)?) => {
-        $(impl PartitionResults for $response {
-            fn partition_results(self) -> Vec<PartitionRow> {
-                self.results
-                    .into_iter()
-                    .flat_map(|topic| topic.partitions)
-                    .map(|p| PartitionRow {
-                        partition: p.partition,
-                        error_code: p.error_code,
-                        error_message: p.error_message,
-                    })
-                    .collect()
-            }
-        })+
-    };
-}
-
-impl_partition_results!(
+krabka_macros::share_partition_results!(
     InitializeShareGroupStateResponse,
     WriteShareGroupStateResponse,
     DeleteShareGroupStateResponse,

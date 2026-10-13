@@ -161,7 +161,7 @@ pub(super) async fn handle_partition_response(
                 return RowAction::Drop;
             }
             if let Some(part) = cfg.partitions.get(&cfg.topic, cfg.partition) {
-                let _target_guard = lock_local_target!(
+                let _target_guard = krabka_macros::replication_target_guard!(
                     part,
                     cfg,
                     "replicator: skipping diverging_epoch truncation from stale local target"
@@ -205,7 +205,7 @@ pub(super) async fn handle_partition_response(
                     "replicator: local partition vanished between fetches");
                 return RowAction::Continue;
             };
-            let _target_guard = lock_local_target!(
+            let _target_guard = krabka_macros::replication_target_guard!(
                 part,
                 cfg,
                 "replicator: discarding response for stale local target"

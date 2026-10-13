@@ -15,7 +15,12 @@ struct Property {
     binding: Ident,
 }
 
-fn declaration(input: &TokenStream) -> Result<(Path, Vec<Property>), ParseError> {
+struct PropertyDeclaration {
+    state: Path,
+    properties: Vec<Property>,
+}
+
+fn declaration(input: &TokenStream) -> Result<PropertyDeclaration, ParseError> {
     let parser = Parser::from_tokens(input);
     let state = Path::parse(&parser)?;
     <Token![;]>::parse(&parser)?;
@@ -52,11 +57,11 @@ fn declaration(input: &TokenStream) -> Result<(Path, Vec<Property>), ParseError>
     if properties.is_empty() {
         return Err(parser.error("declare at least one model property"));
     }
-    Ok((state, properties))
+    Ok(PropertyDeclaration { state, properties })
 }
 
 pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
-    let (state, properties) = declaration(&input.clone().into())?;
+    let PropertyDeclaration { state, properties } = declaration(&input.clone().into())?;
     let oracles = native_braced_bodies(input);
     if properties.len() != oracles.len() {
         return Err(ParseError::new(
@@ -65,15 +70,13 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
         ));
     }
     let mut entries = NativeTokenStream::new();
-    for (
-        Property {
+    let mut properties = properties.into_iter();
+    for oracle in oracles {
+        let Property {
             kind,
             label,
             binding,
-        },
-        oracle,
-    ) in properties.into_iter().zip(oracles)
-    {
+        } = properties.next().expect("validated native oracle count");
         let mut arguments: NativeTokenStream =
             moxy::template! { {{ label }}, |_, {{ binding }}: &{{ state }}| }.into();
         arguments.extend([TokenTree::Group(oracle)]);
@@ -101,7 +104,7 @@ mod tests {
     #[test]
     fn property_order_and_native_blocks_are_parsed_without_expression_ast() {
         let input = "State; always \"first\" => |state| { opaque!(@state state) }, sometimes \"second\" => |next| { other::call::<Type>(next) },".parse().unwrap();
-        let (_, rows) = declaration(&input).unwrap();
+        let rows = declaration(&input).unwrap().properties;
         assert!(
             rows.iter().map(|row| row.label.value()).collect::<Vec<_>>() == ["first", "second"]
         );

@@ -399,14 +399,14 @@ mod tests {
     use {
         super::*,
         crate::{
+            api_catalog::UnstableApiVersions,
             metrics::BrokerMetrics,
             remote_log_manager::{
                 ArchiveMode,
                 local_retention::finished_segment_ranges,
                 test_support::{
                     self as fixtures, Backends, FakeWormArchive, archived_backends, copy_exports,
-                    local_backends, missing_remote_reads, stuck_started_segment, synth_export,
-                    three_exports, tier, tp,
+                    local_backends, stuck_started_segment, synth_export, three_exports, tier, tp,
                 },
             },
             test_support::UnixMillis,
@@ -437,35 +437,38 @@ mod tests {
             .call()
     }
 
+    struct AcceptingCopyResources {
+        rsm: Arc<dyn RemoteStorageManager>,
+        rlmm: Arc<dyn RemoteLogMetadataManager>,
+        metrics: BrokerMetrics,
+    }
+    fn accepting_copy_fixture() -> AcceptingCopyResources {
+        let Backends { rsm, rlmm } = accepting_backends(None);
+        let metrics = BrokerMetrics::new();
+        AcceptingCopyResources { rsm, rlmm, metrics }
+    }
+    fn accepting_copy_tier<'a>(
+        rsm: &'a Arc<dyn RemoteStorageManager>,
+        rlmm: &'a Arc<dyn RemoteLogMetadataManager>,
+        metrics: &'a BrokerMetrics,
+        unstable: UnstableApiVersions,
+    ) -> RemoteTier<'a> {
+        fixtures::configured_tier()
+            .rsm(rsm)
+            .rlmm(rlmm)
+            .metrics(metrics)
+            .unstable_api_versions(unstable)
+            .call()
+    }
+
     /// KIP-405's `RemoteCopyRequestsPerSec`, `RemoteCopyBytesPerSec` and the
     /// two copy-lag gauges. An operator whose object store starts refusing
     /// writes learns about it from these; before them, a stalled tier was
     /// visible only as consumer lag and a filling disk.
-    macro_rules! accepting_copy_fixture {
-        ($rsm:ident, $rlmm:ident, $metrics:ident, $tier:ident, $unstable:expr) => {
-            let Backends {
-                rsm: $rsm,
-                rlmm: $rlmm,
-            } = accepting_backends(None);
-            let $metrics = BrokerMetrics::new();
-            let $tier = fixtures::configured_tier()
-                .rsm(&$rsm)
-                .rlmm(&$rlmm)
-                .metrics(&$metrics)
-                .unstable_api_versions($unstable)
-                .call();
-        };
-    }
-
     #[tokio::test]
     async fn a_copy_round_records_its_requests_bytes_and_lag() {
-        accepting_copy_fixture!(
-            rsm,
-            rlmm,
-            metrics,
-            tier,
-            crate::api_catalog::UnstableApiVersions::Disabled
-        );
+        let AcceptingCopyResources { rsm, rlmm, metrics } = accepting_copy_fixture();
+        let tier = accepting_copy_tier(&rsm, &rlmm, &metrics, UnstableApiVersions::Disabled);
         let exports = fixtures::two_exports();
 
         let copied = copy_exports(&tier, exports).await;
@@ -506,13 +509,8 @@ mod tests {
             (30, 3),
             (i64::MAX, 3),
         ] {
-            accepting_copy_fixture!(
-                rsm,
-                rlmm,
-                metrics,
-                tier,
-                crate::api_catalog::UnstableApiVersions::Disabled
-            );
+            let AcceptingCopyResources { rsm, rlmm, metrics } = accepting_copy_fixture();
+            let tier = accepting_copy_tier(&rsm, &rlmm, &metrics, UnstableApiVersions::Disabled);
             let exports = three_exports().call();
 
             let copied = copy_eligible_below(
@@ -577,13 +575,8 @@ mod tests {
             ("a size lag nothing has reached", 10_000, 193, 0),
             ("either check is enough", 700, 10_000, 3),
         ] {
-            accepting_copy_fixture!(
-                rsm,
-                rlmm,
-                metrics,
-                tier,
-                crate::api_catalog::UnstableApiVersions::Enabled
-            );
+            let AcceptingCopyResources { rsm, rlmm, metrics } = accepting_copy_fixture();
+            let tier = accepting_copy_tier(&rsm, &rlmm, &metrics, UnstableApiVersions::Enabled);
             let exports = three_exports().call();
             let delay = CopyDelay::resolve(RemoteCopyLag { ms, bytes }, &unlimited, 1000, 64);
 
@@ -691,9 +684,8 @@ mod tests {
     /// round over it can take.
     struct RefusingRsm;
 
+    #[krabka_macros::missing_remote_reads(delete_ok)]
     impl RemoteStorageManager for RefusingRsm {
-        missing_remote_reads!(delete_ok);
-
         fn copy_log_segment_data(
             &self,
             _metadata: &RemoteLogSegmentMetadata,
@@ -712,9 +704,8 @@ mod tests {
         receipt: Option<CustomMetadata>,
     }
 
+    #[krabka_macros::missing_remote_reads(delete_ok)]
     impl RemoteStorageManager for AcceptingRsm {
-        missing_remote_reads!(delete_ok);
-
         fn copy_log_segment_data(
             &self,
             _metadata: &RemoteLogSegmentMetadata,
@@ -751,7 +742,12 @@ mod tests {
 
     #[tokio::test]
     async fn copies_all_sealed_segments_and_records_finished() {
-        fixtures::rolled_log_fixture!(log_dir, remote_dir, log, exports);
+        let fixtures::RolledLogFixture {
+            local: _log_dir,
+            remote: remote_dir,
+            log: _log,
+            exports,
+        } = fixtures::rolled_log_fixture();
         assert!(exports.len() >= 2, "test needs multiple sealed segments");
 
         let Backends { rsm, rlmm } = archived_backends(remote_dir.path(), &exports).await;
@@ -781,22 +777,30 @@ mod tests {
 
     #[tokio::test]
     async fn re_running_is_idempotent() {
-        fixtures::rolled_log_fixture!(log_dir, remote_dir, log, exports);
+        let fixture = fixtures::prepared_copy();
 
-        let (rsm, rlmm) = local_backends(remote_dir.path());
-
-        let first = copy_exports(&tier(ArchiveMode::Mutable, &rsm, &rlmm), exports.clone()).await;
-        assert!(first == exports.len());
+        let first = copy_exports(
+            &tier(ArchiveMode::Mutable, &fixture.rsm, &fixture.rlmm),
+            fixture.exports.clone(),
+        )
+        .await;
+        assert!(first == fixture.exports.len());
         // Second pass: everything is already known → nothing re-copied.
-        let second = copy_exports(&tier(ArchiveMode::Mutable, &rsm, &rlmm), exports.clone()).await;
+        let second = copy_exports(
+            &tier(ArchiveMode::Mutable, &fixture.rsm, &fixture.rlmm),
+            fixture.exports.clone(),
+        )
+        .await;
         assert!(second == 0);
-        assert!(rlmm.list_remote_log_segments(&tp()).unwrap().len() == exports.len());
+        assert!(
+            fixture.rlmm.list_remote_log_segments(&tp()).unwrap().len() == fixture.exports.len()
+        );
     }
 
     #[tokio::test]
     async fn empty_exports_copies_nothing() {
         let remote_dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) = local_backends(remote_dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
         let copied = copy_exports(&tier(ArchiveMode::Mutable, &rsm, &rlmm), Vec::new()).await;
         assert!(copied == 0);
         assert!(rlmm.list_remote_log_segments(&tp()).unwrap().is_empty());

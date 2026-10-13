@@ -7,6 +7,8 @@
 //! Kafka's `AclBindingFilter` semantics over a mixed ACL set, and the two ways
 //! Kafka refuses a filter with an `UNKNOWN` element.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{Doomed, filter::build_filter, handle, match_filter},
     crate::{
@@ -14,6 +16,7 @@ use {
         codes,
         error::BrokerError,
         handlers::{
+            acl_test_support as acl_fixtures,
             acl_test_support::{all_acls, seed_acls},
             delete_acls::test_support::{
                 NamedFilter, OPERATION_ANY, PATTERN_TYPE_ANY, PATTERN_TYPE_LITERAL,
@@ -50,12 +53,11 @@ fn orders_and_payments_request() -> DeleteAclsRequest {
 
 #[tokio::test]
 async fn handle_denies_cluster_alter_for_each_filter() {
-    seeded_acl_fixture!(
-        (broker_handle, _dir, broker, ctx),
-        start_broker(Arc::new(DenyAll)),
-        vec![crate::handlers::acl_test_support::alice_orders_acl()],
-        "alice"
-    );
+    krabka_macros::broker_test_setup! {
+    bind(broker_handle, _dir, broker, ctx);
+    boot [acl_fixtures::start_seeded_acls().start(start_broker(Arc::new(DenyAll))).entries(|| vec![acl_fixtures::alice_orders_acl()]).call()];
+    user ["alice"];
+    };
     let req = orders_and_payments_request();
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
@@ -75,12 +77,11 @@ async fn handle_denies_cluster_alter_for_each_filter() {
 
 #[tokio::test]
 async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
-    seeded_acl_fixture!(
-        (broker_handle, _dir, broker, ctx),
-        start_broker(configured_authorizer()),
-        crate::handlers::acl_test_support::orders_payments_acls(),
-        "admin"
-    );
+    krabka_macros::broker_test_setup! {
+    bind(broker_handle, _dir, broker, ctx);
+    boot [acl_fixtures::start_orders_payments_acls()];
+    user ["admin"];
+    };
     let req = request(vec![filter(Some("orders"), Some("User:alice"))]);
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
@@ -89,7 +90,7 @@ async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
         filter_results: vec![krabka_macros::tagged_wire!(DeleteAclsFilterResult {
             error_code: codes::NONE,
             error_message: None,
-            matching_acls: vec![crate::handlers::acl_test_support::expected_deleted_orders_acl()],
+            matching_acls: vec![acl_fixtures::expected_deleted_orders_acl()],
         })],
     });
     assert!(resp == expected);
@@ -114,7 +115,11 @@ async fn handle_returns_matching_acl_fields_and_deletes_only_matches() {
 /// seeded binding must survive the refusal.
 #[tokio::test]
 async fn handle_answers_security_disabled_for_each_filter_when_no_authorizer_is_configured() {
-    security_disabled_acl_fixture!((broker_handle, _dir, broker, ctx));
+    krabka_macros::broker_test_setup! {
+    bind(broker_handle, _dir, broker, ctx);
+    boot [acl_fixtures::start_security_disabled_acls()];
+    user ["admin"];
+    };
     let req = orders_and_payments_request();
 
     let resp = handle(&broker, req, VERSION, &ctx).await.expect("handle");
@@ -128,9 +133,7 @@ async fn handle_answers_security_disabled_for_each_filter_when_no_authorizer_is_
         filter_results: vec![disabled.clone(), disabled],
     });
     assert!(resp == expected);
-    assert!(
-        all_acls(&broker_handle) == vec![crate::handlers::acl_test_support::alice_orders_acl()]
-    );
+    assert!(all_acls(&broker_handle) == vec![acl_fixtures::alice_orders_acl()]);
     broker_handle.shutdown().await;
 }
 
@@ -343,7 +346,10 @@ async fn handle_deletes_exactly_what_kafka_matches() {
 /// same ACL set, so both filters list the shared ACL, and it is removed.
 #[tokio::test]
 async fn handle_lists_an_acl_under_every_filter_that_matches_it() {
-    let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker(configured_authorizer()).await;
     let shared = acl().call();
     let other = acl().resource_name("payments").principal("User:bob").call();
     seed_acls(&broker_handle, vec![shared.clone(), other.clone()]).await;
@@ -387,7 +393,10 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
 
     type Edit = fn(&mut DeleteAclsFilter);
 
-    let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker(configured_authorizer()).await;
     let doomed = acl().call();
     seed_acls(&broker_handle, vec![doomed.clone()]).await;
     let broker = broker_handle.broker_arc_for_test();
@@ -470,12 +479,11 @@ async fn handle_refuses_a_filter_with_an_undefined_byte_and_runs_the_rest() {
 /// filter runs.
 #[tokio::test]
 async fn handle_closes_the_connection_on_an_unknown_element() {
-    seeded_acl_fixture!(
-        (broker_handle, _dir, broker, ctx),
-        start_broker(configured_authorizer()),
-        vec![crate::handlers::acl_test_support::alice_orders_acl()],
-        "admin"
-    );
+    krabka_macros::broker_test_setup! {
+    bind(broker_handle, _dir, broker, ctx);
+    boot [acl_fixtures::start_orders_acl()];
+    user ["admin"];
+    };
     let mut unknown = filter(Some("payments"), None);
     unknown.permission_type = 0;
     let req = request(vec![filter(Some("orders"), Some("User:alice")), unknown]);
@@ -487,9 +495,7 @@ async fn handle_closes_the_connection_on_an_unknown_element() {
             "Filters contain UNKNOWN elements"
         ))) = result
     );
-    assert!(
-        all_acls(&broker_handle) == vec![crate::handlers::acl_test_support::alice_orders_acl()]
-    );
+    assert!(all_acls(&broker_handle) == vec![acl_fixtures::alice_orders_acl()]);
     broker_handle.shutdown().await;
 }
 
@@ -523,7 +529,10 @@ async fn handle_bounds_a_request_to_ten_thousand_removals() {
         (10_000, vec![match_all(), match_all()]),
     ];
     for (seeded, filters) in cases {
-        let (broker_handle, _dir) = start_broker(configured_authorizer()).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(configured_authorizer()).await;
         seed_many_acls(&broker_handle, seeded).await;
         let broker = broker_handle.broker_arc_for_test();
         krabka_macros::request_test_identity! {

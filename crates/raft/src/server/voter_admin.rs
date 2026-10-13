@@ -21,19 +21,8 @@ use {
         },
     },
     bytes::{Bytes, BytesMut},
+    krabka_metadata::VoterEndpoint,
 };
-
-macro_rules! voter_endpoints {
-    ($listeners:expr) => {
-        $listeners
-            .into_iter()
-            .map(|listener| krabka_metadata::VoterEndpoint {
-                name: listener.name,
-                host: listener.host,
-                port: listener.port,
-            })
-    };
-}
 
 #[cfg(test)]
 mod tests;
@@ -145,7 +134,7 @@ pub(super) async fn add_raft_voter_response(
         let voter = requested_voter(
             voter_id,
             directory_id,
-            voter_endpoints!(request.listeners),
+            krabka_macros::voter_endpoints!({ request.listeners }),
             krabka_metadata::KRaftVersionRange::default(),
         );
         reconfiguration_refusal(
@@ -240,7 +229,7 @@ pub(super) async fn update_raft_voter_response(
         let voter = requested_voter(
             voter_id,
             directory_id,
-            voter_endpoints!(request.listeners),
+            krabka_macros::voter_endpoints!({ request.listeners }),
             kraft_version,
         );
         reconfiguration_refusal(

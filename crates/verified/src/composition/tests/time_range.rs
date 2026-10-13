@@ -1,7 +1,7 @@
 use {super::*, assert2::assert};
 
 fn cursor_oracle(
-    entries: &[(i64, u32)],
+    entries: &[TimeEntry],
     base: i64,
     end: i64,
     lower: i64,
@@ -18,18 +18,18 @@ fn cursor_oracle(
     let inclusive = |target| {
         base + entries
             .iter()
-            .rfind(|&&(time, _)| time <= target)
-            .map_or(0, |&(_, offset)| i64::from(offset))
+            .rfind(|entry| entry.key <= target)
+            .map_or(0, |entry| i64::from(entry.coordinate))
     };
     let strict = base
         + entries
             .iter()
-            .rfind(|&&(time, _)| time < lower)
-            .map_or(0, |&(_, offset)| i64::from(offset));
+            .rfind(|entry| entry.key < lower)
+            .map_or(0, |entry| i64::from(entry.coordinate));
     Ok((inclusive(lower), inclusive(upper), strict))
 }
 
-pub(super) fn check_cursors(entries: &[(i64, u32)], base: i64, end: i64, lower: i64, upper: i64) {
+pub(super) fn check_cursors(entries: &[TimeEntry], base: i64, end: i64, lower: i64, upper: i64) {
     assert!(
         validated_time_cursors_are_monotone(entries, base, end, lower, upper)
             == cursor_oracle(entries, base, end, lower, upper)
@@ -57,14 +57,14 @@ fn check_range(window: SparseTimestampWindow<'_>, bounds: (i64, i64, i64), targe
 proptest! {
     #[test]
     fn validated_cursors_match_independent_last_row_oracles(
-        rows in prop::collection::vec((any::<i64>(), any::<u32>()), 0..8),
+        rows in prop::collection::vec((any::<i64>(), any::<u32>()).prop_map(|(key, coordinate)| TimeEntry::new(key, coordinate)), 0..8),
         base in any::<i64>(), end in any::<i64>(), a in any::<i64>(), b in any::<i64>(),
         records in prop::collection::btree_map(any::<u32>(), any::<i64>(), 0..16),
     ) {
         check_cursors(&rows, base, end, a.min(b), a.max(b));
         let mut maximum = i64::MIN;
         let valid: Vec<_> = records.iter().map(|(&offset, &time)| {
-            maximum = maximum.max(time); (maximum, offset)
+            maximum = maximum.max(time); TimeEntry::new(maximum, offset)
         }).collect();
         check_cursors(&valid, 0, i64::from(u32::MAX), a.min(b), a.max(b));
     }
@@ -136,12 +136,15 @@ fn time_range_rejects_invalid_extents_and_preserves_signed_extremes() {
     );
     for lower in [i64::MIN, 0, i64::MAX] {
         check_cursors(
-            &[(i64::MIN, 0), (i64::MAX, u32::MAX)],
+            &[
+                TimeEntry::new(i64::MIN, 0),
+                TimeEntry::new(i64::MAX, u32::MAX),
+            ],
             0,
             i64::from(u32::MAX),
             lower,
             i64::MAX,
         );
-        check_cursors(&[(i64::MIN, 1)], -1, 1, lower, i64::MAX);
+        check_cursors(&[TimeEntry::new(i64::MIN, 1)], -1, 1, lower, i64::MAX);
     }
 }

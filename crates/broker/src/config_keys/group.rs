@@ -20,11 +20,8 @@
 //! (`NOT_APPLIED`, and `docs/KIP_MATRIX.md`).
 
 use {
-    super::{
-        kafka_broker::roster,
-        parse::{
-            check_one_of, check_range, int_value, java_trim, parse_bool, parse_int, parse_long,
-        },
+    super::parse::{
+        check_one_of, check_range, int_value, java_trim, parse_bool, parse_int, parse_long,
     },
     crate::{
         api_catalog::UnstableApiVersions,
@@ -73,35 +70,160 @@ const fn group_key(
 /// `DescribeConfigs` lists them (by name).
 pub(crate) const KAFKA_GROUP_KEYS: &[GroupKey] = {
     use super::registry::ConfigType::{Boolean, Int, List, Long, String};
-    roster! {
-        group_key("consumer.assignment.interval.ms", Int, Some("1000"), Some("group.consumer.assignment.interval.ms")),
-        group_key("consumer.assignor.offload.enable", Boolean, Some("true"), Some("group.consumer.assignor.offload.enable")),
-        group_key("consumer.heartbeat.interval.ms", Int, Some("5000"), Some("group.consumer.heartbeat.interval.ms")),
-        group_key("consumer.session.timeout.ms", Int, Some("45000"), Some("group.consumer.session.timeout.ms")),
-        group_key("errors.deadletterqueue.copy.record.enable", Boolean, Some("false"), None),
+    &[
+        group_key(
+            "consumer.assignment.interval.ms",
+            Int,
+            Some("1000"),
+            Some("group.consumer.assignment.interval.ms"),
+        ),
+        group_key(
+            "consumer.assignor.offload.enable",
+            Boolean,
+            Some("true"),
+            Some("group.consumer.assignor.offload.enable"),
+        ),
+        group_key(
+            "consumer.heartbeat.interval.ms",
+            Int,
+            Some("5000"),
+            Some("group.consumer.heartbeat.interval.ms"),
+        ),
+        group_key(
+            "consumer.session.timeout.ms",
+            Int,
+            Some("45000"),
+            Some("group.consumer.session.timeout.ms"),
+        ),
+        group_key(
+            "errors.deadletterqueue.copy.record.enable",
+            Boolean,
+            Some("false"),
+            None,
+        ),
         group_key("errors.deadletterqueue.topic.name", String, Some(""), None),
-        group_key("share.assignment.interval.ms", Int, Some("1000"), Some("group.share.assignment.interval.ms")),
-        group_key("share.assignor.offload.enable", Boolean, Some("true"), Some("group.share.assignor.offload.enable")),
+        group_key(
+            "share.assignment.interval.ms",
+            Int,
+            Some("1000"),
+            Some("group.share.assignment.interval.ms"),
+        ),
+        group_key(
+            "share.assignor.offload.enable",
+            Boolean,
+            Some("true"),
+            Some("group.share.assignor.offload.enable"),
+        ),
         group_key("share.auto.offset.reset", String, Some("latest"), None),
-        group_key("share.delivery.count.limit", Int, Some("5"), Some("group.share.delivery.count.limit")),
-        group_key("share.heartbeat.interval.ms", Int, Some("5000"), Some("group.share.heartbeat.interval.ms")),
-        group_key("share.isolation.level", String, Some("read_uncommitted"), None),
-        group_key("share.partition.max.record.locks", Int, Some("2000"), Some("group.share.partition.max.record.locks")),
-        group_key("share.record.lock.duration.ms", Int, Some("30000"), Some("group.share.record.lock.duration.ms")),
-        group_key("share.renew.acknowledge.enable", Boolean, Some("true"), None),
-        group_key("share.session.timeout.ms", Int, Some("45000"), Some("group.share.session.timeout.ms")),
-        group_key("streams.acceptable.recovery.lag", Long, Some("10000"), Some("group.streams.acceptable.recovery.lag")),
-        group_key("streams.assignment.interval.ms", Int, Some("1000"), Some("group.streams.assignment.interval.ms")),
-        group_key("streams.assignor.name", String, None, Some("group.streams.assignors")),
-        group_key("streams.assignor.offload.enable", Boolean, Some("true"), Some("group.streams.assignor.offload.enable")),
-        group_key("streams.heartbeat.interval.ms", Int, Some("5000"), Some("group.streams.heartbeat.interval.ms")),
-        group_key("streams.initial.rebalance.delay.ms", Int, Some("3000"), Some("group.streams.initial.rebalance.delay.ms")),
-        group_key("streams.num.standby.replicas", Int, Some("0"), Some("group.streams.num.standby.replicas")),
-        group_key("streams.num.warmup.replicas", Int, Some("2"), Some("group.streams.num.warmup.replicas")),
-        group_key("streams.rack.aware.assignment.tags", List, Some(""), Some("group.streams.rack.aware.assignment.tags")),
-        group_key("streams.session.timeout.ms", Int, Some("45000"), Some("group.streams.session.timeout.ms")),
-        group_key("streams.task.offset.interval.ms", Int, Some("60000"), Some("group.streams.task.offset.interval.ms")),
-    }
+        group_key(
+            "share.delivery.count.limit",
+            Int,
+            Some("5"),
+            Some("group.share.delivery.count.limit"),
+        ),
+        group_key(
+            "share.heartbeat.interval.ms",
+            Int,
+            Some("5000"),
+            Some("group.share.heartbeat.interval.ms"),
+        ),
+        group_key(
+            "share.isolation.level",
+            String,
+            Some("read_uncommitted"),
+            None,
+        ),
+        group_key(
+            "share.partition.max.record.locks",
+            Int,
+            Some("2000"),
+            Some("group.share.partition.max.record.locks"),
+        ),
+        group_key(
+            "share.record.lock.duration.ms",
+            Int,
+            Some("30000"),
+            Some("group.share.record.lock.duration.ms"),
+        ),
+        group_key(
+            "share.renew.acknowledge.enable",
+            Boolean,
+            Some("true"),
+            None,
+        ),
+        group_key(
+            "share.session.timeout.ms",
+            Int,
+            Some("45000"),
+            Some("group.share.session.timeout.ms"),
+        ),
+        group_key(
+            "streams.acceptable.recovery.lag",
+            Long,
+            Some("10000"),
+            Some("group.streams.acceptable.recovery.lag"),
+        ),
+        group_key(
+            "streams.assignment.interval.ms",
+            Int,
+            Some("1000"),
+            Some("group.streams.assignment.interval.ms"),
+        ),
+        group_key(
+            "streams.assignor.name",
+            String,
+            None,
+            Some("group.streams.assignors"),
+        ),
+        group_key(
+            "streams.assignor.offload.enable",
+            Boolean,
+            Some("true"),
+            Some("group.streams.assignor.offload.enable"),
+        ),
+        group_key(
+            "streams.heartbeat.interval.ms",
+            Int,
+            Some("5000"),
+            Some("group.streams.heartbeat.interval.ms"),
+        ),
+        group_key(
+            "streams.initial.rebalance.delay.ms",
+            Int,
+            Some("3000"),
+            Some("group.streams.initial.rebalance.delay.ms"),
+        ),
+        group_key(
+            "streams.num.standby.replicas",
+            Int,
+            Some("0"),
+            Some("group.streams.num.standby.replicas"),
+        ),
+        group_key(
+            "streams.num.warmup.replicas",
+            Int,
+            Some("2"),
+            Some("group.streams.num.warmup.replicas"),
+        ),
+        group_key(
+            "streams.rack.aware.assignment.tags",
+            List,
+            Some(""),
+            Some("group.streams.rack.aware.assignment.tags"),
+        ),
+        group_key(
+            "streams.session.timeout.ms",
+            Int,
+            Some("45000"),
+            Some("group.streams.session.timeout.ms"),
+        ),
+        group_key(
+            "streams.task.offset.interval.ms",
+            Int,
+            Some("60000"),
+            Some("group.streams.task.offset.interval.ms"),
+        ),
+    ]
 };
 
 /// The group keys Kafka trunk's `GroupConfig` defines and Kafka 4.3.1's does

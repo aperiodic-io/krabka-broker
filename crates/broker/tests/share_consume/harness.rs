@@ -22,11 +22,11 @@ pub use crate::support::share::{
     topic_id, wire,
 };
 
-crate::share_consumption_fixture!(
+krabka_macros::share_consumption_driver!(
     /// Initialize the common g1/t fixture before its first consume.
     initialize_consumption,
     join,
-    |broker, client, member, epoch, tid| wait_for_share_init(broker, client, &member, epoch, tid)
+    |broker, client, member, epoch, tid| [wait_for_share_init(broker, client, &member, epoch, tid)]
 );
 
 pub use crate::support::share::ConsumptionFixture;

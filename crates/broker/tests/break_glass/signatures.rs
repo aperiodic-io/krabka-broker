@@ -7,7 +7,7 @@
 
 use {
     crate::{
-        cluster::boot_with_signed_actions,
+        cluster::{ClusterClients, boot_with_signed_actions, client_fixture},
         principals::{ALICE, BOB, CAROL},
         proposals::{
             ACTION_DELETE_TOPIC, approval_signing_bytes, approve, approve_signed, approve_with,
@@ -31,8 +31,16 @@ use {
 /// KFC-9 documents, so the pass also proves the broker rebuilds the same bytes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_signed_action_takes_a_signature_on_every_approval() {
-    crate::cluster::client_fixture!(cluster = boot_with_signed_actions(&["delete_topic"]);
-        alice => ALICE, bob => BOB, carol => CAROL; topic(alice, "doomed", 1));
+    let ClusterClients {
+        cluster,
+        clients: [alice, bob, carol],
+    } = client_fixture(
+        boot_with_signed_actions(&["delete_topic"]).await,
+        [ALICE, BOB, CAROL],
+        "doomed",
+        1,
+    )
+    .await;
 
     let id = open(&alice, ACTION_DELETE_TOPIC, "doomed").await;
 

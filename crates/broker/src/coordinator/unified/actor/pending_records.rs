@@ -151,6 +151,13 @@ impl MemberRecordFamilies for PendingRecords {
 }
 
 impl PendingRecords {
+    /// Validate the three per-member record families of an atomic migration.
+    pub(crate) fn assert_member_record_count(&self, expected: usize) {
+        assert2::debug_assert!(self.member_metadata.len() == expected);
+        assert2::debug_assert!(self.target_per_member.len() == expected);
+        assert2::debug_assert!(self.current_per_member.len() == expected);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.group_metadata.is_none()
             && self.resolved_regexes.is_empty()

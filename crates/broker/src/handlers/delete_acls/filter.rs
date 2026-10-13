@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn build_filter_keeps_empty_strings_and_decodes_axes() {
-        let f = empty_match_acl_filter!(DeleteAclsFilter);
+        let f = krabka_macros::empty_match_acl_filter!(DeleteAclsFilter);
 
         let built = build_filter(&f).expect("filter");
 

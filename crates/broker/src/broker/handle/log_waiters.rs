@@ -229,7 +229,8 @@ mod tests {
     use {
         super::*,
         crate::{
-            broker::test_support::local_partition_with_records, test_support::start_broker_with,
+            broker::test_support::local_partition_with_records,
+            handlers::test_support::StartedBroker, test_support::start_broker_with,
         },
         assert2::check,
         krabka_units::{kibibytes, mebibytes, secs},
@@ -238,7 +239,10 @@ mod tests {
 
     #[tokio::test]
     async fn single_broker_handle_local_log_helpers_observe_real_state() {
-        let (handle, dir) = start_broker_with(|_| {}).await;
+        let StartedBroker {
+            broker: handle,
+            dir,
+        } = start_broker_with(|_| {}).await;
         let broker = handle.broker_arc_for_test();
 
         let helper_topic = "handle-partition-helper-mutant-topic";

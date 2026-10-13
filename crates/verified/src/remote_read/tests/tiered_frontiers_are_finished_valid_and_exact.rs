@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::log_index::IndexEntry};
 
 #[test]
 fn tiered_frontiers_are_finished_valid_and_exact() {
@@ -24,7 +24,12 @@ fn tiered_epoch_owner_has_the_greatest_valid_start() {
 
 #[test]
 fn remote_time_index_selects_strict_predecessor_prefix() {
-    let entries = [(1_000, 0), (2_000, 10), (2_000, 20), (3_000, 30)];
+    let entries = [
+        IndexEntry::new(1_000, 0),
+        IndexEntry::new(2_000, 10),
+        IndexEntry::new(2_000, 20),
+        IndexEntry::new(3_000, 30),
+    ];
     for (target, expected) in [
         (500, 0),
         (1_000, 0),
@@ -43,20 +48,29 @@ fn remote_time_index_stops_at_padding_or_the_target() {
     for (what, entries, target, expected) in [
         (
             "zeroed padding ends the index",
-            &[(1_000, 0), (2_000, 10), (0, 0), (9_000, 20)][..],
+            &[
+                IndexEntry::new(1_000, 0),
+                IndexEntry::new(2_000, 10),
+                IndexEntry::new(0, 0),
+                IndexEntry::new(9_000, 20),
+            ][..],
             i64::MAX,
             2,
         ),
         (
             "a repeated offset is padding",
-            &[(1_000, 0), (2_000, 10), (3_000, 10)][..],
+            &[
+                IndexEntry::new(1_000, 0),
+                IndexEntry::new(2_000, 10),
+                IndexEntry::new(3_000, 10),
+            ][..],
             i64::MAX,
             2,
         ),
         ("an empty index", &[][..], i64::MAX, 0),
         (
             "the first entry at the target",
-            &[(1_000, 0), (2_000, 10)][..],
+            &[IndexEntry::new(1_000, 0), IndexEntry::new(2_000, 10)][..],
             1_000,
             0,
         ),
@@ -64,7 +78,11 @@ fn remote_time_index_stops_at_padding_or_the_target() {
         // first entry that is not strictly below the target.
         (
             "unsorted timestamps stop at the first one at the target",
-            &[(1_000, 0), (5_000, 10), (2_000, 20)][..],
+            &[
+                IndexEntry::new(1_000, 0),
+                IndexEntry::new(5_000, 10),
+                IndexEntry::new(2_000, 20),
+            ][..],
             3_000,
             1,
         ),

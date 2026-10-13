@@ -7,7 +7,10 @@ use {
         cluster_id::matches as cluster_id_matches,
         codes,
         error::BrokerError,
-        handlers::{ApiVersion, RequestContext},
+        handlers::{
+            ApiVersion, RequestContext,
+            registration_listeners::{self, ListenerFields},
+        },
         leader_election::{FailoverPlan, compute_unclean_restart_changes},
         unclean_recovery::RecoveryJob,
     },
@@ -247,11 +250,17 @@ fn clean_shutdown_proven(
 }
 
 fn decode_listeners(listeners: &[Listener]) -> Result<Vec<BrokerEndpoint>, i16> {
-    crate::handlers::registration_listeners::decode!(
+    registration_listeners::decode(
         listeners,
-        codes::INVALID_REGISTRATION,
-        codes::INVALID_REGISTRATION,
-        codes::INVALID_REGISTRATION
+        |listener| ListenerFields {
+            name: &listener.name,
+            host: &listener.host,
+            port: listener.port,
+            security_protocol: listener.security_protocol,
+        },
+        || codes::INVALID_REGISTRATION,
+        || codes::INVALID_REGISTRATION,
+        || codes::INVALID_REGISTRATION,
     )
 }
 

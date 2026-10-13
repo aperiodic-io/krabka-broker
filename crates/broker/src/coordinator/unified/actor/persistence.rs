@@ -13,6 +13,7 @@ use {
     },
     crate::{
         coordinator::unified::{
+            GroupCoordinator,
             classic_state::ClassicGroup,
             consumer_state::{GroupState, MemberState},
             member_records::{MemberValues, append_target_records},
@@ -300,20 +301,20 @@ pub(super) async fn flush_classic_metadata(
     offsets_log.append(&state.group_id, batch).await
 }
 
-crate::coordinator::unified::persistence::flush_pending_records! {
-    state: &mut GroupState, pending: PendingRecords;
-    offsets_log, coordinator, now_ms;
-    group &state.group_id;
-    encode pending.to_batch(&state.group_id, now_ms);
-    cache {
-        state.mark_persisted();
-        // Kafka clears `hasSubscriptionMetadataRecord` when it replays the k4
-        // tombstone it just wrote.
-        if pending.tombstones_partition_metadata() {
-            state.set_has_subscription_metadata_record(false);
-        }
-        pending.apply_to_cache(coordinator, &state.group_id);
-    };
+#[krabka_macros::flush_group_records(group [&state.group_id]; encode [pending.to_batch(&state.group_id, now_ms)];)]
+pub(super) async fn flush_pending(
+    state: &mut GroupState,
+    pending: PendingRecords,
+    offsets_log: &dyn OffsetsLog,
+    coordinator: &GroupCoordinator,
+    now_ms: i64,
+) -> Result<(), BrokerError> {
+    state.mark_persisted();
+    // Kafka clears `hasSubscriptionMetadataRecord` when it replays the k4 tombstone.
+    if pending.tombstones_partition_metadata() {
+        state.set_has_subscription_metadata_record(false);
+    }
+    pending.apply_to_cache(coordinator, &state.group_id);
 }
 
 #[cfg(test)]

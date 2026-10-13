@@ -168,8 +168,8 @@ mod tests {
         crate::fetch_session::{
             SessionDecision,
             test_support::{
-                AllocatedCache, NAME_FETCH_VERSION, SessionAllocationSetup, allocate_session,
-                allocated_cache, forgotten_topic, incremental_req, req, session_key, topic,
+                AllocatedCache, NAME_FETCH_VERSION, RequestSessionId, SessionAllocationSetup,
+                allocate_session, allocated_cache, forgotten_topic, req, session_key, topic,
             },
         },
         assert2::assert,
@@ -304,16 +304,16 @@ mod tests {
                 .partitions(vec![krabka_ids::PartitionIndex(1)])
                 .call(),
         ];
-        let r = incremental_req!(
-            id,
-            1,
-            topics(vec![topic("t", &[
+        let r = req()
+            .session_id(RequestSessionId(id))
+            .session_epoch(1)
+            .topics(vec![topic("t", &[
                 krabka_ids::PartitionIndex(0),
                 krabka_ids::PartitionIndex(2),
                 krabka_ids::PartitionIndex(3),
-            ],)]),
-            forgotten(forgotten)
-        );
+            ])])
+            .forgotten(forgotten)
+            .call();
         check_incremental_count(&cache, &r, CachedPartitionCount(3));
 
         // Close drops the whole session and its partitions.
@@ -326,17 +326,17 @@ mod tests {
     fn counters_track_large_incremental_add_delta() {
         let AllocatedCache { cache, id } = two_partition_cache();
 
-        let r = incremental_req!(
-            id,
-            1,
-            topics(vec![topic("t", &[
+        let r = req()
+            .session_id(RequestSessionId(id))
+            .session_epoch(1)
+            .topics(vec![topic("t", &[
                 krabka_ids::PartitionIndex(0),
                 krabka_ids::PartitionIndex(1),
                 krabka_ids::PartitionIndex(2),
                 krabka_ids::PartitionIndex(3),
                 krabka_ids::PartitionIndex(4),
-            ],)])
-        );
+            ])])
+            .call();
         check_incremental_count(&cache, &r, CachedPartitionCount(5));
     }
 

@@ -14,12 +14,13 @@
 //! goes through the dispatch registry.
 
 use {
+    super::test_support::StateReply,
     crate::{
         codes,
         coordinator::test_support::single_replica_partition,
         test_support::{
-            ControllerPeerAllowed, GrantsInPrincipalName, decode_response, dispatch_context,
-            encode_request, peer, principal, request_context,
+            ControllerPeerAllowed, GrantsInPrincipalName, StartedBroker, decode_response,
+            dispatch_context, encode_request, peer, principal, request_context,
             start_broker_with_authorizer_no_audit,
         },
     },
@@ -30,27 +31,19 @@ use {
             delete_share_group_state_request::{
                 self, DeleteShareGroupStateRequest, DeleteStateData,
             },
-            delete_share_group_state_response::{
-                self, DeleteShareGroupStateResponse, DeleteStateResult,
-            },
+            delete_share_group_state_response::{self, DeleteShareGroupStateResponse},
             initialize_share_group_state_request::{
                 self, InitializeShareGroupStateRequest, InitializeStateData,
             },
-            initialize_share_group_state_response::{
-                self, InitializeShareGroupStateResponse, InitializeStateResult,
-            },
+            initialize_share_group_state_response::{self, InitializeShareGroupStateResponse},
             read_share_group_state_request::{self, ReadShareGroupStateRequest, ReadStateData},
-            read_share_group_state_response::{self, ReadShareGroupStateResponse, ReadStateResult},
+            read_share_group_state_response::{self, ReadShareGroupStateResponse},
             read_share_group_state_summary_request::{
                 self, ReadShareGroupStateSummaryRequest, ReadStateSummaryData,
             },
-            read_share_group_state_summary_response::{
-                self, ReadShareGroupStateSummaryResponse, ReadStateSummaryResult,
-            },
+            read_share_group_state_summary_response::{self, ReadShareGroupStateSummaryResponse},
             write_share_group_state_request::{self, WriteShareGroupStateRequest, WriteStateData},
-            write_share_group_state_response::{
-                self, WriteShareGroupStateResponse, WriteStateResult,
-            },
+            write_share_group_state_response::{self, WriteShareGroupStateResponse},
         },
         primitives::uuid::Uuid as WireUuid,
     },
@@ -249,69 +242,37 @@ impl Request {
     }
 }
 
-/// The partition row that Kafka's `toGlobalErrorResponse` builds.
-macro_rules! refused_row {
-    ($module:ident, $partition:expr) => {
-        $module::PartitionResult {
-            partition: $partition,
-            error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
-            error_message: Some("Cluster authorization failed.".to_string()),
-            ..Default::default()
-        }
-    };
+/// Builds a row for every requested topic and partition, in request order.
+fn every_partition<R: StateReply>(mut row: impl FnMut(i32) -> R::Partition) -> R {
+    R::from_results(
+        TOPICS
+            .map(|topic| R::topic(topic, PARTITIONS.map(&mut row).into_iter().collect()))
+            .into_iter()
+            .collect(),
+    )
 }
 
-/// Builds a response with one result row for each topic in [`TOPICS`], and
-/// the row that `partition_row` builds for each partition in [`PARTITIONS`].
-macro_rules! every_partition {
-    ($response:ident, $result:ident, $partition_row:expr) => {
-        $response {
-            results: TOPICS
-                .map(|topic_id| $result {
-                    topic_id,
-                    partitions: PARTITIONS.map($partition_row).to_vec(),
-                    ..Default::default()
-                })
-                .to_vec(),
-            ..Default::default()
-        }
-    };
+fn refused_response<R: StateReply>() -> R {
+    every_partition::<R>(|partition| {
+        R::error_row(
+            partition,
+            codes::CLUSTER_AUTHORIZATION_FAILED,
+            Some("Cluster authorization failed."),
+        )
+    })
 }
-
 fn refused(request: &Request) -> Response {
     match request {
-        Request::Initialize => Response::Initialize(every_partition!(
-            InitializeShareGroupStateResponse,
-            InitializeStateResult,
-            |partition| refused_row!(initialize_share_group_state_response, partition)
-        )),
-        Request::Read => Response::Read(every_partition!(
-            ReadShareGroupStateResponse,
-            ReadStateResult,
-            |partition| refused_row!(read_share_group_state_response, partition)
-        )),
-        Request::Write => Response::Write(every_partition!(
-            WriteShareGroupStateResponse,
-            WriteStateResult,
-            |partition| refused_row!(write_share_group_state_response, partition)
-        )),
-        Request::Delete => Response::Delete(every_partition!(
-            DeleteShareGroupStateResponse,
-            DeleteStateResult,
-            |partition| refused_row!(delete_share_group_state_response, partition)
-        )),
-        Request::ReadSummary => Response::ReadSummary(every_partition!(
-            ReadShareGroupStateSummaryResponse,
-            ReadStateSummaryResult,
-            |partition| refused_row!(read_share_group_state_summary_response, partition)
-        )),
+        Request::Initialize => Response::Initialize(refused_response()),
+        Request::Read => Response::Read(refused_response()),
+        Request::Write => Response::Write(refused_response()),
+        Request::Delete => Response::Delete(refused_response()),
+        Request::ReadSummary => Response::ReadSummary(refused_response()),
     }
 }
 
 fn summary(state_epoch: i32, start_offset: i64, delivery_complete_count: i32) -> Response {
-    Response::ReadSummary(every_partition!(
-        ReadShareGroupStateSummaryResponse,
-        ReadStateSummaryResult,
+    Response::ReadSummary(every_partition::<ReadShareGroupStateSummaryResponse>(
         |partition| read_share_group_state_summary_response::PartitionResult {
             partition,
             error_code: codes::NONE,
@@ -319,21 +280,19 @@ fn summary(state_epoch: i32, start_offset: i64, delivery_complete_count: i32) ->
             start_offset,
             delivery_complete_count,
             ..Default::default()
-        }
+        },
     ))
 }
 
 fn read(start_offset: i64) -> Response {
-    Response::Read(every_partition!(
-        ReadShareGroupStateResponse,
-        ReadStateResult,
+    Response::Read(every_partition::<ReadShareGroupStateResponse>(
         |partition| read_share_group_state_response::PartitionResult {
             partition,
             error_code: codes::NONE,
             state_epoch: STATE_EPOCH,
             start_offset,
             ..Default::default()
-        }
+        },
     ))
 }
 
@@ -345,7 +304,10 @@ async fn share_state_rpcs_need_cluster_action() {
         expected: Response,
     }
 
-    let (handle, _dir) = start_broker_with_authorizer_no_audit(Arc::new(ControllerPeerAllowed(
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with_authorizer_no_audit(Arc::new(ControllerPeerAllowed(
         GrantsInPrincipalName,
     )))
     .await;
@@ -391,36 +353,30 @@ async fn share_state_rpcs_need_cluster_action() {
     super::test_support::lead_share_state_partitions(&broker).await;
 
     let initialized = || {
-        Response::Initialize(every_partition!(
-            InitializeShareGroupStateResponse,
-            InitializeStateResult,
+        Response::Initialize(every_partition::<InitializeShareGroupStateResponse>(
             |partition| initialize_share_group_state_response::PartitionResult {
                 partition,
                 error_code: codes::NONE,
                 ..Default::default()
-            }
+            },
         ))
     };
     let written = || {
-        Response::Write(every_partition!(
-            WriteShareGroupStateResponse,
-            WriteStateResult,
+        Response::Write(every_partition::<WriteShareGroupStateResponse>(
             |partition| write_share_group_state_response::PartitionResult {
                 partition,
                 error_code: codes::NONE,
                 ..Default::default()
-            }
+            },
         ))
     };
     let deleted = || {
-        Response::Delete(every_partition!(
-            DeleteShareGroupStateResponse,
-            DeleteStateResult,
+        Response::Delete(every_partition::<DeleteShareGroupStateResponse>(
             |partition| delete_share_group_state_response::PartitionResult {
                 partition,
                 error_code: codes::NONE,
                 ..Default::default()
-            }
+            },
         ))
     };
 

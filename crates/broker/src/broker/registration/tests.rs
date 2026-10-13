@@ -482,8 +482,8 @@ mod unclean_restart {
             config::BrokerConfig,
             elr::{TopicElr, state::PartitionElr},
             test_support::{
-                IsrResponseCheck, elr_topic_records, metadata_partition_record, propose_isr,
-                start_broker_with_authorizer, started_controller_broker,
+                IsrResponseCheck, StartedBroker, elr_topic_records, metadata_partition_record,
+                propose_isr, start_broker_with_authorizer, started_controller_broker,
                 wait_for_controller_leader,
             },
         },
@@ -585,7 +585,10 @@ mod unclean_restart {
     /// may be shorter than the records its ELR membership asserts it holds.
     #[tokio::test]
     async fn a_crashed_broker_loses_its_elr_membership_on_restart() {
-        let (handle, _dir) = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
+        let StartedBroker {
+            broker: handle,
+            dir: _dir,
+        } = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
         let broker = handle.broker_arc_for_test();
         let EligibleNode {
             mut config,
@@ -634,7 +637,10 @@ mod unclean_restart {
     /// cluster still holds for it, and keeps its membership.
     #[tokio::test]
     async fn a_gracefully_stopped_broker_keeps_its_elr_membership_on_restart() {
-        let (handle, _dir) = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
+        let StartedBroker {
+            broker: handle,
+            dir: _dir,
+        } = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
         let broker = handle.broker_arc_for_test();
         let EligibleNode {
             mut config,

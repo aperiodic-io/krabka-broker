@@ -9,6 +9,8 @@
 //! `MaxBytes`, `MinBytes`, `MaxRecords` or `MaxWaitMs` is not 0 with a
 //! top-level `INVALID_REQUEST`, and runs no fetch for a valid one.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::BrokerHandle,
@@ -303,7 +305,7 @@ fn cases() -> Vec<RenewCaseSetup> {
 /// a fetch could acquire more, and then sends the request under test.
 #[tokio::test]
 async fn renew_acknowledgements_renew_only_the_renew_offsets() {
-    let (broker, _dir) = start().await;
+    let HandlerStartedBroker { broker, dir: _dir } = start().await;
     let shared = broker.broker_arc_for_test();
 
     let mut actual = Vec::new();
@@ -398,7 +400,7 @@ const NO_TOPIC_READ: &str = "no-topic-read";
 #[derive(Debug)]
 struct DenyTopicReadToOne;
 
-test_authorizer!(DenyTopicReadToOne, (self, _source, request), {
+krabka_macros::test_authorizer!(DenyTopicReadToOne, request; {
     let denied = request.principal.name == NO_TOPIC_READ
         && request.resource_type == krabka_metadata::ResourceType::Topic
         && request.operation == krabka_metadata::AclOperation::Read;
@@ -414,7 +416,7 @@ test_authorizer!(DenyTopicReadToOne, (self, _source, request), {
 /// `NONE`.
 #[tokio::test]
 async fn a_renew_fetch_answers_a_denied_topic_as_an_acknowledge_error() {
-    let (broker, _dir) =
+    let HandlerStartedBroker { broker, dir: _dir } =
         start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(DenyTopicReadToOne)).await;
     let topic_id = create_topic(&broker, "renew-denied").await;
     initialize_share_state(

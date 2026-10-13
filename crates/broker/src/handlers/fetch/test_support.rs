@@ -1,5 +1,7 @@
 //! Fetch wire fixtures shared by version and replica-role tests.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::BrokerHandle,
@@ -22,7 +24,7 @@ use {
 /// window is wide enough to keep node 2 in the ISR for the whole test, so only
 /// the fetches of a case move the high watermark.
 pub(super) async fn start_with_idle_follower() -> StartedBroker {
-    let (broker, dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker { broker, dir } = start_broker_no_audit_with(|cfg| {
         cfg.replica_lag_time_max = krabka_units::secs(600);
     })
     .await;

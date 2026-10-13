@@ -84,7 +84,32 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use {super::expand, assert2::assert};
+    use {
+        super::expand,
+        crate::meta::compact,
+        assert2::assert,
+        moxy::ast::{ItemConst, ItemFn, Parse, Parser},
+    };
+
+    #[test]
+    fn emitted_catalog_and_decoder_keep_key_order_and_the_is_ok_boundary() {
+        let output = expand(&"20 => wire::Delete, 19 => wire::Create".parse().unwrap()).unwrap();
+        let parser = Parser::from_tokens(&output);
+        let catalog = ItemConst::parse(&parser).unwrap();
+        let decoder = ItemFn::parse(&parser).unwrap();
+        assert!(parser.is_empty());
+        assert!(catalog.ident == "FORWARDABLE_API_KEYS");
+        assert!(decoder.sig.ident == "embedded_body_decodes");
+        assert!(decoder.sig.params.inner.inputs.len() == 3);
+        let rendered = compact(&output);
+        assert!(rendered.contains("&[20,19,]"));
+        assert!(
+            rendered.find("20=>wire::Delete::decode").unwrap()
+                < rendered.find("19=>wire::Create::decode").unwrap()
+        );
+        assert!(rendered.contains("decode(&mutcur,version).is_ok()"));
+        assert!(rendered.contains("_=>false"));
+    }
 
     #[test]
     fn rejects_empty_malformed_out_of_range_and_duplicate_tables() {

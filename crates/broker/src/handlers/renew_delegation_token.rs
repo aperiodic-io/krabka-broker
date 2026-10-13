@@ -175,17 +175,19 @@ mod tests {
         super::*,
         crate::{
             codes::DELEGATION_TOKEN_EXPIRED,
-            handlers::delegation_token_test_support::{
-                DAY_MS, ExpiryExpectation, MutationSeedSetup, TokenExpirySetup, TokenMutationIndex,
-                TokenMutationRefusalSetup, TokenPeriodMillis, authed, in_mutation_window,
-                mutation_credential_refusals, ordinary_ownership_refusals,
-                stored_expiry as stored_expiry_fixture, test_controller,
+            handlers::{
+                delegation_token_test_support as token_fixtures,
+                delegation_token_test_support::{
+                    DAY_MS, ExpiryExpectation, MutationExecution, SeededToken, TokenExpirySetup,
+                    TokenFixture, TokenMutationRefusalSetup, TokenPeriodMillis, authed,
+                    in_mutation_window, mutation_credential_refusals, ordinary_ownership_refusals,
+                    stored_expiry as stored_expiry_fixture,
+                },
             },
             test_support::{KafkaErrorCode, UnixMillis},
         },
         assert2::assert,
         krabka_raft::ControllerHandle,
-        tempfile::TempDir,
     };
 
     fn stored_expiry(controller: &ControllerHandle, token_id: &str) -> i64 {
@@ -199,48 +201,50 @@ mod tests {
     /// owner check.
     #[tokio::test]
     async fn refusals_follow_kafka_order() {
-        refusal_token_fixture!((_dir, controller, secret, live, expired));
-
-        let cases = mutation_credential_refusals(&live.0)
-            .into_iter()
-            .chain([
-                TokenMutationRefusalSetup {
-                    name: "expired token, foreign caller",
-                    authentication: authed("eve"),
-                    hmac: expired.0.clone(),
-                    error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
-                    ..Default::default()
-                },
-                TokenMutationRefusalSetup {
-                    name: "expired token, owner",
-                    hmac: expired.0.clone(),
-                    error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
-                    ..Default::default()
-                },
-            ])
-            .chain(ordinary_ownership_refusals(&live.0));
-        for case in cases {
-            let resp = handle(
-                &RenewDelegationTokenRequest {
-                    hmac: case.hmac.into(),
-                    renew_period_ms: 1_000,
-                    ..Default::default()
-                },
-                &case.authentication,
-                case.secret.get(&secret),
-                DAY_MS,
-                &*controller,
-            )
+        token_fixtures::check_refusals()
+            .cases(|live, expired| {
+                mutation_credential_refusals(&live.hmac)
+                    .into_iter()
+                    .chain([
+                        TokenMutationRefusalSetup {
+                            name: "expired token, foreign caller",
+                            authentication: authed("eve"),
+                            hmac: expired.hmac.clone(),
+                            error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
+                            ..Default::default()
+                        },
+                        TokenMutationRefusalSetup {
+                            name: "expired token, owner",
+                            hmac: expired.hmac.clone(),
+                            error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
+                            ..Default::default()
+                        },
+                    ])
+                    .chain(ordinary_ownership_refusals(&live.hmac))
+            })
+            .mutation(async |controller, secret, case| {
+                let resp = handle(
+                    &RenewDelegationTokenRequest {
+                        hmac: case.hmac.into(),
+                        renew_period_ms: 1_000,
+                        ..Default::default()
+                    },
+                    &case.authentication,
+                    case.secret.get(secret),
+                    DAY_MS,
+                    controller,
+                )
+                .await;
+                krabka_macros::token_refusal_result!(RenewDelegationTokenResponse, case, resp)
+            })
+            .verify(|controller, live, expired| {
+                assert!(
+                    stored_expiry(controller, "live") == live.expires_at
+                        && stored_expiry(controller, "expired") == expired.expires_at
+                );
+            })
+            .call()
             .await;
-            check_token_mutation_refusal!(resp, case, RenewDelegationTokenResponse);
-        }
-        assert!(
-            (
-                stored_expiry(&controller, "live"),
-                stored_expiry(&controller, "expired")
-            ) == (live.1, expired.1)
-        );
-        controller.cancel().await;
     }
 
     /// The owner or a renewer renews to `min(max, now + min(default,
@@ -248,7 +252,11 @@ mod tests {
     /// otherwise, even when that is earlier than the current expiry.
     #[tokio::test]
     async fn renews_to_kafka_capped_expiry() {
-        token_fixture!(dir, controller, secret);
+        let TokenFixture {
+            directory: _dir,
+            controller,
+            secret,
+        } = TokenFixture::new().await;
         let hour: i64 = 60 * 60 * 1_000;
         let default_period = 2 * hour;
 
@@ -331,17 +339,23 @@ mod tests {
         for (index, (case, caller, period, expiry_delta, max_delta, expected_delta)) in
             cases.into_iter().enumerate()
         {
-            seeded_token_fixture!(
-                (token_id, hmac, seeded_at, max_timestamp_ms),
-                &controller,
-                MutationSeedSetup {
-                    index: TokenMutationIndex(index),
-                    expiry_delta: TokenPeriodMillis(expiry_delta),
-                    maximum_delta: TokenPeriodMillis(max_delta)
-                }
-            );
+            let SeededToken {
+                token_id,
+                hmac,
 
-            let (window, resp) = in_mutation_window(handle(
+                maximum: max_timestamp_ms,
+            } = token_fixtures::seed_mutation_token()
+                .controller(&controller)
+                .index(index)
+                .expiry_delta(TokenPeriodMillis(expiry_delta))
+                .maximum_delta(TokenPeriodMillis(max_delta))
+                .call()
+                .await;
+
+            let MutationExecution {
+                window,
+                response: resp,
+            } = in_mutation_window(handle(
                 &RenewDelegationTokenRequest {
                     hmac: hmac.into(),
                     renew_period_ms: period,
@@ -353,13 +367,20 @@ mod tests {
                 &*controller,
             ))
             .await;
-            check_token_expiry!(case, resp, TokenExpirySetup {
+            let expiry_setup = TokenExpirySetup {
                 window,
                 expectation: ExpiryExpectation::for_period(
                     expected_delta.map(TokenPeriodMillis),
-                    UnixMillis(max_timestamp_ms)
+                    UnixMillis(max_timestamp_ms),
                 ),
-            });
+            };
+            expiry_setup.check(
+                case,
+                token_fixtures::TokenMutationOutcome::from_wire(
+                    resp.error_code,
+                    resp.expiry_timestamp_ms,
+                ),
+            );
             assert!(
                 stored_expiry(&controller, &token_id) == resp.expiry_timestamp_ms,
                 "{case}"

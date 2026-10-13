@@ -232,7 +232,7 @@ impl TxnModel {
     }
 
     fn begin(s: &mut TxnProj) -> Option<()> {
-        begin_transaction! { s;  }
+        begin_transaction(&mut s.state, &mut s.generation, s.epoch, || {})
     }
 
     fn end_txn_phase1(s: &mut TxnProj, committed: bool) -> Option<()> {

@@ -67,35 +67,6 @@ impl Default for ElectionSetup<'_> {
     }
 }
 
-macro_rules! election_fixture_builder {
-    ($name:ident -> $result:ty = $constructor:path) => {
-        #[bon::builder]
-        pub fn $name(
-            #[builder(default = ElectionSetup::default().topic)] topic: &'_ str,
-            #[builder(into, default = ElectionSetup::default().partition)]
-            partition: krabka_ids::PartitionIndex,
-            #[builder(into, default = ElectionSetup::default().leader)] leader: NodeId,
-            #[builder(default = ElectionSetup::default().replicas)] replicas: &'_ [NodeId],
-            #[builder(default = ElectionSetup::default().isr)] isr: &'_ [NodeId],
-            #[builder(default = ElectionSetup::default().dirs)] dirs: &'_ [Uuid],
-            #[builder(default = ElectionSetup::default().configs)]
-            configs: &'_ [TopicConfigOverride<'_>],
-            #[builder(default = ElectionSetup::default().elr)] elr: ElrFinalization,
-        ) -> $result {
-            $constructor(ElectionSetup {
-                topic,
-                partition,
-                leader,
-                replicas,
-                isr,
-                dirs,
-                configs,
-                elr,
-            })
-        }
-    };
-}
-
 fn image_from_election_setup(setup: ElectionSetup<'_>) -> MetadataImage {
     let mut img = MetadataImage::new(Uuid::nil());
     img.apply(&MetadataRecord::V1Topic(TopicRecord {
@@ -145,8 +116,8 @@ fn partition_record_from_election_setup(setup: ElectionSetup<'_>) -> PartitionRe
 }
 
 // Input partition for election tests, before any leader or ISR change.
-election_fixture_builder!(img_with_partition -> MetadataImage = image_from_election_setup);
-election_fixture_builder!(seed_partition -> PartitionRecord = partition_record_from_election_setup);
+krabka_macros::fixture_constructors! { election: pub img_with_partition -> MetadataImage = image_from_election_setup; }
+krabka_macros::fixture_constructors! { election: pub seed_partition -> PartitionRecord = partition_record_from_election_setup; }
 
 /// Run a failover scan whose metrics are not inspected by the test.
 pub async fn failover(

@@ -5,6 +5,8 @@
 //! carries. The module also maps the KIP-554 wire mechanism byte to a
 //! [`SaslMechanism`], because an unknown byte is itself a per-row error.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{broker::Broker, codes},
     krabka_protocol::owned::alter_user_scram_credentials_request::{
@@ -193,16 +195,25 @@ mod tests {
     };
 
     /// Deletion validation starts with an empty pending-record buffer.
-    async fn deletion_fixture() -> (
-        BrokerHandle,
-        tempfile::TempDir,
-        Arc<Broker>,
-        Vec<MetadataRecord>,
-    ) {
-        let (handle, directory) = start_broker(allow_all_authorizer()).await;
+    struct DeletionFixture {
+        handle: BrokerHandle,
+        directory: tempfile::TempDir,
+        broker: Arc<Broker>,
+        records: Vec<MetadataRecord>,
+    }
+    async fn deletion_fixture() -> DeletionFixture {
+        let HandlerStartedBroker {
+            broker: handle,
+            dir: directory,
+        } = start_broker(allow_all_authorizer()).await;
         let broker = handle.broker_arc_for_test();
         let records = Vec::new();
-        (handle, directory, broker, records)
+        DeletionFixture {
+            handle,
+            directory,
+            broker,
+            records,
+        }
     }
 
     #[test]
@@ -321,7 +332,12 @@ mod tests {
 
     #[tokio::test]
     async fn process_deletion_rejects_missing_credentials() {
-        let (broker_handle, _dir, broker, mut records) = deletion_fixture().await;
+        let DeletionFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+            mut records,
+        } = deletion_fixture().await;
 
         let r = process_deletion(&broker, deletion("alice"), true, &mut records);
         assert!(
@@ -341,7 +357,12 @@ mod tests {
 
     #[tokio::test]
     async fn process_deletion_rejects_unauthorized_users() {
-        let (broker_handle, _dir, broker, mut records) = deletion_fixture().await;
+        let DeletionFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+            mut records,
+        } = deletion_fixture().await;
 
         let r = process_deletion(&broker, deletion("alice"), false, &mut records);
         let expected = expected_result(
@@ -356,7 +377,12 @@ mod tests {
 
     #[tokio::test]
     async fn process_deletion_rejects_unknown_mechanism_with_unsupported_sasl_mechanism() {
-        let (broker_handle, _dir, broker, mut records) = deletion_fixture().await;
+        let DeletionFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+            mut records,
+        } = deletion_fixture().await;
         let mut deletion = deletion("alice");
         deletion.mechanism = 99;
 

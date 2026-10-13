@@ -1,14 +1,14 @@
 //! Fixtures shared by the `WriteTxnMarkers` unit tests: a running broker with
 //! auditing switched off, and a locally-led partition opened beneath it so
 //! that the handler finds it in `broker.partitions`.
-
 use {
     crate::{
-        broker::{Broker, BrokerHandle},
+        broker::Broker,
         coordinator::{
             bootstrap::OFFSETS_TOPIC, partitioner::partition_for_group,
             persistence::OffsetCommitValue,
         },
+        handlers::test_support::StartedBroker,
         partition::Partition,
         test_support::{StandalonePartitionSetup, start_group_broker_with},
     },
@@ -41,7 +41,7 @@ pub(crate) fn open_partition(
 /// Start a broker with auditing switched off, and wait until its group
 /// coordinator serves `__consumer_offsets`: the offsets-partition marker tests
 /// append to that topic, and no broker creates it when it starts.
-pub(super) async fn start_broker() -> (BrokerHandle, tempfile::TempDir) {
+pub(super) async fn start_broker() -> StartedBroker {
     start_group_broker_with(|cfg| cfg.audit_enabled = false).await
 }
 

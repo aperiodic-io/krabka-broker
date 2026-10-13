@@ -4,8 +4,8 @@ use super::time_index::sparse_timestamp_window_valid;
 use super::time_index::time_segment_valid;
 use {
     super::{
-        SparseTimestampWindow, constructed_time_index_preserves_first, first_timestamp_index,
-        validated_time_cursors_are_monotone,
+        ConstructedTimeIndex, SparseTimestampWindow, constructed_time_index_preserves_first,
+        first_timestamp_index, validated_time_cursors_are_monotone,
     },
     creusot_std::prelude::*,
 };
@@ -43,8 +43,10 @@ pub(super) fn constructed_time_range_preserves_first(
     let (base, end, minimum) = bounds;
     let (lower, upper) = targets;
     let (offsets, times, rows) = window;
-    let (entries, _single_target) =
-        constructed_time_index_preserves_first(offsets, times, rows, lower);
+    let ConstructedTimeIndex {
+        entries,
+        selected: _single_target,
+    } = constructed_time_index_preserves_first(offsets, times, rows, lower);
     let (lower_cursor, upper_cursor, scan) =
         validated_time_cursors_are_monotone(&entries, base, end, lower, upper)?;
     let mut i = 0usize;

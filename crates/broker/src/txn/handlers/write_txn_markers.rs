@@ -310,6 +310,7 @@ mod tests {
                     GroupActorHandle, GroupActorMessage, GroupKindTag, test_support::rpc,
                 },
             },
+            handlers::test_support::StartedBroker,
             replica_state::LeaderPolicy,
             test_support::{StandalonePartitionSetup, peer, principal, request_context},
             time_util::now_ms,
@@ -490,7 +491,10 @@ mod tests {
             ),
         ];
         for (name, hosting, expected_code, expected_log_end) in cases {
-            let (broker_handle, dir) = start_broker().await;
+            let StartedBroker {
+                broker: broker_handle,
+                dir,
+            } = start_broker().await;
             let broker = broker_handle.broker_arc_for_test();
             let node_id = broker.config.node_id.0;
             let log_dir = dir.path().join("markers");
@@ -563,7 +567,10 @@ mod tests {
             ),
         ];
         for (name, change, expected_code, expected_log_end) in cases {
-            let (broker_handle, dir) = start_broker().await;
+            let StartedBroker {
+                broker: broker_handle,
+                dir,
+            } = start_broker().await;
             let broker = broker_handle.broker_arc_for_test();
             let node_id = broker.config.node_id;
             let follower = krabka_metadata::NodeId(node_id.0 + 1);
@@ -631,7 +638,10 @@ mod tests {
     /// producer come back as one result.
     #[tokio::test]
     async fn marker_entries_for_one_producer_share_one_result() {
-        let (broker_handle, dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let node_id = broker.config.node_id.0;
         for partition in [1, 2] {
@@ -674,7 +684,10 @@ mod tests {
     async fn committed_offsets_are_published_by_the_offsets_partition_marker() {
         use krabka_log::Offset;
 
-        let (broker_handle, _dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let group_id = "marker-materialization-group";
         let super::test_support::IndexedPartition {
@@ -725,7 +738,10 @@ mod tests {
     async fn abort_marker_succeeds_when_the_groups_actor_has_exited() {
         use krabka_log::Offset;
 
-        let (broker_handle, _dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let group_id = "abort-after-actor-exit";
         let super::test_support::IndexedPartition {
@@ -800,7 +816,10 @@ mod tests {
             krabka_protocol::records::{Attributes, Record, RecordBatch},
         };
 
-        let (broker_handle, _dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let first = "marker-two-groups-a";
         let second = "marker-two-groups-b";

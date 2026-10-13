@@ -2,7 +2,6 @@
 //! task, and the notify/watermark plumbing that a `Partition` owns. Every
 //! caller in the crate that materialises a partition goes through here, so the
 //! spawn paths live apart from the broker's startup sequence.
-
 use {
     crate::{
         config::BrokerConfig,
@@ -14,7 +13,9 @@ use {
             Partition, PartitionRuntimeConfig, ReplicationTarget, WriterMessage,
             empty_marker_materialization, initial_replication_target,
         },
-        partition_writer::run_with_sequencer,
+        partition_writer::{
+            WriterIdentity, WriterServices, WriterSignals, WriterStorage, run_with_sequencer,
+        },
         producer_state::ProducerState,
         replica_state::ReplicaState,
         wal::{
@@ -277,16 +278,26 @@ pub(crate) fn try_spawn_partition_with_replication_target(
         .expect("new partition target is uncontended") = initial_target;
     let log_dir = Arc::new(arc_swap::ArcSwap::from_pointee(log_dir));
     let writer_future = run_with_sequencer(
-        (topic.clone(), partition_id),
-        (log.clone(), log_dir.clone()),
+        WriterIdentity {
+            topic: topic.clone(),
+            partition: partition_id,
+        },
+        WriterStorage {
+            log: log.clone(),
+            log_dir: log_dir.clone(),
+        },
         rx,
-        (
-            notify.clone(),
-            replica_state.clone(),
-            hw_advance_notify.clone(),
-            delivery.clone(),
-        ),
-        (log_dir_status, producer_state, wal),
+        WriterSignals {
+            append_notify: notify.clone(),
+            replica_state: replica_state.clone(),
+            hw_advance_notify: hw_advance_notify.clone(),
+            delivery: delivery.clone(),
+        },
+        WriterServices {
+            log_dir_status,
+            producer_state,
+            wal,
+        },
         max_produce_group,
         sequencer,
     );

@@ -144,30 +144,6 @@ fn orders_label() -> TopicLabel {
     }
 }
 
-/// Keep both the partition and object-store guards through the fault assertions.
-macro_rules! faulty_copy_fixture {
-    (
-        $local:ident,
-        $partition:ident,
-        $exports:ident,
-        $config:ident,
-        $store:ident,
-        $rsm:ident,
-        $make:expr
-    ) => {
-        let $local = tempfile::tempdir().unwrap();
-        let TieredPartition {
-            partition: $partition,
-            exports: $exports,
-            config: $config,
-        } = tiered_partition($local.path());
-        let StoreBackend {
-            store: $store,
-            rsm: $rsm,
-        } = store_backend($make);
-    };
-}
-
 /// The control. The same fixture over a store with no faults copies every
 /// segment and finishes it, so the refusals below are the store's doing and
 /// not the fixture's.
@@ -208,16 +184,19 @@ async fn a_healthy_store_finishes_every_copy() {
 /// `KrabkaRemoteCopyLagGrowing` read.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_throttling_store_finishes_nothing_and_moves_the_error_and_lag_series() {
-    faulty_copy_fixture!(
-        log_dir,
-        _partition,
+    let FaultyCopyFixture {
+        local: _log_dir,
+        partition: _partition,
         exports,
-        _config,
+        config: _config,
         store,
         rsm,
-        throttling_store
-    );
-    fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
+    } = faulty_copy_fixture(throttling_store);
+    let fixtures::OwnedTierResources {
+        rlmm,
+        metrics,
+        index_cache,
+    } = fixtures::owned_tier_resources();
     let tier = fixtures::configured_tier()
         .rsm(&rsm)
         .rlmm(&rlmm)
@@ -262,16 +241,19 @@ async fn a_throttling_store_finishes_nothing_and_moves_the_error_and_lag_series(
 /// counted as a failure like any other.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stalled_copy_is_abandoned_at_its_deadline() {
-    faulty_copy_fixture!(
-        log_dir,
-        _partition,
+    let FaultyCopyFixture {
+        local: _log_dir,
+        partition: _partition,
         exports,
-        _config,
-        _store,
+        config: _config,
+        store: _store,
         rsm,
-        stalling_store
-    );
-    fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
+    } = faulty_copy_fixture(stalling_store);
+    let fixtures::OwnedTierResources {
+        rlmm,
+        metrics,
+        index_cache,
+    } = fixtures::owned_tier_resources();
 
     let started = std::time::Instant::now();
     let copied = copy_exports(
@@ -321,7 +303,11 @@ async fn a_stalled_partition_does_not_stop_the_sweep_reaching_the_next() {
     partitions.insert("orders".into(), PartitionIndex(1), second);
 
     let StoreBackend { store, rsm } = store_backend(stalling_store);
-    fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
+    let fixtures::OwnedTierResources {
+        rlmm,
+        metrics,
+        index_cache,
+    } = fixtures::owned_tier_resources();
     let controller: Arc<dyn MetadataSource> =
         Arc::new(fixed_source(image_with_orders_partitions(2)));
 
@@ -448,4 +434,31 @@ fn store_backend(make_store: fn() -> Arc<FaultInjectingStore>) -> StoreBackend {
     let store = make_store();
     let rsm = backend(Arc::clone(&store));
     StoreBackend { store, rsm }
+}
+
+struct FaultyCopyFixture {
+    local: tempfile::TempDir,
+    partition: Arc<Partition>,
+    exports: Vec<krabka_log::SegmentExport>,
+    config: LogConfig,
+    store: Arc<FaultInjectingStore>,
+    rsm: Arc<dyn RemoteStorageManager>,
+}
+/// Keep both the partition and object-store guards through the fault assertions.
+fn faulty_copy_fixture(make: fn() -> Arc<FaultInjectingStore>) -> FaultyCopyFixture {
+    let local = tempfile::tempdir().unwrap();
+    let TieredPartition {
+        partition,
+        exports,
+        config,
+    } = tiered_partition(local.path());
+    let StoreBackend { store, rsm } = store_backend(make);
+    FaultyCopyFixture {
+        local,
+        partition,
+        exports,
+        config,
+        store,
+        rsm,
+    }
 }

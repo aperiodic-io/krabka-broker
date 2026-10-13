@@ -123,20 +123,32 @@ fn timestamp_records(
     )
 }
 
-fn prefix_maxima(window: SparseTimestampWindow<'_>) -> Vec<(i64, u32)> {
+fn prefix_maxima(window: SparseTimestampWindow<'_>) -> Vec<TimeEntry> {
     let (offsets, times, rows) = window;
     rows.iter()
-        .map(|&(indexed, through)| (*times[..=through].iter().max().unwrap(), offsets[indexed]))
+        .map(|&(indexed, through)| {
+            TimeEntry::new(*times[..=through].iter().max().unwrap(), offsets[indexed])
+        })
         .collect()
+}
+
+struct IndexedTimestampRecords {
+    offsets: Vec<u32>,
+    timestamps: Vec<i64>,
+    entries: Vec<TimeEntry>,
 }
 
 fn indexed_timestamp_records(
     records: &std::collections::BTreeMap<u32, i64>,
     step: usize,
-) -> (Vec<u32>, Vec<i64>, Vec<(i64, u32)>) {
+) -> IndexedTimestampRecords {
     let (offsets, times, rows) = timestamp_records(records, step, 0);
     let entries = prefix_maxima((&offsets, &times, &rows));
-    (offsets, times, entries)
+    IndexedTimestampRecords {
+        offsets,
+        timestamps: times,
+        entries,
+    }
 }
 
 fn oracle_sequence(value: i64) -> i32 { i32::try_from(value.rem_euclid(1_i64 << 31)).unwrap() }

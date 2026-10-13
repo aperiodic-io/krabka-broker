@@ -9,7 +9,8 @@
 //! - the partition's deliver-at-time state: a lock-free mirror of the delivery
 //!   watermark and a second [`Notify`] that fires when a scheduled batch comes
 //!   due. See [`crate::delivery`].
-
+#[cfg(any(test, feature = "test-helpers"))]
+use crate::partition_writer::{WriterIdentity, WriterSignals, WriterStorage};
 // `std::sync::Mutex` is kept for `log` (sync hot-path callers);
 // `replica_state` uses `tokio::sync::Mutex` to avoid blocking worker threads.
 use {
@@ -203,15 +204,10 @@ impl Partition {
         log: Arc<Mutex<Log>>,
         log_dir: Arc<ArcSwap<PathBuf>>,
         spawn: impl FnOnce(
-            (String, PartitionIndex),
-            (Arc<Mutex<Log>>, Arc<ArcSwap<PathBuf>>),
+            WriterIdentity,
+            WriterStorage,
             mpsc::Receiver<WriterMessage>,
-            (
-                Arc<Notify>,
-                Arc<tokio::sync::Mutex<ReplicaState>>,
-                Arc<Notify>,
-                DeliveryHandles,
-            ),
+            WriterSignals,
         ) -> JoinHandle<()>,
     ) -> Self {
         let (writer_tx, rx) = mpsc::channel::<WriterMessage>(8);
@@ -220,15 +216,21 @@ impl Partition {
         let hw_advance_notify = Arc::new(Notify::new());
         let delivery = DeliveryHandles::new();
         let writer = spawn(
-            (topic.to_string(), PartitionIndex(0)),
-            (log.clone(), log_dir.clone()),
+            WriterIdentity {
+                topic: topic.to_string(),
+                partition: PartitionIndex(0),
+            },
+            WriterStorage {
+                log: log.clone(),
+                log_dir: log_dir.clone(),
+            },
             rx,
-            (
-                append_notify.clone(),
-                replica_state.clone(),
-                hw_advance_notify.clone(),
-                delivery.clone(),
-            ),
+            WriterSignals {
+                append_notify: append_notify.clone(),
+                replica_state: replica_state.clone(),
+                hw_advance_notify: hw_advance_notify.clone(),
+                delivery: delivery.clone(),
+            },
         );
         Self {
             topic: topic.to_string(),

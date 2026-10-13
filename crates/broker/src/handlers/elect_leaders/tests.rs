@@ -5,6 +5,8 @@
 //! so an unclean election always has an out-of-ISR replica to elect and the
 //! tests differ only in the approvals the metadata image holds.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         WIRE_ELECTION_PREFERRED, WIRE_ELECTION_UNCLEAN, batch::ElectionBatch, env::ElectionEnv,
@@ -105,7 +107,10 @@ struct StartedBroker {
 }
 
 async fn broker_with(config: BreakGlassConfig) -> StartedBroker {
-    let (handle, dir) = start_broker_no_audit_with(move |cfg| {
+    let HandlerStartedBroker {
+        broker: handle,
+        dir,
+    } = start_broker_no_audit_with(move |cfg| {
         cfg.authorizer = std::sync::Arc::new(AllowAllAuthorizer);
         cfg.break_glass = config;
     })

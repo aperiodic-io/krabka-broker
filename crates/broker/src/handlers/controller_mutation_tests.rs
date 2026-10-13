@@ -1,5 +1,7 @@
 //! Controller mutations through a broker whose observer stopped before newer commits.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::test_support::replicated_partition,
     crate::{
@@ -29,13 +31,14 @@ use {
     uuid::Uuid,
 };
 
-macro_rules! assert_single_response_error {
-    ($response:expr, $error_code:expr) => {{
-        assert!($response.responses.len() == 1);
-        assert!($response.responses[0].error_code == $error_code);
-    }};
+fn assert_single_response_error<Row>(
+    rows: &[Row],
+    error_code: i16,
+    code: impl FnOnce(&Row) -> i16,
+) {
+    assert!(rows.len() == 1);
+    assert!(code(&rows[0]) == error_code);
 }
-
 /// A controller and an observer whose controller client is stopped, with the
 /// temporary directories that hold their data.
 struct StoppedObserver {
@@ -46,12 +49,18 @@ struct StoppedObserver {
 }
 
 async fn stopped_observer() -> StoppedObserver {
-    let (controller, controller_dir) = start_broker_no_audit().await;
+    let HandlerStartedBroker {
+        broker: controller,
+        dir: controller_dir,
+    } = start_broker_no_audit().await;
     controller.wait_until_controller_leader().await;
     let authority = controller.broker_arc_for_test();
     let addr = controller.controller_addr();
     let cluster_id = authority.controller.current_image().cluster_id();
-    let (observer, observer_dir) = start_broker_no_audit_with(|config| {
+    let HandlerStartedBroker {
+        broker: observer,
+        dir: observer_dir,
+    } = start_broker_no_audit_with(|config| {
         config.roles = vec![NodeRole::Broker];
         config.node_id = NodeId(2);
         config.broker_id = 2;
@@ -137,7 +146,9 @@ async fn a_stale_observer_cannot_delete_a_recreated_topic_by_old_id() {
         &ctx,
     )
     .await;
-    assert_single_response_error!(response, codes::UNKNOWN_TOPIC_ID);
+    assert_single_response_error(&response.responses, codes::UNKNOWN_TOPIC_ID, |row| {
+        row.error_code
+    });
     assert!(
         authority
             .controller
@@ -200,7 +211,7 @@ async fn an_incremental_update_through_a_stale_observer_keeps_unrelated_config()
         &ctx,
     )
     .await;
-    assert_single_response_error!(response, codes::NONE);
+    assert_single_response_error(&response.responses, codes::NONE, |row| row.error_code);
     assert!(
         authority.controller.current_image().topic_config("orders")
             == Some(&string_pairs(&[

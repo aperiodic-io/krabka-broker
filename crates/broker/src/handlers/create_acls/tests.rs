@@ -5,14 +5,20 @@
 //! stamps every creation, the positional interleaving of accepted and rejected
 //! creations, and the absence of a principal or resource-name length limit.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::handle,
     crate::{
         broker::{Broker, BrokerHandle},
         codes,
-        handlers::create_acls::test_support::{
-            OPERATION_READ, OPERATION_WRITE, VERSION, all_acls, configured_authorizer, creation,
-            request, test_context,
+        features::{CIDR_ACL_HOST_MIN_LEVEL, METADATA_VERSION},
+        handlers::{
+            create_acls::test_support::{
+                OPERATION_READ, OPERATION_WRITE, VERSION, all_acls, configured_authorizer,
+                creation, request, test_context,
+            },
+            test_support::LiveBrokerFixture,
         },
         test_support::{
             allow_acl, start_broker_no_audit_with,
@@ -173,7 +179,10 @@ async fn handle_answers_security_disabled_for_each_creation_when_no_authorizer_i
 /// A broker with `unstable.feature.versions.enable`, the mode in which
 /// `CreateAcls` applies Kafka trunk's host validation.
 async fn start_trunk_broker() -> TrunkBroker {
-    let (handle, dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker {
+        broker: handle,
+        dir,
+    } = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = configured_authorizer();
         cfg.features.unstable_feature_versions = krabka_raft::UnstableFeatureVersions::Enabled;
     })
@@ -224,24 +233,27 @@ async fn handle_stores_any_host_by_default() {
     broker_handle.shutdown().await;
 }
 
-macro_rules! cidr_metadata_fixture {
-    (($handle:ident, $dir:ident, $broker:ident), $level:expr, $label:literal) => {
-        let TrunkBroker {
-            handle: $handle,
-            dir: $dir,
-        } = start_trunk_broker().await;
-        let $broker = $handle.broker_arc_for_test();
-        $broker
-            .controller
-            .submit_change(vec![MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
-                name: crate::features::METADATA_VERSION.to_string(),
-                level: $level,
-            })])
-            .await
-            .expect($label);
-    };
+/// Finalize the requested CIDR metadata level on the trunk-mode ACL broker.
+async fn cidr_metadata_fixture(level: i16, label: &str) -> LiveBrokerFixture {
+    let TrunkBroker {
+        handle,
+        dir: directory,
+    } = start_trunk_broker().await;
+    let broker = handle.broker_arc_for_test();
+    broker
+        .controller
+        .submit_change(vec![MetadataRecord::V1FeatureLevel(FeatureLevelRecord {
+            name: METADATA_VERSION.to_string(),
+            level,
+        })])
+        .await
+        .expect(label);
+    LiveBrokerFixture {
+        handle,
+        directory,
+        broker,
+    }
 }
-
 /// #652 / KIP-1276: a CIDR host is accepted, and stored as the literal text
 /// the operator typed, once `metadata.version` reaches
 /// [`crate::features::CIDR_ACL_HOST_MIN_LEVEL`]. The test seeds that level
@@ -250,11 +262,15 @@ macro_rules! cidr_metadata_fixture {
 /// seed their own metadata-version floors.
 #[tokio::test]
 async fn handle_accepts_cidr_host_at_the_cidr_metadata_version() {
-    cidr_metadata_fixture!(
-        (broker_handle, _dir, broker),
-        crate::features::CIDR_ACL_HOST_MIN_LEVEL,
-        "seed cidr-supporting metadata.version"
-    );
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = cidr_metadata_fixture(
+        CIDR_ACL_HOST_MIN_LEVEL,
+        "seed cidr-supporting metadata.version",
+    )
+    .await;
     let resp = drive_cidr_request(&broker).await;
 
     let expected = krabka_macros::unthrottled_wire!(CreateAclsResponse {
@@ -279,11 +295,15 @@ async fn handle_accepts_cidr_host_at_the_cidr_metadata_version() {
 /// Kafka's exact `UNSUPPORTED_VERSION` message, and nothing is stored.
 #[tokio::test]
 async fn handle_rejects_cidr_host_below_the_cidr_metadata_version() {
-    cidr_metadata_fixture!(
-        (broker_handle, _dir, broker),
-        crate::features::CIDR_ACL_HOST_MIN_LEVEL - 1,
-        "seed pre-cidr metadata.version"
-    );
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker: _broker,
+    } = cidr_metadata_fixture(
+        CIDR_ACL_HOST_MIN_LEVEL - 1,
+        "seed pre-cidr metadata.version",
+    )
+    .await;
     check_cidr_refusal(&broker_handle).await;
     broker_handle.shutdown().await;
 }

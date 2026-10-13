@@ -14,8 +14,9 @@ use {
                 seed_controller_quota, seed_topic, topic_req,
             },
             test_support::{
-                ALL_BROKERS_FENCED_PARTITION_ERROR, assigned_partition_record,
-                invalid_manual_assignment, replica_availability,
+                ALL_BROKERS_FENCED_PARTITION_ERROR, LiveBrokerFixture,
+                StartedBroker as HandlerStartedBroker, TopicPartitionCount,
+                assigned_partition_record, invalid_manual_assignment, replica_availability,
             },
         },
         test_support::{
@@ -28,6 +29,30 @@ use {
     krabka_units::convert::TimeExt as _,
     std::sync::Arc,
 };
+
+/// Commit the requested initial partition image before exposing this broker.
+#[bon::builder]
+async fn start_partition_topic(
+    name: &str,
+    #[builder(into, default = TopicPartitionCount(2))] partitions: TopicPartitionCount,
+) -> LiveBrokerFixture {
+    let HandlerStartedBroker {
+        broker: handle,
+        dir: directory,
+    } = start_broker(Arc::new(AllowAllAuthorizer)).await;
+    seed_topic()
+        .handle(&handle)
+        .name(name)
+        .partitions(partitions)
+        .call()
+        .await;
+    let broker = handle.broker_arc_for_test();
+    LiveBrokerFixture {
+        handle,
+        directory,
+        broker,
+    }
+}
 
 krabka_macros::wire_codec_helpers! {
     test_context ["admin-client"];
@@ -52,10 +77,11 @@ struct PartitionRowsCaseSetup {
     expected: Vec<CreatePartitionsTopicResult>,
 }
 
+/// Compare complete topic rows, using the supplied context or a fresh admin context.
 #[bon::builder]
 async fn check_topic_rows(
     broker: &Broker,
-    ctx: &RequestContext<'_>,
+    ctx: Option<&RequestContext<'_>>,
     #[builder(default)] topics: Vec<
         krabka_protocol::owned::create_partitions_request::CreatePartitionsTopic,
     >,
@@ -67,33 +93,16 @@ async fn check_topic_rows(
         mutation,
         expected,
     };
-    let response = drive(broker, &request(setup.topics, setup.mutation), ctx).await;
+    let request = request(setup.topics, setup.mutation);
+    let response = if let Some(ctx) = ctx {
+        drive(broker, &request, ctx).await
+    } else {
+        let admin = principal("admin");
+        let address = peer();
+        drive(broker, &request, &test_context(&admin, &address)).await
+    };
     let expected = expected_response(setup.expected);
     assert!(response == expected);
-}
-
-macro_rules! seeded_partition_topic {
-    (($handle:ident, $directory:ident, $broker:ident), $name:expr $(, partitions = $partitions:expr)?) => {
-        let ($handle, $directory) =
-            start_broker(std::sync::Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
-        seed_topic()
-            .handle(&$handle)
-            .name($name)
-            $(.partitions($partitions))?
-            .call()
-            .await;
-        let $broker = $handle.broker_arc_for_test();
-    };
-}
-
-macro_rules! seeded_admin_partition_topic {
-    (($handle:ident, $directory:ident, $broker:ident), ($principal:ident, $peer:ident), $name:expr $(, partitions = $partitions:expr)?) => {
-        seeded_partition_topic!(($handle, $directory, $broker), $name $(, partitions = $partitions)?);
-        krabka_macros::request_test_identity! {
-            bind($principal, $peer);
-            user ["admin"];
-        };
-    };
 }
 
 #[tokio::test]
@@ -121,10 +130,13 @@ async fn handle_denies_topic_alter_for_each_topic() {
 
 #[tokio::test]
 async fn handle_reports_unknown_topic_and_rejects_same_partition_count() {
-    seeded_admin_partition_topic!((broker_handle, _dir, broker), (p, peer), "stable");
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_partition_topic().name("stable").call().await;
     check_topic_rows()
         .broker(&broker)
-        .ctx(&test_context(&p, &peer))
         .topics(vec![
             topic_req().name("missing").call(),
             topic_req().name("stable").count(2).call(),
@@ -151,15 +163,17 @@ async fn handle_reports_unknown_topic_and_rejects_same_partition_count() {
 
 #[tokio::test]
 async fn validate_only_reports_success_without_adding_partitions() {
-    seeded_admin_partition_topic!(
-        (broker_handle, _dir, broker),
-        (p, peer),
-        "dry-run",
-        partitions = 1
-    );
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_partition_topic()
+        .name("dry-run")
+        .partitions(1)
+        .call()
+        .await;
     check_topic_rows()
         .broker(&broker)
-        .ctx(&test_context(&p, &peer))
         .topics(vec![topic_req().name("dry-run").call()])
         .mutation(PartitionMutation::Validate)
         .expected(vec![expected_result("dry-run", codes::NONE, None)])
@@ -177,15 +191,17 @@ async fn validate_only_reports_success_without_adding_partitions() {
 
 #[tokio::test]
 async fn handle_adds_new_partitions_and_preserves_response_identity() {
-    seeded_admin_partition_topic!(
-        (broker_handle, _dir, broker),
-        (p, peer),
-        "grow",
-        partitions = 1
-    );
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_partition_topic()
+        .name("grow")
+        .partitions(1)
+        .call()
+        .await;
     check_topic_rows()
         .broker(&broker)
-        .ctx(&test_context(&p, &peer))
         .topics(vec![
             topic_req()
                 .name("grow")
@@ -207,11 +223,15 @@ async fn handle_adds_new_partitions_and_preserves_response_identity() {
 
 #[tokio::test]
 async fn handle_rejects_an_unplaceable_new_diskless_partition() {
-    seeded_partition_topic!(
-        (broker_handle, _dir, broker),
-        "diskless-grow",
-        partitions = 1
-    );
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_partition_topic()
+        .name("diskless-grow")
+        .partitions(1)
+        .call()
+        .await;
     broker_handle
         .broker_arc_for_test()
         .controller
@@ -255,7 +275,11 @@ async fn handle_rejects_an_unplaceable_new_diskless_partition() {
 
 #[tokio::test]
 async fn strict_create_partitions_rejects_after_quota_exhaustion() {
-    seeded_partition_topic!((broker_handle, _dir, broker), "metered");
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_partition_topic().name("metered").call().await;
     seed_controller_quota(&broker_handle, 2.0).await;
     krabka_macros::request_test_identity! {
         bind(p, peer);
@@ -306,12 +330,16 @@ async fn strict_create_partitions_rejects_after_quota_exhaustion() {
 #[tokio::test]
 async fn a_conflicting_growth_refunds_only_its_obsolete_partition_delta() {
     for concurrent_count in [9, 10] {
-        seeded_admin_partition_topic!(
-            (broker_handle, _dir, broker),
-            (p, peer),
-            "metered",
-            partitions = 1
-        );
+        let LiveBrokerFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+        } = start_partition_topic()
+            .name("metered")
+            .partitions(1)
+            .call()
+            .await;
+        krabka_macros::request_test_identity! { bind(p, peer); user ["admin"]; };
         seed_controller_quota(&broker_handle, 2.0).await;
         let ctx = test_context(&p, &peer);
         let stale = broker.controller.current_image();
@@ -458,7 +486,10 @@ async fn manual_assignment_leaves_unavailable_brokers_out_of_the_isr() {
     ];
 
     for (fenced, witnesses, lists, error_code, error_message, partitions) in rows {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         for node_id in [2, 3, 4] {
             seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
         }
@@ -564,7 +595,10 @@ async fn automatic_growth_takes_fenced_brokers_last_and_words_refusals_like_the_
         outcome,
     } in rows
     {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         for node_id in [3, 4] {
             seed_remote_broker(&broker_handle, krabka_raft::NodeId(node_id)).await;
         }
@@ -711,7 +745,10 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for (label, topics, mutation, results) in cases {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_topic().handle(&broker_handle).call().await;
         let broker = broker_handle.broker_arc_for_test();
         krabka_macros::request_test_identity! {
@@ -740,7 +777,11 @@ async fn rows_follow_kafkas_duplicate_and_count_checks() {
 /// new indices; the other must see the committed count on its next attempt.
 #[tokio::test]
 async fn concurrent_growth_revalidates_partition_count_before_append() {
-    seeded_partition_topic!((handle, _dir, broker), "t", partitions = 1);
+    let LiveBrokerFixture {
+        handle,
+        directory: _dir,
+        broker,
+    } = start_partition_topic().name("t").partitions(1).call().await;
     let p = principal("admin");
     let h = peer();
     let ctx = test_context(&p, &h);

@@ -212,23 +212,49 @@ pub(crate) mod test_support {
         krabka_units::{Time, convert::TimeExt, secs},
     };
 
-    /// A named input builder for one quota kind's rate tests.
-    macro_rules! image_builder {
-        ($name:ident, $key:literal) => {
-            fn $name(
-                entity: Vec<(&str, Option<&str>)>,
-                rate: f64,
-            ) -> krabka_metadata::MetadataImage {
-                crate::quota::test_support::image_with_quota()
-                    .entity(entity)
-                    .key($key)
-                    .value(rate)
-                    .call()
+    /// One borrowed entity component of a quota fixture, in wire field order.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub(crate) struct QuotaEntityInput<'a> {
+        pub(crate) entity_type: &'a str,
+        pub(crate) entity_name: Option<&'a str>,
+    }
+
+    impl<'a> QuotaEntityInput<'a> {
+        pub(crate) const fn user(name: Option<&'a str>) -> Self {
+            Self {
+                entity_type: "user",
+                entity_name: name,
             }
-        };
+        }
+
+        pub(crate) const fn client_id(name: Option<&'a str>) -> Self {
+            Self {
+                entity_type: "client-id",
+                entity_name: name,
+            }
+        }
+
+        pub(crate) const fn ip(name: Option<&'a str>) -> Self {
+            Self {
+                entity_type: "ip",
+                entity_name: name,
+            }
+        }
+    }
+
+    /// A named input builder for one quota kind's rate tests.
+    pub(crate) fn image_with_rate(
+        entity: Vec<QuotaEntityInput<'_>>,
+        key: &str,
+        rate: f64,
+    ) -> MetadataImage {
+        image_with_quota()
+            .entity(entity)
+            .key(key)
+            .value(rate)
+            .call()
     }
     use crate::throttle::TokenBucket;
-    pub(crate) use image_builder;
 
     /// A quota rate, the bytes charged against it and the throttle that
     /// charge must earn.
@@ -273,32 +299,12 @@ pub(crate) mod test_support {
 
     #[derive(krabka_macros::FieldDefaults)]
     pub(crate) struct QuotaRecordSetup<'a> {
-        #[default(vec![("user", Some("alice"))])]
-        pub entity: Vec<(&'a str, Option<&'a str>)>,
+        #[default(vec![QuotaEntityInput::user(Some("alice"))])]
+        pub entity: Vec<QuotaEntityInput<'a>>,
         #[default("producer_byte_rate")]
         pub key: &'a str,
         #[default(QuotaValue(1_000.0))]
         pub value: QuotaValue,
-    }
-
-    #[macro_export]
-    macro_rules! quota_record_builder {
-        ($visibility:vis $name:ident -> $output:ty = $constructor:path) => {
-            #[bon::builder]
-            $visibility fn $name(
-                #[builder(default = vec![ ("user", Some("alice")) ])]
-                entity: Vec<(&'_ str, Option<&'_ str>)>,
-                #[builder(default = "producer_byte_rate")] key: &'_ str,
-                #[builder(into, default = $crate::quota::test_support::QuotaValue(1_000.0))]
-                value: $crate::quota::test_support::QuotaValue,
-            ) -> $output {
-                $constructor($crate::quota::test_support::QuotaRecordSetup {
-                    entity,
-                    key,
-                    value,
-                })
-            }
-        };
     }
 
     fn image_from_quota_setup(setup: QuotaRecordSetup<'_>) -> MetadataImage {
@@ -328,9 +334,9 @@ pub(crate) mod test_support {
         ClientQuotaRecord {
             entity: entity
                 .into_iter()
-                .map(|(entity_type, entity_name)| QuotaEntity {
-                    entity_type: entity_type.into(),
-                    entity_name: entity_name.map(Into::into),
+                .map(|entry| QuotaEntity {
+                    entity_type: entry.entity_type.into(),
+                    entity_name: entry.entity_name.map(Into::into),
                 })
                 .collect(),
             config_key: key.into(),
@@ -338,10 +344,10 @@ pub(crate) mod test_support {
         }
     }
 
-    crate::quota_record_builder!(pub(crate) image_with_quota -> MetadataImage = image_from_quota_setup);
-    crate::quota_record_builder!(pub(crate) quota_record -> ClientQuotaRecord = record_from_quota_setup);
+    krabka_macros::fixture_constructors! { quota: pub(crate) image_with_quota -> MetadataImage = image_from_quota_setup; }
+    krabka_macros::fixture_constructors! { quota: pub(crate) quota_record -> ClientQuotaRecord = record_from_quota_setup; }
 
-    pub(crate) type QuotaEntitySpec<'a> = Vec<(&'a str, Option<&'a str>)>;
+    pub(crate) type QuotaEntitySpec<'a> = Vec<QuotaEntityInput<'a>>;
 
     #[derive(krabka_macros::FieldDefaults)]
     pub(crate) struct UniformQuotaImageSetup<'a> {
@@ -385,7 +391,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn app1_producer_quota() -> ClientQuotaRecord {
         quota_record()
-            .entity(vec![("client-id", Some("app1"))])
+            .entity(vec![QuotaEntityInput::client_id(Some("app1"))])
             .value(200.0)
             .call()
     }
@@ -413,7 +419,10 @@ pub(crate) mod test_support {
     /// The 5,000-byte pair used to compare lookup precedence with bucket refresh.
     pub(crate) fn alice_app1_producer_quota() -> ClientQuotaRecord {
         quota_record()
-            .entity(vec![("user", Some("alice")), ("client-id", Some("app1"))])
+            .entity(vec![
+                QuotaEntityInput::user(Some("alice")),
+                QuotaEntityInput::client_id(Some("app1")),
+            ])
             .value(5_000.0)
             .call()
     }

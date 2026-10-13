@@ -32,7 +32,10 @@ impl BrokerMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {
+        super::*,
+        crate::metrics::{MetricCounterCase, assert_metric_counter_cases},
+    };
 
     #[test]
     fn replication_helpers_accumulate_per_partition() {
@@ -56,11 +59,31 @@ mod tests {
             partition: 4,
         };
         let cases = [
-            ("replication_in", &m.replication_bytes_in, &lbl3, 4_000),
-            ("replication_in", &m.replication_bytes_in, &lbl4, 100),
-            ("replication_out", &m.replication_bytes_out, &lbl3, 4_000),
-            ("replication_out", &m.replication_bytes_out, &lbl4, 0),
+            MetricCounterCase {
+                name: "replication_in",
+                family: &m.replication_bytes_in,
+                label: &lbl3,
+                expected: 4_000,
+            },
+            MetricCounterCase {
+                name: "replication_in",
+                family: &m.replication_bytes_in,
+                label: &lbl4,
+                expected: 100,
+            },
+            MetricCounterCase {
+                name: "replication_out",
+                family: &m.replication_bytes_out,
+                label: &lbl3,
+                expected: 4_000,
+            },
+            MetricCounterCase {
+                name: "replication_out",
+                family: &m.replication_bytes_out,
+                label: &lbl4,
+                expected: 0,
+            },
         ];
-        crate::metrics::assert_metric_counter_cases!(cases);
+        assert_metric_counter_cases(&cases);
     }
 }

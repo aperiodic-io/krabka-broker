@@ -5,6 +5,8 @@
 //! top-level field that has to reach two different response shapes: the
 //! pre-KIP-516 `topics[]` of v0–v7 and the `groups[]` of v8 and above.
 
+#[cfg(test)]
+use crate::handlers::test_support::CreatedTopicResponse;
 use {
     super::*,
     crate::{
@@ -16,7 +18,10 @@ use {
             classic_state::OffsetEntry,
             regex_resolver::no_topic_regex_resolver,
         },
-        handlers::test_support::allow_all_authorizer,
+        handlers::test_support::{
+            LiveBrokerFixture, StartedBroker as HandlerStartedBroker, allow_all_authorizer,
+            configured_topic_request, created_topic_response,
+        },
         test_support::{
             self as broker_fixture_support, dispatch_wire, start_group_broker_no_audit,
         },
@@ -77,11 +82,18 @@ async fn seed_committed_offset(
 }
 
 /// Retain broker resources after the group actor acknowledges its default offset.
-async fn start_seeded_offset_broker() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
-    let (handle, directory) = start_group_broker_no_audit(allow_all_authorizer()).await;
+async fn start_seeded_offset_broker() -> LiveBrokerFixture {
+    let HandlerStartedBroker {
+        broker: handle,
+        dir: directory,
+    } = start_group_broker_no_audit(allow_all_authorizer()).await;
     let broker = handle.broker_arc_for_test();
     seed_committed_offset().broker(&broker).call().await;
-    (handle, directory, broker)
+    LiveBrokerFixture {
+        handle,
+        directory,
+        broker,
+    }
 }
 
 fn named_topic_request(group: &str, topic: &str, partitions: Vec<i32>) -> OffsetFetchRequest {
@@ -105,7 +117,11 @@ fn named_topic_request(group: &str, topic: &str, partitions: Vec<i32>) -> Offset
 #[tokio::test]
 async fn named_topic_fetch_returns_committed_offset() {
     const VERSION: i16 = 7; // legacy single-group path (< 8)
-    let (broker_handle, _dir, broker) = start_seeded_offset_broker().await;
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_seeded_offset_broker().await;
 
     krabka_macros::request_test_identity! {
         bind(p, peer, ctx);
@@ -281,7 +297,11 @@ async fn require_stable_reports_unstable_offsets_on_each_wire_shape(
 async fn a_mark_for_records_below_an_applied_marker_does_not_strand_the_partition() {
     const VERSION: i16 = 7;
     const PRODUCER_ID: i64 = 91;
-    let (broker_handle, _dir, broker) = start_seeded_offset_broker().await;
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_seeded_offset_broker().await;
 
     let request = OffsetFetchRequest {
         require_stable: true,
@@ -359,14 +379,15 @@ use crate::handlers::test_support::{DenyTopics, TopicRef, WireTopic};
 /// `(KNOWN_NAME, 0)`, and one for the empty topic name, which a zero-id row
 /// must not read.
 async fn seed_topic_reference_group(broker_handle: &BrokerHandle) -> WireUuid {
-    created_topic_fixture!(
-        (client, response),
-        broker_handle,
-        "offset-fetch-resolution-test",
-        crate::handlers::test_support::configured_topic_request()
-            .topic(KNOWN_NAME)
-            .call()
-    );
+    let CreatedTopicResponse {
+        client: _client,
+        response: _response,
+    } = created_topic_response()
+        .broker(broker_handle)
+        .client_id("offset-fetch-resolution-test")
+        .request(|| configured_topic_request().topic(KNOWN_NAME).call())
+        .call()
+        .await;
     broker_handle
         .wait_until_partition_present(KNOWN_NAME, 0)
         .await;
@@ -534,7 +555,10 @@ struct TopicReferenceBroker {
 }
 
 async fn topic_reference_broker(authorizer: Arc<dyn Authorizer>) -> TopicReferenceBroker {
-    let (handle, directory) = start_group_broker_no_audit(authorizer).await;
+    let HandlerStartedBroker {
+        broker: handle,
+        dir: directory,
+    } = start_group_broker_no_audit(authorizer).await;
     let topic_id = seed_topic_reference_group(&handle).await;
     TopicReferenceBroker {
         handle,
@@ -691,7 +715,7 @@ async fn refused_topics_follow_the_answered_topics() {
 #[derive(Debug)]
 struct DescribeKnownTopic;
 
-test_authorizer!(DescribeKnownTopic, (self, _source, req), {
+krabka_macros::test_authorizer!(DescribeKnownTopic, req; {
     let allowed = req.resource_type != krabka_metadata::ResourceType::Topic
         || (req.operation == krabka_metadata::AclOperation::Describe
             && req.resource_name == KNOWN_NAME);
@@ -1122,7 +1146,11 @@ async fn legacy_offset_fetch_creates_no_group() {
 /// Exercise the same transaction phases against both KIP-447 wire shapes.
 async fn require_stable(version: i16, shape: RequireStableShape) {
     const PRODUCER_ID: i64 = 91;
-    let (broker_handle, _dir, broker) = start_seeded_offset_broker().await;
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_seeded_offset_broker().await;
     seed_committed_offset()
         .broker(&broker)
         .partition(1)

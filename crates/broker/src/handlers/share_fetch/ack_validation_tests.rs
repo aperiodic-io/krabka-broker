@@ -10,6 +10,8 @@
 //! `Read` check and the metadata check on its own, so a row can carry a fetch
 //! error and a different acknowledge error.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AuthorizationResult,
@@ -69,7 +71,7 @@ struct RowCodes {
 #[derive(Debug)]
 struct DenyOnePrincipal;
 
-test_authorizer!(DenyOnePrincipal, (self, _source, request), {
+krabka_macros::test_authorizer!(DenyOnePrincipal, request; {
     if request.principal.name == DENIED
         && request.resource_type == ResourceType::Topic
         && request.operation == AclOperation::Read
@@ -81,7 +83,8 @@ test_authorizer!(DenyOnePrincipal, (self, _source, request), {
 });
 
 async fn start() -> StartedBroker {
-    let (broker, dir) = start_broker_with_authorizer_no_audit(Arc::new(DenyOnePrincipal)).await;
+    let HandlerStartedBroker { broker, dir } =
+        start_broker_with_authorizer_no_audit(Arc::new(DenyOnePrincipal)).await;
     StartedBroker { broker, dir }
 }
 
@@ -163,10 +166,7 @@ async fn share_fetch(
                 .into_iter()
                 .map(|row| FetchPartition {
                     partition_index: row.index.0,
-                    acknowledgement_batches: acknowledgement_batches!(
-                        FetchAcknowledgeBatch,
-                        row.batches
-                    ),
+                    acknowledgement_batches: krabka_macros::acknowledgement_batches!(FetchAcknowledgeBatch; [row.batches]),
                     ..Default::default()
                 })
                 .collect(),

@@ -23,26 +23,6 @@ use {
 /// A cluster ACL gate: `true` when the authorizer denies `ctx`'s principal.
 pub(super) type ClusterGate = fn(&dyn Authorizer, &MetadataImage, &RequestContext<'_>) -> bool;
 
-#[cfg(test)]
-macro_rules! test_dispatch {
-    ($api:expr, $request:ty, $response:ty) => {
-        krabka_macros::wire_codec_helpers! {
-            test_context ["admin-client"];
-        }
-        async fn answer(
-            broker: &crate::broker::Broker,
-            version: i16,
-            request: &$request,
-            ctx: &crate::handlers::RequestContext<'_>,
-        ) -> $response {
-            crate::test_support::dispatch_wire(broker, $api, version, request, ctx).await
-        }
-    };
-}
-
-#[cfg(test)]
-pub(super) use test_dispatch;
-
 /// The valid `AddRaftVoter` fixture shared by the voter handler tests.
 #[cfg(test)]
 #[bon::builder]
@@ -69,61 +49,72 @@ pub(crate) fn add_voter_request(
     }
 }
 
-/// Drive the shared denial scenario while keeping each API's optional message check.
+/// Keep the broker and directory alive through the case's assertions and shutdown.
 #[cfg(test)]
-macro_rules! check_denied_reconfiguration {
-    (($handle:ident, $directory:ident, $broker:ident, $context:ident, $response:ident), $version:expr $(, $message:expr)?) => {
-        krabka_macros::broker_test_setup! {
-            bind($handle, $directory, $broker, $context);
-            boot [start_broker] deny_all;
-            user ["alice"];
-        };
-        let $response = answer(&$broker, $version, &request(2), &$context).await;
-        assert!($response.error_code == crate::codes::CLUSTER_AUTHORIZATION_FAILED);
-        $(assert!($response.error_message.as_deref() == Some($message));)?
-        $handle.shutdown().await;
+pub(super) async fn with_voter_broker(
+    authorizer: Arc<dyn Authorizer>,
+    check: impl for<'a> std::ops::AsyncFnOnce(&'a Broker),
+) {
+    use crate::{
+        handlers::test_support::StartedBroker, test_support::start_broker_with_authorizer,
     };
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with_authorizer(authorizer).await;
+    let broker = handle.broker_arc_for_test();
+    check(&broker).await;
+    handle.shutdown().await;
 }
-#[cfg(test)]
-pub(super) use check_denied_reconfiguration;
 
-/// An invalid add/remove id is refused before the controller reconfigures.
 #[cfg(test)]
-macro_rules! check_invalid_voter {
-    (
-        (
-            $handle:ident,
-            $directory:ident,
-            $broker:ident,
-            $context:ident,
-            $request:ident,
-            $response:ident
-        ),
-        $version:expr,
-        $response_type:ident,
-        $message:expr
-    ) => {
-        krabka_macros::broker_test_setup! {
-            bind($handle, $directory, $broker, $context);
-            boot [start_broker] allow_all;
-            user ["admin"];
-        };
-        let mut $request = request(-7);
-        stamp_voter_request!($request, $broker);
-        let $response = answer(&$broker, $version, &$request, &$context).await;
-        assert!(
-            $response
-                == $response_type {
-                    error_code: crate::codes::INVALID_REQUEST,
-                    error_message: Some($message.into()),
-                    ..Default::default()
-                }
-        );
-        $handle.shutdown().await;
-    };
+krabka_macros::wire_codec_helpers! { test_context ["admin-client"]; }
+
+/// The two voter refusal scenarios and their original authorization identities.
+#[cfg(test)]
+pub(super) enum VoterCase {
+    Denied,
+    Invalid,
 }
+
 #[cfg(test)]
-pub(super) use check_invalid_voter;
+impl VoterCase {
+    fn authorizer(&self) -> Arc<dyn Authorizer> {
+        use crate::{authorizer::AllowAllAuthorizer, test_support::DenyAll};
+        match self {
+            Self::Denied => Arc::new(DenyAll),
+            Self::Invalid => Arc::new(AllowAllAuthorizer),
+        }
+    }
+
+    fn user(&self) -> &'static str {
+        match self {
+            Self::Denied => "alice",
+            Self::Invalid => "admin",
+        }
+    }
+}
+
+/// Check a refusal before releasing the broker or its directory.
+#[cfg(test)]
+pub(super) async fn check_voter_case<
+    Request: Encode,
+    Response: for<'a> Decode<'a> + PartialEq + std::fmt::Debug,
+>(
+    case: VoterCase,
+    api: i16,
+    version: i16,
+    request: impl FnOnce(&Broker) -> Request,
+    expected: impl FnOnce() -> Response,
+) {
+    use crate::test_support::dispatch_wire;
+    with_voter_broker(case.authorizer(), async move |broker| {
+        krabka_macros::request_test_identity! { bind(ctx); user [case.user()]; };
+        let response: Response = dispatch_wire(broker, api, version, &request(broker), &ctx).await;
+        assert2::assert!(response == expected());
+    })
+    .await;
+}
 
 /// What a voter handler runs its own checks on once the prelude lets the
 /// request through.

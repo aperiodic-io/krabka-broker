@@ -170,20 +170,17 @@ mod tests {
 
     fn anon() -> krabka_security::Principal { principal("ANONYMOUS") }
 
-    macro_rules! empty_acl_resource_check {
-        (($authorizer:ident, $image:ident, $peer:ident, $code:ident), $kind:expr, $name:expr) => {
-            let $authorizer =
-                crate::authorizer::SimpleAclAuthorizer::new(std::collections::HashSet::new());
-            let $image = MetadataImage::new(Uuid::nil());
-            let $peer = peer();
-            let $code =
-                super::resource_authz_failure(&$authorizer, &$image, &anon(), &$peer, $kind, $name);
-        };
+    /// Refuse an anonymous resource probe against the empty ACL image.
+    fn empty_acl_resource_failure(kind: i8, name: &str) -> Option<i16> {
+        let authorizer = SimpleAclAuthorizer::new(std::collections::HashSet::new());
+        let image = MetadataImage::new(Uuid::nil());
+        let peer = peer();
+        super::resource_authz_failure(&authorizer, &image, &anon(), &peer, kind, name)
     }
 
     #[test]
     fn topic_resource_denied_yields_topic_authorization_failed() {
-        empty_acl_resource_check!((authz, image, peer, code), super::RESOURCE_TYPE_TOPIC, "t");
+        let code = empty_acl_resource_failure(super::RESOURCE_TYPE_TOPIC, "t");
         assert!(code == Some(crate::codes::TOPIC_AUTHORIZATION_FAILED));
         let res = super::denied_result(
             super::RESOURCE_TYPE_TOPIC,
@@ -296,7 +293,7 @@ mod tests {
 
     #[test]
     fn broker_resource_denied_yields_cluster_authorization_failed() {
-        empty_acl_resource_check!((authz, image, peer, code), super::RESOURCE_TYPE_BROKER, "1");
+        let code = empty_acl_resource_failure(super::RESOURCE_TYPE_BROKER, "1");
         assert!(code == Some(crate::codes::CLUSTER_AUTHORIZATION_FAILED));
     }
 }

@@ -285,6 +285,7 @@ mod tests {
                 persistence::OffsetCommitValue,
                 unified::{actor::test_support::rpc, classic_state::OffsetEntry},
             },
+            handlers::test_support::StartedBroker,
             partition::Partition,
             test_support::StandalonePartitionSetup,
             txn::handlers::write_txn_markers::{
@@ -304,7 +305,10 @@ mod tests {
     async fn aborted_offsets_are_not_published_by_the_offsets_partition_marker() {
         use krabka_log::Offset;
 
-        let (broker_handle, _dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let group_id = "marker-abort-group";
         let part = local_offsets_partition(&broker, group_id);
@@ -352,7 +356,10 @@ mod tests {
     async fn internal_marker_path_records_supplied_commit_stamp() {
         use krabka_protocol::records::Record;
 
-        let (broker_handle, dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let part_setup = StandalonePartitionSetup {
             topic: "stamped-orders",
@@ -402,7 +409,10 @@ mod tests {
     async fn transaction_version_2_fences_an_equal_marker_epoch() {
         use krabka_protocol::records::Record;
 
-        let (broker_handle, dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let producer_id = krabka_log::ProducerId(711);
         // (label, transaction version, marker epoch, transaction open,
@@ -478,7 +488,10 @@ mod tests {
     async fn marker_adapter_fences_generations_and_suppresses_exact_retries() {
         use krabka_protocol::records::Record;
 
-        let (broker_handle, dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         open_partition(&broker, dir.path(), StandalonePartitionSetup {
             topic: "fenced-orders",
@@ -586,7 +599,10 @@ mod tests {
     async fn failed_marker_append_never_publishes_transactional_offsets() {
         use krabka_log::Offset;
 
-        let (broker_handle, _dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let group_id = "failed-marker-group";
         let part = local_offsets_partition(&broker, group_id);
@@ -677,7 +693,10 @@ mod tests {
     async fn a_retried_commit_marker_publishes_offsets_after_a_lost_ack() {
         use krabka_log::Offset;
 
-        let (broker_handle, _dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let group_id = "lost-ack-group";
         let part = local_offsets_partition(&broker, group_id);
@@ -744,7 +763,10 @@ mod tests {
     async fn exact_marker_retry_drains_retained_offset_publication() {
         use krabka_log::Offset;
 
-        let (broker_handle, _dir) = start_broker().await;
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let group_id = "retained-marker-group";
         let part = local_offsets_partition(&broker, group_id);

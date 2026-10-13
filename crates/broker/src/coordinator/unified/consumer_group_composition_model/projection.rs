@@ -9,14 +9,11 @@
 use {
     super::{
         TOPIC,
-        state::{CgcState, MemberProj},
+        state::{AssignmentEpoch, CgcState, CommittedPartitionOffset, MemberProj},
     },
-    crate::coordinator::{
-        test_support::sorted_epoch_pairs,
-        unified::{
-            actor::reconciliation_model_support::{insert_modeled_member, modeled_member},
-            consumer_state::GroupState,
-        },
+    crate::coordinator::unified::{
+        actor::reconciliation_model_support::{insert_modeled_member, modeled_member},
+        consumer_state::GroupState,
     },
     krabka_log::Offset,
     krabka_protocol::primitives::uuid::Uuid,
@@ -26,16 +23,32 @@ use {
     },
 };
 
-fn epochs_of(map: &HashMap<Uuid, HashMap<i32, i32>>) -> Vec<(i32, i32)> {
-    sorted_epoch_pairs(map.get(&TOPIC))
+fn epochs_of(map: &HashMap<Uuid, HashMap<i32, i32>>) -> Vec<AssignmentEpoch> {
+    // The runtime map exposes std key/value pairs; model coordinates are named.
+    let mut result: Vec<_> = map
+        .get(&TOPIC)
+        .map(|epochs| {
+            epochs
+                .iter()
+                .map(|(&partition, &epoch)| AssignmentEpoch { partition, epoch })
+                .collect()
+        })
+        .unwrap_or_default();
+    result.sort_unstable_by_key(|row| row.partition);
+    result
 }
 
-fn epochs_to_map(epochs: &[(i32, i32)]) -> HashMap<Uuid, HashMap<i32, i32>> {
+fn epochs_to_map(epochs: &[AssignmentEpoch]) -> HashMap<Uuid, HashMap<i32, i32>> {
     if epochs.is_empty() {
-        HashMap::new()
-    } else {
-        [(TOPIC, epochs.iter().copied().collect())].into()
+        return HashMap::new();
     }
+    let mut assignments = HashMap::new();
+    for row in epochs {
+        assignments.insert(row.partition, row.epoch);
+    }
+    let mut topics = HashMap::new();
+    topics.insert(TOPIC, assignments);
+    topics
 }
 
 krabka_macros::rebuild_reconciliation_group! {
@@ -71,7 +84,11 @@ pub(super) fn project(
         members,
         owned,
         advertised,
-        committed.iter().map(|(&k, &v)| (k, v)).collect(),
+        // std map iterator pairs are converted directly into the named ledger.
+        committed
+            .iter()
+            .map(|(&partition, &offset)| CommittedPartitionOffset { partition, offset })
+            .collect(),
     )
 }
 

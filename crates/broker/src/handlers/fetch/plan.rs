@@ -930,16 +930,22 @@ pub(super) async fn build_pending_reads(
 mod tests {
     use {
         crate::{
-            broker::{Broker, spawn_partition},
+            broker::{Broker, BrokerHandle, spawn_partition},
             codes::{NONE, NOT_LEADER_OR_FOLLOWER, OFFSET_OUT_OF_RANGE},
             config::{BrokerConfig, NodeRole},
             config_keys::{BROKER_WITNESS, WITNESS_TRUE},
             handlers::{
-                fetch::test_support::append_epoch_batches, produce::test_support::image_with_topic,
+                fetch::test_support::append_epoch_batches,
+                produce::test_support::image_with_topic,
+                test_support::{StartedBroker, local_partition, start_broker_with},
             },
             partition::Partition,
             producer_state::ProducerState,
-            test_support::{broker_registration, spawn_standalone_partition, temporary_partition},
+            replica_selector::ReplicaSelectorKind,
+            test_support::{
+                TemporaryPartition, broker_registration, spawn_standalone_partition,
+                temporary_partition,
+            },
         },
         assert2::assert,
         krabka_ids::PartitionIndex,
@@ -973,26 +979,35 @@ mod tests {
         image
     }
 
+    struct RackAwareFixture {
+        // Drop partition/log owners before removing their directory.
+        partition: Arc<Partition>,
+        broker: Arc<Broker>,
+        handle: BrokerHandle,
+        _dir: tempfile::TempDir,
+    }
+
+    async fn rack_aware_fixture() -> RackAwareFixture {
+        let StartedBroker {
+            broker: handle,
+            dir: directory,
+        } = start_broker_with(|config| {
+            config.replica_selector = ReplicaSelectorKind::RackAware;
+        })
+        .await;
+        let broker = handle.broker_arc_for_test();
+        let partition = local_partition(&broker, directory.path(), "orders");
+        RackAwareFixture {
+            partition,
+            broker,
+            handle,
+            _dir: directory,
+        }
+    }
+
     /// The witness gate refuses a client fetch with the witness row. It lets a
     /// follower fetch through, and the leader check then refuses it with the
     /// read row, because a witness never leads the partition.
-    macro_rules! rack_aware_fixture {
-        (($handle:ident, $directory:ident, $broker:ident, $partition:ident)) => {
-            krabka_macros::broker_test_setup! {
-                bind($handle, $directory, $broker);
-                boot [crate::handlers::test_support::start_broker_with(|config| {
-                                config.replica_selector =
-                                    crate::replica_selector::ReplicaSelectorKind::RackAware;
-                            })];
-            };
-            let $partition = crate::handlers::test_support::local_partition(
-                &$broker,
-                $directory.path(),
-                "orders",
-            );
-        };
-    }
-
     #[tokio::test]
     async fn witness_refuses_a_client_fetch_and_passes_a_follower_fetch_on() {
         const TOPIC: &str = "witness-fetch";
@@ -1074,7 +1089,7 @@ mod tests {
         // The consumer sits in `dc-b`, the witness site. Node 2 is the only
         // same-rack in-ISR replica, so it is exactly the redirect a rack-aware
         // selector wants to make.
-        rack_aware_fixture!((broker_handle, dir, broker, partition));
+        let rack = rack_aware_fixture().await;
 
         for (name, witness_ids, want) in [
             ("node 2 is a plain broker in dc-b", &[][..], 2),
@@ -1082,9 +1097,9 @@ mod tests {
         ] {
             let image = stretch_image(witness_ids);
             let got = super::preferred_read_replica(
-                &broker,
+                &rack.broker,
                 &image,
-                &partition,
+                &rack.partition,
                 "orders",
                 0,
                 "dc-b",
@@ -1093,7 +1108,7 @@ mod tests {
             .await;
             assert!(got == want, "{name}: got {got}, want {want}");
         }
-        broker_handle.shutdown().await;
+        rack.handle.shutdown().await;
     }
 
     /// Table over the follower's reported log end and log start offset
@@ -1103,7 +1118,7 @@ mod tests {
     /// trimmed the offset away, must never be offered.
     #[tokio::test]
     async fn preferred_read_replica_excludes_a_follower_outside_its_reported_range() {
-        rack_aware_fixture!((broker_handle, dir, broker, partition));
+        let rack = rack_aware_fixture().await;
         let image = stretch_image(&[]);
 
         for (name, follower_leo, follower_log_start, fetch_offset, want) in [
@@ -1113,7 +1128,7 @@ mod tests {
             ("in range on both bounds: eligible", 40, 10, 20, 2),
         ] {
             {
-                let mut state = partition.replica_state.lock().await;
+                let mut state = rack.partition.replica_state.lock().await;
                 state.install_isr(
                     &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
                     &[krabka_raft::NodeId(1), krabka_raft::NodeId(2)],
@@ -1132,9 +1147,9 @@ mod tests {
                 );
             }
             let got = super::preferred_read_replica(
-                &broker,
+                &rack.broker,
                 &image,
-                &partition,
+                &rack.partition,
                 "orders",
                 0,
                 "dc-b",
@@ -1143,7 +1158,7 @@ mod tests {
             .await;
             assert!(got == want, "{name}: got {got}, want {want}");
         }
-        broker_handle.shutdown().await;
+        rack.handle.shutdown().await;
     }
 
     /// A named preferred read replica skips the log read and the long poll
@@ -1152,21 +1167,21 @@ mod tests {
     /// this partition (#873).
     #[tokio::test]
     async fn a_named_preferred_read_replica_skips_the_read() {
-        rack_aware_fixture!((broker_handle, dir, broker, partition));
-        broker.partitions.insert(
+        let rack = rack_aware_fixture().await;
+        rack.broker.partitions.insert(
             "orders".into(),
             PartitionIndex(0),
-            std::sync::Arc::clone(&partition),
+            std::sync::Arc::clone(&rack.partition),
         );
-        partition
-            .install_replication_target(None, broker.config.node_id.0, 0)
+        rack.partition
+            .install_replication_target(None, rack.broker.config.node_id.0, 0)
             .await;
         let image = stretch_image(&[]);
         let consumer = super::FetchAuthorization::Consumer {
             denied_topics: std::collections::HashSet::new(),
         };
         let context = super::PendingPlanContext {
-            broker: &broker,
+            broker: &rack.broker,
             image: &image,
             authorization: &consumer,
             rack_id: "dc-b",
@@ -1202,7 +1217,7 @@ mod tests {
             read.partition.is_none(),
             "no `Partition` left to read: the loop must not read or park on it"
         );
-        broker_handle.shutdown().await;
+        rack.handle.shutdown().await;
     }
 
     /// The leader check needs this node in the installed local role, and no
@@ -1211,7 +1226,10 @@ mod tests {
     #[tokio::test]
     async fn a_read_needs_the_installed_role_and_the_image_to_name_this_node() {
         let image = stretch_image(&[]);
-        let (_dir, partition) = temporary_partition().call();
+        let TemporaryPartition {
+            dir: _dir,
+            partition,
+        } = temporary_partition().call();
         let refused = |leader_id| super::PartitionData {
             current_leader: super::LeaderIdAndEpoch {
                 leader_id,

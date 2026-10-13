@@ -235,7 +235,12 @@ mod tests {
 
     #[tokio::test]
     async fn cascade_remote_partition_delete_drops_every_segment() {
-        fixtures::rolled_log_fixture!(log_dir, remote_dir, log, exports);
+        let fixtures::RolledLogFixture {
+            local: _log_dir,
+            remote: remote_dir,
+            log: _log,
+            exports,
+        } = fixtures::rolled_log_fixture();
         let rsm: Arc<dyn RemoteStorageManager> =
             Arc::new(LocalTieredStorage::new(remote_dir.path()));
         let rlmm_impl = Arc::new(InmemoryRemoteLogMetadataManager::new());
@@ -267,7 +272,7 @@ mod tests {
     #[tokio::test]
     async fn cascade_remote_partition_delete_is_noop_on_empty_partition() {
         let remote_dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) = local_backends(remote_dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
         // No add — partition has no segments. Cascade still walks the
         // three partition-delete states without error.
         cascade_remote_partition_delete(

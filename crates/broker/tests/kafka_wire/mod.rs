@@ -40,7 +40,7 @@ use {
         Decode, Encode,
         owned::{
             api_versions_request::ApiVersionsRequest, api_versions_response::ApiVersionsResponse,
-            elect_leaders_request::ElectLeadersRequest,
+            create_topics_request::CreatableTopic, elect_leaders_request::ElectLeadersRequest,
             elect_leaders_response::ElectLeadersResponse, produce_request::ProduceRequest,
             produce_response::ProduceResponse, sasl_authenticate_request::SaslAuthenticateRequest,
             sasl_authenticate_response::SaslAuthenticateResponse,
@@ -56,16 +56,14 @@ use {
     },
 };
 
-macro_rules! configured_topic_request {
-    ($topic:expr) => {{
-        let topic = $topic;
-        topics::creatable_topic()
-            .name(topic.name)
-            .partitions(topic.partitions)
-            .replicas(topic.replicas)
-            .configs(topic.configs)
-            .call()
-    }};
+/// Move a named automatic-placement setup into its concrete wire topic row.
+fn configured_topic_row(topic: ConfiguredTopicSetup) -> CreatableTopic {
+    topics::creatable_topic()
+        .name(topic.name)
+        .partitions(topic.partitions)
+        .replicas(topic.replicas)
+        .configs(topic.configs)
+        .call()
 }
 
 /// The `ApiVersions` API key, whose response header is v0 at every version.
@@ -327,7 +325,7 @@ pub async fn create_topic_as_super_user(
 ) {
     let setup = AutomaticTopicSetup { client_id, topic };
     let name = setup.topic.name.clone();
-    let request = topics::create_topic_request(configured_topic_request!(setup.topic));
+    let request = topics::create_topic_request(configured_topic_row(setup.topic));
     let response: krabka_protocol::owned::create_topics_response::CreateTopicsResponse =
         request_as_plain(addr, &request, &PlainRequestSetup {
             authentication: PlainAuthenticationSetup::admin(setup.client_id),
@@ -1018,7 +1016,7 @@ pub async fn create_configured_topic_sasl(
     };
     create_topic_sasl(
         addr,
-        configured_topic_request!(setup.topic),
+        configured_topic_row(setup.topic),
         &PlainAuthenticationSetup {
             client_id: setup.client_id,
             user: setup.user,
@@ -1065,12 +1063,8 @@ pub async fn create_automatic_topic_plaintext(
     #[builder(default)] topic: ConfiguredTopicSetup,
 ) {
     let setup = AutomaticTopicSetup { client_id, topic };
-    create_topic_on_fresh_connection(
-        addr,
-        setup.client_id,
-        configured_topic_request!(setup.topic),
-    )
-    .await;
+    create_topic_on_fresh_connection(addr, setup.client_id, configured_topic_row(setup.topic))
+        .await;
 }
 
 #[derive(krabka_macros::FieldDefaults)]
@@ -1168,10 +1162,5 @@ pub async fn create_configured_topic_plaintext(
     #[builder(default)] topic: ConfiguredTopicSetup,
 ) {
     let setup = AutomaticTopicSetup { client_id, topic };
-    create_topic_plaintext(
-        addr,
-        setup.client_id,
-        configured_topic_request!(setup.topic),
-    )
-    .await;
+    create_topic_plaintext(addr, setup.client_id, configured_topic_row(setup.topic)).await;
 }

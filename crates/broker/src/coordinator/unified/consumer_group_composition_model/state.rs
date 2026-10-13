@@ -9,7 +9,7 @@ use {
     crate::coordinator::unified::{
         INITIAL_GROUP_EPOCH,
         actor::reconciliation_model_support::{
-            MemberHeartbeat, assert_member_epochs, owned_to_vec, parts_of,
+            MemberHeartbeat, MemberPartitions, owned_to_vec, parts_of,
         },
         consumer_state::{GroupState, MemberState},
         persistence_next_gen::MemberAssignmentState,
@@ -18,12 +18,24 @@ use {
     std::collections::BTreeMap,
 };
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(super) struct AssignmentEpoch {
+    pub(super) partition: i32,
+    pub(super) epoch: i32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(super) struct CommittedPartitionOffset {
+    pub(super) partition: i32,
+    pub(super) offset: Offset,
+}
+
 #[krabka_macros::reconciliation_fields(member)]
 #[derive(Clone, PartialEq, Eq, Hash, Debug, krabka_macros::ReconciliationMember)]
 pub(super) struct MemberProj {
     /// `(partition, assignment epoch)` of every held partition, sorted.
     #[reconciliation(extra)]
-    pub(super) assignment_epochs: Vec<(i32, i32)>,
+    pub(super) assignment_epochs: Vec<AssignmentEpoch>,
     /// The member's sorted target assignment.
     pub(super) target: Vec<i32>,
 }
@@ -35,7 +47,7 @@ pub(super) struct CgcState {
     pub(super) members: Vec<MemberProj>,
     /// Modeled per-partition committed offsets, sorted.
     #[reconciliation(extra)]
-    pub(super) committed: Vec<(i32, Offset)>,
+    pub(super) committed: Vec<CommittedPartitionOffset>,
 }
 
 pub(super) fn member<'a>(state: &'a CgcState, id: &str) -> Option<&'a MemberProj> {
@@ -66,12 +78,16 @@ pub(super) enum CgcAction {
 }
 
 pub(super) fn committed_map(s: &CgcState) -> BTreeMap<i32, Offset> {
-    s.committed.iter().copied().collect()
+    let mut result = BTreeMap::new();
+    for row in &s.committed {
+        result.insert(row.partition, row.offset);
+    }
+    result
 }
 
 pub(super) fn committed_of(s: &CgcState, part: i32) -> Offset {
     s.committed
         .iter()
-        .find(|(p, _)| *p == part)
-        .map_or(Offset(0), |(_, o)| *o)
+        .find(|row| row.partition == part)
+        .map_or(Offset(0), |row| row.offset)
 }

@@ -35,7 +35,9 @@ mod share_loads {
 
     #[derive(Debug, Default, krabka_macros::ScheduledLoads)]
     #[scheduled_loads(failure_message = "__share_group_state load task failed")]
-    pub(super) struct Loads(pub(super) Vec<JoinHandle<()>>);
+    pub(super) struct Loads {
+        pub(super) tasks: Vec<JoinHandle<()>>,
+    }
 }
 
 mod transaction_loads {
@@ -43,15 +45,19 @@ mod transaction_loads {
 
     #[derive(Debug, Default, krabka_macros::ScheduledLoads)]
     #[scheduled_loads(failure_message = "__transaction_state load task failed")]
-    pub(super) struct Loads(pub(super) Vec<JoinHandle<()>>);
+    pub(super) struct Loads {
+        pub(super) tasks: Vec<JoinHandle<()>>,
+    }
 }
 
 #[derive(Clone)]
-struct LogOutput(Arc<Mutex<Vec<u8>>>);
+struct LogOutput {
+    bytes: Arc<Mutex<Vec<u8>>>,
+}
 
 impl Write for LogOutput {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
+        self.bytes.lock().unwrap().extend_from_slice(bytes);
         Ok(bytes.len())
     }
 
@@ -60,40 +66,53 @@ impl Write for LogOutput {
 
 #[tokio::test(flavor = "current_thread")]
 async fn finished_forwards_handles_once_and_warns_at_each_declarations_target() {
+    struct ExpectedWarning<'a> {
+        line: &'a str,
+        module: &'static str,
+        message: &'static str,
+    }
     let bytes = Arc::new(Mutex::new(Vec::new()));
-    let output = LogOutput(Arc::clone(&bytes));
+    let output = LogOutput {
+        bytes: Arc::clone(&bytes),
+    };
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
         .with_writer(move || output.clone())
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
-    assert!(share_loads::Loads::default().0.is_empty());
+    assert!(share_loads::Loads::default().tasks.is_empty());
     let task = tokio::spawn(pending::<()>());
     task.abort();
-    share_loads::Loads(vec![task]).finished().await;
+    share_loads::Loads { tasks: vec![task] }.finished().await;
     let task = tokio::spawn(pending::<()>());
     task.abort();
-    transaction_loads::Loads(vec![task]).finished().await;
+    transaction_loads::Loads { tasks: vec![task] }
+        .finished()
+        .await;
     assert!(FINISH_CALLS.load(Ordering::SeqCst) == 2);
     let captured = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
     let lines: Vec<_> = captured.lines().collect();
     assert!(lines.len() == 2);
-    for (line, module, message) in [
-        (
-            lines[0],
-            "share_loads",
-            "__share_group_state load task failed",
-        ),
-        (
-            lines[1],
-            "transaction_loads",
-            "__transaction_state load task failed",
-        ),
+    for expected in [
+        ExpectedWarning {
+            line: lines[0],
+            module: "share_loads",
+            message: "__share_group_state load task failed",
+        },
+        ExpectedWarning {
+            line: lines[1],
+            module: "transaction_loads",
+            message: "__transaction_state load task failed",
+        },
     ] {
-        assert!(line.contains("WARN"));
-        assert!(line.contains(&format!("{}::{module}:", module_path!())));
-        assert!(line.contains(message));
-        assert!(line.contains("error=") && line.contains("cancelled"));
+        assert!(expected.line.contains("WARN"));
+        assert!(
+            expected
+                .line
+                .contains(&format!("{}::{}:", module_path!(), expected.module))
+        );
+        assert!(expected.line.contains(expected.message));
+        assert!(expected.line.contains("error=") && expected.line.contains("cancelled"));
     }
 }

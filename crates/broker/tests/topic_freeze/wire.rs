@@ -18,7 +18,7 @@ use {
             topics::{creatable_topic, create_topic_request},
         },
     },
-    assert2::assert,
+    assert2::{assert, check},
     bytes::Bytes,
     krabka_broker::{BrokerHandle, codes},
     krabka_client_core::Client,
@@ -186,23 +186,17 @@ pub(super) fn refused(
     }
 }
 
-// Keep expected outcomes and optional scenario labels at the assertion site.
-macro_rules! check_produce {
-    ($broker:expr, $client:expr; $($topic:expr, $topic_id:expr => $expected:expr),+; $context:tt) => {
-        $( $crate::wire::check_produce!($broker, $client, $topic, $topic_id => $expected, $context); )+
-    };
-    ($broker:expr, $client:expr; $($topic:expr, $topic_id:expr => $expected:expr),+ $(,)?) => {
-        $( $crate::wire::check_produce!($broker, $client, $topic, $topic_id => $expected); )+
-    };
-
-    ($broker:expr, $client:expr, $topic:expr, $topic_id:expr => $expected:expr $(, $($context:tt)*)?) => {
-        ::assert2::check!(
-            $crate::wire::produce_outcome($broker, $client, $topic, $topic_id).await == $expected
-            $(, $($context)*)?
-        )
-    };
+/// Check that the unfrozen control still accepts a record before shutting down.
+pub(super) async fn finish_with_control_record(
+    broker: BrokerHandle,
+    client: &Client,
+    control: WireUuid,
+) {
+    check!(produce_outcome(&broker, client, CONTROL, control).await == accepted(1));
+    broker.shutdown().await;
 }
-pub(super) use check_produce;
+
+// Keep expected outcomes and optional scenario labels at the assertion site.
 
 /// Create a topic with one accepted record, freeze it and verify refusal.
 pub(super) async fn frozen_topic_with_record(
@@ -212,7 +206,7 @@ pub(super) async fn frozen_topic_with_record(
     reason: &str,
 ) -> (WireUuid, WireUuid) {
     let (frozen, control) = create_controlled_topic(broker, client, topic).await;
-    check_produce!(broker, client, topic, frozen => accepted(1));
+    check!(produce_outcome(broker, client, topic, frozen).await == accepted(1));
     freeze_scope(
         client,
         krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL,
@@ -220,6 +214,9 @@ pub(super) async fn frozen_topic_with_record(
         reason,
     )
     .await;
-    check_produce!(broker, client, topic, frozen => refused("literal", topic, reason, 1));
+    check!(
+        produce_outcome(broker, client, topic, frozen).await
+            == refused("literal", topic, reason, 1)
+    );
     (frozen, control)
 }

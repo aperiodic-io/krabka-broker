@@ -2,6 +2,10 @@
 //! group protocol. It routes the request to the per-group actor in
 //! `GroupCoordinator`.
 
+#[cfg(test)]
+use crate::handlers::test_support::LiveBrokerFixture;
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::Broker,
@@ -237,9 +241,9 @@ mod tests {
             handlers::{
                 encode_response,
                 group_heartbeat_test_support::{
-                    GroupFeatureLevel, acl_authorizer, alice_peer, check_group_read_denied,
-                    describe_acl, grant_group_read, group_read_acl, image_with_group_version,
-                    set_group_version,
+                    GroupFeatureLevel, RequestIdentity, acl_authorizer, alice_peer,
+                    check_group_read_denied, describe_acl, grant_group_read, group_read_acl,
+                    image_with_group_version, set_group_version,
                     subscribed_names_describe_denied_table as subscribed_names_describe_denied_cases,
                     topic_with_partitions, versioned_group_broker,
                 },
@@ -514,8 +518,11 @@ mod tests {
     #[tokio::test]
     async fn handle_group_read_denied_preserves_error_response() {
         let authorizer = acl_authorizer();
-        let (broker_handle, _dir, broker) =
-            versioned_group_broker(Arc::new(authorizer), GroupFeatureLevel(1)).await;
+        let LiveBrokerFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+        } = versioned_group_broker(Arc::new(authorizer), GroupFeatureLevel(1)).await;
         check_denied_group_response(&broker, KafkaErrorCode(codes::GROUP_AUTHORIZATION_FAILED))
             .await;
 
@@ -530,7 +537,10 @@ mod tests {
     #[tokio::test]
     async fn handle_protocol_gate_precedes_group_acl() {
         let authorizer = acl_authorizer();
-        let (broker_handle, _dir) = start_group_broker(Arc::new(authorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_group_broker(Arc::new(authorizer)).await;
         let broker = broker_handle.broker_arc_for_test();
         // `start_broker`'s bootstrap seeds every feature at its release
         // default for a modern metadata.version, which finalizes
@@ -544,8 +554,11 @@ mod tests {
 
     #[tokio::test]
     async fn handle_persists_request_client_identity() {
-        let (broker_handle, _dir, broker) =
-            versioned_group_broker(Arc::new(AllowAllAuthorizer), GroupFeatureLevel(1)).await;
+        let LiveBrokerFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+        } = versioned_group_broker(Arc::new(AllowAllAuthorizer), GroupFeatureLevel(1)).await;
         krabka_macros::request_test_identity! {
             bind(principal, peer, ctx);
             user ["ANONYMOUS"];
@@ -594,8 +607,11 @@ mod tests {
     /// and compares the whole response; `None` expects an accepted join.
     #[tokio::test]
     async fn handle_creates_consumer_group_only_on_join_as_kafka_does() {
-        let (broker_handle, _dir, broker) =
-            versioned_group_broker(Arc::new(AllowAllAuthorizer), GroupFeatureLevel(1)).await;
+        let LiveBrokerFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+        } = versioned_group_broker(Arc::new(AllowAllAuthorizer), GroupFeatureLevel(1)).await;
         let coordinator = &broker.group_coordinator;
         coordinator.mark_share("share");
         coordinator.mark_streams("streams");
@@ -697,10 +713,13 @@ mod tests {
     #[tokio::test]
     async fn handle_subscribed_name_describe_denied_refuses_whole_heartbeat_no_member_created() {
         // Deliberately no Describe grant for "topic-a".
-        let (broker_handle, _dir, broker) =
-            versioned_group_broker(Arc::new(acl_authorizer()), GroupFeatureLevel(1)).await;
+        let LiveBrokerFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+        } = versioned_group_broker(Arc::new(acl_authorizer()), GroupFeatureLevel(1)).await;
         grant_group_read(&broker, "g").await;
-        let (principal, peer) = alice_peer();
+        let RequestIdentity { principal, peer } = alice_peer();
         let ctx = request_context(&principal, &peer, "c");
         let req = subscription_request("g", "", 0);
 
@@ -731,8 +750,11 @@ mod tests {
     /// through the whole handler → actor → reconciler path.
     #[tokio::test]
     async fn handle_regex_subscription_assigns_only_describe_authorized_topics() {
-        let (broker_handle, _dir, broker) =
-            versioned_group_broker(Arc::new(acl_authorizer()), GroupFeatureLevel(1)).await;
+        let LiveBrokerFixture {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+        } = versioned_group_broker(Arc::new(acl_authorizer()), GroupFeatureLevel(1)).await;
         let allowed_id = uuid::Uuid::from_u128(1);
         let denied_id = uuid::Uuid::from_u128(2);
         let node = krabka_raft::NodeId(broker_handle.node_id());
@@ -756,7 +778,7 @@ mod tests {
             .submit_change(records)
             .await
             .expect("grant ACLs and create topics");
-        let (principal, peer) = alice_peer();
+        let RequestIdentity { principal, peer } = alice_peer();
         let ctx = request_context(&principal, &peer, "c");
         let req = ConsumerGroupHeartbeatRequest {
             group_id: "g".into(),
@@ -825,7 +847,7 @@ mod tests {
         /// Sends one heartbeat as `alice`, with `regex` only when it is the
         /// join or when the pattern changes, as the Java client does.
         async fn heartbeat(&mut self, regex: Option<&str>) {
-            let (principal, peer) = alice_peer();
+            let RequestIdentity { principal, peer } = alice_peer();
             let ctx = request_context(&principal, &peer, "c");
             let joining = self.member_epoch == 0;
             let req = ConsumerGroupHeartbeatRequest {
@@ -885,8 +907,11 @@ mod tests {
     /// A broker whose group `g` and topics `topics` (each with two partitions
     /// and a `Describe` grant for alice) exist, and the broker's handle.
     async fn broker_with_described_topics(topics: &[DescribedTopic<'_>]) -> StartedBroker {
-        let (broker_handle, dir, broker) =
-            versioned_group_broker(Arc::new(acl_authorizer()), GroupFeatureLevel(1)).await;
+        let LiveBrokerFixture {
+            handle: broker_handle,
+            directory: dir,
+            broker,
+        } = versioned_group_broker(Arc::new(acl_authorizer()), GroupFeatureLevel(1)).await;
         let node = krabka_raft::NodeId(broker_handle.node_id());
         let mut records = vec![group_read_acl("g")];
         for DescribedTopic { name, id } in topics {
@@ -910,32 +935,49 @@ mod tests {
         }
     }
 
+    /// A joined member and the broker resources kept until shutdown.
+    struct JoinedRegexMember {
+        handle: BrokerHandle,
+        directory: tempfile::TempDir,
+        broker: Arc<Broker>,
+        member: RegexMember,
+    }
+
     /// Kafka refreshes the resolution of a group's regular expressions when the
     /// metadata image has new topics (`lastMetadataImageWithNewTopics`), at the
     /// next heartbeat of any member. A Java client sends its pattern only when
     /// it joins, so a topic created after the join reaches the member only
     /// through that refresh.
-    macro_rules! joined_regex_member {
-        (($handle:ident, $directory:ident, $broker:ident, $member:ident), $topics:expr) => {
-            let StartedBroker {
-                handle: $handle,
-                dir: $directory,
-            } = broker_with_described_topics($topics).await;
-            let $broker = $handle.broker_arc_for_test();
-            let mut $member = RegexMember::new($broker.clone(), "m1");
-            $member.heartbeat(Some("^orders-.*")).await;
-        };
+    async fn joined_regex_member(topics: &[DescribedTopic<'_>]) -> JoinedRegexMember {
+        let StartedBroker {
+            handle,
+            dir: directory,
+        } = broker_with_described_topics(topics).await;
+        let broker = handle.broker_arc_for_test();
+        let mut member = RegexMember::new(broker.clone(), "m1");
+        member.heartbeat(Some("^orders-.*")).await;
+        JoinedRegexMember {
+            handle,
+            directory,
+            broker,
+            member,
+        }
     }
-
     #[tokio::test]
     async fn a_topic_created_after_the_join_is_assigned_to_a_member_that_never_resends_its_pattern()
     {
         let first = uuid::Uuid::from_u128(1);
         let second = uuid::Uuid::from_u128(2);
-        joined_regex_member!((broker_handle, _dir, broker, member), &[DescribedTopic {
+        let JoinedRegexMember {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+            mut member,
+        } = joined_regex_member(&[DescribedTopic {
             name: "orders-eu",
-            id: first
-        }]);
+            id: first,
+        }])
+        .await;
         member.heartbeat_until_holding(&[first]).await;
 
         let node = krabka_raft::NodeId(broker_handle.node_id());
@@ -964,16 +1006,22 @@ mod tests {
     async fn revoking_describe_on_a_resolved_topic_removes_it_at_a_later_heartbeat() {
         let allowed = uuid::Uuid::from_u128(1);
         let revoked = uuid::Uuid::from_u128(2);
-        joined_regex_member!((broker_handle, _dir, broker, member), &[
+        let JoinedRegexMember {
+            handle: broker_handle,
+            directory: _dir,
+            broker,
+            mut member,
+        } = joined_regex_member(&[
             DescribedTopic {
                 name: "orders-eu",
-                id: allowed
+                id: allowed,
             },
             DescribedTopic {
                 name: "orders-us",
-                id: revoked
-            }
-        ]);
+                id: revoked,
+            },
+        ])
+        .await;
         member.heartbeat_until_holding(&[allowed, revoked]).await;
 
         broker

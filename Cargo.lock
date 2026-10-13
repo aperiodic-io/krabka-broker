@@ -3625,6 +3625,8 @@ dependencies = [
  "assert2",
  "bytes",
  "clap",
+ "futures-util",
+ "krabka-protocol",
  "krabka-units",
  "moxy",
  "prometheus-client",

@@ -14,7 +14,7 @@ use {
 async fn completed_remote_delete_uses_a_representable_floor() {
     for (end, expected) in [(i64::MAX - 1, Some(Offset(i64::MAX))), (i64::MAX, None)] {
         let dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) = local_backends(dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(dir.path());
         let id = RemoteLogSegmentId::new(tp(), Uuid::new_v4());
         let md = RemoteLogSegmentMetadata::new(
             id.clone(),

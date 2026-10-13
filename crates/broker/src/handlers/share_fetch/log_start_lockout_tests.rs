@@ -16,6 +16,8 @@
 //! record lock limit that bounds the window, and a partition whose log read
 //! fails beside a healthy one.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AllowAllAuthorizer,
@@ -71,7 +73,7 @@ fn acquired_run(partition_index: i32, first_offset: i64, last_offset: i64) -> Pa
 const DELETE_RECORDS_VERSION: i16 = 2;
 
 async fn start() -> StartedBroker {
-    let (broker, dir) =
+    let HandlerStartedBroker { broker, dir } =
         start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
     StartedBroker { broker, dir }
 }
@@ -453,7 +455,7 @@ async fn a_partition_failure_does_not_affect_other_partitions(failure: IsolatedP
 /// records each time.
 #[tokio::test]
 async fn a_member_that_does_not_acknowledge_gets_no_more_than_the_record_lock_limit() {
-    let (broker, _dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker { broker, dir: _dir } = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.share_group.max_inflight_records = 100;
     })

@@ -1,6 +1,5 @@
 //! Tests for finding deleted topics and for tombstoning their offsets in every
 //! owned group.
-
 use {
     super::{DeletedTopic, GroupDeletedOffsets, deleted_topics, on_topics_deleted},
     crate::{
@@ -14,7 +13,8 @@ use {
             },
         },
         handlers::{
-            offset_commit::handle as offset_commit_handle, test_support::configured_topic_request,
+            offset_commit::handle as offset_commit_handle,
+            test_support::{StartedBroker, configured_topic_request},
         },
         test_support::start_broker_with_authorizer_no_audit,
     },
@@ -200,7 +200,10 @@ async fn a_recreated_topic_does_not_inherit_the_old_committed_offsets() {
         fetch_offset(broker, GROUP, TOPIC, FETCH_VERSION).await
     }
 
-    let (handle, _dir) = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
     handle.wait_until_group_coordinator_ready().await;
     let broker = handle.broker_arc_for_test();
     let client = krabka_client_core::Client::builder()

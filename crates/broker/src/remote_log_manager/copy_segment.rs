@@ -324,8 +324,8 @@ mod tests {
         crate::remote_log_manager::{
             copy_eligible,
             test_support::{
-                self as fixtures, FakeWormArchive, copy_exports, local_backends,
-                missing_remote_reads, rolled_log, synth_export, tier, tp,
+                self as fixtures, FakeWormArchive, copy_exports, local_backends, rolled_log,
+                synth_export, tier, tp,
             },
         },
         assert2::{assert, check},
@@ -342,9 +342,9 @@ mod tests {
     /// use it to exercise the failure rollback path.
     struct AlwaysFailRsm;
 
-    impl RemoteStorageManager for AlwaysFailRsm {
-        missing_remote_reads!(delete_ok);
+    #[krabka_macros::missing_remote_reads(delete_ok)]
 
+    impl RemoteStorageManager for AlwaysFailRsm {
         fn copy_log_segment_data(
             &self,
             _metadata: &RemoteLogSegmentMetadata,
@@ -357,9 +357,9 @@ mod tests {
     /// Returns caller-selected metadata without touching storage.
     struct ReturningRsm(Option<CustomMetadata>);
 
-    impl RemoteStorageManager for ReturningRsm {
-        missing_remote_reads!(delete_ok);
+    #[krabka_macros::missing_remote_reads(delete_ok)]
 
+    impl RemoteStorageManager for ReturningRsm {
         fn copy_log_segment_data(
             &self,
             _metadata: &RemoteLogSegmentMetadata,
@@ -377,9 +377,9 @@ mod tests {
         seen: Mutex<Vec<RemoteLogSegmentMetadata>>,
     }
 
-    impl RemoteStorageManager for CapturingRsm {
-        missing_remote_reads!(delete_ok);
+    #[krabka_macros::missing_remote_reads(delete_ok)]
 
+    impl RemoteStorageManager for CapturingRsm {
         fn copy_log_segment_data(
             &self,
             metadata: &RemoteLogSegmentMetadata,
@@ -417,7 +417,7 @@ mod tests {
     #[tokio::test]
     async fn fallback_leader_epoch_when_export_has_none() {
         let remote_dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) = local_backends(remote_dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
 
         // Hand-build an export with no leader epochs but real files on disk.
         let src = tempfile::tempdir().unwrap();
@@ -604,7 +604,11 @@ mod tests {
             failed,
         } in cases
         {
-            fixtures::owned_tier_resources!(rlmm, metrics, index_cache);
+            let fixtures::OwnedTierResources {
+                rlmm,
+                metrics,
+                index_cache,
+            } = fixtures::owned_tier_resources();
             let tier = fixtures::configured_tier()
                 .rsm(&rsm)
                 .rlmm(&rlmm)

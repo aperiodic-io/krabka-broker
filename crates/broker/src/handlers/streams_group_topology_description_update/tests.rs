@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::*,
     crate::test_support::{ControllerPeerAllowed, GrantsInPrincipalName, start_broker_with},
@@ -98,7 +100,10 @@ async fn handle_answers_as_a_trunk_broker_without_a_plugin() {
         ),
     ];
     for (case, enable, streams_version, grants, want) in rows {
-        let (broker_handle, _dir) = start_broker_with(|cfg| {
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_with(|cfg| {
             cfg.streams_group.enable = enable;
             cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
         })
@@ -128,7 +133,10 @@ async fn handle_answers_as_a_trunk_broker_without_a_plugin() {
 async fn handle_refuses_what_a_trunk_broker_with_a_plugin_refuses() {
     use crate::coordinator::unified::streams::description::TopologyDescriptionPlugin;
 
-    let (broker_handle, _dir) = start_broker_with(|cfg| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_with(|cfg| {
         cfg.streams_group.topology_description_plugin = TopologyDescriptionPlugin::InMemory;
         cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
     })

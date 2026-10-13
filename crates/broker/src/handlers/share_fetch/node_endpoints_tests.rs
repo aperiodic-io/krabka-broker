@@ -8,6 +8,8 @@
 //! leader that no live broker registration backs keeps its id in the hint and
 //! adds no endpoint.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AllowAllAuthorizer,
@@ -59,7 +61,7 @@ const REMOTE: WireUuid = WireUuid([0x22; 16]);
 const ORPHAN: WireUuid = WireUuid([0x77; 16]);
 
 async fn start() -> StartedBroker {
-    let (broker, dir) =
+    let HandlerStartedBroker { broker, dir } =
         start_broker_no_audit_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
     StartedBroker { broker, dir }
 }

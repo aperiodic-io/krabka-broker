@@ -32,21 +32,24 @@ async fn delete_state(
     image: &MetadataImage,
     req: DeleteShareGroupStateRequest,
 ) -> DeleteShareGroupStateResponse {
-    if req.group_id.is_empty() || super::empty_partition_data!(req) {
+    if req.group_id.is_empty()
+        || super::empty_partition_data(&req.topics, |topic| topic.partitions.is_empty())
+    {
         return DeleteShareGroupStateResponse::default();
     }
-    let results = super::state_results!(req, DeleteStateResult, |group_id, topic_id, pd| {
-        let result = coordinator
-            .delete(image, group_id, topic_id, pd.partition)
-            .await;
-        let (error_code, error_message) = super::operation_result(result, "delete");
-        PartitionResult {
-            partition: pd.partition,
-            error_code,
-            error_message,
-            ..Default::default()
-        }
-    });
+    let results =
+        krabka_macros::share_state_results!(req, DeleteStateResult, |group_id, topic_id, pd| {
+            let result = coordinator
+                .delete(image, group_id, topic_id, pd.partition)
+                .await;
+            let verdict = super::operation_result(result, "delete");
+            PartitionResult {
+                partition: pd.partition,
+                error_code: verdict.code,
+                error_message: verdict.message,
+                ..Default::default()
+            }
+        });
 
     DeleteShareGroupStateResponse {
         results,
@@ -60,8 +63,11 @@ mod tests {
         super::*,
         crate::{
             codes,
-            share_coordinator::coordinator::test_support::{
-                Logged, image_with_topic, logged_records, logged_since,
+            share_coordinator::{
+                coordinator::test_support::{
+                    Logged, image_with_topic, logged_records, logged_since,
+                },
+                handlers::test_support::StateResponseSetup,
             },
             test_support::KafkaErrorCode,
         },
@@ -77,15 +83,22 @@ mod tests {
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([31; 16]);
     const UNKNOWN_TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([34; 16]);
 
-    super::super::test_support::request_fixture! {
-        DeleteShareGroupStateRequest, DeleteStateData, PartitionData;
-        fn request(group_id: &str, [topic_id: uuid::Uuid], partitions: &[i32]);
-        topic ProtoUuid(*topic_id.as_bytes()); |partition| {
+    fn request(
+        group_id: &str,
+        topic_id: uuid::Uuid,
+        partitions: &[i32],
+    ) -> DeleteShareGroupStateRequest {
+        krabka_macros::share_state_request! {
+            DeleteShareGroupStateRequest, DeleteStateData;
+            group [group_id];
+            topic [ProtoUuid(*topic_id.as_bytes())];
+            partitions [partitions.iter().map(|&partition| {
             PartitionData { partition, ..Default::default() }
+            }).collect()];
         }
     }
 
-    super::super::test_support::response_fixture!(DeleteShareGroupStateResponse, DeleteStateResult, PartitionResult; keyed);
+    fn response(setup: StateResponseSetup<'_>) -> DeleteShareGroupStateResponse { setup.response() }
 
     /// The whole response and the appended records for each request, over a
     /// state for partition 0 only of a two-partition topic, as Kafka's
@@ -100,7 +113,7 @@ mod tests {
                 "a key with state is tombstoned",
                 true,
                 request("g", TOPIC, &[0]),
-                response(StateResponseSetup::default()),
+                response(StateResponseSetup::for_topic(TOPIC)),
                 vec![Logged::Tombstone],
                 false,
             ),
@@ -110,7 +123,7 @@ mod tests {
                 request("g", TOPIC, &[1]),
                 response(StateResponseSetup {
                     partition: PartitionIndex(1),
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 vec![],
                 true,
@@ -123,7 +136,7 @@ mod tests {
                     partition: PartitionIndex(-1),
                     code: KafkaErrorCode(codes::INVALID_REQUEST),
                     message: Some("The partition id cannot be a negative number."),
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 vec![],
                 true,
@@ -136,7 +149,7 @@ mod tests {
                     partition: PartitionIndex(2),
                     code: KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
                     message: unknown,
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 vec![],
                 true,
@@ -149,7 +162,7 @@ mod tests {
                     topic: UNKNOWN_TOPIC,
                     code: KafkaErrorCode(codes::UNKNOWN_TOPIC_OR_PARTITION),
                     message: unknown,
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 vec![],
                 true,
@@ -179,7 +192,7 @@ mod tests {
                     message: Some(
                         "Unable to delete share group state: This is not the correct coordinator.",
                     ),
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 vec![],
                 // The resignation itself drops the in-memory keys.

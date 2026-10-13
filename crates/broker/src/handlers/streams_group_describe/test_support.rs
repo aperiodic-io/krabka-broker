@@ -7,11 +7,13 @@
 //! finalizing `streams.version`, and driving one describe round trip over the
 //! wire encoding -- live here for the same reason.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::handle,
     crate::{
         authorizer::Authorizer,
-        broker::{Broker, BrokerHandle},
+        broker::Broker,
         codes::GROUP_ID_NOT_FOUND,
         coordinator::unified::{
             StreamsGroupSeed,
@@ -51,7 +53,7 @@ fn request(group_ids: &[&str]) -> StreamsGroupDescribeRequest {
     }
 }
 
-pub(super) async fn start_broker(streams_enabled: bool) -> (BrokerHandle, tempfile::TempDir) {
+pub(super) async fn start_broker(streams_enabled: bool) -> HandlerStartedBroker {
     start_group_broker_with(|cfg| {
         cfg.streams_group.enable = streams_enabled;
     })
@@ -63,7 +65,7 @@ pub(super) async fn start_broker(streams_enabled: bool) -> (BrokerHandle, tempfi
 /// rather than allow everything.
 pub(super) async fn start_broker_with_authorizer(
     authorizer: Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir) {
+) -> HandlerStartedBroker {
     start_group_broker_with(|cfg| {
         cfg.streams_group.enable = true;
         cfg.authorizer = controller_peer_allowed(authorizer);

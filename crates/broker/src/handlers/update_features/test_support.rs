@@ -5,6 +5,8 @@
 //! requests and assert on the same result rows, so the fixtures live in one
 //! module rather than being duplicated per test file.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::answer,
     crate::{
@@ -65,9 +67,7 @@ pub(super) fn context<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> Req
     request_context(principal, peer, "update-features-client")
 }
 
-pub(super) async fn start_broker(
-    authorizer: Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir) {
+pub(super) async fn start_broker(authorizer: Arc<dyn Authorizer>) -> HandlerStartedBroker {
     start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await
 }
 
@@ -75,7 +75,10 @@ pub(super) async fn call_with(
     authorizer: Arc<dyn Authorizer>,
     req: UpdateFeaturesRequest,
 ) -> (UpdateFeaturesResponse, BrokerHandle, tempfile::TempDir) {
-    let (broker_handle, dir) = start_broker(authorizer).await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir,
+    } = start_broker(authorizer).await;
     let resp = call(&broker_handle, req, VERSION).await;
     (resp, broker_handle, dir)
 }

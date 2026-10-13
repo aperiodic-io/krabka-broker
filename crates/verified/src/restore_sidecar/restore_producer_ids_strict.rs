@@ -2,6 +2,7 @@
 use super::{Int, invariant};
 use {
     super::{RestoreAbortedTxn, RestoreSegmentExtent},
+    crate::log_index::{IndexEntry, OffsetEntry, TimeEntry},
     creusot_std::prelude::*,
 };
 
@@ -39,13 +40,13 @@ pub fn restore_index_frontier(segment_base: i64, segment_end: i64) -> Option<i64
 #[ensures(result == (relative_offset@ <= max_relative@
     && position@ < log_bytes@
     && match previous {
-        Some((previous_relative, previous_position)) =>
+        Some(IndexEntry { key: previous_relative, coordinate: previous_position }) =>
             previous_relative@ < relative_offset@ && previous_position@ < position@,
         None => true,
     }))]
 #[must_use]
 pub fn restore_offset_index_entry_valid(
-    previous: Option<(u32, u32)>,
+    previous: Option<OffsetEntry>,
     relative_offset: u32,
     position: u32,
     max_relative: i64,
@@ -54,9 +55,10 @@ pub fn restore_offset_index_entry_valid(
     i64::from(relative_offset) <= max_relative
         && u64::from(position) < log_bytes
         && match previous {
-            Some((previous_relative, previous_position)) => {
-                previous_relative < relative_offset && previous_position < position
-            }
+            Some(IndexEntry {
+                key: previous_relative,
+                coordinate: previous_position,
+            }) => previous_relative < relative_offset && previous_position < position,
             None => true,
         }
 }
@@ -72,22 +74,23 @@ pub fn restore_offset_index_entry_valid(
 /// or a separate semantic check against complete decoded records.
 #[ensures(result == (relative_offset@ <= max_relative@
     && match previous {
-        Some((previous_timestamp, previous_relative)) =>
+        Some(IndexEntry { key: previous_timestamp, coordinate: previous_relative }) =>
             previous_timestamp@ <= timestamp@ && previous_relative@ < relative_offset@,
         None => true,
     }))]
 #[must_use]
 pub fn restore_time_index_entry_valid(
-    previous: Option<(i64, u32)>,
+    previous: Option<TimeEntry>,
     timestamp: i64,
     relative_offset: u32,
     max_relative: i64,
 ) -> bool {
     i64::from(relative_offset) <= max_relative
         && match previous {
-            Some((previous_timestamp, previous_relative)) => {
-                previous_timestamp <= timestamp && previous_relative < relative_offset
-            }
+            Some(IndexEntry {
+                key: previous_timestamp,
+                coordinate: previous_relative,
+            }) => previous_timestamp <= timestamp && previous_relative < relative_offset,
             None => true,
         }
 }

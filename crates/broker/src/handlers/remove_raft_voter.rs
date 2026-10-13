@@ -90,13 +90,13 @@ mod tests {
         }
     }
 
-    crate::handlers::raft_voter::test_dispatch!(
-        81,
-        RemoveRaftVoterRequest,
-        RemoveRaftVoterResponse
-    );
-
-    use {super::*, crate::test_support::start_broker_with_authorizer as start_broker};
+    use {
+        super::*,
+        crate::handlers::{
+            raft_voter::{VoterCase, check_voter_case},
+            test_support::voter_cluster_id,
+        },
+    };
 
     /// Decode and encode round trip at the minimum and maximum versions.
     #[test]
@@ -130,21 +130,38 @@ mod tests {
     #[tokio::test]
     async fn handle_denies_cluster_alter_without_calling_reconfig() {
         let version = krabka_protocol::owned::remove_raft_voter_response::MAX_VERSION;
-        crate::handlers::raft_voter::check_denied_reconfiguration!(
-            (broker_handle, _dir, broker, ctx, resp),
+        check_voter_case(
+            VoterCase::Denied,
+            81,
             version,
-            "remove-raft-voter denied"
-        );
+            |_| request(2),
+            || RemoveRaftVoterResponse {
+                error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
+                error_message: Some("remove-raft-voter denied".into()),
+                ..Default::default()
+            },
+        )
+        .await;
     }
 
     #[tokio::test]
     async fn handle_rejects_negative_voter_id_before_reconfig() {
         let version = krabka_protocol::owned::remove_raft_voter_response::MAX_VERSION;
-        crate::handlers::raft_voter::check_invalid_voter!(
-            (broker_handle, _dir, broker, ctx, request, resp),
+        check_voter_case(
+            VoterCase::Invalid,
+            81,
             version,
-            RemoveRaftVoterResponse,
-            "Remove voter request didn't include a valid voter"
-        );
+            |broker| {
+                let mut request = request(-7);
+                request.cluster_id = Some(voter_cluster_id(broker));
+                request
+            },
+            || RemoveRaftVoterResponse {
+                error_code: codes::INVALID_REQUEST,
+                error_message: Some("Remove voter request didn't include a valid voter".into()),
+                ..Default::default()
+            },
+        )
+        .await;
     }
 }

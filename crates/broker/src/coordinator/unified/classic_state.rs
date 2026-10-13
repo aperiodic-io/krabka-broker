@@ -25,26 +25,28 @@ pub use self::{
     protocol::select_protocol,
 };
 
-super::persistence::committed_offset_type! {
-    /// A committed offset entry, keyed by `(topic, partition)` in
-    /// [`Group::committed_offsets`].
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct OffsetEntry {
-        /// KIP-211: the absolute expiry a v2-v4 `OffsetCommit` asked for through
-        /// `retention_time_ms`. `None` means the entry expires on the broker's
-        /// `offsets.retention.minutes` instead.
-        expire_timestamp_ms,
-        /// The topic id the metadata image held for the topic name when the
-        /// offset was committed, as Kafka's `OffsetAndMetadata.topicId` does. The
-        /// `OffsetCommitValue` record carries it from version 4, so a replayed or
-        /// transaction-published offset keeps it too. `None` is Kafka's zero id:
-        /// the image did not know the topic, or the record predates version 4.
-        /// A topic deletion removes an offset whose id is `None` or the deleted
-        /// id, so an offset committed to a topic created again with the same name
-        /// survives the deletion of the old one, and an `OffsetFetch` that names
-        /// another topic id does not see it.
-        topic_id,
-    }
+/// A committed offset entry, keyed by `(topic, partition)` in
+/// [`Group::committed_offsets`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OffsetEntry {
+    pub offset: krabka_log::Offset,
+    pub leader_epoch: i32,
+    pub metadata: String,
+    pub commit_timestamp_ms: i64,
+    /// KIP-211: the absolute expiry a v2-v4 `OffsetCommit` asked for through
+    /// `retention_time_ms`. `None` means the entry expires on the broker's
+    /// `offsets.retention.minutes` instead.
+    pub expire_timestamp_ms: Option<i64>,
+    /// The topic id the metadata image held for the topic name when the
+    /// offset was committed, as Kafka's `OffsetAndMetadata.topicId` does. The
+    /// `OffsetCommitValue` record carries it from version 4, so a replayed or
+    /// transaction-published offset keeps it too. `None` is Kafka's zero id:
+    /// the image did not know the topic, or the record predates version 4.
+    /// A topic deletion removes an offset whose id is `None` or the deleted
+    /// id, so an offset committed to a topic created again with the same name
+    /// survives the deletion of the old one, and an `OffsetFetch` that names
+    /// another topic id does not see it.
+    pub topic_id: Option<uuid::Uuid>,
 }
 
 impl OffsetEntry {

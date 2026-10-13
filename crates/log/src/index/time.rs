@@ -36,7 +36,7 @@ pub struct TimeIndexEntry {
 pub struct TimeIndex {
     file: File,
     io: std::sync::Arc<dyn LogIo>,
-    entries: Vec<(i64, u32)>,
+    entries: Vec<IndexEntry<i64, u32>>,
 }
 
 impl TimeIndex {
@@ -46,10 +46,7 @@ impl TimeIndex {
     /// order. An empty index compares against `NO_TIMESTAMP` (`-1`), so a run
     /// of batches without timestamps leaves it empty.
     pub fn maybe_append(&mut self, timestamp: i64, relative_offset: u32) -> Result<(), LogError> {
-        let newest = self
-            .entries
-            .last()
-            .map_or(NO_TIMESTAMP, |&(newest, _)| newest);
+        let newest = self.entries.last().map_or(NO_TIMESTAMP, |entry| entry.key);
         if timestamp > newest {
             self.append(timestamp, relative_offset)?;
         }
@@ -97,12 +94,10 @@ impl TimeIndex {
     /// `max_timestamp` from.
     #[must_use]
     pub fn last_entry(&self) -> Option<TimeIndexEntry> {
-        self.entries
-            .last()
-            .map(|&(timestamp, relative_offset)| TimeIndexEntry {
-                timestamp,
-                relative_offset,
-            })
+        self.entries.last().map(|entry| TimeIndexEntry {
+            timestamp: entry.key,
+            relative_offset: entry.coordinate,
+        })
     }
 }
 
@@ -117,7 +112,7 @@ mod time_tests {
         assert2::check,
     };
 
-    seed_index_fixture!(TimeIndex, i64);
+    krabka_macros::index_seed_helpers!(TimeIndex, i64);
 
     /// The time index truncates on relative offset, with the same exclusive
     /// bound and the same file-length obligation.
@@ -160,30 +155,56 @@ mod time_tests {
     /// order.
     #[test]
     fn maybe_append_takes_only_strictly_newer_timestamps() {
+        struct AppendCase {
+            label: &'static str,
+            existing: Vec<IndexSeed<i64>>,
+            appended: IndexEntry<i64, u32>,
+            expected: Vec<IndexEntry<i64, u32>>,
+        }
         let seed = |key, coordinate| IndexSeed { key, coordinate };
-        for (label, existing, appended, want) in [
-            ("no timestamp on an empty index", vec![], (-1, 0), vec![]),
-            ("first timestamp", vec![], (0, 0), vec![(0, 0)]),
-            (
-                "same timestamp, later offset",
-                vec![seed(100, 5)],
-                (100, 9),
-                vec![(100, 5)],
-            ),
-            ("older timestamp", vec![seed(100, 5)], (99, 9), vec![(
-                100, 5,
-            )]),
-            ("newer timestamp", vec![seed(100, 5)], (101, 9), vec![
-                (100, 5),
-                (101, 9),
-            ]),
+        for AppendCase {
+            label,
+            existing,
+            appended,
+            expected: want,
+        } in [
+            AppendCase {
+                label: "no timestamp on an empty index",
+                existing: vec![],
+                appended: IndexEntry::new(-1, 0),
+                expected: vec![],
+            },
+            AppendCase {
+                label: "first timestamp",
+                existing: vec![],
+                appended: IndexEntry::new(0, 0),
+                expected: vec![IndexEntry::new(0, 0)],
+            },
+            AppendCase {
+                label: "same timestamp, later offset",
+                existing: vec![seed(100, 5)],
+                appended: IndexEntry::new(100, 9),
+                expected: vec![IndexEntry::new(100, 5)],
+            },
+            AppendCase {
+                label: "older timestamp",
+                existing: vec![seed(100, 5)],
+                appended: IndexEntry::new(99, 9),
+                expected: vec![IndexEntry::new(100, 5)],
+            },
+            AppendCase {
+                label: "newer timestamp",
+                existing: vec![seed(100, 5)],
+                appended: IndexEntry::new(101, 9),
+                expected: vec![IndexEntry::new(100, 5), IndexEntry::new(101, 9)],
+            },
         ] {
             let IndexFixture {
                 dir: _dir,
                 path,
                 index: mut idx,
             } = populated_index("0.timeindex", &existing);
-            idx.maybe_append(appended.0, appended.1).unwrap();
+            idx.maybe_append(appended.key, appended.coordinate).unwrap();
             check!(idx.entries == want, "case {label}");
             let reopened = TimeIndex::open(&path).unwrap();
             check!(reopened.entries == want, "case {label}: on disk");

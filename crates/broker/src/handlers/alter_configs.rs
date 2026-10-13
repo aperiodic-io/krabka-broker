@@ -55,7 +55,7 @@ use {
                 RESOURCE_TYPE_GROUP, RESOURCE_TYPE_TOPIC,
             },
             encode_response,
-            forward_to_controller::{controller_listener_dispatch, to_active_controller_or_handle},
+            forward_to_controller::to_active_controller_or_handle,
             response_encoding::{ErrorRow as _, ResourceErrorRow},
         },
     },
@@ -99,21 +99,10 @@ krabka_macros::decoded_dispatch! {
         req_bytes: &[u8],
         ctx: &RequestContext<'_>,
     )
-        [request = AlterConfigsRequest, binding(mut req)] -> DispatchResult
+        [request = AlterConfigsRequest, binding(req)] -> DispatchResult
     {
-        controller_listener_dispatch!(
-            broker,
-            ctx,
-            req,
-            version,
-            self::handle,
-            self::request_refusal
-        );
-        let duplicates = duplicate_resource_flags(
-            req.resources
-                .iter()
-                .map(|r| (r.resource_type, r.resource_name.as_str())),
-        );
+        let mut req = krabka_macros::controller_request!(broker, ctx, req, version; self::handle, self::request_refusal);
+        let duplicates = duplicate_resource_flags(req.resources.iter());
         let mut indexed_responses = Vec::new();
         let mut forwarded_indices = Vec::new();
         req.resources = std::mem::take(&mut req.resources)
@@ -232,42 +221,7 @@ fn preprocess_resource(
     )
 }
 
-/// Both config APIs validate and audit resources in request order.
-macro_rules! config_alter_handler {
-    ($request:ty => $($response:ident)::+, $operation:literal, $audit:path, $process:path) => {
-        $crate::handlers::alter_configs::config_alter_handler!($request => $($response)::+, $operation, $audit, $process, false);
-    };
-    ($request:ty => $($response:ident)::+, $operation:literal, $audit:path, $process:path, $audits_in_process:expr) => {
-        pub(crate) async fn handle(
-            broker: &crate::broker::Broker,
-            req: $request,
-            _version: i16,
-            ctx: &crate::handlers::RequestContext<'_>,
-        ) -> Result<$($response)::+, crate::error::BrokerError> {
-            let image = broker.controller.current_image();
-            let mut responses = Vec::with_capacity(req.resources.len());
-            let validate_only = req.validate_only;
-            let mut audited: Vec<krabka_audit::AuditResource> = Vec::new();
-            let duplicate_flags = crate::handlers::alter_configs::duplicate_resource_flags(
-                req.resources.iter().map(|resource| (resource.resource_type, resource.resource_name.as_str())),
-            );
-            for (resource, is_duplicate) in req.resources.into_iter().zip(duplicate_flags) {
-                let named = $audit(&resource, &image);
-                let response = $process(broker, &image, ctx, resource, validate_only, is_duplicate).await;
-                // A dry run stores nothing and cannot claim a changed resource.
-                if response.error_code == crate::codes::NONE && !validate_only && !$audits_in_process {
-                    audited.extend(named);
-                }
-                responses.push(response);
-            }
-            crate::handlers::audit_admin_success(broker.audit_log.as_ref(), ctx, $operation, audited);
-            Ok($($response)::+ { responses, throttle_time_ms: 0, ..Default::default() })
-        }
-    };
-}
-pub(super) use config_alter_handler;
-
-config_alter_handler!(AlterConfigsRequest => AlterConfigsResponse, "AlterConfigs", audit_resources_for, process_resource, true);
+krabka_macros::config_alter_handler! { request = AlterConfigsRequest, response = AlterConfigsResponse, operation = "AlterConfigs", audit = audit_resources_for, process = process_resource, audits_in_process = true }
 
 /// Names the audited resource and the keys the request changes on it.
 ///
@@ -355,19 +309,35 @@ fn changed_config_keys(
     changed.into_iter().collect()
 }
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct ConfigResourceIdentity<'a> {
+    resource_type: i8,
+    resource_name: &'a str,
+}
+
 /// Kafka's `ConfigAdminManager.preprocess` rejects a request that names the
 /// same `(resource_type, resource_name)` pair more than once, on every row
 /// that names it. This computes that flag for each resource in request order
 /// before any of them is authorized or processed, since the duplicate check
 /// has to see the whole request at once.
 ///
-/// `resources` yields each row's `(resource_type, resource_name)` in request
+/// `resources` yields each typed resource in request
 /// order. `AlterConfigs` and `IncrementalAlterConfigs` both call this.
-pub(super) fn duplicate_resource_flags<'a>(
-    resources: impl IntoIterator<Item = (i8, &'a str)>,
-) -> Vec<bool> {
-    let keys: Vec<(i8, &str)> = resources.into_iter().collect();
-    let mut counts: std::collections::HashMap<(i8, &str), usize> = std::collections::HashMap::new();
+pub(super) fn duplicate_resource_flags<'a, Resource>(
+    resources: impl IntoIterator<Item = &'a Resource>,
+) -> Vec<bool>
+where
+    Resource: ResourceErrorRequestResource + 'a,
+{
+    let keys: Vec<_> = resources
+        .into_iter()
+        .map(|resource| ConfigResourceIdentity {
+            resource_type: resource.resource_type(),
+            resource_name: resource.resource_name(),
+        })
+        .collect();
+    let mut counts: std::collections::HashMap<ConfigResourceIdentity<'_>, usize> =
+        std::collections::HashMap::new();
     for key in &keys {
         *counts.entry(*key).or_insert(0) += 1;
     }

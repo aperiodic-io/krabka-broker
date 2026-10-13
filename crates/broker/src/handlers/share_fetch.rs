@@ -119,7 +119,7 @@ pub(crate) use self::{
         AckApplication, Renewal, acknowledgement_batches_are_valid, apply_acknowledgements,
     },
     leader_hint::{current_leader, names_the_leader},
-    request::{ShareRequestIdentity, resolve_share_identity, share_request_identity},
+    request::{ShareRequestIdentity, resolve_share_identity},
 };
 use {
     self::{
@@ -164,20 +164,13 @@ fn renew_fetch_fields_are_zero(req: &ShareFetchRequest) -> bool {
     req.max_bytes == 0 && req.min_bytes == 0 && req.max_records == 0 && req.max_wait_ms == 0
 }
 
+#[krabka_macros::share_request_identity]
 pub(crate) async fn handle(
     broker: &Broker,
     req: ShareFetchRequest,
     version: ApiVersion,
     ctx: &RequestContext<'_>,
 ) -> Result<ShareFetchResponse, BrokerError> {
-    share_request_identity!(
-        (cfg, image, group, settings, lock_timeout_ms, member),
-        ShareFetchResponse,
-        broker,
-        req,
-        ctx
-    );
-
     // KIP-1222: a renew-ack fetch renews locks and fetches no records, so
     // Kafka's `KafkaApis.handleShareFetchRequest` refuses one that asks for
     // records or a wait. The error response carries no message.

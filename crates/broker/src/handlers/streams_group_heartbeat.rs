@@ -11,6 +11,8 @@
 //! KIP-1071 early access, AND the `streams_group.enable` config kill-switch.
 //! BOTH must allow the request.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::Broker,
@@ -349,24 +351,6 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
-    /// Joining streams cases share the active protocol version and Alice's identity.
-    macro_rules! streams_join_fixture {
-        (
-            ($version:ident, $handle:ident, $directory:ident, $broker:ident),($principal:ident, $peer:ident, $context:ident)
-        ) => {
-            let $version = streams_group_heartbeat_response::MAX_VERSION;
-            krabka_macros::broker_test_setup! {
-                bind($handle, $directory, $broker);
-                boot [start_broker(true)];
-            };
-            set_streams_version(&$broker, 1).await;
-            krabka_macros::request_test_identity! {
-                bind($principal, $peer, $context);
-                user ["alice"];
-            };
-        };
-    }
-
     /// The status details of `response`, in order.
     fn status_details(response: &StreamsGroupHeartbeatResponse) -> Vec<String> {
         response
@@ -387,9 +371,11 @@ mod tests {
     /// and no group is created.
     #[tokio::test]
     async fn handle_refuses_a_topology_naming_a_prohibited_or_invalid_topic() {
-        streams_join_fixture!(
-            (version, broker_handle, _dir, broker),
-            (principal, peer, ctx)
+        let version = streams_group_heartbeat_response::MAX_VERSION;
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, principal, peer, ctx);
+            boot [join_ready_broker()];
+            user ["alice"];
         );
 
         // (group id, source topic, the expected error message)
@@ -539,9 +525,11 @@ mod tests {
             actor::GroupKindTag, streams::actor::response::error_resp,
         };
 
-        streams_join_fixture!(
-            (version, broker_handle, _dir, broker),
-            (principal, peer, ctx)
+        let version = streams_group_heartbeat_response::MAX_VERSION;
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, principal, peer, ctx);
+            boot [join_ready_broker()];
+            user ["alice"];
         );
         broker.group_coordinator.mark_share("share");
         let _consumer = broker
@@ -606,9 +594,11 @@ mod tests {
     /// group is not created.
     #[tokio::test]
     async fn handle_refuses_an_invalid_request_and_creates_no_group() {
-        streams_join_fixture!(
-            (version, broker_handle, _dir, broker),
-            (principal, peer, ctx)
+        let version = streams_group_heartbeat_response::MAX_VERSION;
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, principal, peer, ctx);
+            boot [join_ready_broker()];
+            user ["alice"];
         );
         let req = StreamsGroupHeartbeatRequest {
             member_id: String::new(),
@@ -736,7 +726,10 @@ mod tests {
     async fn configured_streams_broker(
         configure: impl FnOnce(&mut BrokerConfig),
     ) -> ConfiguredBroker {
-        let (handle, directory) = start_group_broker_with(|cfg| {
+        let HandlerStartedBroker {
+            broker: handle,
+            dir: directory,
+        } = start_group_broker_with(|cfg| {
             cfg.authorizer = Arc::new(AllowAllAuthorizer);
             configure(cfg);
         })
@@ -768,7 +761,13 @@ mod tests {
         broker_handle.shutdown().await;
     }
 
-    async fn start_broker(streams_enabled: bool) -> (BrokerHandle, tempfile::TempDir) {
+    /// Finalize the streams feature before constructing the joining caller's identity.
+    async fn join_ready_broker() -> HandlerStartedBroker {
+        let started = start_broker(true).await;
+        set_streams_version(&started.broker.broker_arc_for_test(), 1).await;
+        started
+    }
+    async fn start_broker(streams_enabled: bool) -> HandlerStartedBroker {
         start_group_broker_with(|cfg| {
             cfg.authorizer = Arc::new(AllowAllAuthorizer);
             cfg.streams_group.enable = streams_enabled;
@@ -781,7 +780,7 @@ mod tests {
     /// for the tests that drive a specific ACL gate rather than allow
     /// everything.
     async fn start_broker_with_grants() -> StartedBroker {
-        let (broker, dir) = start_group_broker_with(|cfg| {
+        let HandlerStartedBroker { broker, dir } = start_group_broker_with(|cfg| {
             cfg.authorizer = Arc::new(ControllerPeerAllowed(GrantsInPrincipalName));
             cfg.streams_group.enable = true;
         })
@@ -942,9 +941,11 @@ mod tests {
 
     #[tokio::test]
     async fn handle_persists_request_client_identity() {
-        streams_join_fixture!(
-            (version, broker_handle, _dir, broker),
-            (principal, peer, ctx)
+        let version = streams_group_heartbeat_response::MAX_VERSION;
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, principal, peer, ctx);
+            boot [join_ready_broker()];
+            user ["alice"];
         );
 
         let resp = handle(&broker, request("identity-group"), version, &ctx)

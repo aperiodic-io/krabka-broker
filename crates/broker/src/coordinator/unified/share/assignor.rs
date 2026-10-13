@@ -174,26 +174,28 @@ fn next_member(
 }
 
 /// Revoke excess holders in their original member order, then update the caller's indices.
-macro_rules! revoke_overshared_partitions {
-    ($by_partition:ident, $sharing:ident;
-        |$member:ident, $partition:ident| $remove:expr; { $($revoked:tt)* }) => {
-        for (&$partition, holders) in &mut $by_partition {
-            let mut count = holders.len();
-            if count <= $sharing {
-                continue;
+fn revoke_overshared_partitions<P: Copy + Ord>(
+    by_partition: &mut BTreeMap<P, BTreeSet<usize>>,
+    sharing: usize,
+    mut remove: impl FnMut(usize, P) -> bool,
+    mut revoked: impl FnMut(usize, P),
+) {
+    for (&partition, holders) in by_partition {
+        let mut count = holders.len();
+        if count <= sharing {
+            continue;
+        }
+        for member in holders.clone() {
+            if remove(member, partition) {
+                count -= 1;
+                holders.remove(&member);
+                revoked(member, partition);
             }
-            for $member in holders.clone() {
-                if $remove {
-                    count -= 1;
-                    holders.remove(&$member);
-                    $($revoked)*
-                }
-                if count <= $sharing {
-                    break;
-                }
+            if count <= sharing {
+                break;
             }
         }
-    };
+    }
 }
 
 /// Kafka's `SimpleHomogeneousAssignmentBuilder.build`.
@@ -260,12 +262,15 @@ fn homogeneous(
     }
 
     // revokeOversharedPartitions.
-    revoke_overshared_partitions! {
-        by_partition, sharing; |member, tp| remove_partition(&mut assignment[member], tp); {
+    revoke_overshared_partitions(
+        &mut by_partition,
+        sharing,
+        |member, tp| remove_partition(&mut assignment[member], tp),
+        |member, tp| {
             by_member[member].remove(&tp);
             unfilled.insert(member);
-        }
-    }
+        },
+    );
 
     // Add the target partitions nobody holds, then assignRemainingPartitions.
     for &tp in &targets {
@@ -337,13 +342,18 @@ fn heterogeneous(
         }
 
         // revokeOversharedPartitions.
-        revoke_overshared_partitions! {
-            by_partition, sharing; |member, p| remove_partition(&mut assignment[member], TopicPartition { topic, partition: p }); {
+        revoke_overshared_partitions(
+            &mut by_partition,
+            sharing,
+            |member, partition| {
+                remove_partition(&mut assignment[member], TopicPartition { topic, partition })
+            },
+            |member, partition| {
                 if let Some(held) = by_member.get_mut(&member) {
-                    held.remove(&p);
+                    held.remove(&partition);
                 }
-            }
-        }
+            },
+        );
 
         for &p in &targets {
             by_partition.entry(p).or_default();

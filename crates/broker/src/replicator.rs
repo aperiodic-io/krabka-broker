@@ -37,23 +37,6 @@ use {
     tracing::{info, warn},
 };
 
-/// Hold the current replication target through a mutation, or reject the stale row.
-macro_rules! lock_local_target {
-    ($part:ident, $cfg:ident, $message:literal) => {
-        match $part
-            .lock_replication_target(crate::replicator::task_replication_target($cfg))
-            .await
-        {
-            Ok(guard) => guard,
-            Err(error) => {
-                tracing::warn!(topic = %$cfg.topic, partition = $cfg.partition.get(), %error,
-                    $message);
-                return crate::replicator::response::RowAction::Drop;
-            }
-        }
-    };
-}
-
 pub(crate) mod connection;
 mod fetch_loop;
 mod follower_throttle;

@@ -5,12 +5,11 @@
 //! per-partition rows KIP-932 asks for -- feature disabled, group
 //! denied, topic unknown -- stay exactly what the JVM admin client reads.
 
+#[cfg(test)]
+use crate::handlers::test_support::{ShareRefusalCase, ShareRefusalPolicy};
 use {
     super::*,
-    crate::{
-        authorizer::Authorizer,
-        test_support::{DenyAll, ShareApiSupport},
-    },
+    crate::test_support::ShareApiSupport,
     krabka_protocol::{
         owned::{
             describe_share_group_offsets_request::{
@@ -68,19 +67,9 @@ krabka_macros::wire_codec_helpers! {
 
 #[tokio::test]
 async fn handle_error_scenarios_preserve_expected_rows() {
-    type Case<'a> = (
-        &'a str,
-        Arc<dyn Authorizer>,
-        ShareApiSupport,
-        Vec<RequestGroup<'a>>,
-        DescribeShareGroupOffsetsResponse,
-    );
     let version = describe_share_group_offsets_response::MAX_VERSION;
-    let cases: Vec<Case<'_>> = vec![
-        (
-            "disabled feature preserves group error rows",
-            Arc::new(crate::authorizer::AllowAllAuthorizer),
-            crate::test_support::ShareApiSupport::Disabled,
+    let cases: Vec<ShareRefusalCase<Vec<RequestGroup<'_>>, DescribeShareGroupOffsetsResponse>> = vec![
+        ShareRefusalPolicy::unsupported("disabled feature preserves group error rows").with_input(
             vec![
                 RequestGroup {
                     group_id: "g1",
@@ -114,40 +103,38 @@ async fn handle_error_scenarios_preserve_expected_rows() {
                 ],
             }),
         ),
-        (
-            "denied group preserves group id and error code",
-            Arc::new(crate::test_support::ControllerPeerAllowed(DenyAll)),
-            crate::test_support::ShareApiSupport::Enabled,
-            vec![RequestGroup {
-                group_id: "g1",
-                topics: vec![RequestTopic {
-                    topic_name: "missing",
-                    partitions: vec![0],
+        ShareRefusalPolicy::group_denied("denied group preserves group id and error code")
+            .with_input(
+                vec![RequestGroup {
+                    group_id: "g1",
+                    topics: vec![RequestTopic {
+                        topic_name: "missing",
+                        partitions: vec![0],
+                    }],
                 }],
-            }],
-            krabka_macros::unthrottled_wire!(DescribeShareGroupOffsetsResponse {
-                groups: vec![krabka_macros::tagged_wire!(
-                    DescribeShareGroupOffsetsResponseGroup {
-                        group_id: "g1".into(),
-                        topics: Vec::new(),
-                        error_code: codes::GROUP_AUTHORIZATION_FAILED,
-                        error_message: None,
-                    }
-                )],
-            }),
-        ),
-        (
-            "an unknown topic has no data and no error",
-            Arc::new(crate::authorizer::AllowAllAuthorizer),
-            crate::test_support::ShareApiSupport::Enabled,
-            vec![RequestGroup {
+                krabka_macros::unthrottled_wire!(DescribeShareGroupOffsetsResponse {
+                    groups: vec![krabka_macros::tagged_wire!(
+                        DescribeShareGroupOffsetsResponseGroup {
+                            group_id: "g1".into(),
+                            topics: Vec::new(),
+                            error_code: codes::GROUP_AUTHORIZATION_FAILED,
+                            error_message: None,
+                        }
+                    )],
+                }),
+            ),
+        ShareRefusalCase {
+            name: "an unknown topic has no data and no error",
+            authorizer: Arc::new(crate::authorizer::AllowAllAuthorizer),
+            enabled: ShareApiSupport::Enabled,
+            input: vec![RequestGroup {
                 group_id: "g1",
                 topics: vec![RequestTopic {
                     topic_name: "missing-topic",
                     partitions: vec![3, 5],
                 }],
             }],
-            krabka_macros::unthrottled_wire!(DescribeShareGroupOffsetsResponse {
+            expected: krabka_macros::unthrottled_wire!(DescribeShareGroupOffsetsResponse {
                 groups: vec![krabka_macros::tagged_wire!(
                     DescribeShareGroupOffsetsResponseGroup {
                         group_id: "g1".into(),
@@ -184,11 +171,11 @@ async fn handle_error_scenarios_preserve_expected_rows() {
                     }
                 )],
             }),
-        ),
+        },
     ];
     krabka_macros::share_refusal_matrix! {
-        case(case, authorizer, share_enabled, groups, expected) [cases];
+        case(row) [cases];
         bind(broker_handle, _dir, broker, ctx, resp);
-        invoke [handle(&broker, request(&groups), version, &ctx)];
+        invoke [handle(&broker, request(&row.input), version, &ctx)];
     };
 }

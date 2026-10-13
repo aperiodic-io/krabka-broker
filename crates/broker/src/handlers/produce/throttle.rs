@@ -95,7 +95,10 @@ pub(super) fn finish_produce_response(
 #[cfg(test)]
 mod tests {
     use {
-        crate::quota::{QuotaBuckets, consume_producer_quota, test_support::image_with_quota},
+        crate::quota::{
+            QuotaBuckets, consume_producer_quota,
+            test_support::{QuotaEntityInput, image_with_quota},
+        },
         assert2::assert,
         krabka_units::secs,
     };
@@ -105,7 +108,10 @@ mod tests {
         use krabka_units::{Time, convert::TimeExt};
 
         let img = image_with_quota()
-            .entity(vec![("user", Some("alice")), ("client-id", Some("app-x"))])
+            .entity(vec![
+                QuotaEntityInput::user(Some("alice")),
+                QuotaEntityInput::client_id(Some("app-x")),
+            ])
             .value(1024.0)
             .call();
         // A one-second window, so 4096 bytes at 1024 B/s is 3072 over the

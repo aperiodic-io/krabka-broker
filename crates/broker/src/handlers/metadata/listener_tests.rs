@@ -8,6 +8,8 @@
 //! `LISTENER_NOT_FOUND`. The tests compare the responses as a client decodes
 //! them.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::BrokerHandle,
@@ -101,7 +103,10 @@ struct Cluster {
 /// Topic `led` has four partitions, led by 2, 9 (no registration), 4 and 2,
 /// where the last one also holds the fenced broker 3.
 async fn cluster() -> Cluster {
-    let (handle, dir) = start_broker_no_audit().await;
+    let HandlerStartedBroker {
+        broker: handle,
+        dir,
+    } = start_broker_no_audit().await;
     let broker = handle.broker_arc_for_test();
     broker
         .controller

@@ -9,6 +9,7 @@
 use {
     super::{RelativeOffset, TimestampMs, corrupt_index},
     crate::error::RemoteStorageError,
+    krabka_verified::log_index::TimeEntry,
     zerocopy::{
         BigEndian, FromBytes, Immutable, KnownLayout, Unaligned,
         byteorder::{I64, U32},
@@ -57,15 +58,15 @@ pub fn relative_offset_floor_for_timestamp(
     entries: &[TimeIndexEntry],
     target_ts: TimestampMs,
 ) -> RelativeOffset {
-    let decoded: Vec<(i64, u32)> = entries
+    let decoded: Vec<TimeEntry> = entries
         .iter()
-        .map(|entry| (entry.timestamp.get(), entry.relative_offset.get()))
+        .map(|entry| TimeEntry::new(entry.timestamp.get(), entry.relative_offset.get()))
         .collect();
     // The kernel ends the usable index at the padding itself.
     let candidate_count = krabka_verified::remote_time_index_candidate_count(&decoded, target_ts);
     candidate_count
         .checked_sub(1)
-        .map_or(0, |index| decoded[index].1)
+        .map_or(0, |index| decoded[index].coordinate)
 }
 
 #[cfg(test)]

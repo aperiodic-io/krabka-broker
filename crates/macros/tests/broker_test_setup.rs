@@ -39,50 +39,60 @@ struct Broker {
     events: Events,
     enabled: bool,
 }
-struct Handle(Arc<Broker>);
-struct Directory(Events);
+struct Handle {
+    broker: Arc<Broker>,
+}
+struct Directory {
+    events: Events,
+}
 
 impl Handle {
     fn broker_arc_for_test(&self) -> Arc<Broker> {
-        record(&self.0.events, "broker");
-        Arc::clone(&self.0)
+        record(&self.broker.events, "broker");
+        Arc::clone(&self.broker)
     }
 
     async fn shutdown(&self) {
         tokio::task::yield_now().await;
-        record(&self.0.events, "shutdown");
+        record(&self.broker.events, "shutdown");
     }
 }
 
 impl Drop for Directory {
-    fn drop(&mut self) { record(&self.0, "directory dropped"); }
+    fn drop(&mut self) { record(&self.events, "directory dropped"); }
 }
 
-async fn start<const MAJOR: u8, const MINOR: u8>(events: Events) -> (Handle, Directory) {
-    assert!((MAJOR, MINOR) == (1, 2));
+async fn start<const MAJOR: u8, const MINOR: u8>(
+    events: Events,
+) -> handlers::test_support::StartedBroker {
+    assert!(MAJOR == 1 && MINOR == 2);
     tokio::task::yield_now().await;
     record(&events, "start");
-    (
-        Handle(Arc::new(Broker {
-            events: Arc::clone(&events),
-            enabled: true,
-        })),
-        Directory(events),
-    )
+    handlers::test_support::StartedBroker {
+        broker: Handle {
+            broker: Arc::new(Broker {
+                events: Arc::clone(&events),
+                enabled: true,
+            }),
+        },
+        dir: Directory { events },
+    }
 }
 
 struct Identity {
     name: String,
     events: Events,
 }
-struct Address(Events);
+struct Address {
+    events: Events,
+}
 
 impl Drop for Identity {
     fn drop(&mut self) { record(&self.events, format!("identity dropped:{}", self.name)); }
 }
 
 impl Drop for Address {
-    fn drop(&mut self) { record(&self.0, "address dropped"); }
+    fn drop(&mut self) { record(&self.events, "address dropped"); }
 }
 
 mod handlers {
@@ -119,6 +129,10 @@ mod handlers {
     }
 
     pub(crate) mod test_support {
+        pub(crate) struct StartedBroker {
+            pub(crate) broker: super::super::Handle,
+            pub(crate) dir: super::super::Directory,
+        }
         use super::super::{active_events, record};
 
         pub(crate) fn allow_all_authorizer() -> bool {
@@ -141,7 +155,8 @@ mod handlers {
 mod test_support {
     use super::{
         Address, Arc, Broker, Directory, Events, Handle, Identity, active_events,
-        handlers::RequestContext, install_events, record,
+        handlers::{self, RequestContext},
+        install_events, record,
     };
 
     pub(crate) fn principal(name: &str) -> Identity {
@@ -156,7 +171,7 @@ mod test_support {
     pub(crate) fn peer() -> Address {
         let events = active_events();
         record(&events, "address");
-        Address(events)
+        Address { events }
     }
 
     pub(crate) async fn wait_for_controller_leader(broker: &Broker) {
@@ -179,7 +194,9 @@ mod test_support {
         )
     }
 
-    pub(crate) struct Authorization(pub Events);
+    pub(crate) struct Authorization {
+        pub(crate) events: Events,
+    }
     pub(crate) struct ShareStarter {
         authorizer: Option<Authorization>,
         enabled: bool,
@@ -203,18 +220,20 @@ mod test_support {
             self
         }
 
-        pub(crate) async fn call(self) -> (Handle, Directory) {
+        pub(crate) async fn call(self) -> handlers::test_support::StartedBroker {
             tokio::task::yield_now().await;
-            let events = self.authorizer.unwrap().0;
+            let events = self.authorizer.unwrap().events;
             install_events(&events);
             record(&events, format!("start:{}", self.enabled));
-            (
-                Handle(Arc::new(Broker {
-                    events: Arc::clone(&events),
-                    enabled: self.enabled,
-                })),
-                Directory(events),
-            )
+            handlers::test_support::StartedBroker {
+                broker: Handle {
+                    broker: Arc::new(Broker {
+                        events: Arc::clone(&events),
+                        enabled: self.enabled,
+                    }),
+                },
+                dir: Directory { events },
+            }
         }
     }
 }
@@ -223,17 +242,19 @@ fn test_context<'a>(identity: &'a Identity, address: &'a Address) -> handlers::R
     test_support::request_context(identity, address, "builder-client")
 }
 
-async fn configured_start(enabled: bool) -> (Handle, Directory) {
+async fn configured_start(enabled: bool) -> handlers::test_support::StartedBroker {
     tokio::task::yield_now().await;
     let events = active_events();
     record(&events, format!("start:{enabled}"));
-    (
-        Handle(Arc::new(Broker {
-            events: Arc::clone(&events),
-            enabled,
-        })),
-        Directory(events),
-    )
+    handlers::test_support::StartedBroker {
+        broker: Handle {
+            broker: Arc::new(Broker {
+                events: Arc::clone(&events),
+                enabled,
+            }),
+        },
+        dir: Directory { events },
+    }
 }
 
 #[tokio::test]
@@ -248,7 +269,7 @@ async fn combined_policy_keeps_the_selected_starter_and_readiness_before_context
             user ["admin"];
         }
         assert!(broker.enabled && context.identity.name == "admin");
-        assert!(Arc::strong_count(&directory.0) > 1);
+        assert!(Arc::strong_count(&directory.events) > 1);
         handle.shutdown().await;
     }
     assert!(
@@ -312,7 +333,7 @@ async fn combined_policy_keeps_the_selected_starter_and_readiness_before_context
             user ["without-context"];
         }
         assert!(broker.enabled && principal.name == "without-context");
-        assert!(Arc::ptr_eq(&principal.events, &peer.0));
+        assert!(Arc::ptr_eq(&principal.events, &peer.events));
         handle.shutdown().await;
     }
 }
@@ -381,7 +402,7 @@ fn contexts_borrow_visible_or_hygienic_bindings_and_keep_expression_order() {
             client [{ record(&events, "client expression"); "replica-client" }];
         }
         assert!(first.identity.name == "admin" && second.identity.name == "replica");
-        assert!((__request_principal, __request_peer) == (42, 19));
+        assert!(__request_principal == 42 && __request_peer == 19);
         assert!(first.client == "builder-client" && second.client == "replica-client");
         assert!(
             first.connection == "test-connection"
@@ -403,7 +424,7 @@ fn contexts_borrow_visible_or_hygienic_bindings_and_keep_expression_order() {
             address [test_support::peer()];
         }
         assert!(user.name == "identity-only");
-        assert!(ptr::eq(Arc::as_ptr(&address.0), Arc::as_ptr(&events)));
+        assert!(ptr::eq(Arc::as_ptr(&address.events), Arc::as_ptr(&events)));
     }
     let events = events.lock().unwrap();
     assert!(
@@ -450,27 +471,38 @@ async fn dispatch(
 
 #[tokio::test]
 async fn refusal_matrix_preserves_each_cases_setup_response_assertion_and_cleanup() {
+    struct Case {
+        name: &'static str,
+        authorizer: test_support::Authorization,
+        enabled: bool,
+        input: u8,
+        expected: u8,
+    }
     let events = Events::default();
     let cases = [
-        (
-            "enabled",
-            test_support::Authorization(Arc::clone(&events)),
-            true,
-            7,
-            7,
-        ),
-        (
-            "disabled",
-            test_support::Authorization(Arc::clone(&events)),
-            false,
-            9,
-            0,
-        ),
+        Case {
+            name: "enabled",
+            authorizer: test_support::Authorization {
+                events: Arc::clone(&events),
+            },
+            enabled: true,
+            input: 7,
+            expected: 7,
+        },
+        Case {
+            name: "disabled",
+            authorizer: test_support::Authorization {
+                events: Arc::clone(&events),
+            },
+            enabled: false,
+            input: 9,
+            expected: 0,
+        },
     ];
     krabka_macros::share_refusal_matrix! {
-        case(label, authorizer, enabled, value, expected) [cases];
+        case(row) [cases];
         bind(handle, _directory, broker, context, response);
-        invoke [dispatch(&broker, value, &context)];
+        invoke [dispatch(&broker, row.input, &context)];
     }
     assert!(
         *events.lock().unwrap()

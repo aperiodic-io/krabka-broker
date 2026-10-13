@@ -17,11 +17,19 @@ struct FieldRole {
     extra: bool,
 }
 
-fn extra_arguments(extra: &[Field]) -> (Vec<Ident>, Vec<Type>) {
+struct ExtraArgument {
+    name: Ident,
+    ty: Type,
+}
+
+fn extra_arguments(extra: &[Field]) -> Vec<ExtraArgument> {
     extra
         .iter()
-        .map(|field| (field.ident.clone().expect("named field"), field.ty.clone()))
-        .unzip()
+        .map(|field| ExtraArgument {
+            name: field.ident.clone().expect("named field"),
+            ty: field.ty.clone(),
+        })
+        .collect()
 }
 
 fn extra_fields(item: &ItemStruct, common: &[&str]) -> Result<Vec<Field>, ParseError> {
@@ -73,13 +81,13 @@ pub(crate) fn member(item: ItemStruct) -> Result<TokenStream, ParseError> {
         "pending_revocation",
         "target",
     ])?;
-    let (names, types) = extra_arguments(&extra);
+    let arguments = extra_arguments(&extra);
     let visibility = &item.vis;
     let members = moxy::template! {
         {{ visibility }} fn from_member(
             member: &MemberState,
             target: Option<&::std::collections::HashMap<::krabka_protocol::primitives::uuid::Uuid, Vec<i32>>>,
-            @for (name, ty) in names.iter().zip(&types) { {{ name }}: {{ ty }}, }
+            @for argument in &arguments { {{ argument.name }}: {{ argument.ty }}, }
         ) -> Self {
             Self {
                 id: member.member_id.clone(),
@@ -87,7 +95,7 @@ pub(crate) fn member(item: ItemStruct) -> Result<TokenStream, ParseError> {
                 assignment_state: member.assignment_state,
                 assigned: parts_of(Some(&member.assigned_partitions)),
                 pending_revocation: parts_of(Some(&member.partitions_pending_revocation)),
-                @for name in &names { {{ name }}, }
+                @for argument in &arguments { {{ argument.name }}, }
                 target: parts_of(target),
             }
         }
@@ -104,7 +112,7 @@ pub(crate) fn group(item: ItemStruct) -> Result<TokenStream, ParseError> {
         "client_owned",
         "advertised",
     ])?;
-    let (names, types) = extra_arguments(&extra);
+    let arguments = extra_arguments(&extra);
     let member_list = named_fields(&item, "ReconciliationGroup")?
         .iter()
         .find(|field| {
@@ -118,7 +126,7 @@ pub(crate) fn group(item: ItemStruct) -> Result<TokenStream, ParseError> {
         .clone();
     let visibility = &item.vis;
     let members = moxy::template! {
-        {{ visibility }} fn empty(@for (name, ty) in names.iter().zip(&types) { {{ name }}: {{ ty }}, }) -> Self {
+        {{ visibility }} fn empty(@for argument in &arguments { {{ argument.name }}: {{ argument.ty }}, }) -> Self {
             Self {
                 group_epoch: INITIAL_GROUP_EPOCH,
                 metadata_hash: 0,
@@ -126,7 +134,7 @@ pub(crate) fn group(item: ItemStruct) -> Result<TokenStream, ParseError> {
                 members: vec![],
                 client_owned: vec![],
                 advertised: vec![],
-                @for name in &names { {{ name }}, }
+                @for argument in &arguments { {{ argument.name }}, }
             }
         }
         {{ visibility }} fn from_group(
@@ -134,7 +142,7 @@ pub(crate) fn group(item: ItemStruct) -> Result<TokenStream, ParseError> {
             members: {{ member_list }},
             owned: &::std::collections::BTreeMap<String, ::std::collections::BTreeSet<i32>>,
             advertised: &::std::collections::BTreeMap<String, Vec<i32>>,
-            @for (name, ty) in names.iter().zip(&types) { {{ name }}: {{ ty }}, }
+            @for argument in &arguments { {{ argument.name }}: {{ argument.ty }}, }
         ) -> Self {
             Self {
                 group_epoch: group.group_epoch,
@@ -142,12 +150,18 @@ pub(crate) fn group(item: ItemStruct) -> Result<TokenStream, ParseError> {
                 target_epoch: group.target.epoch,
                 members,
                 client_owned: owned_to_vec(owned),
-                advertised: advertised.iter().map(|(id, parts)| (id.clone(), parts.clone())).collect(),
-                @for name in &names { {{ name }}, }
+                // std map iteration is the boundary; projected rows have named fields.
+                advertised: advertised.iter().map(|(id, parts)| MemberPartitions { member_id: id.clone(), partitions: parts.clone() }).collect(),
+                @for argument in &arguments { {{ argument.name }}, }
             }
         }
         {{ visibility }} fn assert_epochs_against(&self, post: &GroupState) {
-            assert_member_epochs(self.members.iter().map(|member| (member.id.as_str(), member.member_epoch)), post);
+            use crate::coordinator::unified::actor::reconciliation_model_support::{MemberEpoch, assert_member_epochs};
+            assert_member_epochs(self.members.iter().map(|member| MemberEpoch { member_id: member.id.as_str(), epoch: member.member_epoch }), post);
+        }
+        {{ visibility }} fn handoff_witness(&self) -> bool {
+            use crate::coordinator::unified::actor::reconciliation_model_support::{AssignmentView, overlaps_others};
+            overlaps_others(self.members.iter().map(|member| AssignmentView { member_id: member.id.as_str(), partitions: &member.target }), &self.client_owned)
         }
     };
     Ok(impl_block(item, &TokenStream::new(), &members))
@@ -300,6 +314,45 @@ mod tests {
             "struct Projection { epoch: i16 }",
         ] {
             assert!(epoch(moxy::parse!({ input }).unwrap()).is_err(), "{input}");
+        }
+    }
+    #[test]
+    fn group_constructors_keep_named_ledgers_and_visible_extra_arguments() {
+        let item = moxy::parse!("pub struct Projection { group_epoch: i32, metadata_hash: i64, target_epoch: i32, members: Vec<Member>, client_owned: Vec<MemberPartitions>, advertised: Vec<MemberPartitions>, #[reconciliation(extra)] ledger: Vec<OffsetRow> }").unwrap();
+        let output = compact(&group(item).unwrap());
+        assert!(output.contains("fnempty(ledger:Vec<OffsetRow>,)"));
+        assert!(output.contains("client_owned:owned_to_vec(owned)"));
+        assert!(output.contains("MemberPartitions{member_id:id.clone(),partitions:parts.clone()}"));
+        assert!(
+            output.contains("MemberEpoch{member_id:member.id.as_str(),epoch:member.member_epoch}")
+        );
+    }
+
+    #[test]
+    fn declared_action_variants_emit_epoch_gates_and_refuse_generic_models() {
+        let item = moxy::parse!("enum Action { Join(String), Leave(String), Heartbeat(String), Keepalive(String), ClientAdd(String, i32), ClientRevoke(String, i32) }").unwrap();
+        let output = compact(&action(item).unwrap());
+        assert!(output.contains("ifepoch(&id).is_some(){returnNone;}"));
+        assert!(output.contains("Self::Leave(id)=>{epoch(&id)?;MemberHeartbeat::Leave(id)}"));
+        assert!(output.contains("Self::Heartbeat(id)=>"));
+        assert!(output.contains("Self::Keepalive(id)=>"));
+        let generic = moxy::parse!("enum Action<T> { Join(T) }").unwrap();
+        assert!(action(generic).is_err());
+    }
+
+    #[test]
+    fn field_roles_and_violation_generic_arguments_reject_incompatible_schemas() {
+        let wrong_role = moxy::parse!("struct Member { id: String, member_epoch: i32, assignment_state: State, assigned: Vec<i32>, pending_revocation: Vec<i32>, target: Vec<i32>, #[reconciliation(unknown)] extra: i32 }").unwrap();
+        assert!(member(wrong_role).is_err());
+        for declaration in [
+            "struct Projection { epoch: i16, violations: BTreeSet<Violation, Other> }",
+            "struct Projection { epoch: i16, violations: BTreeSet<&Violation> }",
+            "struct Projection<T> { epoch: i16, violations: BTreeSet<T> }",
+        ] {
+            assert!(
+                epoch(moxy::parse!({ declaration }).unwrap()).is_err(),
+                "{declaration}"
+            );
         }
     }
 }

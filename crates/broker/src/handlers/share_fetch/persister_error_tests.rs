@@ -9,6 +9,8 @@
 //! error that `SharePartition.fetchPersisterError` maps. A fenced state epoch
 //! maps to `NOT_LEADER_OR_FOLLOWER` and drops the partition from the cache.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::BrokerHandle,
@@ -184,7 +186,7 @@ struct FencedWrite {
 /// again and acquires the records again.
 #[tokio::test]
 async fn a_fenced_state_write_fails_the_acknowledgement_and_drops_the_partition() {
-    let (broker, _dir) = start().await;
+    let HandlerStartedBroker { broker, dir: _dir } = start().await;
     let shared = broker.broker_arc_for_test();
 
     let mut actual = Vec::new();
@@ -298,7 +300,7 @@ async fn state_topic_led_by_an_unknown_broker(broker: &BrokerHandle) {
 /// does, without reading the state.
 #[tokio::test]
 async fn a_failed_state_read_fails_the_partition_and_caches_nothing() {
-    let (broker, _dir) = start().await;
+    let HandlerStartedBroker { broker, dir: _dir } = start().await;
     state_topic_led_by_an_unknown_broker(&broker).await;
     let topic_id = create_topic(&broker, "unreadable").await;
     produce_two_records(&broker, "unreadable").await;
@@ -345,7 +347,7 @@ async fn a_failed_state_read_fails_the_partition_and_caches_nothing() {
 #[tokio::test]
 async fn a_read_of_an_uninitialized_state_fails_until_the_state_is_initialized() {
     const GROUP: &str = "uninitialized-group";
-    let (broker, _dir) = start().await;
+    let HandlerStartedBroker { broker, dir: _dir } = start().await;
     let topic_id = create_topic(&broker, "uninitialized").await;
     let shared = broker.broker_arc_for_test();
     let persister = shared

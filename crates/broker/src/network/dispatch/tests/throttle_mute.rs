@@ -8,11 +8,11 @@
 //! to read the next request. The pre-KIP-219 broker slept inside the quota
 //! code before writing, which each test distinguishes by giving the response
 //! a deadline far shorter than the window it must beat.
-
 use {
     super::request_frame,
     crate::{
         BrokerHandle,
+        handlers::test_support::StartedBroker,
         network::{codec::KafkaCodec, dispatch::test_support::plaintext_loop},
         test_support::start_broker_with,
     },
@@ -77,10 +77,16 @@ const fn quota(key: &str, value: f64) -> AnonymousQuota<'_> { AnonymousQuota { k
 async fn broker_with_anonymous_quotas(
     throttle_max: Time,
     quotas: &[AnonymousQuota<'_>],
-) -> (BrokerHandle, tempfile::TempDir) {
-    let (handle, dir) = broker_with_throttle(throttle_max).await;
+) -> StartedBroker {
+    let StartedBroker {
+        broker: handle,
+        dir,
+    } = broker_with_throttle(throttle_max).await;
     seed_anonymous_quotas(&handle, quotas).await;
-    (handle, dir)
+    StartedBroker {
+        broker: handle,
+        dir,
+    }
 }
 
 /// Seeds `quotas` against the ANONYMOUS user on an already-running `handle`,
@@ -372,8 +378,10 @@ async fn acks_zero_produce_writes_no_response_and_still_mutes() {
     // A byte-rate throttle is not bounded (#709): 2800 bytes/sec against an
     // 8 KiB produce, after the one-second burst, is about two seconds of debt,
     // longer than `mute_window` and well inside `MUTE_LIFT_TIMEOUT`.
-    let (handle, _dir) =
-        broker_with_anonymous_quotas(mute_window, &[quota("producer_byte_rate", 2800.0)]).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = broker_with_anonymous_quotas(mute_window, &[quota("producer_byte_rate", 2800.0)]).await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     create_topic(&mut framed, "acks-zero-mute").await;
@@ -416,7 +424,10 @@ async fn acks_zero_produce_writes_no_response_and_still_mutes() {
 #[tokio::test]
 async fn a_request_tripping_two_quotas_is_muted_once_for_the_longest_window() {
     let mute_window = millis(1000);
-    let (handle, _dir) = broker_with_anonymous_quotas(mute_window, &[
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = broker_with_anonymous_quotas(mute_window, &[
         quota("producer_byte_rate", 4800.0),
         quota("request_percentage", 0.0001),
     ])
@@ -461,8 +472,10 @@ async fn a_request_tripping_two_quotas_is_muted_once_for_the_longest_window() {
 /// burst, in milliseconds.
 #[tokio::test]
 async fn produce_charges_the_whole_request_frame_once() {
-    let (handle, _dir) =
-        broker_with_anonymous_quotas(millis(1000), &[quota("producer_byte_rate", 1000.0)]).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = broker_with_anonymous_quotas(millis(1000), &[quota("producer_byte_rate", 1000.0)]).await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     let body = produce_body("frame-charge", 1, 256, 8);
@@ -541,7 +554,10 @@ async fn every_charged_api_reports_its_delay_and_mutes() {
 
     let mute_window = millis(1000);
     let window_ms = i32::try_from(mute_window.millis_i64()).expect("a window");
-    let (handle, _dir) = broker_with_throttle(mute_window).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = broker_with_throttle(mute_window).await;
     // The `FindCoordinator` case must find `__consumer_offsets`. A lookup
     // that creates it runs the creation on this runtime, and that work would
     // delay the read the mute window is measured from.
@@ -708,7 +724,10 @@ async fn every_charged_api_reports_its_delay_and_mutes() {
 #[tokio::test]
 async fn acks_zero_produce_is_exempt_from_the_request_quota() {
     let mute_window = millis(1000);
-    let (handle, _dir) = broker_with_throttle(mute_window).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = broker_with_throttle(mute_window).await;
     let (server, mut framed) = connect_to_serve_loop(&handle).await;
 
     create_topic(&mut framed, "acks-zero-exempt").await;
@@ -746,7 +765,10 @@ async fn acks_zero_produce_is_exempt_from_the_request_quota() {
 #[tokio::test]
 async fn a_controller_mutation_and_the_request_quota_resolve_in_one_observation() {
     const VERSION: i16 = 7;
-    let (handle, _dir) = broker_with_anonymous_quotas(millis(1000), &[
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = broker_with_anonymous_quotas(millis(1000), &[
         quota("controller_mutation_rate", 1.0),
         quota("request_percentage", 0.0001),
     ])
@@ -787,7 +809,7 @@ async fn a_controller_mutation_and_the_request_quota_resolve_in_one_observation(
 krabka_macros::consumer_fetch_fixture!(consumer_fetch_request);
 krabka_macros::create_topic_fixture!(configured_topic_request);
 
-async fn broker_with_throttle(throttle_max: Time) -> (BrokerHandle, tempfile::TempDir) {
+async fn broker_with_throttle(throttle_max: Time) -> StartedBroker {
     start_broker_with(|cfg| cfg.quota_throttle_max = throttle_max).await
 }
 
@@ -833,8 +855,10 @@ struct QuotaConnection {
 }
 
 async fn request_quota_connection(window: Time) -> QuotaConnection {
-    let (handle, dir) =
-        broker_with_anonymous_quotas(window, &[quota("request_percentage", 0.0001)]).await;
+    let StartedBroker {
+        broker: handle,
+        dir,
+    } = broker_with_anonymous_quotas(window, &[quota("request_percentage", 0.0001)]).await;
     let (server, framed) = connect_to_serve_loop(&handle).await;
     QuotaConnection {
         handle,

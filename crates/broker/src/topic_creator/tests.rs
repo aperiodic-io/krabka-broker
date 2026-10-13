@@ -1,11 +1,11 @@
 //! Behavior tests of [`TopicCreator`]: against a real in-process broker for
 //! what the controller answers, and against a scripted controller listener
 //! for the retry and version rules of the "forwarding" channel.
-
 use {
     super::*,
     crate::{
         api_catalog::UnstableApiVersions,
+        handlers::test_support::StartedBroker,
         network::{
             client::InterBrokerClient, request::parse_request, test_support::raw_request_frame,
         },
@@ -126,7 +126,10 @@ async fn create(
 /// second request for the same name gets Kafka's existence row.
 #[tokio::test]
 async fn without_principal_creates_a_topic_and_then_reports_that_it_exists() {
-    let (handle, _dir) = start_broker_no_audit().await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_no_audit().await;
     let broker = handle.broker_arc_for_test();
     let creator = TopicCreator::new(&broker);
 
@@ -178,7 +181,10 @@ async fn without_principal_creates_a_topic_and_then_reports_that_it_exists() {
 /// through it, and a principal that holds `Create` can.
 #[tokio::test]
 async fn the_controller_authorizes_the_forwarded_principal() {
-    let (handle, _dir) = start_broker_with_authorizer_no_audit(Arc::new(ControllerPeerAllowed(
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with_authorizer_no_audit(Arc::new(ControllerPeerAllowed(
         GrantsInPrincipalName,
     )))
     .await;
@@ -242,8 +248,10 @@ async fn the_controller_authorizes_the_forwarded_principal() {
 /// topic is created.
 #[tokio::test]
 async fn an_envelope_from_a_broker_without_cluster_action_is_refused() {
-    let (handle, _dir) =
-        start_broker_with_authorizer_no_audit(Arc::new(GrantsInPrincipalName)).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with_authorizer_no_audit(Arc::new(GrantsInPrincipalName)).await;
     let broker = handle.broker_arc_for_test();
     let creator = TopicCreator::new(&broker);
 

@@ -150,7 +150,9 @@ mod tests {
                 group_heartbeat_test_support::{acl as group_acl, topic_with_partitions},
                 test_support as handler_fixture_support,
             },
-            test_support::{DenyAll, ShareApiSupport, start_share_broker},
+            test_support::{
+                DenyAll, ShareApiSupport, StartedBroker as HandlerStartedBroker, start_share_broker,
+            },
         },
         assert2::assert,
         krabka_metadata::{AclOperation, ResourceType},
@@ -173,7 +175,10 @@ mod tests {
     #[tokio::test]
     async fn handle_denied_groups_preserve_group_ids_and_error_codes() {
         let version = share_group_describe_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_share_broker()
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_share_broker()
             .authorizer(Arc::new(DenyAll))
             .call()
             .await;
@@ -205,7 +210,10 @@ mod tests {
     #[tokio::test]
     async fn handle_disabled_feature_wins_even_when_share_actor_exists() {
         let version = share_group_describe_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_share_broker()
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_share_broker()
             .authorizer(Arc::new(DenyAll))
             .support(ShareApiSupport::Disabled)
             .call()
@@ -313,7 +321,10 @@ mod tests {
         };
 
         let version = share_group_describe_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_share_broker()
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_share_broker()
             .authorizer(Arc::new(SimpleAclAuthorizer::new(
                 std::collections::HashSet::new(),
             )))

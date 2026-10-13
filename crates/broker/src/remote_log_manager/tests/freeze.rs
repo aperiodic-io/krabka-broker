@@ -106,7 +106,7 @@ async fn tick_once(image: MetadataImage, config: LogConfig) -> TickOutcome {
     partitions.insert("orders".into(), PartitionIndex(0), Arc::clone(&partition));
 
     let controller = fixed_source(image);
-    let (rsm, rlmm) = local_backends(remote_dir.path());
+    let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
 
     fixtures::sweep_mutable(&partitions, &controller, &rsm, &rlmm).await;
 

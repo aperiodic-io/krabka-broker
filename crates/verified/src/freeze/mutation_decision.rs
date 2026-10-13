@@ -143,44 +143,25 @@ pub fn freeze_scope_decision(
     }
 }
 
-// One exhaustive mutation policy supplies both the executable and logical classifiers.
-macro_rules! freeze_refusal {
-    ($kind:ident; {$($head:tt)*}) => {
-        $($head)* {
-            match $kind {
-            FreezeMutationKind::Produce
-            | FreezeMutationKind::TransactionEnlistment
-            | FreezeMutationKind::DeleteRecords
-            | FreezeMutationKind::DeleteTopic
-            | FreezeMutationKind::ReassignmentAlter
-            | FreezeMutationKind::Compaction
-            | FreezeMutationKind::Retention => true,
-            FreezeMutationKind::TransactionCompletion
-            | FreezeMutationKind::ReassignmentCompletion
-            | FreezeMutationKind::OffsetCommit
-            | FreezeMutationKind::Replication
-            | FreezeMutationKind::BarrierMarker
-            | FreezeMutationKind::TieringCopy => false,
-            }
-        }
-    };
-}
-
-freeze_refusal! { kind; {
+krabka_macros::freeze_refusal_rules! {
+    FreezeMutationKind;
+    refuse [Produce, TransactionEnlistment, DeleteRecords, DeleteTopic, ReassignmentAlter, Compaction, Retention];
+    allow [TransactionCompletion, ReassignmentCompletion, OffsetCommit, Replication, BarrierMarker, TieringCopy];
+    runtime {
 /// Classify the complete topic-mutation inventory under a live freeze.
 #[ensures(result == freeze_refusal_model(kind))]
 #[must_use]
 pub const fn freeze_refuses(kind: FreezeMutationKind) -> bool
-} }
-
-freeze_refusal! { kind; {
+    }
+    model {
 /// Logical mirror of [`freeze_refuses`] for the mutation contract.
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
 #[cfg_attr(test, mutants::skip)]
 #[logic]
 fn freeze_refusal_model(kind: FreezeMutationKind) -> bool
-} }
+    }
+}
 
 /// Rank authorization ahead of freeze detail, then apply the one refusal
 /// classification shared by every mutation adapter.

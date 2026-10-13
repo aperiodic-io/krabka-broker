@@ -18,6 +18,8 @@
 //! `SocketAddr` in its `RequestContext`, for the group `Read` and per-topic
 //! `Read` ACL gates.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::Broker,
@@ -27,7 +29,7 @@ use {
             ApiVersion, ErrorResponse as _, RequestContext, acl_denied, leader_endpoints,
             share_fetch::{
                 AckApplication, Renewal, acknowledgement_batches_are_valid, apply_acknowledgements,
-                current_leader, names_the_leader, share_request_identity,
+                current_leader, names_the_leader,
             },
         },
         share_partition::group_settings::GroupShareSettings,
@@ -43,20 +45,13 @@ use {
     std::time::Instant,
 };
 
+#[krabka_macros::share_request_identity]
 pub(crate) async fn handle(
     broker: &Broker,
     req: ShareAcknowledgeRequest,
     version: ApiVersion,
     ctx: &RequestContext<'_>,
 ) -> Result<ShareAcknowledgeResponse, BrokerError> {
-    share_request_identity!(
-        (cfg, image, group, settings, lock_timeout_ms, member),
-        ShareAcknowledgeResponse,
-        broker,
-        req,
-        ctx
-    );
-
     let released = match broker.share_partition_leaders.update_acknowledge_session(
         &group,
         &member,
@@ -291,7 +286,8 @@ mod tests {
             authorizer::AllowAllAuthorizer,
             broker::BrokerHandle,
             handlers::test_support::{
-                StartedBroker, create_topic as create_topic_from_test_support,
+                InitializedShareTopic, StartedBroker,
+                create_topic as create_topic_from_test_support, initialized_share_topic,
             },
             share_partition::session::FetchPartitions,
             test_support::{ShareApiSupport, dispatch_wire, start_broker_with, start_share_broker},
@@ -333,7 +329,10 @@ mod tests {
     #[tokio::test]
     async fn handle_disabled_feature_returns_top_level_unsupported_version() {
         let version = share_acknowledge_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_share_broker()
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_share_broker()
             .authorizer(std::sync::Arc::new(AllowAllAuthorizer))
             .support(ShareApiSupport::Disabled)
             .call()
@@ -480,18 +479,26 @@ mod tests {
 
     #[tokio::test]
     async fn partition_row_error_follows_topic_id() {
-        initialized_share_topic!(
-            (broker_handle, _dir, known),
+        let InitializedShareTopic {
+            started:
+                StartedBroker {
+                    broker: broker_handle,
+                    dir: _dir,
+                },
+            topic_id: known,
+        } = initialized_share_topic(
             async {
-                let (broker, dir) = start_share_broker()
+                let HandlerStartedBroker { broker, dir } = start_share_broker()
                     .authorizer(std::sync::Arc::new(AllowAllAuthorizer))
                     .call()
                     .await;
                 StartedBroker { broker, dir }
             },
             "ack-resolution",
-            "g1"
-        );
+            "g1",
+            create_topic,
+        )
+        .await;
 
         let DrivenCases { actual, expected } = drive(&broker_handle, known, codes::NONE).await;
 
@@ -504,18 +511,26 @@ mod tests {
     /// 100 for an id that does not resolve.
     #[tokio::test]
     async fn unresolved_id_answers_before_topic_authorization() {
-        initialized_share_topic!(
-            (broker_handle, _dir, known),
+        let InitializedShareTopic {
+            started:
+                StartedBroker {
+                    broker: broker_handle,
+                    dir: _dir,
+                },
+            topic_id: known,
+        } = initialized_share_topic(
             async {
-                let (broker, dir) = start_broker_with(|cfg| {
+                let HandlerStartedBroker { broker, dir } = start_broker_with(|cfg| {
                     cfg.authorizer = std::sync::Arc::new(DenyTopicRead);
                 })
                 .await;
                 StartedBroker { broker, dir }
             },
             "ack-resolution",
-            "g1"
-        );
+            "g1",
+            create_topic,
+        )
+        .await;
 
         let DrivenCases { actual, expected } =
             drive(&broker_handle, known, codes::TOPIC_AUTHORIZATION_FAILED).await;

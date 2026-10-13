@@ -1,7 +1,10 @@
 //! Full reconciliation method declarations with typed helpers and native operations.
 
 use {
-    crate::meta::{Tokens, bracketed_function, function_signature, is_plain_sync, parameter_ident},
+    crate::meta::{
+        BracketedFunction, Tokens, bracketed_function, function_signature, is_plain_sync,
+        parameter_ident,
+    },
     moxy::{
         ast::{FnParam, FromMeta, Meta, Parse, ParseError, Parser, Path, Signature},
         token::{Ident, Span, Spanner, TokenStream},
@@ -49,8 +52,7 @@ fn path(value: &Tokens) -> Result<Path, ParseError> {
     Ok(path)
 }
 
-fn metadata<T: FromMeta>(tokens: &NativeTokenStream) -> Result<T, ParseError> {
-    let tokens: TokenStream = tokens.clone().into();
+fn metadata<T: FromMeta>(tokens: &TokenStream) -> Result<T, ParseError> {
     let meta: Meta = moxy::parse!({
         moxy::template! { reconciliation({{ tokens }}) }
     })?;
@@ -83,20 +85,40 @@ fn append_group(output: &mut NativeTokenStream, body: NativeTokenStream) {
     output.extend([TokenTree::Group(Group::new(Delimiter::Brace, body))]);
 }
 
-fn shell(
-    input: NativeTokenStream,
-    macro_name: &str,
-) -> Result<(NativeTokenStream, NativeTokenStream, Group, Signature), ParseError> {
-    let (header, metadata, body) = bracketed_function(input, macro_name)?;
+struct OperationDeclaration {
+    header: NativeTokenStream,
+    metadata: NativeTokenStream,
+    body: Group,
+    signature: Signature,
+}
+
+fn shell(input: NativeTokenStream, macro_name: &str) -> Result<OperationDeclaration, ParseError> {
+    let BracketedFunction {
+        header,
+        metadata,
+        body,
+    } = bracketed_function(input, macro_name)?;
     let mut item = header.clone();
     append_group(&mut item, NativeTokenStream::new());
     let signature = function_signature(&item.into())?;
-    Ok((header, metadata, body, signature))
+    Ok(OperationDeclaration {
+        header,
+        metadata,
+        body,
+        signature,
+    })
 }
 
-pub(crate) fn rebuild(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
-    let (mut header, args, body, signature) = shell(input, "rebuild_reconciliation_group")?;
-    if !is_plain_sync(&signature)
+struct RebuildParts {
+    initial: TokenStream,
+    loop_header: TokenStream,
+    member_prefix: TokenStream,
+    member_suffix: TokenStream,
+    result: TokenStream,
+}
+
+fn rebuild_parts(args: &TokenStream, signature: &Signature) -> Result<RebuildParts, ParseError> {
+    if !is_plain_sync(signature)
         || signature.params.inner.inputs.len() != 1
         || !signature
             .output
@@ -113,37 +135,56 @@ pub(crate) fn rebuild(input: NativeTokenStream) -> Result<NativeTokenStream, Par
         &signature.params.inner.inputs[0],
         "group projection parameter needs a name",
     )?;
-    let args: Rebuild = metadata(&args)?;
+    let args: Rebuild = metadata(args)?;
     let member = name(&args.member)?;
     let built = name(&args.built)?;
     let group = Ident::new("group").with_span(Span::mixed_site());
     let now = Ident::new("now").with_span(Span::mixed_site());
-    let mut generated: NativeTokenStream = moxy::template! {
-        let mut {{ group }} = GroupState::new("g");
-        {{ group }}.group_epoch = {{ state }}.group_epoch;
-        {{ group }}.record_metadata_hash({{ state }}.metadata_hash);
-        {{ group }}.target.epoch = {{ state }}.target_epoch;
-        let {{ now }} = Instant::now();
-    }
-    .into();
-    let mut loop_body: NativeTokenStream = moxy::template! {
-        let {{ built }} = modeled_member(&{{ member }}.id, {{ member }}.member_epoch, {{ member }}.assignment_state, &{{ member }}.assigned, &{{ member }}.pending_revocation, {{ now }});
-        let {{ built }} =
-    }.into();
+    Ok(RebuildParts {
+        initial: moxy::template! {
+            let mut {{ group }} = GroupState::new("g");
+            {{ group }}.group_epoch = {{ state }}.group_epoch;
+            {{ group }}.record_metadata_hash({{ state }}.metadata_hash);
+            {{ group }}.target.epoch = {{ state }}.target_epoch;
+            let {{ now }} = Instant::now();
+        },
+        loop_header: moxy::template! { for {{ member }} in &{{ state }}.members },
+        member_prefix: moxy::template! {
+            let {{ built }} = modeled_member(&{{ member }}.id, {{ member }}.member_epoch, {{ member }}.assignment_state, &{{ member }}.assigned, &{{ member }}.pending_revocation, {{ now }});
+            let {{ built }} =
+        },
+        member_suffix: moxy::template! { ; insert_modeled_member(&mut {{ group }}, {{ built }}, &{{ member }}.target); },
+        result: moxy::template! { {{ group }} },
+    })
+}
+
+pub(crate) fn rebuild(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    let OperationDeclaration {
+        mut header,
+        metadata: args,
+        body,
+        signature,
+    } = shell(input, "rebuild_reconciliation_group")?;
+    let parts = rebuild_parts(&args.into(), &signature)?;
+    let mut generated: NativeTokenStream = parts.initial.into();
+    let mut loop_body: NativeTokenStream = parts.member_prefix.into();
     loop_body.extend([TokenTree::Group(body)]);
-    loop_body.extend(NativeTokenStream::from(moxy::template! { ; insert_modeled_member(&mut {{ group }}, {{ built }}, &{{ member }}.target); }));
-    generated.extend(NativeTokenStream::from(
-        moxy::template! { for {{ member }} in &{{ state }}.members },
-    ));
+    loop_body.extend(NativeTokenStream::from(parts.member_suffix));
+    generated.extend(NativeTokenStream::from(parts.loop_header));
     append_group(&mut generated, loop_body);
-    generated.extend(NativeTokenStream::from(moxy::template! { {{ group }} }));
+    generated.extend(NativeTokenStream::from(parts.result));
     append_group(&mut header, generated);
     Ok(header)
 }
 
-pub(crate) fn actions(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
-    let (mut header, args, body, signature) = shell(input, "reconciliation_actions")?;
-    let this = receiver(&signature)?;
+struct ActionParts {
+    before: TokenStream,
+    loop_header: TokenStream,
+    member_prefix: TokenStream,
+}
+
+fn action_parts(args: &TokenStream, signature: &Signature) -> Result<ActionParts, ParseError> {
+    let this = receiver(signature)?;
     if signature.ident.text() != "actions" || !signature.output.is_default() {
         return Err(ParseError::new(
             signature.ident.span(),
@@ -158,75 +199,125 @@ pub(crate) fn actions(input: NativeTokenStream) -> Result<NativeTokenStream, Par
         &signature.params.inner.inputs[2],
         "actions parameter needs a name",
     )?;
-    let args: Actions = metadata(&args)?;
+    let args: Actions = metadata(args)?;
     let action = path(&args.action)?;
     let lookup = path(&args.lookup)?;
     let member = name(&args.member)?;
     let under_cap = Ident::new("under_cap").with_span(Span::mixed_site());
     let id = Ident::new("id").with_span(Span::mixed_site());
-    let add = Ident::new("add").with_span(Span::mixed_site());
-    let partition = Ident::new("partition").with_span(Span::mixed_site());
-    let mut generated: NativeTokenStream = moxy::template! {
-        let {{ under_cap }} = {{ state }}.group_epoch < {{ this }}.max_epoch;
-        if {{ under_cap }} {
-            for &{{ id }} in &{{ this }}.pool {
-                if {{ lookup }}({{ state }}, {{ id }}).is_none() { {{ actions }}.push({{ action }}::Join({{ id }}.to_string())); }
+    let movement = Ident::new("movement").with_span(Span::mixed_site());
+    Ok(ActionParts {
+        before: moxy::template! {
+            let {{ under_cap }} = {{ state }}.group_epoch < {{ this }}.max_epoch;
+            if {{ under_cap }} {
+                for &{{ id }} in &{{ this }}.pool {
+                    if {{ lookup }}({{ state }}, {{ id }}).is_none() { {{ actions }}.push({{ action }}::Join({{ id }}.to_string())); }
+                }
             }
-        }
-    }.into();
-    let mut per_member: NativeTokenStream = moxy::template! {
-        if {{ under_cap }} {
-            {{ actions }}.push({{ action }}::Leave({{ member }}.id.clone()));
-            {{ actions }}.push({{ action }}::Heartbeat({{ member }}.id.clone()));
-            {{ actions }}.push({{ action }}::Keepalive({{ member }}.id.clone()));
-        }
-        for ({{ add }}, {{ partition }}) in client_moves(&{{ state }}.advertised, &{{ state }}.client_owned, &{{ member }}.id) {
-            {{ actions }}.push(if {{ add }} { {{ action }}::ClientAdd({{ member }}.id.clone(), {{ partition }}) } else { {{ action }}::ClientRevoke({{ member }}.id.clone(), {{ partition }}) });
-        }
-    }.into();
+        },
+        loop_header: moxy::template! { for {{ member }} in &{{ state }}.members },
+        member_prefix: moxy::template! {
+            if {{ under_cap }} {
+                {{ actions }}.push({{ action }}::Leave({{ member }}.id.clone()));
+                {{ actions }}.push({{ action }}::Heartbeat({{ member }}.id.clone()));
+                {{ actions }}.push({{ action }}::Keepalive({{ member }}.id.clone()));
+            }
+            for {{ movement }} in client_moves(&{{ state }}.advertised, &{{ state }}.client_owned, &{{ member }}.id) {
+                {{ actions }}.push(if {{ movement }}.add { {{ action }}::ClientAdd({{ member }}.id.clone(), {{ movement }}.partition) } else { {{ action }}::ClientRevoke({{ member }}.id.clone(), {{ movement }}.partition) });
+            }
+        },
+    })
+}
+
+pub(crate) fn actions(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    let OperationDeclaration {
+        mut header,
+        metadata: args,
+        body,
+        signature,
+    } = shell(input, "reconciliation_actions")?;
+    let parts = action_parts(&args.into(), &signature)?;
+    let mut generated: NativeTokenStream = parts.before.into();
+    let mut per_member: NativeTokenStream = parts.member_prefix.into();
     per_member.extend([TokenTree::Group(body)]);
-    generated.extend(NativeTokenStream::from(
-        moxy::template! { for {{ member }} in &{{ state }}.members },
-    ));
+    generated.extend(NativeTokenStream::from(parts.loop_header));
     append_group(&mut generated, per_member);
     append_group(&mut header, generated);
     Ok(header)
 }
 
-fn transition_sections(body: &Group) -> Result<(Group, Group, Group), ParseError> {
+struct TransitionSections {
+    setup: Group,
+    actions: Group,
+    project: Group,
+}
+
+fn validate_sections(input: &TokenStream) -> Result<(), ParseError> {
+    let parser = Parser::from_tokens(input);
+    for expected in ["setup", "actions", "project"] {
+        let name = Ident::parse(&parser).map_err(|_| {
+            ParseError::new(
+                input.span(),
+                "transition body needs setup {}, actions {} and project {} native sections",
+            )
+        })?;
+        let group = moxy::token::Group::parse(&parser).map_err(|_| {
+            ParseError::new(
+                input.span(),
+                "transition body needs setup {}, actions {} and project {} native sections",
+            )
+        })?;
+        if name.text() != expected || !group.delim.is_brace() {
+            return Err(ParseError::new(
+                input.span(),
+                "expected ordered setup/actions/project blocks",
+            ));
+        }
+    }
+    if !parser.is_empty() {
+        return Err(parser
+            .error("transition body needs setup {}, actions {} and project {} native sections"));
+    }
+    Ok(())
+}
+
+fn transition_sections(body: &Group) -> Result<TransitionSections, ParseError> {
+    validate_sections(&body.stream().into())?;
     let tokens: Vec<_> = body.stream().into_iter().collect();
     let [
-        TokenTree::Ident(setup_name),
+        TokenTree::Ident(_),
         TokenTree::Group(setup),
-        TokenTree::Ident(actions_name),
+        TokenTree::Ident(_),
         TokenTree::Group(actions),
-        TokenTree::Ident(project_name),
+        TokenTree::Ident(_),
         TokenTree::Group(project),
     ] = tokens.as_slice()
     else {
-        return Err(ParseError::new(
-            body.span().into(),
-            "transition body needs setup {}, actions {} and project {} native sections",
-        ));
+        unreachable!("validated named native sections")
     };
-    if setup_name.to_string() != "setup"
-        || actions_name.to_string() != "actions"
-        || project_name.to_string() != "project"
-        || [setup, actions, project]
-            .iter()
-            .any(|group| group.delimiter() != Delimiter::Brace)
-    {
-        return Err(ParseError::new(
-            body.span().into(),
-            "expected ordered setup/actions/project blocks",
-        ));
-    }
-    Ok((setup.clone(), actions.clone(), project.clone()))
+    Ok(TransitionSections {
+        setup: setup.clone(),
+        actions: actions.clone(),
+        project: project.clone(),
+    })
 }
 
-pub(crate) fn next_state(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
-    let (mut header, args, body, signature) = shell(input, "reconciliation_next_state")?;
-    let this = receiver(&signature)?;
+struct TransitionParts {
+    before_setup: TokenStream,
+    before_match: TokenStream,
+    match_prefix: TokenStream,
+    match_suffix: TokenStream,
+    after_match: TokenStream,
+    before_extra: TokenStream,
+    result: TokenStream,
+}
+
+fn transition_parts(
+    args: &TokenStream,
+    signature: &Signature,
+    has_extra: bool,
+) -> Result<TransitionParts, ParseError> {
+    let this = receiver(signature)?;
     if signature.ident.text() != "next_state"
         || !signature
             .output
@@ -247,13 +338,12 @@ pub(crate) fn next_state(input: NativeTokenStream) -> Result<NativeTokenStream, 
         &signature.params.inner.inputs[2],
         "action parameter needs a name",
     )?;
-    let args: Transition = metadata(&args)?;
+    let args: Transition = metadata(args)?;
     let action = path(&args.action)?;
     let lookup = path(&args.lookup)?;
     let rebuild = path(&args.rebuild)?;
     let check = path(&args.check)?;
     let project = path(&args.project)?;
-    let (setup, custom_actions, extra) = transition_sections(&body)?;
     let owned = Ident::new("owned").with_span(Span::mixed_site());
     let advertised = Ident::new("advertised").with_span(Span::mixed_site());
     let add = Ident::new("add").with_span(Span::mixed_site());
@@ -263,43 +353,250 @@ pub(crate) fn next_state(input: NativeTokenStream) -> Result<NativeTokenStream, 
     let partition = Ident::new("partition").with_span(Span::mixed_site());
     let member = Ident::new("member").with_span(Span::mixed_site());
     let group = Ident::new("group").with_span(Span::mixed_site());
-    let mut generated: NativeTokenStream = moxy::template! {
-        let mut {{ owned }} = owned_map(&{{ last }}.client_owned);
-        let mut {{ advertised }}: BTreeMap<_, _> = {{ last }}.advertised.iter().cloned().collect();
-    }
-    .into();
-    generated.extend(setup.stream());
-    generated.extend(NativeTokenStream::from(moxy::template! { let {{ add }} = matches!({{ action_value }}, {{ action }}::ClientAdd(..)); let {{ event }} = match {{ action_value }} }));
-    let mut arms: NativeTokenStream = moxy::template! {
-        {{ action }}::ClientAdd({{ id }}, {{ partition }}) | {{ action }}::ClientRevoke({{ id }}, {{ partition }}) => {
-            let mut {{ next }} = {{ last }}.clone();
-            {{ next }}.client_owned = apply_client_move(&{{ last }}.advertised, &mut {{ owned }}, {{ id }}, {{ partition }}, {{ add }})?;
-            return Some({{ next }});
-        },
-    }.into();
-    arms.extend(custom_actions.stream());
-    arms.extend(NativeTokenStream::from(moxy::template! {
-        {{ event }} => {{ event }}.member_heartbeat(|{{ id }}| {{ lookup }}({{ last }}, {{ id }}).map(|{{ member }}| {{ member }}.member_epoch))?,
-    }));
-    append_group(&mut generated, arms);
-    generated.extend(NativeTokenStream::from(moxy::template! {
-        ;
-        let mut {{ group }} = {{ rebuild }}({{ last }});
-        apply_member_heartbeat(&mut {{ group }}, &{{ this }}.metadata(), {{ event }}, &mut {{ owned }}, &mut {{ advertised }});
-        {{ check }}({{ last }}, &{{ group }});
-    }));
     let extra_value = Ident::new("projection_extra").with_span(Span::mixed_site());
-    if !extra.stream().is_empty() {
-        generated.extend(NativeTokenStream::from(
-            moxy::template! { let {{ extra_value }} = },
-        ));
-        generated.extend([TokenTree::Group(extra.clone())]);
+    Ok(TransitionParts {
+        before_setup: moxy::template! {
+            let mut {{ owned }} = owned_map(&{{ last }}.client_owned);
+            // std map collection requires key/value pairs at this runtime boundary.
+            let mut {{ advertised }}: BTreeMap<_, _> = {{ last }}.advertised.iter().map(|row| (row.member_id.clone(), row.partitions.clone())).collect();
+        },
+        before_match: moxy::template! { let {{ add }} = matches!({{ action_value }}, {{ action }}::ClientAdd(..)); let {{ event }} = match {{ action_value }} },
+        match_prefix: moxy::template! {
+            {{ action }}::ClientAdd({{ id }}, {{ partition }}) | {{ action }}::ClientRevoke({{ id }}, {{ partition }}) => {
+                let mut {{ next }} = {{ last }}.clone();
+                {{ next }}.client_owned = apply_client_move(&{{ last }}.advertised, &mut {{ owned }}, {{ id }}, {{ partition }}, {{ add }})?;
+                return Some({{ next }});
+            },
+        },
+        match_suffix: moxy::template! { {{ event }} => {{ event }}.member_heartbeat(|{{ id }}| {{ lookup }}({{ last }}, {{ id }}).map(|{{ member }}| {{ member }}.member_epoch))?, },
+        after_match: moxy::template! {
+            ; let mut {{ group }} = {{ rebuild }}({{ last }});
+            apply_member_heartbeat(&mut {{ group }}, &{{ this }}.metadata(), {{ event }}, &mut {{ owned }}, &mut {{ advertised }});
+            {{ check }}({{ last }}, &{{ group }});
+        },
+        before_extra: moxy::template! { @if has_extra { let {{ extra_value }} = } },
+        result: moxy::template! { Some({{ project }}(&{{ group }}, &{{ owned }}, &{{ advertised }} @if has_extra { , {{ extra_value }} })) },
+    })
+}
+
+pub(crate) fn next_state(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    let OperationDeclaration {
+        mut header,
+        metadata: args,
+        body,
+        signature,
+    } = shell(input, "reconciliation_next_state")?;
+    let has_extra = body.stream().into_iter().last().is_some_and(
+        |token| matches!(token, TokenTree::Group(group) if !group.stream().is_empty()),
+    );
+    let parts = transition_parts(&args.into(), &signature, has_extra)?;
+    let TransitionSections {
+        setup,
+        actions: custom_actions,
+        project: extra,
+    } = transition_sections(&body)?;
+    let mut generated: NativeTokenStream = parts.before_setup.into();
+    generated.extend(setup.stream());
+    generated.extend(NativeTokenStream::from(parts.before_match));
+    let mut arms: NativeTokenStream = parts.match_prefix.into();
+    arms.extend(custom_actions.stream());
+    arms.extend(NativeTokenStream::from(parts.match_suffix));
+    append_group(&mut generated, arms);
+    generated.extend(NativeTokenStream::from(parts.after_match));
+    if has_extra {
+        generated.extend(NativeTokenStream::from(parts.before_extra));
+        generated.extend([TokenTree::Group(extra)]);
         generated.extend(NativeTokenStream::from(moxy::template! { ; }));
     }
-    let has_extra = !extra.stream().is_empty();
-    generated.extend(NativeTokenStream::from(moxy::template! {
-        Some({{ project }}(&{{ group }}, &{{ owned }}, &{{ advertised }} @if has_extra { , {{ extra_value }} }))
-    }));
+    generated.extend(NativeTokenStream::from(parts.result));
     append_group(&mut header, generated);
     Ok(header)
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::{action_parts, rebuild_parts, transition_parts, validate_sections},
+        crate::meta::{compact, function_signature},
+        assert2::assert,
+    };
+
+    #[test]
+    fn rebuild_plan_preserves_initial_facts_and_native_member_insertion_point() {
+        let signature = function_signature(
+            &"fn rebuild(previous: &State) -> GroupState {}"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        let parts = rebuild_parts(
+            &"member = projected, built = actual".parse().unwrap(),
+            &signature,
+        )
+        .unwrap();
+        let initial = compact(&parts.initial);
+        assert!(
+            initial.find("group.group_epoch").unwrap()
+                < initial.find("group.record_metadata_hash").unwrap()
+        );
+        assert!(
+            initial.find("group.record_metadata_hash").unwrap()
+                < initial.find("group.target.epoch").unwrap()
+        );
+        assert!(initial.matches("Instant::now()").count() == 1);
+        assert!(compact(&parts.loop_header) == "forprojectedin&previous.members");
+        assert!(compact(&parts.member_prefix).ends_with("letactual="));
+        assert!(
+            compact(&parts.member_suffix)
+                .contains("insert_modeled_member(&mutgroup,actual,&projected.target)")
+        );
+        assert!(compact(&parts.result) == "group");
+    }
+
+    #[test]
+    fn action_plan_preserves_join_then_member_then_named_client_move_order() {
+        let signature = function_signature(
+            &"fn actions(&self, snapshot: &State, events: &mut Vec<Action>) {}"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        let parts = action_parts(
+            &"action = Action, lookup = find_member, member = projected"
+                .parse()
+                .unwrap(),
+            &signature,
+        )
+        .unwrap();
+        assert!(compact(&parts.before).contains("events.push(Action::Join(id.to_string()))"));
+        assert!(compact(&parts.loop_header) == "forprojectedin&snapshot.members");
+        let body = compact(&parts.member_prefix);
+        assert!(body.find("Action::Leave").unwrap() < body.find("Action::Heartbeat").unwrap());
+        assert!(body.find("Action::Heartbeat").unwrap() < body.find("Action::Keepalive").unwrap());
+        assert!(body.find("Action::Keepalive").unwrap() < body.find("client_moves").unwrap());
+        assert!(body.contains("movement.add") && body.contains("movement.partition"));
+    }
+
+    #[test]
+    fn transition_plan_checks_before_projection_and_conditionally_accepts_native_extra() {
+        let signature = function_signature(&"fn next_state(&self, previous: &Self::State, command: Self::Action) -> Option<Self::State> {}".parse().unwrap()).unwrap();
+        let args = "action = Action, lookup = find_member, rebuild = rebuild_group, check = assert_epoch, project = project".parse().unwrap();
+        for has_extra in [false, true] {
+            let parts = transition_parts(&args, &signature, has_extra).unwrap();
+            assert!(
+                compact(&parts.before_setup)
+                    .contains("row.member_id.clone(),row.partitions.clone()")
+            );
+            assert!(
+                compact(&parts.before_match).contains("matches!(command,Action::ClientAdd(..))")
+            );
+            assert!(compact(&parts.match_prefix).contains("returnSome(next)"));
+            assert!(compact(&parts.match_suffix).contains("find_member(previous,id)"));
+            let after = compact(&parts.after_match);
+            assert!(
+                after.find("rebuild_group").unwrap()
+                    < after.find("apply_member_heartbeat").unwrap()
+            );
+            assert!(
+                after.find("apply_member_heartbeat").unwrap() < after.find("assert_epoch").unwrap()
+            );
+            assert!(parts.before_extra.is_empty() != has_extra);
+            assert!(compact(&parts.result).contains("projection_extra") == has_extra);
+        }
+    }
+
+    #[test]
+    fn operation_signatures_and_metadata_refuse_unsupported_bindings() {
+        let rebuild_args = "member = member, built = built".parse().unwrap();
+        for header in [
+            "async fn rebuild(state: &State) -> GroupState {}",
+            "fn rebuild() -> GroupState {}",
+            "fn rebuild(state: &State) -> bool {}",
+            "fn rebuild(_: &State) -> GroupState {}",
+        ] {
+            assert!(
+                rebuild_parts(
+                    &rebuild_args,
+                    &function_signature(&header.parse().unwrap()).unwrap()
+                )
+                .is_err(),
+                "{header}"
+            );
+        }
+        let actions_args = "action = Action, lookup = member, member = m"
+            .parse()
+            .unwrap();
+        for header in [
+            "fn actions(self, state: &State, out: &mut Vec<Action>) {}",
+            "fn actions(&mut self, state: &State, out: &mut Vec<Action>) {}",
+            "fn actions(model: &Model, state: &State, out: &mut Vec<Action>) {}",
+            "fn events(&self, state: &State, out: &mut Vec<Action>) {}",
+            "fn actions(&self, state: &State, out: &mut Vec<Action>) -> bool {}",
+            "fn actions(&self) {}",
+        ] {
+            assert!(
+                action_parts(
+                    &actions_args,
+                    &function_signature(&header.parse().unwrap()).unwrap()
+                )
+                .is_err(),
+                "{header}"
+            );
+        }
+        let actions_header = function_signature(
+            &"fn actions(&self, state: &State, out: &mut Vec<Action>) {}"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        for args in [
+            "action = Action, lookup = member, member = m + extra",
+            "action = Action + Other, lookup = member, member = m",
+            "action = Action, lookup = member + extra, member = m",
+            "action = Action, lookup = member",
+        ] {
+            assert!(
+                action_parts(&args.parse().unwrap(), &actions_header).is_err(),
+                "{args}"
+            );
+        }
+        let next_args =
+            "action = Action, lookup = member, rebuild = rebuild, check = check, project = project"
+                .parse()
+                .unwrap();
+        for header in [
+            "fn step(&self, state: &State, action: Action) -> Option<State> {}",
+            "fn next_state(&self, state: &State, action: Action) -> bool {}",
+            "fn next_state(&self, _: &State, action: Action) -> Option<State> {}",
+            "fn next_state(&self, state: &State, _: Action) -> Option<State> {}",
+        ] {
+            assert!(
+                transition_parts(
+                    &next_args,
+                    &function_signature(&header.parse().unwrap()).unwrap(),
+                    false
+                )
+                .is_err(),
+                "{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn section_parser_accepts_opaque_groups_and_requires_their_declared_order() {
+        let valid = "setup { caller!(@opaque state); } actions { Action::Extra => return None, } project { &committed }".parse().unwrap();
+        assert!(validate_sections(&valid).is_ok());
+        for input in [
+            "setup {} actions {}",
+            "setup {} project {} actions {}",
+            "setup () actions {} project {}",
+            "setup {} actions {} project {} extra",
+            "setup {} actions missing project {}",
+        ] {
+            assert!(
+                validate_sections(&input.parse().unwrap()).is_err(),
+                "{input}"
+            );
+        }
+    }
 }

@@ -7,11 +7,9 @@ use {
     crate::{
         codes,
         handlers::test_support::replicated_partition,
-        log_dir_status::LogDirRegistry,
         partition::Partition,
         partition_registry::PartitionRegistry,
-        partition_writer,
-        producer_state::ProducerState,
+        partition_writer::{self, WriterServices},
         share_coordinator::{
             config::ShareCoordinatorConfig,
             coordinator::{
@@ -57,11 +55,7 @@ async fn abandoned_append_fences_the_shard_until_writer_barrier_and_replay() {
                         storage,
                         rx,
                         signals,
-                        (
-                            LogDirRegistry::default(),
-                            Arc::new(ProducerState::new()),
-                            None,
-                        ),
+                        WriterServices::default(),
                     )
                     .await;
                 })

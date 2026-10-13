@@ -10,6 +10,8 @@
 //! The records go straight into the partition's log, past `Produce`'s own
 //! check, the way a record that predates a lowered limit is already there.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         sentinels::{MAX_TIMESTAMP, UNKNOWN_EPOCH, UNKNOWN_OFFSET, UNKNOWN_TIMESTAMP},
@@ -41,7 +43,7 @@ const RETENTION_KEY: &str = "log.retention.ms";
 /// 1000 at offset 0, and a record with a 1000-byte value stamped 2000 at
 /// offset 1.
 async fn broker_with_records(unstable: UnstableApiVersions) -> ClientBroker<tempfile::TempDir> {
-    let (broker, dir) = start_broker_no_audit_with(move |config| {
+    let HandlerStartedBroker { broker, dir } = start_broker_no_audit_with(move |config| {
         config.features.unstable_api_versions = unstable;
     })
     .await;

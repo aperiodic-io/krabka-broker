@@ -78,42 +78,18 @@ pub mod schema_units {
         std::borrow::Cow,
     };
 
-    macro_rules! unit_marker {
-        ($name:ident, $format:literal, $doc:literal) => {
-            #[doc = $doc]
-            pub struct $name;
-
-            impl JsonSchema for $name {
-                fn schema_name() -> Cow<'static, str> {
-                    Cow::Borrowed(stringify!($name))
-                }
-
-                fn inline_schema() -> bool {
-                    true
-                }
-
-                fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
-                    json_schema!({ "type": "string", "format": $format })
-                }
-            }
-        };
-    }
-
-    unit_marker!(
-        Duration,
-        "duration",
-        "A `krabka_units::Time` written with a unit suffix, such as `\"500ms\"` or `\"30s\"`."
-    );
-    unit_marker!(
-        ByteSize,
-        "byte-size",
-        "A `krabka_units::ByteSize` written with a unit suffix, such as `\"1MiB\"`."
-    );
-    unit_marker!(
-        Ratio,
-        "ratio",
-        "A `krabka_units::Ratio` written as a percentage or a fraction, such as `\"10%\"`."
-    );
+    #[doc = "A `krabka_units::Time` written with a unit suffix, such as `\"500ms\"` or `\"30s\"`."]
+    #[derive(krabka_macros::UnitSchema)]
+    #[unit_schema(format = "duration")]
+    pub struct Duration;
+    #[doc = "A `krabka_units::ByteSize` written with a unit suffix, such as `\"1MiB\"`."]
+    #[derive(krabka_macros::UnitSchema)]
+    #[unit_schema(format = "byte-size")]
+    pub struct ByteSize;
+    #[doc = "A `krabka_units::Ratio` written as a percentage or a fraction, such as `\"10%\"`."]
+    #[derive(krabka_macros::UnitSchema)]
+    #[unit_schema(format = "ratio")]
+    pub struct Ratio;
 }
 
 /// The JSON Schema for [`FileConfig`], as a JSON value.

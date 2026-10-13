@@ -8,19 +8,26 @@
 //! topic authorization. After the topic authorization, a topic or a partition
 //! that the image does not hold answers `UNKNOWN_TOPIC_OR_PARTITION`.
 
+#[cfg(test)]
+use crate::handlers::test_support::CreatedTopicResponse;
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::{AllowAllAuthorizer, Authorizer},
         broker::BrokerHandle,
         codes,
         coordinator::unified::actor::GroupActorMessage,
-        test_support::{DenyAll, dispatch_wire, request_context, start_group_broker_no_audit},
+        handlers::test_support::{configured_topic_request, created_topic_response},
+        test_support::{
+            DenyAll, dispatch_wire, peer, principal, request_context, start_group_broker_no_audit,
+        },
     },
     assert2::assert,
     krabka_protocol::{
         owned::{
             offset_commit_request::{
-                OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
+                self, OffsetCommitRequest, OffsetCommitRequestPartition, OffsetCommitRequestTopic,
             },
             offset_commit_response::{
                 OffsetCommitResponse, OffsetCommitResponsePartition, OffsetCommitResponseTopic,
@@ -44,6 +51,25 @@ const KNOWN_NAME: &str = "offsets-resolution";
 use crate::handlers::test_support::{
     CaseOutcomes, DenyTopics, TopicRef, TopicResolutionCase as Case, WireTopic,
 };
+
+async fn consumer_commit(
+    broker: &BrokerHandle,
+    version: i16,
+    request: &OffsetCommitRequest,
+) -> OffsetCommitResponse {
+    let shared = broker.broker_arc_for_test();
+    let user = principal("consumer");
+    let address = peer();
+    let context = request_context(&user, &address, "consumer-client");
+    dispatch_wire(
+        &shared,
+        offset_commit_request::API_KEY,
+        version,
+        request,
+        &context,
+    )
+    .await
+}
 
 /// A topic-partition that a group holds a committed offset for.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -73,14 +99,15 @@ struct Outcome {
 }
 
 async fn create_known_topic(broker: &BrokerHandle) -> WireUuid {
-    created_topic_fixture!(
-        (client, response),
-        broker,
-        "offset-commit-resolution-test",
-        crate::handlers::test_support::configured_topic_request()
-            .topic(KNOWN_NAME)
-            .call()
-    );
+    let CreatedTopicResponse {
+        client: _client,
+        response: _response,
+    } = created_topic_response()
+        .broker(broker)
+        .client_id("offset-commit-resolution-test")
+        .request(|| configured_topic_request().topic(KNOWN_NAME).call())
+        .call()
+        .await;
     broker.wait_until_partition_present(KNOWN_NAME, 0).await;
     let image = broker.controller_image_for_test();
     let topic = image.topic(KNOWN_NAME).expect("known topic in the image");
@@ -109,30 +136,6 @@ async fn committed_keys(broker: &BrokerHandle, group: &str) -> Vec<CommittedKey>
         .collect();
     keys.sort();
     keys
-}
-
-macro_rules! consumer_commit {
-    (
-        ($shared:ident, $user:ident, $address:ident, $context:ident, $actual:ident),
-        $broker:expr,
-        $version:expr,
-        $request:ident
-    ) => {
-        let $shared = $broker.broker_arc_for_test();
-        krabka_macros::request_test_identity! {
-            bind($user, $address);
-            user ["consumer"];
-        };
-        let $context = request_context(&$user, &$address, "consumer-client");
-        let $actual: OffsetCommitResponse = crate::test_support::dispatch_wire(
-            &$shared,
-            krabka_protocol::owned::offset_commit_request::API_KEY,
-            $version,
-            &$request,
-            &$context,
-        )
-        .await;
-    };
 }
 
 /// Send one single-row `OffsetCommit` at `case.version` for `case.topic`, in
@@ -171,12 +174,7 @@ async fn drive(
         ..Default::default()
     };
 
-    consumer_commit!(
-        (shared, user, address, ctx, actual),
-        broker,
-        case.version,
-        request
-    );
+    let actual = consumer_commit(broker, case.version, &request).await;
     let actual_keys = committed_keys(broker, &group).await;
 
     let id_only = case.version >= super::FIRST_TOPIC_ID_VERSION;
@@ -224,7 +222,7 @@ async fn drive(
 }
 
 async fn run_table(authorizer: Arc<dyn Authorizer>, cases: &[Case]) {
-    let (broker, _dir) = start_group_broker_no_audit(authorizer).await;
+    let HandlerStartedBroker { broker, dir: _dir } = start_group_broker_no_audit(authorizer).await;
     // A table that names no existing topic can run under an authorizer that
     // refuses `CreateTopics`.
     let needs_known = cases
@@ -295,7 +293,8 @@ async fn group_authorization_answers_before_topic_resolution() {
 async fn refused_rows_precede_the_committed_row() {
     const VERSION: i16 = 10;
     const GROUP: &str = "resolution-mixed";
-    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let known_id = create_known_topic(&broker).await;
     let row = |topic_id| OffsetCommitRequestTopic {
         topic_id,
@@ -312,12 +311,7 @@ async fn refused_rows_precede_the_committed_row() {
         ..Default::default()
     };
 
-    consumer_commit!(
-        (shared, user, address, ctx, actual),
-        broker,
-        VERSION,
-        request
-    );
+    let actual = consumer_commit(&broker, VERSION, &request).await;
 
     let answer = |topic_id, error_code| OffsetCommitResponseTopic {
         topic_id,
@@ -351,7 +345,8 @@ async fn refused_rows_precede_the_committed_row() {
 #[tokio::test]
 async fn unknown_partition_answers_on_its_own_row() {
     const MISSING_PARTITION: i32 = 7;
-    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let known_id = create_known_topic(&broker).await;
     let shared = broker.broker_arc_for_test();
     krabka_macros::request_test_identity! {

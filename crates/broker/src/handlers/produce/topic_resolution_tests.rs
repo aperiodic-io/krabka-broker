@@ -8,6 +8,8 @@
 //! name that does not resolve goes to the authorization gate and then to the
 //! partition gate.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::*,
     crate::{
@@ -38,7 +40,8 @@ use crate::handlers::test_support::{
 type Outcome = TopicCaseOutcome<ProduceResponse>;
 
 async fn start(authorizer: Arc<dyn Authorizer>) -> StartedBroker {
-    let (broker, dir) = start_broker_with_authorizer_no_audit(authorizer).await;
+    let HandlerStartedBroker { broker, dir } =
+        start_broker_with_authorizer_no_audit(authorizer).await;
     StartedBroker { broker, dir }
 }
 

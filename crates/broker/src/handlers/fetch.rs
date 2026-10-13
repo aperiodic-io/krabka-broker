@@ -523,10 +523,15 @@ mod tests {
         krabka_metadata::AclOperation,
         krabka_protocol::{
             Encode as _,
+            owned::fetch_response::FetchResponse,
             records::{Record, RecordBatch, RecordsPayload},
         },
         krabka_security::Principal,
-        std::sync::Mutex,
+        std::{
+            borrow::Cow,
+            net::SocketAddr,
+            sync::{Arc, Mutex},
+        },
     };
 
     /// A partition with nothing to serve reaches the wire as an empty record
@@ -581,7 +586,7 @@ mod tests {
     #[derive(Debug)]
     struct TopicReadOnly;
 
-    test_authorizer!(TopicReadOnly, (self, _source, request), {
+    krabka_macros::test_authorizer!(TopicReadOnly, request; {
         if request.operation == AclOperation::Read {
             AuthorizationResult::Allow
         } else {
@@ -650,33 +655,53 @@ mod tests {
     }
 
     /// Keep the WAL broker, directory and request context in their original scopes.
-    macro_rules! wal_fixture {
-        (($directory:ident, $handle:ident, $topic_id:ident, $broker:ident), ($principal:ident, $peer:ident, $listener:ident, $context:ident)) => {
-            wal_fixture!(@broker ($directory, $handle, $topic_id, $broker));
-            wal_fixture!(@identity ($principal, $peer));
-            let $listener = $broker.config.inter_broker_listener_name.clone();
-            wal_fixture!(@context ($principal, $peer, $context), &$listener);
-        };
-        (($directory:ident, $handle:ident, $topic_id:ident, $broker:ident), ($principal:ident, $peer:ident, $context:ident), $listener:expr) => {
-            wal_fixture!(@broker ($directory, $handle, $topic_id, $broker));
-            wal_fixture!(@identity ($principal, $peer));
-            wal_fixture!(@context ($principal, $peer, $context), $listener);
-        };
-        (@broker ($directory:ident, $handle:ident, $topic_id:ident, $broker:ident)) => {
-            let $directory = tempfile::tempdir().expect("tempdir");
-            let WalShardBroker {
-                handle: $handle,
-                topic_id: $topic_id,
-            } = broker_with_routable_wal_shard($directory.path()).await;
-            let $broker = $handle.broker_arc_for_test();
-        };
-        (@identity ($principal:ident, $peer:ident)) => {
-            let $principal = wal_peer_principal();
-            let $peer = peer();
-        };
-        (@context ($principal:ident, $peer:ident, $context:ident), $listener:expr) => {
-            let $context = RequestContext::new(&$principal, &$peer, "wal-fetch", "test", false, $listener);
-        };
+    struct WalFixture {
+        listener: Cow<'static, str>,
+        peer: SocketAddr,
+        principal: Principal,
+        broker: Arc<Broker>,
+        handle: BrokerHandle,
+        _dir: tempfile::TempDir,
+        topic_id: uuid::Uuid,
+    }
+
+    impl WalFixture {
+        fn context(&self) -> RequestContext<'_> {
+            RequestContext::new(
+                &self.principal,
+                &self.peer,
+                "wal-fetch",
+                "test",
+                false,
+                &self.listener,
+            )
+        }
+    }
+
+    async fn wal_fixture(listener: Option<&'static str>) -> WalFixture {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let WalShardBroker { handle, topic_id } = broker_with_routable_wal_shard(dir.path()).await;
+        let broker = handle.broker_arc_for_test();
+        let principal = wal_peer_principal();
+        let peer = peer();
+        let listener = listener.map_or_else(
+            || Cow::Owned(broker.config.inter_broker_listener_name.clone()),
+            Cow::Borrowed,
+        );
+        WalFixture {
+            listener,
+            peer,
+            principal,
+            broker,
+            handle,
+            _dir: dir,
+            topic_id,
+        }
+    }
+
+    struct RoutedWalResponse {
+        response: FetchResponse,
+        version: i16,
     }
 
     async fn routed_wal_response(
@@ -685,7 +710,7 @@ mod tests {
         version: i16,
         context: &RequestContext<'_>,
         expectation: &str,
-    ) -> (krabka_protocol::owned::fetch_response::FetchResponse, i16) {
+    ) -> RoutedWalResponse {
         let request = fetch_request(
             QuorumGroup::diskless_wal(topic_id, PartitionIndex(0)),
             krabka_raft::NodeId(2),
@@ -698,9 +723,10 @@ mod tests {
         request
             .encode(&mut encoded, version)
             .expect("encode WAL fetch");
-        super::handle(broker, version, 1, &encoded, context)
+        let (response, version) = super::handle(broker, version, 1, &encoded, context)
             .await
-            .expect(expectation)
+            .expect(expectation);
+        RoutedWalResponse { response, version }
     }
 
     /// The peer principal a routed WAL fetch authenticates as.
@@ -708,14 +734,21 @@ mod tests {
 
     #[tokio::test]
     async fn handle_routes_discriminated_wal_fetch_on_broker_listener() {
-        wal_fixture!(
-            (dir, broker_handle, topic_id, broker),
-            (principal, peer, listener, context)
-        );
+        let wal = wal_fixture(None).await;
+        let context = wal.context();
 
         for version in [KIP_595_FETCH_VERSION, 18] {
-            let (response, response_version) =
-                routed_wal_response(&broker, topic_id, version, &context, "route WAL fetch").await;
+            let RoutedWalResponse {
+                response,
+                version: response_version,
+            } = routed_wal_response(
+                &wal.broker,
+                wal.topic_id,
+                version,
+                &context,
+                "route WAL fetch",
+            )
+            .await;
 
             assert!(response_version == version);
             let partition = &response.responses[0].partitions[0];
@@ -725,7 +758,7 @@ mod tests {
                 Some(RecordsPayload::Raw(ref records)) if !records.is_empty()
             ));
         }
-        broker_handle.shutdown().await;
+        wal.handle.shutdown().await;
     }
 
     /// The rendered value of `krabka_broker_<series>{api_key="Fetch"}` in
@@ -750,13 +783,11 @@ mod tests {
     /// indistinguishable there from the fetches the handler refused.
     #[tokio::test]
     async fn routed_wal_fetch_observes_all_three_phases() {
-        wal_fixture!(
-            (dir, broker_handle, topic_id, broker),
-            (principal, peer, listener, context)
-        );
-        let (response, _) = routed_wal_response(
-            &broker,
-            topic_id,
+        let wal = wal_fixture(None).await;
+        let context = wal.context();
+        let RoutedWalResponse { response, .. } = routed_wal_response(
+            &wal.broker,
+            wal.topic_id,
             KIP_595_FETCH_VERSION,
             &context,
             "route WAL fetch",
@@ -766,7 +797,7 @@ mod tests {
 
         let mut rendered = String::new();
         {
-            let registry = broker.metrics.registry.lock().await;
+            let registry = wal.broker.metrics.registry.lock().await;
             prometheus_client::encoding::text::encode(&mut rendered, &registry)
                 .expect("encode registry");
         }
@@ -787,7 +818,7 @@ mod tests {
         );
         assert!(fetch_series_value(&rendered, "request_remote_duration_seconds_sum") == "0.0");
         assert!(fetch_series_value(&rendered, "request_throttle_duration_seconds_sum") == "0.0");
-        broker_handle.shutdown().await;
+        wal.handle.shutdown().await;
     }
 
     #[tokio::test]
@@ -831,15 +862,12 @@ mod tests {
     /// `broker-2` and read another voter's WAL shard.
     #[tokio::test]
     async fn wal_fetch_on_a_client_listener_is_refused() {
-        wal_fixture!(
-            (dir, broker_handle, topic_id, broker),
-            (principal, peer, context),
-            "EXTERNAL"
-        );
+        let wal = wal_fixture(Some("EXTERNAL")).await;
+        let context = wal.context();
 
-        let (response, _) = routed_wal_response(
-            &broker,
-            topic_id,
+        let RoutedWalResponse { response, .. } = routed_wal_response(
+            &wal.broker,
+            wal.topic_id,
             KIP_595_FETCH_VERSION,
             &context,
             "refuse WAL fetch",
@@ -848,7 +876,7 @@ mod tests {
 
         assert!(response.error_code == crate::codes::CLUSTER_AUTHORIZATION_FAILED);
         assert!(response.responses.is_empty());
-        broker_handle.shutdown().await;
+        wal.handle.shutdown().await;
     }
 }
 

@@ -223,16 +223,24 @@ pub fn consume_controller_mutation_quota(
 mod tests {
     use {
         super::*,
-        crate::quota::QuotaDelay,
+        crate::quota::{
+            QuotaDelay,
+            test_support::{QuotaEntityInput, image_with_rate},
+        },
         assert2::{assert, check},
         krabka_units::{millis, secs},
     };
 
-    crate::quota::test_support::image_builder!(img_with_quota, "controller_mutation_rate");
+    fn img_with_quota(
+        entity: Vec<QuotaEntityInput<'_>>,
+        rate: f64,
+    ) -> krabka_metadata::MetadataImage {
+        image_with_rate(entity, "controller_mutation_rate", rate)
+    }
 
     fn retry_quota() -> ControllerMutationQuota {
         ControllerMutationQuota::new(&QuotaRequest {
-            image: &img_with_quota(vec![("user", Some("alice"))], 2.0),
+            image: &img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 2.0),
             buckets: &QuotaBuckets::new(),
             principal: "alice",
             client_id: None,
@@ -286,7 +294,7 @@ mod tests {
 
     #[test]
     fn zero_mutations_returns_zero_delay() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 1.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 1.0);
         let buckets = QuotaBuckets::new();
         let delay = consume_controller_mutation_quota(&img, &buckets, "alice", Some(""), 0);
         let expected = QuotaDelay::new(<Time as TimeExt>::ZERO, Some("alice".into()), None);
@@ -297,7 +305,7 @@ mod tests {
     fn under_rate_returns_zero_delay() {
         // rate=10/sec, burst capacity=10 (one second of capacity).
         // 5 mutations consumed → bucket has 5 left → no overage.
-        let img = img_with_quota(vec![("user", Some("alice"))], 10.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 10.0);
         let buckets = QuotaBuckets::new();
         let delay = consume_controller_mutation_quota(&img, &buckets, "alice", Some(""), 5);
         assert!(delay.delay == <Time as TimeExt>::ZERO);
@@ -308,7 +316,7 @@ mod tests {
     /// one-mutation burst, 61 mutations leave 60 seconds of debt.
     #[test]
     fn overage_delay_is_not_capped() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 1.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 1.0);
         let buckets = QuotaBuckets::new();
         let delay = consume_controller_mutation_quota(&img, &buckets, "alice", Some(""), 61);
         check!(
@@ -325,8 +333,8 @@ mod tests {
     #[test]
     fn a_rate_change_keeps_the_debt_of_the_bucket() {
         let buckets = QuotaBuckets::new();
-        let before = img_with_quota(vec![("user", Some("alice"))], 1.0);
-        let after = img_with_quota(vec![("user", Some("alice"))], 2.0);
+        let before = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 1.0);
+        let after = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 2.0);
 
         // A one-mutation bucket and 61 mutations: 60 in debt.
         let _ = consume_controller_mutation_quota(&before, &buckets, "alice", Some(""), 61);
@@ -342,8 +350,8 @@ mod tests {
     #[test]
     fn a_smaller_capacity_caps_the_kept_balance() {
         let buckets = QuotaBuckets::new();
-        let before = img_with_quota(vec![("user", Some("alice"))], 10.0);
-        let after = img_with_quota(vec![("user", Some("alice"))], 1.0);
+        let before = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 10.0);
+        let after = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 1.0);
 
         // Ten tokens held, then a capacity of one: nine mutations are 8 over.
         let _ = consume_controller_mutation_quota(&before, &buckets, "alice", Some(""), 0);
@@ -390,7 +398,7 @@ mod tests {
             },
         ];
 
-        let img = img_with_quota(vec![("user", Some("alice"))], 10.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 10.0);
         let mut actual = Vec::new();
         let mut expected = Vec::new();
         for Case {
@@ -431,7 +439,7 @@ mod tests {
     /// it leaves the bucket below zero.
     #[test]
     fn strict_quota_reports_the_throttle_of_a_refusal_only() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 10.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 10.0);
         let buckets = QuotaBuckets::new();
         let open = || {
             ControllerMutationQuota::new(&QuotaRequest {
@@ -460,7 +468,7 @@ mod tests {
     /// no bound shortens (#709).
     #[test]
     fn strict_rejection_reports_the_uncapped_refill_time() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 1.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 1.0);
         let buckets = QuotaBuckets::new();
         let quota_req = QuotaRequest {
             image: &img,
@@ -484,7 +492,7 @@ mod tests {
 
     #[test]
     fn fractional_strict_quota_rejects_the_operation_after_debt() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 0.015);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 0.015);
         let buckets = QuotaBuckets::new();
         let mut quota = ControllerMutationQuota::new(&QuotaRequest {
             image: &img,
@@ -531,7 +539,7 @@ mod tests {
     /// A principal with no `controller_mutation_rate` is never throttled.
     #[test]
     fn no_quota_never_refuses() {
-        let image = img_with_quota(vec![("user", Some("bob"))], 1.0);
+        let image = img_with_quota(vec![QuotaEntityInput::user(Some("bob"))], 1.0);
         let buckets = QuotaBuckets::new();
         let req = QuotaRequest {
             image: &image,

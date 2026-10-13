@@ -40,35 +40,38 @@ async fn write_state(
     image: &MetadataImage,
     req: WriteShareGroupStateRequest,
 ) -> WriteShareGroupStateResponse {
-    if super::empty_partition_data!(req) || req.group_id.is_empty() {
+    if super::empty_partition_data(&req.topics, |topic| topic.partitions.is_empty())
+        || req.group_id.is_empty()
+    {
         return WriteShareGroupStateResponse::default();
     }
-    let results = super::state_results!(req, WriteStateResult, |group_id, topic_id, pd| {
-        let request = ShareWrite {
-            state_epoch: pd.state_epoch,
-            leader_epoch: pd.leader_epoch,
-            start_offset: Offset(pd.start_offset),
-            delivery_complete_count: pd.delivery_complete_count,
-            batches: pd.state_batches.iter().map(StateBatch::from).collect(),
-        };
-        let result = coordinator
-            .write(image, group_id, topic_id, pd.partition, request)
-            .await;
-        match result {
-            Ok(()) => PartitionResult {
-                partition: pd.partition,
-                error_code: codes::NONE,
-                error_message: None,
-                ..Default::default()
-            },
-            Err(error) => PartitionResult {
-                partition: pd.partition,
-                error_code: error.code(),
-                error_message: Some(error.row_message("write")),
-                ..Default::default()
-            },
-        }
-    });
+    let results =
+        krabka_macros::share_state_results!(req, WriteStateResult, |group_id, topic_id, pd| {
+            let request = ShareWrite {
+                state_epoch: pd.state_epoch,
+                leader_epoch: pd.leader_epoch,
+                start_offset: Offset(pd.start_offset),
+                delivery_complete_count: pd.delivery_complete_count,
+                batches: pd.state_batches.iter().map(StateBatch::from).collect(),
+            };
+            let result = coordinator
+                .write(image, group_id, topic_id, pd.partition, request)
+                .await;
+            match result {
+                Ok(()) => PartitionResult {
+                    partition: pd.partition,
+                    error_code: codes::NONE,
+                    error_message: None,
+                    ..Default::default()
+                },
+                Err(error) => PartitionResult {
+                    partition: pd.partition,
+                    error_code: error.code(),
+                    error_message: Some(error.row_message("write")),
+                    ..Default::default()
+                },
+            }
+        });
 
     WriteShareGroupStateResponse {
         results,
@@ -149,12 +152,11 @@ mod tests {
         }
     }
 
-    super::super::test_support::response_fixture!(
-        WriteShareGroupStateResponse,
-        WriteStateResult,
-        PartitionResult,
-        WIRE_TOPIC
-    );
+    use crate::share_coordinator::handlers::test_support::state_response;
+
+    fn response(partitions: Vec<PartitionResult>) -> WriteShareGroupStateResponse {
+        state_response(WIRE_TOPIC, partitions)
+    }
 
     /// The whole `WriteShareGroupStateResponse` for each request shape, over
     /// one initialized key (partition 4, state epoch 17), and the stored

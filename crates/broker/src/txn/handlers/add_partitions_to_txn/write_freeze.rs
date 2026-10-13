@@ -70,12 +70,12 @@ pub(super) fn topic_refusal(
 
 #[cfg(test)]
 mod tests {
-
     use {
         super::*,
         crate::{
             authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
             broker::Broker,
+            handlers::test_support::StartedBroker,
             test_support::{
                 configure_single_partition_transactions, start_broker_no_audit_with,
                 topic_freeze_record,
@@ -253,7 +253,10 @@ mod tests {
         authorizer: Arc<dyn Authorizer>,
         freeze: FreezeSpec<'_>,
     ) -> CoordinatorBroker {
-        let (handle, dir) = start_broker_no_audit_with(move |cfg| {
+        let StartedBroker {
+            broker: handle,
+            dir,
+        } = start_broker_no_audit_with(move |cfg| {
             configure_single_partition_transactions(cfg, authorizer);
         })
         .await;

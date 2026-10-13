@@ -229,7 +229,7 @@ where
             "replicator: skipping out_of_range recovery from stale target");
         return RowAction::Drop;
     }
-    let _target_guard = lock_local_target!(
+    let _target_guard = krabka_macros::replication_target_guard!(
         partition,
         cfg,
         "replicator: skipping out_of_range recovery from stale local target"
@@ -335,7 +335,7 @@ pub(super) async fn handle_offset_moved_to_tiered_storage(cfg: &Config) -> RowAc
             "replicator: skipping tiered-storage restart from stale target");
         return RowAction::Drop;
     }
-    let _target_guard = lock_local_target!(
+    let _target_guard = krabka_macros::replication_target_guard!(
         partition,
         cfg,
         "replicator: skipping tiered-storage restart from stale local target"

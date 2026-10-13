@@ -1,4 +1,4 @@
-use super::*;
+use {super::*, crate::log_index::IndexEntry};
 
 #[test]
 fn index_frontier_is_the_u32_relative_span() {
@@ -19,21 +19,21 @@ fn index_frontier_is_the_u32_relative_span() {
 fn offset_and_time_index_entries_are_strict_and_bounded() {
     check!(restore_offset_index_entry_valid(None, 0, 0, 4, 100));
     check!(restore_offset_index_entry_valid(
-        Some((0, 0)),
+        Some(IndexEntry::new(0, 0)),
         3,
         50,
         4,
         100
     ));
     check!(!restore_offset_index_entry_valid(
-        Some((3, 50)),
+        Some(IndexEntry::new(3, 50)),
         3,
         60,
         4,
         100
     ));
     check!(!restore_offset_index_entry_valid(
-        Some((0, 50)),
+        Some(IndexEntry::new(0, 50)),
         3,
         50,
         4,
@@ -51,9 +51,24 @@ fn offset_and_time_index_entries_are_strict_and_bounded() {
 
     check!(restore_time_index_entry_valid(None, 10, 0, 4));
     // krabka's writer repeats the running maximum timestamp.
-    check!(restore_time_index_entry_valid(Some((10, 0)), 10, 3, 4));
-    check!(!restore_time_index_entry_valid(Some((10, 3)), 11, 3, 4));
-    check!(!restore_time_index_entry_valid(Some((10, 0)), 9, 3, 4));
+    check!(restore_time_index_entry_valid(
+        Some(IndexEntry::new(10, 0)),
+        10,
+        3,
+        4
+    ));
+    check!(!restore_time_index_entry_valid(
+        Some(IndexEntry::new(10, 3)),
+        11,
+        3,
+        4
+    ));
+    check!(!restore_time_index_entry_valid(
+        Some(IndexEntry::new(10, 0)),
+        9,
+        3,
+        4
+    ));
     check!(!restore_time_index_entry_valid(None, 10, 5, 4));
 }
 

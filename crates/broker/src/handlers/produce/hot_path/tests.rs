@@ -55,12 +55,17 @@ fn settings(
     }
 }
 
-macro_rules! append_fixture {
-    (($metrics:ident, $dir:ident, $log:ident)) => {
-        let $metrics = crate::metrics::BrokerMetrics::new();
-        let $dir = tempdir().unwrap();
-        let mut $log = Log::open($dir.path(), LogConfig::default()).unwrap();
-    };
+struct AppendFixture {
+    metrics: BrokerMetrics,
+    log: Log,
+    dir: tempfile::TempDir,
+}
+
+fn append_fixture() -> AppendFixture {
+    let metrics = BrokerMetrics::new();
+    let dir = tempdir().unwrap();
+    let log = Log::open(dir.path(), LogConfig::default()).unwrap();
+    AppendFixture { metrics, log, dir }
 }
 
 #[test]
@@ -97,7 +102,11 @@ fn seam_reproduces_the_pipeline_decision_and_appends_on_both_paths() {
     ];
 
     for (name, records, choice, topic_compression, expected) in cases {
-        append_fixture!((metrics, dir, log));
+        let AppendFixture {
+            metrics,
+            dir: _dir,
+            mut log,
+        } = append_fixture();
 
         let path = append_one_batch(
             records,
@@ -128,7 +137,11 @@ fn a_malformed_records_field_returns_the_response_error_code() {
         ("no first batch", &b"not a batch"[..], codes::INVALID_RECORD),
     ];
     for (name, records, want) in cases {
-        append_fixture!((metrics, dir, log));
+        let AppendFixture {
+            metrics,
+            dir: _dir,
+            mut log,
+        } = append_fixture();
 
         let error = append_one_batch(
             Bytes::copy_from_slice(records),

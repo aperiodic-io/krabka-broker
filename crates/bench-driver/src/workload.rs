@@ -1072,6 +1072,95 @@ impl TaskMeasurements {
     }
 }
 
+/// One producer's acknowledgement tallies and the run controls they observe.
+struct ProducerObservations<'a> {
+    idx: usize,
+    msg_size: u64,
+    grid: Grid,
+    shared: SharedHandles<'a>,
+    output: ProducerOut,
+}
+
+impl<'a> ProducerObservations<'a> {
+    fn new(idx: usize, msg_size: u64, grid: Grid, shared: SharedHandles<'a>) -> Self {
+        let measurements = TaskMeasurements::new(grid.n);
+        Self {
+            idx,
+            msg_size,
+            grid,
+            shared,
+            output: ProducerOut {
+                latency: measurements.latency,
+                msgs: measurements.msgs,
+                bytes: measurements.bytes,
+                dropped: 0,
+                recovery_unix_ms: 0,
+                latency_spike_max: Time::ZERO,
+                error: String::new(),
+                interval_msgs: measurements.interval_msgs,
+                interval_hist: measurements.interval_hist,
+            },
+        }
+    }
+
+    /// Account for every send still outstanding at the final drain deadline.
+    fn record_drain_timeout(&mut self, unresolved: usize) {
+        self.output.dropped += unresolved as u64;
+        if self.output.error.is_empty() {
+            self.output.error = format!("producer-{}-final-drain-timeout:{unresolved}", self.idx);
+        }
+    }
+
+    /// Record one settled send in the phase observed at receipt.
+    fn record_ack(&mut self, result: AckResult, sent_at: Instant) {
+        match result {
+            Ok(_meta) => {
+                let latency = sent_at.elapsed().as_time();
+                if self.shared.stop.load(Ordering::Relaxed) == STATE_MEASURING {
+                    hist::record(&mut self.output.latency, latency);
+                    self.output.msgs += 1;
+                    self.output.bytes += self.msg_size;
+                    let iv = self.grid.idx(Instant::now());
+                    self.output.interval_msgs[iv] += 1;
+                    hist::record(&mut self.output.interval_hist[iv], latency);
+                    // Recovery and the spike are measured against the
+                    // shared kill marker, not against this task's own
+                    // errors. The marker is published only after the pod
+                    // delete succeeds, so an ack before it belongs to the
+                    // healthy cluster and is not a recovery.
+                    let killed_at = self.shared.kill_at.load(Ordering::Relaxed);
+                    if killed_at > 0 {
+                        let now_ms = nonnegative_i64_to_u64(Utc::now().timestamp_millis());
+                        if self.output.recovery_unix_ms == 0 && now_ms >= killed_at {
+                            self.output.recovery_unix_ms = now_ms;
+                        }
+                        if latency > self.output.latency_spike_max {
+                            self.output.latency_spike_max = latency;
+                        }
+                    }
+                }
+                if self.shared.first_ack.load(Ordering::Relaxed) == 0 {
+                    let now_ms = nonnegative_i64_to_u64(Utc::now().timestamp_millis());
+                    let _ = self.shared.first_ack.compare_exchange(
+                        0,
+                        now_ms,
+                        Ordering::SeqCst,
+                        Ordering::Relaxed,
+                    );
+                }
+            }
+            Err(e) => {
+                if self.shared.stop.load(Ordering::Relaxed) == STATE_MEASURING {
+                    self.output.dropped += 1;
+                }
+                if self.output.dropped == 1 && self.output.error.is_empty() {
+                    self.output.error = format!("producer-{}-err: {e}", self.idx);
+                }
+            }
+        }
+    }
+}
+
 async fn run_producer(task: ProducerTask) -> ProducerOut {
     let ProducerTask {
         setup:
@@ -1145,11 +1234,12 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
     // Counter behind each record key, so keys vary within this task. The task
     // index is folded in, so two tasks never mint the same key.
     let mut sent_records = (idx as u64) << 40;
-    let mut measurements = TaskMeasurements::new(grid.n);
-    let mut dropped = 0u64;
-    let mut recovery_unix_ms = 0u64;
-    let mut latency_spike_max = Time::ZERO;
-    let mut error = String::new();
+    let mut observations =
+        ProducerObservations::new(idx, scenario.msg_size.bytes_u64(), grid, SharedHandles {
+            stop: &stop,
+            first_ack: &first_ack,
+            kill_at: &kill_at,
+        });
 
     let mut pacer = match scenario.mode {
         LoadMode::Saturate => None,
@@ -1167,57 +1257,6 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
     let max_inflight: usize = 512;
     let mut inflight: FuturesUnordered<AckFuture> = FuturesUnordered::new();
 
-    // Record one *settled* send (`Ok` = ack, `Err` = producer error). A macro,
-    // not a closure, so it can mutate the per-task accumulators in place.
-    macro_rules! handle_ack {
-        ($res:expr, $t0:expr) => {
-            match $res {
-                Ok(_meta) => {
-                    let latency = $t0.elapsed().as_time();
-                    if stop.load(Ordering::Relaxed) == STATE_MEASURING {
-                        hist::record(&mut measurements.latency, latency);
-                        measurements.msgs += 1;
-                        measurements.bytes += scenario.msg_size.bytes_u64();
-                        let iv = grid.idx(Instant::now());
-                        measurements.interval_msgs[iv] += 1;
-                        hist::record(&mut measurements.interval_hist[iv], latency);
-                        // Recovery and the spike are measured against the
-                        // shared kill marker, not against this task's own
-                        // errors. The marker is published only after the pod
-                        // delete succeeds, so an ack before it belongs to the
-                        // healthy cluster and is not a recovery.
-                        let killed_at = kill_at.load(Ordering::Relaxed);
-                        if killed_at > 0 {
-                            let now_ms = nonnegative_i64_to_u64(Utc::now().timestamp_millis());
-                            if recovery_unix_ms == 0 && now_ms >= killed_at {
-                                recovery_unix_ms = now_ms;
-                            }
-                            if latency > latency_spike_max {
-                                latency_spike_max = latency;
-                            }
-                        }
-                    }
-                    if first_ack.load(Ordering::Relaxed) == 0 {
-                        let now_ms = nonnegative_i64_to_u64(Utc::now().timestamp_millis());
-                        let _ = first_ack.compare_exchange(
-                            0,
-                            now_ms,
-                            Ordering::SeqCst,
-                            Ordering::Relaxed,
-                        );
-                    }
-                }
-                Err(e) => {
-                    if stop.load(Ordering::Relaxed) == STATE_MEASURING {
-                        dropped += 1;
-                    }
-                    if dropped == 1 && error.is_empty() {
-                        error = format!("producer-{idx}-err: {e}");
-                    }
-                }
-            }
-        };
-    }
     loop {
         let state = stop.load(Ordering::Relaxed);
         if state == STATE_STOP {
@@ -1231,7 +1270,7 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
             sent_at: t0,
         }) = inflight.next().now_or_never().flatten()
         {
-            handle_ack!(res, t0);
+            observations.record_ack(res, t0);
         }
         // Back-pressure: at capacity, block until any send completes. Waiting
         // for the oldest can make one dead-leader send hide live-partition acks.
@@ -1241,7 +1280,7 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
                 sent_at: t0,
             }) = inflight.next().await
             {
-                handle_ack!(res, t0);
+                observations.record_ack(res, t0);
             }
         }
         if let Some(p) = pacer.as_mut() {
@@ -1268,7 +1307,7 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
                     sent_at: t0,
                 }
             })),
-            Err(error) => handle_ack!(Err::<RecordMetadata, _>(error), t0),
+            Err(error) => observations.record_ack(Err(error), t0),
         }
     }
 
@@ -1280,25 +1319,17 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
     while !inflight.is_empty() {
         let now = Instant::now();
         if now >= drain_until {
-            let unresolved = inflight.len() as u64;
-            dropped += unresolved;
-            if error.is_empty() {
-                error = format!("producer-{idx}-final-drain-timeout:{unresolved}");
-            }
+            observations.record_drain_timeout(inflight.len());
             break;
         }
         match tokio::time::timeout_at(drain_until, inflight.next()).await {
             Ok(Some(SettledAck {
                 result: res,
                 sent_at: t0,
-            })) => handle_ack!(res, t0),
+            })) => observations.record_ack(res, t0),
             Ok(None) => break,
             Err(_) => {
-                let unresolved = inflight.len() as u64;
-                dropped += unresolved;
-                if error.is_empty() {
-                    error = format!("producer-{idx}-final-drain-timeout:{unresolved}");
-                }
+                observations.record_drain_timeout(inflight.len());
                 break;
             }
         }
@@ -1307,17 +1338,7 @@ async fn run_producer(task: ProducerTask) -> ProducerOut {
     let _ = producer.flush().await;
     let _ = producer.close().await;
 
-    ProducerOut {
-        latency: measurements.latency,
-        msgs: measurements.msgs,
-        bytes: measurements.bytes,
-        dropped,
-        recovery_unix_ms,
-        latency_spike_max,
-        error,
-        interval_msgs: measurements.interval_msgs,
-        interval_hist: measurements.interval_hist,
-    }
+    observations.output
 }
 
 // ── Consumer task ───────────────────────────────────────────────────────────
@@ -1538,6 +1559,150 @@ mod tests {
     }
 
     fn scenario(rf: i16) -> Scenario { short_scenario(rf) }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct ProducerCounters {
+        messages: u64,
+        bytes: u64,
+        dropped: u64,
+    }
+
+    fn producer_counters(output: &ProducerOut) -> ProducerCounters {
+        ProducerCounters {
+            messages: output.msgs,
+            bytes: output.bytes,
+            dropped: output.dropped,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn settled_acknowledgements_observe_phase_and_shared_failover_markers() {
+        let scenario = scenario(1);
+        let grid = Grid::new(Instant::now(), 0, &scenario, millis(10));
+        let stop = Arc::new(AtomicU8::new(STATE_RUN));
+        let first_ack = Arc::new(AtomicU64::new(0));
+        let kill_at = Arc::new(AtomicU64::new(0));
+        let shared = SharedHandles {
+            stop: &stop,
+            first_ack: &first_ack,
+            kill_at: &kill_at,
+        };
+        let metadata = RecordMetadata {
+            topic: "t".into(),
+            partition: 0,
+            offset: 7,
+            timestamp_ms: 0,
+            serialized_key_size: -1,
+            serialized_value_size: 600,
+        };
+
+        // Warmup and stopped receipts publish the first acknowledgement, but
+        // only measuring receipts contribute throughput, latency, or drops.
+        for phase in [STATE_RUN, STATE_MEASURING, STATE_STOP] {
+            stop.store(phase, Ordering::SeqCst);
+            first_ack.store(0, Ordering::SeqCst);
+            let mut observations = ProducerObservations::new(4, 100, grid, shared);
+            let sent_at = Instant::now();
+            observations.record_ack(Err(ProducerError::Server(29)), sent_at);
+            assert!(first_ack.load(Ordering::SeqCst) == 0);
+            tokio::time::advance(millis(5).to_std()).await;
+            observations.record_ack(Ok(metadata.clone()), sent_at);
+            let first_receipt = first_ack.load(Ordering::SeqCst);
+            assert!(first_receipt > 0);
+            let measured = u64::from(phase == STATE_MEASURING);
+            assert!(
+                producer_counters(&observations.output)
+                    == ProducerCounters {
+                        messages: measured,
+                        bytes: measured * 100,
+                        dropped: measured,
+                    }
+            );
+            assert!(observations.output.latency.len() == measured);
+            assert!(observations.output.interval_msgs.iter().sum::<u64>() == measured);
+            assert!(
+                observations
+                    .output
+                    .interval_hist
+                    .iter()
+                    .map(Histogram::len)
+                    .sum::<u64>()
+                    == measured
+            );
+            observations.record_ack(Err(ProducerError::Server(31)), sent_at);
+            assert!(observations.output.dropped == 2 * measured);
+            assert!(
+                observations.output.error
+                    == if measured == 1 {
+                        "producer-4-err: broker error_code 29"
+                    } else {
+                        ""
+                    }
+            );
+            assert!(
+                observations.output.recovery_unix_ms == 0
+                    && observations.output.latency_spike_max == Time::ZERO
+            );
+
+            stop.store(STATE_STOP, Ordering::SeqCst);
+            observations.record_ack(Ok(metadata.clone()), sent_at);
+            observations.record_ack(Err(ProducerError::Server(32)), sent_at);
+            assert!(
+                observations.output.msgs == measured && observations.output.dropped == 2 * measured
+            );
+            assert!(first_ack.load(Ordering::SeqCst) == first_receipt);
+            let first_error = observations.output.error.clone();
+            observations.record_drain_timeout(3);
+            assert!(observations.output.dropped == 2 * measured + 3);
+            assert!(
+                observations.output.error
+                    == if first_error.is_empty() {
+                        "producer-4-final-drain-timeout:3"
+                    } else {
+                        first_error.as_str()
+                    }
+            );
+        }
+
+        stop.store(STATE_MEASURING, Ordering::SeqCst);
+        first_ack.store(777, Ordering::SeqCst);
+        let mut observations = ProducerObservations::new(4, 100, grid, shared);
+        let sent_at = Instant::now();
+        tokio::time::advance(millis(20).to_std()).await;
+        observations.record_ack(Ok(metadata.clone()), sent_at);
+        assert!(observations.output.latency_spike_max == Time::ZERO);
+
+        // A marker beyond this receipt does not establish recovery. The
+        // original spike ledger still records latency once a marker exists.
+        kill_at.store(u64::MAX, Ordering::SeqCst);
+        let sent_at = Instant::now();
+        tokio::time::advance(millis(50).to_std()).await;
+        observations.record_ack(Ok(metadata.clone()), sent_at);
+        assert!(observations.output.recovery_unix_ms == 0);
+        assert!(observations.output.latency_spike_max == millis(50));
+
+        kill_at.store(1, Ordering::SeqCst);
+        let sent_at = Instant::now();
+        tokio::time::advance(millis(20).to_std()).await;
+        observations.record_ack(Ok(metadata.clone()), sent_at);
+        let recovered = observations.output.recovery_unix_ms;
+        assert!(recovered >= 1);
+        assert!(observations.output.latency_spike_max == millis(50));
+        let sent_at = Instant::now();
+        tokio::time::advance(millis(70).to_std()).await;
+        observations.record_ack(Ok(metadata), sent_at);
+        assert!(observations.output.recovery_unix_ms == recovered);
+        assert!(observations.output.latency_spike_max == millis(70));
+        assert!(
+            producer_counters(&observations.output)
+                == ProducerCounters {
+                    messages: 4,
+                    bytes: 400,
+                    dropped: 0,
+                }
+        );
+        assert!(first_ack.load(Ordering::SeqCst) == 777);
+    }
 
     /// A mock broker for the producer pipeline test, with the signal that a
     /// metadata request named a topic and the largest batch it saw.

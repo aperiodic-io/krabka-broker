@@ -6,6 +6,8 @@
 //! duplicate id is answered once, and the rows of the groups the principal may
 //! not delete follow the coordinator's rows.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::Broker,
@@ -153,7 +155,10 @@ mod tests {
 
     #[tokio::test]
     async fn handle_denies_delete_for_each_group() {
-        let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
         krabka_macros::request_test_identity! {
             bind(p, peer);
@@ -173,7 +178,7 @@ mod tests {
     #[derive(Debug)]
     struct DenyGroupNamedDenied;
 
-    test_authorizer!(DenyGroupNamedDenied, (self, _source, req), {
+    krabka_macros::test_authorizer!(DenyGroupNamedDenied, req; {
         if req.resource_name == "denied" {
             AuthorizationResult::Deny
         } else {
@@ -191,8 +196,10 @@ mod tests {
             error_code: i16,
         }
 
-        let (broker_handle, _dir) =
-            start_group_broker_no_audit(Arc::new(DenyGroupNamedDenied)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_group_broker_no_audit(Arc::new(DenyGroupNamedDenied)).await;
         let broker = broker_handle.broker_arc_for_test();
         krabka_macros::request_test_identity! {
             bind(p, peer);
@@ -293,7 +300,10 @@ mod tests {
     async fn handle_answers_v3_with_a_null_error_message_per_group() {
         use krabka_protocol::{Decode as _, Encode as _};
 
-        let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
         krabka_macros::request_test_identity! {
             bind(ctx);

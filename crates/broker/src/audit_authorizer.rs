@@ -127,16 +127,32 @@ mod tests {
         std::{net::SocketAddr, sync::Arc},
     };
 
-    // Expand the setup in the caller so receiver and metrics keep their scopes.
-    macro_rules! denial_fixture {
-        ($rx:ident, $metrics:ident, $authz:ident, $principal:ident, $host:ident, $image:ident) => {
-            let (log, mut $rx) = krabka_audit::AuditLog::new(8);
-            let $metrics = crate::metrics::BrokerMetrics::new();
-            let $authz = AuditingAuthorizer::new(Arc::new(DenyAll), log, $metrics.clone());
-            let $principal = principal("anonymous");
-            let $host: SocketAddr = "10.0.0.9:5555".parse().unwrap();
-            let $image = krabka_metadata::MetadataImage::default();
-        };
+    // Each caller retains the receiver and metrics for the whole observation.
+
+    struct DenialFixture {
+        receiver: krabka_audit::AuditReceiver,
+        metrics: BrokerMetrics,
+        authorizer: AuditingAuthorizer,
+        principal: krabka_security::Principal,
+        host: SocketAddr,
+        image: krabka_metadata::MetadataImage,
+    }
+    fn denial_fixture() -> DenialFixture {
+        // AuditLog's existing channel constructor returns a log/receiver pair.
+        let (log, receiver) = krabka_audit::AuditLog::new(8);
+        let metrics = BrokerMetrics::new();
+        let authorizer = AuditingAuthorizer::new(Arc::new(DenyAll), log, metrics.clone());
+        let principal = principal("anonymous");
+        let host = "10.0.0.9:5555".parse().unwrap();
+        let image = krabka_metadata::MetadataImage::default();
+        DenialFixture {
+            receiver,
+            metrics,
+            authorizer,
+            principal,
+            host,
+            image,
+        }
     }
 
     fn secret_write(
@@ -163,7 +179,14 @@ mod tests {
 
     #[tokio::test]
     async fn deny_decision_emits_audit_record() {
-        denial_fixture!(rx, metrics, authz, principal, host, image);
+        let DenialFixture {
+            receiver: mut rx,
+            metrics,
+            authorizer: authz,
+            principal,
+            host,
+            image,
+        } = denial_fixture();
         let result = secret_write(&authz, &image, &principal, &host);
         check!(result == AuthorizationResult::Deny);
 
@@ -275,7 +298,14 @@ mod tests {
     /// count, where the same Deny through `authorize` leaves both.
     #[tokio::test]
     async fn a_quiet_deny_leaves_no_audit_record_and_no_count() {
-        denial_fixture!(rx, metrics, authz, principal, host, image);
+        let DenialFixture {
+            receiver: mut rx,
+            metrics,
+            authorizer: authz,
+            principal,
+            host,
+            image,
+        } = denial_fixture();
         let request = AuthorizationRequest {
             principal: &principal,
             host: &host,

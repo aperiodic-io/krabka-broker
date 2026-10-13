@@ -220,28 +220,49 @@ mod tests {
 
     #[test]
     fn every_describe_schema_preserves_error_fields_and_default_operation_bits() {
-        fn check_row<Row: DescribedGroupRow>(fields: impl Fn(&Row) -> (Option<&str>, i32)) {
+        #[derive(Debug, PartialEq)]
+        struct RowFields<'a> {
+            error_message: Option<&'a str>,
+            authorized_operations: i32,
+        }
+        fn check_row<Row: DescribedGroupRow>(fields: impl for<'a> Fn(&'a Row) -> RowFields<'a>) {
             let mut row = Row::error_row("group", -1, Some("refusal".into()));
             assert!(row.group_id() == "group");
             assert!(row.error_code() == -1);
-            assert!(fields(&row) == (Some("refusal"), i32::MIN));
+            assert!(
+                fields(&row)
+                    == RowFields {
+                        error_message: Some("refusal"),
+                        authorized_operations: i32::MIN
+                    }
+            );
             row.set_authorized_operations(1 << 8);
-            assert!(fields(&row) == (Some("refusal"), 1 << 8));
+            assert!(
+                fields(&row)
+                    == RowFields {
+                        error_message: Some("refusal"),
+                        authorized_operations: 1 << 8
+                    }
+            );
             assert!(row.group_id() == "group");
             assert!(row.error_code() == -1);
         }
 
-        check_row::<consumer_group_describe_response::DescribedGroup>(|row| {
-            (row.error_message.as_deref(), row.authorized_operations)
+        check_row::<consumer_group_describe_response::DescribedGroup>(|row| RowFields {
+            error_message: row.error_message.as_deref(),
+            authorized_operations: row.authorized_operations,
         });
-        check_row::<describe_groups_response::DescribedGroup>(|row| {
-            (row.error_message.as_deref(), row.authorized_operations)
+        check_row::<describe_groups_response::DescribedGroup>(|row| RowFields {
+            error_message: row.error_message.as_deref(),
+            authorized_operations: row.authorized_operations,
         });
-        check_row::<share_group_describe_response::DescribedGroup>(|row| {
-            (row.error_message.as_deref(), row.authorized_operations)
+        check_row::<share_group_describe_response::DescribedGroup>(|row| RowFields {
+            error_message: row.error_message.as_deref(),
+            authorized_operations: row.authorized_operations,
         });
-        check_row::<streams_group_describe_response::DescribedGroup>(|row| {
-            (row.error_message.as_deref(), row.authorized_operations)
+        check_row::<streams_group_describe_response::DescribedGroup>(|row| RowFields {
+            error_message: row.error_message.as_deref(),
+            authorized_operations: row.authorized_operations,
         });
     }
 

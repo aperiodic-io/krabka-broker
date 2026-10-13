@@ -304,20 +304,11 @@ fn durable_projection(group: &ShareGroupState) -> DurableProjection {
 
 /// Reconciles the group and then the member against its target, as a share
 /// heartbeat does: `true` for a joining member.
-macro_rules! reconcile_group_and_member {
-    ($state:ident, $member_id:ident, $joining:expr) => {
-        let metadata = metadata($state.partitions);
-        reconcile(
-            &mut $state.group,
-            &metadata,
-            std::time::Duration::ZERO,
-            $joining,
-        )
-        .ok()?;
-        $state
-            .group
-            .reconcile_member($member_id, $joining, &metadata);
-    };
+fn reconcile_group_and_member(state: &mut State, member_id: &str, joining: bool) -> Option<()> {
+    let metadata = metadata(state.partitions);
+    reconcile(&mut state.group, &metadata, Duration::ZERO, joining).ok()?;
+    state.group.reconcile_member(member_id, joining, &metadata);
+    Some(())
 }
 
 impl Model for ShareModel {
@@ -338,7 +329,7 @@ impl Model for ShareModel {
                 );
                 member.last_seen = at(&state);
                 state.group.add_or_update_member(member);
-                reconcile_group_and_member! { state, member_id, true }
+                reconcile_group_and_member(&mut state, member_id, true)?;
             }
             Action::Heartbeat(member_id, kind) => {
                 let current = state.group.members.get(member_id)?.member_epoch;
@@ -350,7 +341,7 @@ impl Model for ShareModel {
                 match state.group.validate_member_epoch(member_id, requested) {
                     Ok(_) => {
                         state.group.members.get_mut(member_id)?.last_seen = at(&state);
-                        reconcile_group_and_member! { state, member_id, false }
+                        reconcile_group_and_member(&mut state, member_id, false)?;
                     }
                     Err(error) => match kind {
                         EpochKind::Stale => {
@@ -392,7 +383,7 @@ impl Model for ShareModel {
                 state.partitions = partitions;
                 initialize(&mut state.group, partitions);
                 let before = state.group.group_epoch;
-                reconcile_group_and_member! { state, member_id, false }
+                reconcile_group_and_member(&mut state, member_id, false)?;
                 if state.group.group_epoch > before {
                     state.witnesses |= WITNESS_METADATA;
                 }

@@ -642,6 +642,7 @@ mod tests {
         krabka_ids::Offset,
         krabka_log::{Log, LogConfig},
         krabka_protocol::{
+            owned::fetch_response::AbortedTransaction,
             primitives::uuid::Uuid as WireUuid,
             records::{Record, RecordBatch, RecordsPayload},
         },
@@ -659,12 +660,12 @@ mod tests {
     }
 
     async fn local_read_setup(topic: &str) -> ReadSetup {
-        let (broker_handle, dir) = handler_fixture_support::start_broker().await;
-        let broker = broker_handle.broker_arc_for_test();
-        let part = handler_fixture_support::local_partition(&broker, dir.path(), topic);
+        let started = handler_fixture_support::start_broker().await;
+        let broker = started.broker.broker_arc_for_test();
+        let part = handler_fixture_support::local_partition(&broker, started.dir.path(), topic);
         ReadSetup {
-            broker_handle,
-            dir,
+            broker_handle: started.broker,
+            dir: started.dir,
             broker,
             part,
         }
@@ -1072,13 +1073,25 @@ mod tests {
     }
 
     /// Independent null-versus-empty aborted-transaction expectations for both isolation modes.
-    macro_rules! aborted_isolation_cases {
-        () => {
-            [
-                ("read_uncommitted", false, None),
-                ("read_committed", true, Some(Vec::new())),
-            ]
-        };
+    struct AbortedIsolationCase {
+        name: &'static str,
+        read_committed: bool,
+        want_aborted: Option<Vec<AbortedTransaction>>,
+    }
+
+    fn aborted_isolation_cases() -> [AbortedIsolationCase; 2] {
+        [
+            AbortedIsolationCase {
+                name: "read_uncommitted",
+                read_committed: false,
+                want_aborted: None,
+            },
+            AbortedIsolationCase {
+                name: "read_committed",
+                read_committed: true,
+                want_aborted: Some(Vec::new()),
+            },
+        ]
     }
 
     /// A partition the response budget has no room for gets the row an
@@ -1091,14 +1104,19 @@ mod tests {
     /// one gets `None`.
     #[tokio::test]
     async fn a_metadata_only_row_carries_an_empty_reads_aborted_transactions() {
-        let cases = aborted_isolation_cases!();
+        let cases = aborted_isolation_cases();
 
         krabka_macros::broker_test_setup! {
             bind(broker_handle, _dir, broker);
             boot [handler_fixture_support::start_broker()];
         };
 
-        for (name, read_committed, want_aborted) in cases {
+        for AbortedIsolationCase {
+            name,
+            read_committed,
+            want_aborted,
+        } in cases
+        {
             // The first partition spends the response's one progress
             // exception; the second is read at a zero budget after it.
             let ConsumerPartition {
@@ -1561,7 +1579,12 @@ mod tests {
             boot [handler_fixture_support::start_broker()];
         };
 
-        for (name, read_committed, want_aborted) in aborted_isolation_cases!() {
+        for AbortedIsolationCase {
+            name,
+            read_committed,
+            want_aborted,
+        } in aborted_isolation_cases()
+        {
             let ConsumerPartition {
                 partition: part,
                 dir: _part_dir,

@@ -2,7 +2,7 @@
 use super::timestamp::{time_archive_valid, time_cursor_matches};
 use {
     super::{
-        indexed_timestamp_scan_finds_first, remote_timestamp_scan_preserves_first,
+        TimeEntry, indexed_timestamp_scan_finds_first, remote_timestamp_scan_preserves_first,
         validated_remote_and_local_time_starts_agree,
     },
     creusot_std::prelude::*,
@@ -15,7 +15,7 @@ type TimeScanWitness = (usize, u32, u32, Option<usize>);
 #[cfg_attr(test, mutants::skip)]
 #[logic(open)]
 fn time_scan_input_valid(
-    entries: Seq<(i64, u32)>,
+    entries: Seq<TimeEntry>,
     offsets: Seq<u32>,
     times: Seq<i64>,
     maximum: Int,
@@ -47,7 +47,7 @@ fn time_scan_input_valid(
         },
 })]
 pub(super) fn validated_retained_time_scan_agrees(
-    entries: &[(i64, u32)],
+    entries: &[TimeEntry],
     offsets: &[u32],
     times: &[i64],
     max_relative: i64,
@@ -73,15 +73,15 @@ pub(super) fn validated_retained_time_scan_agrees(
     i = 0;
     #[invariant(i@ <= entries@.len())]
     #[invariant(forall<j: Int, k: Int> 0 <= j && j < i@ && 0 <= k && k < offsets@.len()
-        && offsets@[k]@ < entries@[j].1@ ==> times@[k]@ <= entries@[j].0@)]
+        && offsets@[k]@ < entries@[j].coordinate@ ==> times@[k]@ <= entries@[j].key@)]
     #[variant(entries@.len() - i@)]
     while i < entries.len() {
         let mut j = 0usize;
         #[invariant(j@ <= offsets@.len())]
-        #[invariant(forall<k: Int> 0 <= k && k < j@ && offsets@[k]@ < entries@[i@].1@ ==> times@[k]@ <= entries@[i@].0@)]
+        #[invariant(forall<k: Int> 0 <= k && k < j@ && offsets@[k]@ < entries@[i@].coordinate@ ==> times@[k]@ <= entries@[i@].key@)]
         #[variant(offsets@.len() - j@)]
         while j < offsets.len() {
-            if offsets[j] < entries[i].1 && times[j] > entries[i].0 {
+            if offsets[j] < entries[i].coordinate && times[j] > entries[i].key {
                 return Err(());
             }
             j += 1;

@@ -18,7 +18,10 @@ use {
             offsets::{offset_commit_partition, offset_commit_topic},
             records::record_count,
         },
-        wire::{CONTROL, accepted, create_topic, frozen_topic_with_record, refused},
+        wire::{
+            CONTROL, accepted, create_topic, finish_with_control_record, frozen_topic_with_record,
+            produce_outcome, refused,
+        },
     },
     assert2::{assert, check},
     krabka_broker::{Broker, BrokerConfig, codes},
@@ -114,8 +117,7 @@ async fn fetch_metadata_and_the_metrics_endpoint_still_answer_for_a_frozen_topic
         check!(body.contains(needle), "missing {needle} in:\n{body}");
     }
 
-    crate::wire::check_produce!(&broker, &client, CONTROL, control => accepted(1));
-    broker.shutdown().await;
+    finish_with_control_record(broker, &client, control).await;
 }
 
 /// A consumer of a frozen topic can still record where it got to.
@@ -133,10 +135,13 @@ async fn offset_commit_still_works_against_a_frozen_topic() {
     p.broker.wait_until_group_coordinator_ready().await;
     let frozen = create_topic(&p.broker, &p.client, "orders").await;
     let control = create_topic(&p.broker, &p.client, CONTROL).await;
-    crate::wire::check_produce!(&p.broker, &p.client, "orders", frozen => accepted(1));
+    check!(produce_outcome(&p.broker, &p.client, "orders", frozen).await == accepted(1));
 
     freeze_scope(&p.client, PATTERN_TYPE_LITERAL, "orders", "cutover").await;
-    crate::wire::check_produce!(&p.broker, &p.client, "orders", frozen => refused("literal", "orders", "cutover", 1));
+    check!(
+        produce_outcome(&p.broker, &p.client, "orders", frozen).await
+            == refused("literal", "orders", "cutover", 1)
+    );
 
     for (label, topic, topic_id) in [
         ("the frozen topic", "orders", frozen),

@@ -3,7 +3,7 @@
 use {
     crate::{
         meta::{expect_name, grouped_value, native_groups},
-        sweep_loop::splice,
+        sweep_loop::{SpliceValue, splice},
     },
     moxy::{
         ast::{List, Parse, ParseError, Parser, Token},
@@ -13,7 +13,7 @@ use {
 };
 
 struct Matrix {
-    cases: Vec<Ident>,
+    case: Ident,
     bindings: Vec<Ident>,
 }
 
@@ -31,10 +31,11 @@ fn declaration(input: &TokenStream) -> Result<Matrix, ParseError> {
                 ));
             }
             let names = List::<Ident, Token![,]>::parse_all(&Parser::from_tokens(&group.tokens))?;
-            if (expected == "case" && names.len() < 4) || (expected == "bind" && names.len() != 5) {
+            if (expected == "case" && names.len() != 1) || (expected == "bind" && names.len() != 5)
+            {
                 return Err(ParseError::new(
                     group.span(),
-                    "case needs label/authorizer/support/input.../expected; bind needs handle/directory/broker/context/response",
+                    "case needs one named row; bind needs handle/directory/broker/context/response",
                 ));
             }
             declarations.push(names.into_iter().collect::<Vec<_>>());
@@ -55,29 +56,25 @@ fn declaration(input: &TokenStream) -> Result<Matrix, ParseError> {
     }
     let mut declarations = declarations.into_iter();
     Ok(Matrix {
-        cases: declarations.next().unwrap(),
+        case: declarations.next().unwrap().remove(0),
         bindings: declarations.next().unwrap(),
     })
 }
 
 fn template(matrix: &Matrix) -> TokenStream {
-    let cases = &matrix.cases;
-    let [case, authorizer, enabled, ..] = cases.as_slice() else {
-        unreachable!("validated case count")
-    };
-    let expected = cases.last().unwrap();
+    let case = &matrix.case;
     let [handle, directory, broker, context, response] = matrix.bindings.as_slice() else {
         unreachable!("validated fixture binding count")
     };
     moxy::template! {
-        for (@for name in cases { {{ name }}, }) in __matrix_cases {
-            let ({{ handle }}, {{ directory }}) = crate::test_support::start_share_broker().authorizer({{ authorizer }}).support({{ enabled }}).call().await;
+        for {{ case }} in __matrix_cases {
+            let crate::handlers::test_support::StartedBroker { broker: {{ handle }}, dir: {{ directory }} } = crate::test_support::start_share_broker().authorizer({{ case }}.authorizer).support({{ case }}.enabled).call().await;
             let {{ broker }} = {{ handle }}.broker_arc_for_test();
             let __share_principal = crate::test_support::principal("alice");
             let __share_peer = crate::test_support::peer();
             let {{ context }} = test_context(&__share_principal, &__share_peer);
             let {{ response }} = __matrix_invoke.await.expect("handle");
-            ::assert2::assert!({{ response }} == {{ expected }}, "case: {}", {{ case }});
+            ::assert2::assert!({{ response }} == {{ case }}.expected, "case: {}", {{ case }}.name);
             {{ handle }}.shutdown().await;
         }
     }
@@ -93,14 +90,14 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
     Ok(splice(
         template(&matrix).into(),
         &[
-            (
-                "__matrix_cases".to_owned(),
-                Group::new(Delimiter::None, cases.stream()),
-            ),
-            (
-                "__matrix_invoke".to_owned(),
-                Group::new(Delimiter::Parenthesis, invoke.stream()),
-            ),
+            SpliceValue {
+                name: "__matrix_cases".to_owned(),
+                group: Group::new(Delimiter::None, cases.stream()),
+            },
+            SpliceValue {
+                name: "__matrix_invoke".to_owned(),
+                group: Group::new(Delimiter::Parenthesis, invoke.stream()),
+            },
         ],
         &["__share_principal", "__share_peer"],
     ))
@@ -116,21 +113,17 @@ mod tests {
 
     #[test]
     fn keeps_case_arity_and_shared_execution_order_explicit() {
-        let matrix = declaration(&"case(label, authorizer, enabled, topic, partitions, expected) [cases::<1, 2>()]; bind(handle,dir,broker,ctx,response); invoke [dispatch(&broker, request(topic,&partitions), version,&ctx)];".parse().unwrap()).unwrap();
+        let matrix = declaration(&"case(row) [cases::<1, 2>()]; bind(handle,dir,broker,ctx,response); invoke [dispatch(&broker, request(row.input.topic,&row.input.partitions), version,&ctx)];".parse().unwrap()).unwrap();
         let output = compact(&template(&matrix));
-        assert!(
-            output.contains(
-                "for(label,authorizer,enabled,topic,partitions,expected,)in__matrix_cases"
-            )
-        );
+        assert!(output.contains("forrowin__matrix_cases"));
         assert!(output.contains("handle.shutdown().await;"));
         for invalid in [
             "",
             "case(label,auth,expected) [cases]; bind(h,d,b,c,r); invoke [handle()];",
-            "case(label,auth,enabled,expected) []; bind(h,d,b,c,r); invoke [handle()];",
-            "case(label,auth,enabled,expected) [cases]; bind(h,d,b,c); invoke [handle()];",
-            "case(label,auth,enabled,expected) [cases]; bind(h,d,b,c,r); invoke [];",
-            "case(label,auth,enabled,expected) [cases]; bind(h,d,b,c,r); invoke [handle()]; extra",
+            "case(row) []; bind(h,d,b,c,r); invoke [handle()];",
+            "case(row) [cases]; bind(h,d,b,c); invoke [handle()];",
+            "case(row) [cases]; bind(h,d,b,c,r); invoke [];",
+            "case(row) [cases]; bind(h,d,b,c,r); invoke [handle()]; extra",
         ] {
             assert!(declaration(&invalid.parse().unwrap()).is_err(), "{invalid}");
         }

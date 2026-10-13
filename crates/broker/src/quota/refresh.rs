@@ -146,7 +146,7 @@ fn refresh_buckets(image: &MetadataImage, buckets: &QuotaBuckets) {
 /// re-rated from the key and not from whichever client created it (#1213):
 /// Kafka re-rates each sensor from its own metric tags.
 ///
-/// An accept-path bucket is keyed by `[("ip", Some(peer))]`, so it is looked
+/// An accept-path bucket is keyed by `[QuotaEntityInput::ip(Some(peer))]`, so it is looked
 /// up with the `ip` precedence. The user and client-id lookup would find
 /// nothing for it and would remove the `connection_creation_rate` limit at the
 /// next image change.
@@ -175,7 +175,9 @@ mod tests {
         super::{super::bucket_rate, *},
         crate::{
             quota::test_support::{
-                AliceBucket, alice_app1_producer_quota, alice_bucket, app1_producer_quota,
+                AliceBucket, QuotaEntityInput, QuotaRecordSetup, QuotaValue,
+                alice_app1_producer_quota, alice_bucket, app1_producer_quota,
+                shared_image_from_quota_setup,
             },
             throttle::TokenBucket,
         },
@@ -187,9 +189,7 @@ mod tests {
         },
     };
 
-    crate::quota_record_builder!(
-        img_with_quota -> Arc<MetadataImage> = crate::quota::test_support::shared_image_from_quota_setup
-    );
+    krabka_macros::fixture_constructors! { quota: img_with_quota -> Arc<MetadataImage> = shared_image_from_quota_setup; }
 
     /// A refresh keeps each bucket at the rate its consumer created it with
     /// (#692). A `request_percentage` of 50 is 500 000 microseconds of handler
@@ -291,7 +291,7 @@ mod tests {
             let b = buckets.get_or_create("connection_creation_rate", &key, 1.0);
 
             let img = img_with_quota()
-                .entity(vec![("ip", entity_name)])
+                .entity(vec![QuotaEntityInput::ip(entity_name)])
                 .key("connection_creation_rate")
                 .value(rate)
                 .call();
@@ -309,7 +309,7 @@ mod tests {
         let key: EntityKey = vec![("ip".into(), Some("::1".into()))];
         let b = buckets.get_or_create("connection_creation_rate", &key, 1.0);
         let img = img_with_quota()
-            .entity(vec![("ip", Some("0:0:0:0:0:0:0:1"))])
+            .entity(vec![QuotaEntityInput::ip(Some("0:0:0:0:0:0:0:1"))])
             .key("connection_creation_rate")
             .value(3.0)
             .call();
@@ -335,7 +335,7 @@ mod tests {
         let key: EntityKey = vec![("ip".into(), Some(peer.to_string()))];
         let b = buckets.get_or_create("connection_creation_rate", &key, 1.0);
         let img = img_with_quota()
-            .entity(vec![("ip", Some("localhost"))])
+            .entity(vec![QuotaEntityInput::ip(Some("localhost"))])
             .key("connection_creation_rate")
             .value(3.0)
             .call();
@@ -432,7 +432,7 @@ mod tests {
 
     fn db_image() -> Arc<MetadataImage> {
         img_with_quota()
-            .entity(vec![("ip", Some("db"))])
+            .entity(vec![QuotaEntityInput::ip(Some("db"))])
             .key("connection_creation_rate")
             .value(3.0)
             .call()

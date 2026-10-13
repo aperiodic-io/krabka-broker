@@ -7,7 +7,6 @@
 //! response builder first, calls the group coordinator only when a row
 //! survives (lines 2163-2165), and merges the coordinator's answer onto the
 //! surviving rows only (line 2185).
-
 use {
     super::{
         integration_tests::{
@@ -20,6 +19,7 @@ use {
         broker::{Broker, BrokerHandle},
         codes,
         coordinator::{bootstrap::OFFSETS_TOPIC, partitioner::partition_for_group},
+        handlers::test_support::StartedBroker,
         test_support::{
             configure_single_partition_transactions, decode_response, dispatch_context,
             encode_request, peer, principal, request_context, start_broker_no_audit_with,
@@ -173,7 +173,10 @@ async fn stage_producer_identity(broker: &Broker, transactional_id: &str, produc
 /// only move a partition whose cases have already run.
 #[tokio::test]
 async fn per_topic_codes_survive_every_exit_and_gate_the_coordinator_call() {
-    let (handle, _dir) = start_broker_no_audit_with(|cfg| {
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|cfg| {
         configure_single_partition_transactions(cfg, Arc::new(DenyOneTopic));
     })
     .await;

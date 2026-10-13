@@ -6,6 +6,8 @@
 //! partition count and replication factor shape the topic that is created and
 //! the partition a key is routed to.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::*,
     crate::{
@@ -95,7 +97,7 @@ const KAFKA_TOPIC_ID: &str = "BQUFBQUFBQUFBQUFBQUFBQ";
 #[derive(Debug)]
 struct DenyOneTransaction;
 
-test_authorizer!(DenyOneTransaction, (self, _source, request), {
+krabka_macros::test_authorizer!(DenyOneTransaction, request; {
     if request.resource_type == ResourceType::TransactionalId
         && request.operation == AclOperation::Describe
         && request.resource_name == "denied"
@@ -115,7 +117,10 @@ fn check_invalid_share_lookup(handle: &BrokerHandle, response: &FindCoordinatorR
 
 #[tokio::test]
 async fn configured_partition_count_controls_txn_topic_and_routing() {
-    let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| {
         config.transaction_state_num_partitions = 7;
         config.transaction_state_replication_factor = 1;
     })
@@ -157,13 +162,7 @@ async fn configured_partition_count_controls_txn_topic_and_routing() {
 
 #[tokio::test]
 async fn share_key_type_before_v6_is_invalid_without_bootstrap() {
-    let (broker_handle, _dir) = start_broker_no_audit().await;
-    let broker = broker_handle.broker_arc_for_test();
-    krabka_macros::request_test_identity! {
-        bind(principal, peer, context);
-        user ["alice"];
-        client ["share-client"];
-    };
+    krabka_macros::broker_test_setup! { bind(broker_handle, _dir, broker, principal, peer, context); boot [start_broker_no_audit()]; user ["alice"]; client ["share-client"]; };
     let version = 5;
     let request = FindCoordinatorRequest {
         key_type: KEY_TYPE_SHARE,
@@ -181,13 +180,7 @@ async fn share_key_type_before_v6_is_invalid_without_bootstrap() {
 
 #[tokio::test]
 async fn v4_empty_key_array_stays_empty_without_bootstrap() {
-    let (broker_handle, _dir) = start_broker_no_audit().await;
-    let broker = broker_handle.broker_arc_for_test();
-    krabka_macros::request_test_identity! {
-        bind(principal, peer, context);
-        user ["alice"];
-        client ["txn-client"];
-    };
+    krabka_macros::broker_test_setup! { bind(broker_handle, _dir, broker, principal, peer, context); boot [start_broker_no_audit()]; user ["alice"]; client ["txn-client"]; };
     let version = 4;
     let request = FindCoordinatorRequest {
         key_type: KEY_TYPE_TRANSACTION,
@@ -211,7 +204,10 @@ async fn v4_empty_key_array_stays_empty_without_bootstrap() {
 
 #[tokio::test]
 async fn mixed_rejection_and_resolution_preserve_key_order_and_errors() {
-    let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| {
         config.authorizer = std::sync::Arc::new(DenyOneTransaction);
         config.transaction_state_replication_factor = 1;
     })
@@ -257,7 +253,10 @@ async fn mixed_rejection_and_resolution_preserve_key_order_and_errors() {
 
 #[tokio::test]
 async fn malformed_share_key_is_invalid_without_bootstrap() {
-    let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| {
         config.share_coordinator.state_topic_replication_factor = 1;
     })
     .await;
@@ -317,15 +316,19 @@ fn row(key: &str, error_code: i16, error_message: Option<String>) -> Coordinator
     }
 }
 
-macro_rules! mixed_share_keys {
-    (($valid:ident, $request:ident)) => {
-        let $valid = format!("share-group:{KAFKA_TOPIC_ID}:0");
-        let $request = FindCoordinatorRequest {
-            key_type: KEY_TYPE_SHARE,
-            coordinator_keys: vec!["malformed".into(), $valid.clone()],
-            ..Default::default()
-        };
+struct MixedShareRequest {
+    valid: String,
+    request: FindCoordinatorRequest,
+}
+
+fn mixed_share_keys() -> MixedShareRequest {
+    let valid = format!("share-group:{KAFKA_TOPIC_ID}:0");
+    let request = FindCoordinatorRequest {
+        key_type: KEY_TYPE_SHARE,
+        coordinator_keys: vec!["malformed".into(), valid.clone()],
+        ..Default::default()
     };
+    MixedShareRequest { valid, request }
 }
 
 /// A principal without `ClusterAction` that sends one malformed and one valid
@@ -334,13 +337,16 @@ macro_rules! mixed_share_keys {
 /// `getErrorResponse` stamps every key. Nothing is bootstrapped.
 #[tokio::test]
 async fn denied_share_request_answers_cluster_authorization_failed_on_every_key() {
-    let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| {
         config.authorizer = std::sync::Arc::new(DenyAll);
         config.share_coordinator.state_topic_replication_factor = 1;
     })
     .await;
     let broker = broker_handle.broker_arc_for_test();
-    mixed_share_keys!((valid, request));
+    let MixedShareRequest { valid, request } = mixed_share_keys();
 
     let response = find(&broker, &request, 6, "alice").await;
 
@@ -373,9 +379,7 @@ async fn denied_share_request_answers_cluster_authorization_failed_on_every_key(
 /// message of the code and `Node.noNode()`.
 #[tokio::test]
 async fn denied_group_key_answers_kafka_row_shape_per_version() {
-    let (broker_handle, _dir) =
-        start_broker_no_audit_with(|config| config.authorizer = std::sync::Arc::new(DenyAll)).await;
-    let broker = broker_handle.broker_arc_for_test();
+    krabka_macros::broker_test_setup! { bind(broker_handle, _dir, broker); boot [start_broker_no_audit_with(|config| config.authorizer = std::sync::Arc::new(DenyAll))]; };
     let rows = vec![
         VersionedResponse {
             version: krabka_ids::ApiVersion(4),
@@ -404,13 +408,16 @@ async fn denied_group_key_answers_kafka_row_shape_per_version() {
 /// `INVALID_REQUEST` row with no message and a valid key resolves.
 #[tokio::test]
 async fn granted_share_request_validates_each_key() {
-    let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| {
         config.share_coordinator.state_topic_replication_factor = 1;
     })
     .await;
     let broker = broker_handle.broker_arc_for_test();
     broker_handle.wait_until_share_coordinator_ready().await;
-    mixed_share_keys!((valid, request));
+    let MixedShareRequest { valid, request } = mixed_share_keys();
 
     let response = find(&broker, &request, 6, "admin").await;
 
@@ -442,7 +449,10 @@ async fn granted_share_request_validates_each_key() {
 /// bootstrapped.
 #[tokio::test]
 async fn unknown_key_type_fails_the_whole_request() {
-    let (broker_handle, _dir) = start_broker_no_audit().await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit().await;
     let broker = broker_handle.broker_arc_for_test();
     let message = response::error_message(codes::INVALID_REQUEST);
     let rows = vec![
@@ -603,8 +613,10 @@ fn resolve_answers_only_an_alive_leader_on_the_request_listener() {
 /// which for `NONE` is the enum name.
 #[tokio::test]
 async fn a_legacy_group_lookup_answers_in_the_top_level_fields() {
-    let (broker_handle, _dir) =
-        start_broker_no_audit_with(|config| config.offsets_topic_replication_factor = 1).await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| config.offsets_topic_replication_factor = 1).await;
     let broker = broker_handle.broker_arc_for_test();
     broker_handle.wait_until_group_coordinator_ready().await;
     let request = FindCoordinatorRequest {
@@ -650,7 +662,10 @@ async fn the_first_lookup_creates_the_state_topic_once_and_a_later_one_names_the
         (KEY_TYPE_SHARE, share_key.as_str(), TOPIC),
     ];
     for (key_type, key, topic) in cases {
-        let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_no_audit_with(|config| {
             config.offsets_topic_num_partitions = 3;
             config.transaction_state_num_partitions = 3;
             config.share_coordinator.state_topic_num_partitions = 3;
@@ -717,7 +732,10 @@ async fn the_first_lookup_creates_the_state_topic_once_and_a_later_one_names_the
 /// topic with a replica on each broker.
 #[tokio::test]
 async fn a_lookup_with_too_few_brokers_creates_nothing_until_enough_register() {
-    let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| {
         config.offsets_topic_num_partitions = 3;
         config.offsets_topic_replication_factor = 2;
     })

@@ -3,6 +3,7 @@ use {
     crate::{
         barrier::STATE_TOPIC,
         coordinator::bootstrap::OFFSETS_TOPIC,
+        handlers::test_support::StartedBroker,
         share_coordinator::bootstrap::TOPIC as SHARE_TOPIC,
         test_support::{PartitionCount, ReplicationFactor, start_broker_no_audit},
         time_util::now_ms,
@@ -447,7 +448,10 @@ fn a_finished_streams_creation_caches_kafkas_errors() {
 /// only when some topic is left.
 #[tokio::test]
 async fn a_streams_creation_skips_a_backed_off_or_in_flight_topic() {
-    let (handle, _dir) = start_broker_no_audit().await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_no_audit().await;
     let broker = handle.broker_arc_for_test();
     let creation = &broker.auto_topic_creation;
     let identity = ForwardedIdentity {

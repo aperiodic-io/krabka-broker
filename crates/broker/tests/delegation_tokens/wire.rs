@@ -33,7 +33,7 @@ use {
 const CLIENT_ID: &str = "krabka-deltok-test";
 
 // One length-prefixed request/response exchange, bound to this suite.
-crate::socket_round_trip_fixture!(pub(crate) round_trip, CLIENT_ID);
+krabka_macros::wire_test_driver!(socket pub(crate) round_trip, CLIENT_ID);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SASL handshake drivers. Both walk ApiVersions → SaslHandshake →

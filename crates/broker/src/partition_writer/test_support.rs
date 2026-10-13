@@ -2,7 +2,7 @@
 //! opener, and the stub sequencer and WAL the diskless tests drive.
 
 use {
-    super::run_with_sequencer,
+    super::{WriterIdentity, WriterServices, WriterSignals, WriterStorage, run_with_sequencer},
     crate::{
         config::BrokerConfig,
         delivery::DeliveryHandles,
@@ -209,23 +209,29 @@ pub(super) fn spawn_writer(
     receiver: mpsc::Receiver<WriterMessage>,
     options: WriterOptions,
 ) -> tokio::task::JoinHandle<()> {
-    let (cap, sequencer) = (options.max_produce_group, options.sequencer);
     tokio::spawn(run_with_sequencer(
-        (options.topic, options.partition),
-        (
+        WriterIdentity {
+            topic: options.topic,
+            partition: options.partition,
+        },
+        WriterStorage {
             log,
-            Arc::new(arc_swap::ArcSwap::from_pointee(dir.to_path_buf())),
-        ),
+            log_dir: Arc::new(arc_swap::ArcSwap::from_pointee(dir.to_path_buf())),
+        },
         receiver,
-        (
-            options.append_notify,
-            options.replica_state,
-            options.hw_advance_notify,
-            options.delivery,
-        ),
-        (options.log_dir_status, options.producer_state, options.wal),
-        cap,
-        sequencer,
+        WriterSignals {
+            append_notify: options.append_notify,
+            replica_state: options.replica_state,
+            hw_advance_notify: options.hw_advance_notify,
+            delivery: options.delivery,
+        },
+        WriterServices {
+            log_dir_status: options.log_dir_status,
+            producer_state: options.producer_state,
+            wal: options.wal,
+        },
+        options.max_produce_group,
+        options.sequencer,
     ))
 }
 

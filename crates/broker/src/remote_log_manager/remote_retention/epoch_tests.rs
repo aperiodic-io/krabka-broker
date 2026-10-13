@@ -5,7 +5,7 @@ use {
     super::*,
     crate::remote_log_manager::{
         now_ms,
-        test_support::{local_backends, tier, tp},
+        test_support::{self as fixtures, local_backends, tier, tp},
     },
     assert2::assert,
     krabka_ids::{LeaderEpoch, Offset},
@@ -135,7 +135,7 @@ fn the_epoch_cache_eviction_set_holds_the_segments_below_the_earliest_epoch() {
 #[tokio::test]
 async fn remote_retention_pass_deletes_segments_below_the_earliest_epoch() {
     let remote_dir = tempfile::tempdir().unwrap();
-    let (rsm, rlmm) = local_backends(remote_dir.path());
+    let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
     // An unclean election left epoch 1's segment over offsets that the current
     // lineage assigns to epochs 2 and 3.
     finished_segment()

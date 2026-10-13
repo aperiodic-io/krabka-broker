@@ -34,7 +34,9 @@ use {
 /// A caller that does not wait drops this value. The tasks run on.
 #[derive(Debug, Default, krabka_macros::ScheduledLoads)]
 #[scheduled_loads(failure_message = "__transaction_state load task failed")]
-pub(crate) struct ScheduledLoads(Vec<JoinHandle<()>>);
+pub(crate) struct ScheduledLoads {
+    tasks: Vec<JoinHandle<()>>,
+}
 
 impl TxnCoordinator {
     /// Applies the `__transaction_state` leadership of `image`, and starts the
@@ -93,8 +95,8 @@ impl TxnCoordinator {
                 "unloaded __transaction_state partition"
             );
         }
-        ScheduledLoads(
-            changes
+        ScheduledLoads {
+            tasks: changes
                 .load
                 .into_iter()
                 .map(|(partition, generation)| {
@@ -104,7 +106,7 @@ impl TxnCoordinator {
                     })
                 })
                 .collect(),
-        )
+        }
     }
 
     /// Loads every `__transaction_state` partition that `image` says this

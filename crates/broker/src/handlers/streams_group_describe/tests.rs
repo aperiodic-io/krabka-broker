@@ -5,6 +5,8 @@
 //! KIP-1071 gates produce -- feature disabled, group unknown, streams actor
 //! gone -- stay byte-for-byte what the JVM admin client expects.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         test_support::{
@@ -356,7 +358,10 @@ async fn ready_group_describes_the_configured_topology_and_every_member_field() 
 
     // The member reports task offsets, which Kafka 4.3.1 refuses and trunk
     // takes.
-    let (broker_handle, _dir) = start_broker_with(|cfg| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_with(|cfg| {
         cfg.streams_group.enable = true;
         cfg.features.unstable_api_versions = UnstableApiVersions::Enabled;
     })

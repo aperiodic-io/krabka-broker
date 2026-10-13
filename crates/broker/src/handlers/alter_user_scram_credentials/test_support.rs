@@ -5,17 +5,15 @@
 //! and assert on the same result shape, so the fixtures live in one module
 //! rather than being duplicated per test file.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         records::{delete_record, upsertion_record},
         response::{err_result, ok_result},
         validation::{validate_deletion, validate_upsertion},
     },
-    crate::{
-        authorizer::Authorizer,
-        broker::{Broker, BrokerHandle},
-        test_support::start_broker_with,
-    },
+    crate::{authorizer::Authorizer, broker::Broker, test_support::start_broker_with},
     bytes::Bytes,
     krabka_metadata::MetadataRecord,
     krabka_protocol::owned::{
@@ -110,9 +108,7 @@ krabka_macros::wire_codec_helpers! {
     pub(super) test_context ["admin-client"];
 }
 
-pub(super) async fn start_broker(
-    authorizer: Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir) {
+pub(super) async fn start_broker(authorizer: Arc<dyn Authorizer>) -> HandlerStartedBroker {
     start_broker_with(|cfg| {
         cfg.authorizer = authorizer;
     })

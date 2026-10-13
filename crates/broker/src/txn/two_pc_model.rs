@@ -259,7 +259,9 @@ impl TwoPcModel {
     }
 
     fn begin(s: &mut TwoPcProj) -> Option<()> {
-        begin_transaction! { s; s.start_ms = CLOCK[s.clock]; }
+        begin_transaction(&mut s.state, &mut s.generation, s.epoch, || {
+            s.start_ms = CLOCK[s.clock];
+        })
     }
 
     fn end_txn(s: &mut TwoPcProj, committed: bool) -> Option<()> {

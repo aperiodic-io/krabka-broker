@@ -22,7 +22,10 @@ use {
         broker::BrokerHandle,
         codes,
         fetch_session::{FINAL_EPOCH, INVALID_SESSION_ID},
-        handlers::test_support::{StartedBroker, seed_partition_replicas},
+        handlers::test_support::{
+            CaseOutcomes, StartedBroker, collect_topic_cases, seed_partition_replicas,
+            wait_for_bound_partition,
+        },
         partition::Partition,
         test_support::encode_request,
     },
@@ -99,19 +102,21 @@ async fn partition(broker: &BrokerHandle, topic: &str, topic_id: u128) -> Arc<Pa
         .call()
         .await;
 
-    wait_for_local_partition!(
-        (shared, partition),
-        broker,
+    let shared = broker.broker_arc_for_test();
+    let partition = wait_for_bound_partition(
+        &shared,
         topic,
-        partition,
-        partition
-            .replica_state
-            .lock()
-            .await
-            .isr
-            .contains(&krabka_raft::NodeId(FOLLOWER)),
-        "the broker leads the partition with node 2 in the ISR"
-    );
+        async |partition| {
+            partition
+                .replica_state
+                .lock()
+                .await
+                .isr
+                .contains(&krabka_raft::NodeId(FOLLOWER))
+        },
+        "the broker leads the partition with node 2 in the ISR",
+    )
+    .await;
 
     for value in [&b"first"[..], &b"second"[..]] {
         partition
@@ -258,41 +263,39 @@ async fn a_follower_learns_the_high_watermark_it_moved_one_fetch_later() {
     ];
 
     let StartedBroker { broker, dir: _dir } = start_with_idle_follower().await;
-    topic_case_outcomes!(
-        (actual, want),
-        (index, case, label, name),
-        "follower-watermark",
-        cases,
-        {
-            let partition = partition(&broker, &name, index + 1).await;
+    let CaseOutcomes {
+        actual,
+        expected: want,
+    } = collect_topic_cases("follower-watermark", cases, async |row| {
+        let partition = partition(&broker, &row.topic, row.index + 1).await;
 
-            let appender = (case.answer == Answer::Wake)
-                .then(|| tokio::spawn(append_after_the_position(Arc::clone(&partition))));
-            let response = tokio::time::timeout(
-                Duration::from_secs(5),
-                fetch(&broker, &request(&name, case)),
-            )
-            .await
-            .expect("the fetch is answered");
-            if let Some(appender) = appender {
-                appender.await.expect("append task");
-            }
+        let appender = (row.case.answer == Answer::Wake)
+            .then(|| tokio::spawn(append_after_the_position(Arc::clone(&partition))));
+        let response = tokio::time::timeout(
+            Duration::from_secs(5),
+            fetch(&broker, &request(&row.topic, row.case)),
+        )
+        .await
+        .expect("the fetch is answered");
+        if let Some(appender) = appender {
+            appender.await.expect("append task");
+        }
 
-            let records = match case.answer {
-                Answer::FirstRead | Answer::Expiry => RecordsPayload::Legacy(Bytes::new()),
-                Answer::FirstReadWithRecords => {
-                    RecordsPayload::V2(vec![stored_batch(&partition, 1)])
-                }
-                Answer::Wake => RecordsPayload::V2(vec![stored_batch(&partition, LOG_END)]),
-            };
-            actual.push(Outcome {
-                case: label.clone(),
+        let records = match row.case.answer {
+            Answer::FirstRead | Answer::Expiry => RecordsPayload::Legacy(Bytes::new()),
+            Answer::FirstReadWithRecords => RecordsPayload::V2(vec![stored_batch(&partition, 1)]),
+            Answer::Wake => RecordsPayload::V2(vec![stored_batch(&partition, LOG_END)]),
+        };
+        CaseOutcomes {
+            actual: Outcome {
+                case: row.label.clone(),
                 response,
                 high_watermark: partition.high_watermark().await,
-            });
-            want.push(expected(case, label, &name, records));
+            },
+            expected: expected(row.case, row.label, &row.topic, records),
         }
-    );
+    })
+    .await;
     broker.shutdown().await;
 
     assert!(actual == want);

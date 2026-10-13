@@ -26,25 +26,29 @@ use crate::{
 };
 
 /// Whether a request has no topic rows or contains an empty partition row.
-macro_rules! empty_partition_data {
-    ($request:ident) => {
-        $request.topics.is_empty()
-            || $request
-                .topics
-                .iter()
-                .any(|topic| topic.partitions.is_empty())
-    };
+fn empty_partition_data<T>(topics: &[T], empty: impl Fn(&T) -> bool) -> bool {
+    topics.is_empty() || topics.iter().any(empty)
 }
-use empty_partition_data;
+
+struct OperationVerdict {
+    code: i16,
+    message: Option<String>,
+}
 
 /// The code and Kafka message for a completed share-state operation.
 fn operation_result(
     result: Result<(), super::coordinator::ShareStateError>,
     operation: &str,
-) -> (i16, Option<String>) {
+) -> OperationVerdict {
     match result {
-        Ok(()) => (NONE, None),
-        Err(error) => (error.code(), Some(error.row_message(operation))),
+        Ok(()) => OperationVerdict {
+            code: NONE,
+            message: None,
+        },
+        Err(error) => OperationVerdict {
+            code: error.code(),
+            message: Some(error.row_message(operation)),
+        },
     }
 }
 
@@ -61,29 +65,6 @@ fn cluster_action_denied(broker: &Broker, ctx: &RequestContext<'_>) -> bool {
         ctx,
     )
 }
-
-/// Runs each topic's partition operations together and keeps request order in the results.
-/// Each operation waits for its own records to commit, as Kafka's `ShareCoordinatorService` does.
-macro_rules! state_results {
-    ($request:expr, $result:ident, |$group:ident, $topic:ident, $partition:ident| $body:block) => {{
-        let request = $request;
-        let $group = request.group_id.as_str();
-        futures_util::future::join_all(request.topics.into_iter().map(|topic| async move {
-            let $topic = uuid::Uuid::from_bytes(topic.topic_id.0);
-            let partitions = futures_util::future::join_all(
-                topic.partitions.into_iter().map(|$partition| async move $body),
-            )
-            .await;
-            $result {
-                topic_id: topic.topic_id,
-                partitions,
-                ..Default::default()
-            }
-        }))
-        .await
-    }};
-}
-use state_results;
 
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -103,11 +84,22 @@ pub(crate) mod test_support {
                 },
                 persistence::StateBatch,
             },
+            test_support::KafkaErrorCode,
             topic_creator::TopicCreator,
         },
         krabka_ids::{NodeId, PartitionIndex},
         krabka_log::Offset,
-        std::{path::Path, sync::Arc},
+        krabka_metadata::MetadataImage,
+        krabka_protocol::{
+            UnknownTaggedFields,
+            owned::{
+                delete_share_group_state_response, initialize_share_group_state_response,
+                read_share_group_state_response, read_share_group_state_summary_response,
+                write_share_group_state_response,
+            },
+            primitives::uuid::Uuid as ProtoUuid,
+        },
+        std::{fmt::Debug, path::Path, sync::Arc},
     };
 
     pub(crate) fn batch(bounds: std::ops::RangeInclusive<Offset>) -> StateBatch {
@@ -225,118 +217,114 @@ pub(crate) mod test_support {
         }
     }
 
-    macro_rules! response_fixture {
-        ($response:ident, $result:ident, $partition:ident, $topic:expr) => {
-            fn response(partitions: Vec<$partition>) -> $response {
-                super::super::test_support::response_fixture!(@value $response, $result, $topic, partitions)
-            }
-        };
-        ($response:ident, $result:ident, $partition:ident; keyed) => {
-            #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
-            struct StateResponseSetup<'a> {
-                #[default(TOPIC)]
-                topic: uuid::Uuid,
-                partition: krabka_ids::PartitionIndex,
-                #[default($crate::test_support::KafkaErrorCode($crate::codes::NONE))]
-                code: $crate::test_support::KafkaErrorCode,
-                message: Option<&'a str>,
-            }
-
-            fn response(setup: StateResponseSetup<'_>) -> $response {
-                super::super::test_support::response_fixture!(@value $response, $result,
-                    krabka_protocol::primitives::uuid::Uuid(*setup.topic.as_bytes()),
-                    vec![$partition {
-                        partition: setup.partition.0,
-                        error_code: setup.code.0,
-                        error_message: setup.message.map(str::to_owned),
-                        unknown_tagged_fields: krabka_protocol::tagged_fields::UnknownTaggedFields(vec![]),
-                    }]
-                )
-            }
-        };
-        (@value $response:ident, $result:ident, $topic:expr, $partitions:expr) => {
-            $response {
-                results: vec![$result {
-                    topic_id: $topic,
-                    partitions: $partitions,
-                    unknown_tagged_fields: krabka_protocol::tagged_fields::UnknownTaggedFields(vec![]),
-                }],
-                unknown_tagged_fields: krabka_protocol::tagged_fields::UnknownTaggedFields(vec![]),
-            }
-        };
+    /// One external response's associated topic and partition row schemas.
+    pub(crate) trait StateReply: Sized {
+        type Partition;
+        type Topic;
+        fn topic(topic: ProtoUuid, partitions: Vec<Self::Partition>) -> Self::Topic;
+        fn from_results(results: Vec<Self::Topic>) -> Self;
+        fn error_row(partition: i32, code: i16, message: Option<&str>) -> Self::Partition;
     }
-    pub(crate) use response_fixture;
 
-    /// Request fixtures share a singleton topic while keeping their partition fields explicit.
-    macro_rules! request_fixture {
-        ($request:ident, $topic:ident, $partition:ident;
-            fn request($group:ident: &str, [$($topic_id:ident: uuid::Uuid)?], $parts:ident: &[$row:ty]);
-            topic $wire_topic:expr; |$pattern:pat_param| $fields:block) => {
-            fn request($group: &str $(, $topic_id: uuid::Uuid)?, $parts: &[$row]) -> $request {
-                $request {
-                    group_id: $group.into(),
-                    topics: vec![$topic {
-                        topic_id: $wire_topic,
-                        partitions: $parts.iter().map(|&$pattern| $fields).collect(),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                }
-            }
-        };
+    krabka_macros::share_fixture_schemas! {
+        initialize_share_group_state_response::InitializeShareGroupStateResponse => initialize_share_group_state_response::InitializeStateResult, initialize_share_group_state_response::PartitionResult;
+        write_share_group_state_response::WriteShareGroupStateResponse => write_share_group_state_response::WriteStateResult, write_share_group_state_response::PartitionResult;
+        delete_share_group_state_response::DeleteShareGroupStateResponse => delete_share_group_state_response::DeleteStateResult, delete_share_group_state_response::PartitionResult;
+        read_share_group_state_response::ReadShareGroupStateResponse => read_share_group_state_response::ReadStateResult, read_share_group_state_response::PartitionResult;
+        read_share_group_state_summary_response::ReadShareGroupStateSummaryResponse => read_share_group_state_summary_response::ReadStateSummaryResult, read_share_group_state_summary_response::PartitionResult;
     }
-    pub(crate) use request_fixture;
 
-    /// A refused row with its independently supplied code and message.
-    macro_rules! error_row_fixture {
-        ($partition:ident) => {
-            fn error_row(partition: i32, error_code: i16, message: &str) -> $partition {
-                $partition {
-                    partition,
-                    error_code,
-                    error_message: Some(message.to_owned()),
-                    ..Default::default()
-                }
-            }
-        };
+    pub(crate) fn state_response<R: StateReply>(
+        topic: ProtoUuid,
+        partitions: Vec<R::Partition>,
+    ) -> R {
+        R::from_results(vec![R::topic(topic, partitions)])
     }
-    pub(crate) use error_row_fixture;
 
-    /// A request with a group id but no topics, distinct from an empty partition list.
-    macro_rules! no_topics {
-        ($request:ident, $group:expr) => {
-            $request {
-                group_id: $group.into(),
-                ..Default::default()
-            }
-        };
+    /// The keyed write-RPC response fields, with explicit caller-selected default topic.
+    #[derive(Clone, Copy, Default)]
+    pub(crate) struct StateResponseSetup<'a> {
+        pub(crate) topic: uuid::Uuid,
+        pub(crate) partition: PartitionIndex,
+        pub(crate) code: KafkaErrorCode,
+        pub(crate) message: Option<&'a str>,
     }
-    pub(crate) use no_topics;
 
-    /// Check each read operation against the whole independently supplied expected response.
-    macro_rules! stored_response_rows {
-        ($rows:expr, $topic:expr,($partitions:expr, $partition:expr), $serve:ident) => {
-            for (index, (led, req, expected)) in $rows.into_iter().enumerate() {
-                let dir = tempfile::TempDir::new().expect("tempdir");
-                let $crate::share_coordinator::handlers::test_support::StateFixture {
-                    coordinator,
-                    image,
-                } = super::super::test_support::initialized_state()
-                    .log_dir(dir.path())
-                    .topic($topic)
-                    .partitions($partitions)
-                    .partition($partition)
-                    .stored_data(true)
-                    .call()
-                    .await;
-                super::super::test_support::retain_leadership(&coordinator, led).await;
-                let resp = $serve(&coordinator, &image, req).await;
-                assert2::check!(resp == expected, "row {index}");
+    impl StateResponseSetup<'_> {
+        pub(crate) fn for_topic(topic: uuid::Uuid) -> Self {
+            Self {
+                topic,
+                ..Self::default()
             }
-        };
-    }
-    pub(crate) use stored_response_rows;
+        }
 
+        pub(crate) fn response<R: StateReply>(self) -> R {
+            state_response::<R>(ProtoUuid(*self.topic.as_bytes()), vec![R::error_row(
+                self.partition.0,
+                self.code.0,
+                self.message,
+            )])
+        }
+    }
+
+    pub(crate) struct StoredStateRow<Q, R> {
+        pub(crate) led: bool,
+        pub(crate) request: Q,
+        pub(crate) expected: R,
+    }
+
+    /// The three empty request shapes that every read RPC answers with no rows.
+    pub(crate) struct EmptyStateRequests<Q> {
+        pub(crate) group: Q,
+        pub(crate) partitions: Q,
+        pub(crate) topics: Q,
+    }
+
+    impl<Q> EmptyStateRequests<Q> {
+        pub(crate) fn into_rows<R: Clone>(self, empty: R) -> [StoredStateRow<Q, R>; 3] {
+            [
+                StoredStateRow {
+                    led: true,
+                    request: self.group,
+                    expected: empty.clone(),
+                },
+                StoredStateRow {
+                    led: true,
+                    request: self.partitions,
+                    expected: empty.clone(),
+                },
+                StoredStateRow {
+                    led: true,
+                    request: self.topics,
+                    expected: empty,
+                },
+            ]
+        }
+    }
+
+    /// Check read operations sequentially against each independently supplied complete response.
+    pub(crate) async fn check_stored_rows<Q, R: PartialEq + Debug>(
+        rows: impl IntoIterator<Item = StoredStateRow<Q, R>>,
+        topic: uuid::Uuid,
+        partitions: i32,
+        partition: i32,
+        serve: impl AsyncFn(&ShareCoordinator, &MetadataImage, Q) -> R,
+    ) {
+        for (index, row) in rows.into_iter().enumerate() {
+            let dir = tempfile::TempDir::new().expect("tempdir");
+            let StateFixture { coordinator, image } = initialized_state()
+                .log_dir(dir.path())
+                .topic(topic)
+                .partitions(partitions)
+                .partition(partition)
+                .stored_data(true)
+                .call()
+                .await;
+            retain_leadership(&coordinator, row.led).await;
+            let response = serve(&coordinator, &image, row.request).await;
+            assert2::check!(response == row.expected, "row {index}");
+        }
+    }
     /// Creates the real `__share_group_state` topic through the active
     /// controller, with its configured shape, and waits until the share
     /// coordinator of `broker` has loaded every partition of it. A topic that

@@ -10,7 +10,6 @@
 //! gets a record, so it stands in for an authorized topic the image does not
 //! hold. Partition 5 of `a` stands in for a partition the image does not hold
 //! even though its topic exists.
-
 use {
     super::{super::add_partitions_to_txn::test_support::seed_topic, test_support::RowKey},
     crate::{
@@ -30,7 +29,7 @@ use {
                 },
             },
         },
-        handlers::RequestContext,
+        handlers::{RequestContext, test_support::StartedBroker},
         test_support::{
             ControllerPeerAllowed, GrantsInPrincipalName, configure_single_partition_transactions,
             decode_response, dispatch_context, encode_request, peer, principal, request_context,
@@ -58,12 +57,15 @@ const READ_ON_STAR: &str = "TransactionalId:Write+Group:Read+Topic:Read";
 const NO_TOPIC_READ: &str = "TransactionalId:Write+Group:Read";
 
 /// Build the read-granted test context in the original peer/principal order.
-macro_rules! read_context {
-    ($address:ident, $user:ident, $ctx:ident; $client:literal) => {
-        let $address = peer();
-        let $user = principal(READ_ON_STAR);
-        let $ctx = request_context(&$user, &$address, $client);
-    };
+struct ReadIdentity {
+    address: std::net::SocketAddr,
+    user: krabka_security::Principal,
+}
+
+fn read_identity() -> ReadIdentity {
+    let address = peer();
+    let user = principal(READ_ON_STAR);
+    ReadIdentity { address, user }
 }
 
 /// Adds topic `a` with one partition, led by this broker, to the metadata
@@ -73,7 +75,10 @@ pub(super) async fn seed_topic_a(broker: &Broker) { seed_topic(broker, "a", 1).a
 /// Starts a broker that grants what the principal name says, waits until its
 /// group and transaction coordinators serve, and seeds topic `a`.
 async fn start_seeded_broker() -> SeededBroker {
-    let (handle, dir) = start_transaction_grant_broker().await;
+    let StartedBroker {
+        broker: handle,
+        dir,
+    } = start_transaction_grant_broker().await;
     wait_for_coordinators(&handle).await;
     seed_topic_a(&handle.broker_arc_for_test()).await;
     SeededBroker { handle, dir }
@@ -554,7 +559,10 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
         primitives::uuid::Uuid as WireUuid,
     };
 
-    let (handle, _dir) = start_broker_no_audit_with(|cfg| {
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|cfg| {
         configure_single_partition_transactions(cfg, Arc::new(DeniesReadOnB));
     })
     .await;
@@ -755,7 +763,8 @@ async fn v6_resolves_topic_ids_before_the_read_gate_and_the_existence_check() {
 async fn v6_answers_group_id_not_found_where_older_versions_answer_illegal_generation() {
     let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
-    read_context!(address, user, ctx; "txn-offset-commit-missing-group");
+    let ReadIdentity { address, user } = read_identity();
+    let ctx = request_context(&user, &address, "txn-offset-commit-missing-group");
     let a_id = broker
         .controller
         .current_image()
@@ -850,7 +859,8 @@ fn kip_1251_seed(topic_id: krabka_protocol::primitives::uuid::Uuid) -> GroupSeed
 async fn an_older_member_epoch_commits_a_partition_assigned_before_it() {
     let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
-    read_context!(address, user, ctx; "txn-offset-commit-kip-1251");
+    let ReadIdentity { address, user } = read_identity();
+    let ctx = request_context(&user, &address, "txn-offset-commit-kip-1251");
     let a_id = krabka_protocol::primitives::uuid::Uuid(
         broker
             .controller
@@ -932,7 +942,8 @@ async fn txn_offset_commit_verifies_the_producer_with_the_transaction_coordinato
 
     let SeededBroker { handle, dir: _dir } = start_seeded_broker().await;
     let broker = handle.broker_arc_for_test();
-    read_context!(address, user, ctx; "txn-offset-commit-verification");
+    let ReadIdentity { address, user } = read_identity();
+    let ctx = request_context(&user, &address, "txn-offset-commit-verification");
 
     let cases = [
         VerificationCase {
@@ -1100,7 +1111,8 @@ async fn a_v5_commit_adds_the_offsets_partition_on_a_transaction_version_1_clust
         )])
         .await
         .expect("finalize transaction.version 1");
-    read_context!(address, user, ctx; "txn-offset-commit-tv1");
+    let ReadIdentity { address, user } = read_identity();
+    let ctx = request_context(&user, &address, "txn-offset-commit-tv1");
 
     let group_id = "group-tv1";
     seed_transaction()
@@ -1155,7 +1167,10 @@ async fn a_v5_commit_adds_the_offsets_partition_on_a_transaction_version_1_clust
 async fn a_v5_commit_records_the_topic_id_only_under_unstable_api_versions() {
     // (unstable api versions on, the topic id the offset records)
     for (unstable, recorded) in [(false, false), (true, true)] {
-        let (handle, _dir) = start_broker_no_audit_with(|cfg| {
+        let StartedBroker {
+            broker: handle,
+            dir: _dir,
+        } = start_broker_no_audit_with(|cfg| {
             configure_single_partition_transactions(
                 cfg,
                 Arc::new(ControllerPeerAllowed(GrantsInPrincipalName)),
@@ -1168,7 +1183,8 @@ async fn a_v5_commit_records_the_topic_id_only_under_unstable_api_versions() {
         wait_for_coordinators(&handle).await;
         let broker = handle.broker_arc_for_test();
         seed_topic_a(&broker).await;
-        read_context!(address, user, ctx; "txn-offset-commit-topic-id");
+        let ReadIdentity { address, user } = read_identity();
+        let ctx = request_context(&user, &address, "txn-offset-commit-topic-id");
 
         let group_id = "group-topic-id";
         seed_transaction()

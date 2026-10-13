@@ -8,14 +8,17 @@
 //! `KafkaApis.getAcknowledgeBatchesFromShareFetchRequest` also answers
 //! `UNKNOWN_TOPIC_ID` as the acknowledge error of those partitions.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::{AllowAllAuthorizer, Authorizer},
         broker::BrokerHandle,
         codes,
         handlers::test_support::{
-            StartedBroker, UNKNOWN_TOPIC_ID as UNKNOWN_ID,
-            create_topic as create_topic_from_test_support, share_fetch_wire,
+            InitializedShareTopic, StartedBroker, UNKNOWN_TOPIC_ID as UNKNOWN_ID,
+            create_topic as create_topic_from_test_support, initialized_share_topic,
+            share_fetch_wire,
         },
         test_support::start_broker_no_audit_with,
     },
@@ -57,7 +60,8 @@ struct Outcome {
 }
 
 async fn start(authorizer: Arc<dyn Authorizer>) -> StartedBroker {
-    let (broker, dir) = start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await;
+    let HandlerStartedBroker { broker, dir } =
+        start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await;
     StartedBroker { broker, dir }
 }
 
@@ -232,12 +236,16 @@ fn cases(known: i16) -> Vec<Case> {
 
 #[tokio::test]
 async fn partition_row_error_follows_topic_id() {
-    initialized_share_topic!(
-        (broker, _dir, known),
+    let InitializedShareTopic {
+        started: StartedBroker { broker, dir: _dir },
+        topic_id: known,
+    } = initialized_share_topic(
         start(Arc::new(AllowAllAuthorizer)),
         "share-resolution",
-        "resolution-group"
-    );
+        "resolution-group",
+        create_topic,
+    )
+    .await;
 
     let DrivenCases { actual, expected } = drive(&broker, known, &cases(codes::NONE)).await;
 
@@ -250,12 +258,16 @@ async fn partition_row_error_follows_topic_id() {
 /// 100 for an id that does not resolve.
 #[tokio::test]
 async fn unresolved_id_answers_before_topic_authorization() {
-    initialized_share_topic!(
-        (broker, _dir, known),
+    let InitializedShareTopic {
+        started: StartedBroker { broker, dir: _dir },
+        topic_id: known,
+    } = initialized_share_topic(
         start(Arc::new(DenyTopicRead)),
         "share-resolution",
-        "resolution-group"
-    );
+        "resolution-group",
+        create_topic,
+    )
+    .await;
 
     let DrivenCases { actual, expected } =
         drive(&broker, known, &cases(codes::TOPIC_AUTHORIZATION_FAILED)).await;

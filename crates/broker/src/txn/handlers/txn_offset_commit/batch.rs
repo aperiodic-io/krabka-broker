@@ -240,7 +240,7 @@ mod tests {
         krabka_ids::PartitionIndex,
         krabka_log::{Log, Offset, ReadOutput},
         krabka_metadata::MetadataImage,
-        std::sync::Arc,
+        std::sync::{Arc, MutexGuard},
     };
 
     /// This broker.
@@ -315,34 +315,55 @@ mod tests {
             .expect("read offsets log")
     }
 
-    /// Bind the registered partition and keep its read guard in the caller's scope.
-    macro_rules! read_registered_offsets {
-        ($registry:expr; $part:ident, $log:ident, $read:ident) => {
-            let $part = offsets_partition($registry);
-            let $log = $part.log.lock().expect("lock offsets log");
-            let $read = read_offsets(&$log);
-        };
+    struct RegisteredOffsets<'a> {
+        log: MutexGuard<'a, Log>,
+        read: ReadOutput,
+    }
+
+    fn read_registered_offsets(part: &Partition) -> RegisteredOffsets<'_> {
+        let log = part.log.lock().expect("lock offsets log");
+        let read = read_offsets(&log);
+        RegisteredOffsets { log, read }
     }
 
     /// The append config of these tests, evaluated in the original argument order.
-    macro_rules! append_as_test_leader {
-        ($req:expr, $registry:expr, $filters:expr, $check:expr, $topic_ids:expr) => {
-            append_txn_batch(
-                $req,
-                LocalOffsets {
-                    registry: $registry,
-                    metadata: &led_here(),
-                    node_id: NODE,
-                },
-                OFFSETS_PARTITION,
-                12_345,
-                $filters,
-                AppendChecks {
-                    producer_check: $check,
-                    record_topic_ids: $topic_ids,
-                },
-            )
-        };
+    struct TestLeaderOffsets<'a> {
+        registry: &'a PartitionRegistry,
+        metadata: FakeMetadataSource,
+    }
+
+    impl<'a> TestLeaderOffsets<'a> {
+        fn new(registry: &'a PartitionRegistry) -> Self {
+            Self {
+                registry,
+                metadata: led_here(),
+            }
+        }
+    }
+
+    async fn append_as_test_leader(
+        req: &TxnOffsetCommitRequest,
+        leader: TestLeaderOffsets<'_>,
+        filters: RowSweep<'_>,
+        check: ProducerAppendCheck,
+        record_topic_ids: bool,
+    ) -> Result<Option<TxnBatchWrite>, i16> {
+        append_txn_batch(
+            req,
+            LocalOffsets {
+                registry: leader.registry,
+                metadata: &leader.metadata,
+                node_id: NODE,
+            },
+            OFFSETS_PARTITION,
+            12_345,
+            filters,
+            AppendChecks {
+                producer_check: check,
+                record_topic_ids,
+            },
+        )
+        .await
     }
 
     /// The check a verification of `req`'s producer on the offsets partition
@@ -366,12 +387,12 @@ mod tests {
         filters: RowSweep<'_>,
         record_topic_ids: bool,
     ) -> Result<Option<TxnBatchWrite>, i16> {
-        append_as_test_leader!(
+        append_as_test_leader(
             req,
-            registry,
+            TestLeaderOffsets::new(registry),
             filters,
             verified(registry, req).await,
-            record_topic_ids
+            record_topic_ids,
         )
         .await
     }
@@ -396,7 +417,8 @@ mod tests {
         check!(appended.written_at == 0);
         check!(appended.keys == vec![orders(2), orders(3)]);
 
-        read_registered_offsets!(&registry; part, log, read);
+        let part = offsets_partition(&registry);
+        let RegisteredOffsets { log, read } = read_registered_offsets(&part);
         assert!(read.batches.len() == 1);
         let batch = &read.batches[0];
         check!(batch.attributes.is_transactional());
@@ -432,7 +454,8 @@ mod tests {
             .await
             .expect("all denied succeeds");
         check!(appended.is_none());
-        read_registered_offsets!(&registry; part, log, read);
+        let part = offsets_partition(&registry);
+        let RegisteredOffsets { log: _log, read } = read_registered_offsets(&part);
         assert!(read.batches.is_empty());
     }
 
@@ -444,12 +467,12 @@ mod tests {
             batch: offset_batch(&req),
             guard: krabka_log::VerificationGuard::SENTINEL,
         };
-        let err = append_as_test_leader!(
+        let err = append_as_test_leader(
             &req,
-            &registry,
+            TestLeaderOffsets::new(&registry),
             sweep_of(&HashSet::new(), &HashSet::new()),
             unverified,
-            false
+            false,
         )
         .await
         .expect_err("missing offsets partition");
@@ -576,7 +599,8 @@ mod tests {
         } = appended;
         check!(appended.keys == vec![orders(2)]);
 
-        read_registered_offsets!(&registry; part, log, read);
+        let part = offsets_partition(&registry);
+        let RegisteredOffsets { log: _log, read } = read_registered_offsets(&part);
         assert!(read.batches.len() == 1);
         assert!(read.batches[0].records.len() == 1);
     }
@@ -605,7 +629,8 @@ mod tests {
             .expect("append batch")
             .expect("records appended");
 
-            read_registered_offsets!(&registry; part, log, read);
+            let part = offsets_partition(&registry);
+            let RegisteredOffsets { log: _log, read } = read_registered_offsets(&part);
             let recorded_ids: Vec<Option<uuid::Uuid>> = read.batches[0]
                 .records
                 .iter()
@@ -650,19 +675,20 @@ mod tests {
                 batch: offset_batch(&req),
                 guard: krabka_log::VerificationGuard::SENTINEL,
             };
-            let refused = append_as_test_leader!(
+            let refused = append_as_test_leader(
                 &req,
-                &registry,
+                TestLeaderOffsets::new(&registry),
                 sweep_of(&HashSet::new(), &HashSet::new()),
                 unverified,
-                false
+                false,
             )
             .await
             .expect_err(label);
             assert!(refused == expected, "{label}");
         }
 
-        read_registered_offsets!(&registry; part, log, read);
+        let part = offsets_partition(&registry);
+        let RegisteredOffsets { log: _log, read } = read_registered_offsets(&part);
         assert!(read.batches.len() == 1, "only the verified append landed");
     }
 }

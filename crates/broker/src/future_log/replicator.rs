@@ -46,6 +46,13 @@ pub(super) struct ReplicatorTask {
     pub(super) policy: MovePolicy,
 }
 
+async fn wait_retry_or_cancel(cancel: &CancellationToken, backoff: krabka_units::Time) -> bool {
+    tokio::select! {
+        () = cancel.cancelled() => true,
+        () = tokio::time::sleep(backoff.to_std()) => false,
+    }
+}
+
 pub(super) async fn replicator_loop(task: ReplicatorTask) {
     let ReplicatorTask {
         part,
@@ -74,14 +81,7 @@ pub(super) async fn replicator_loop(task: ReplicatorTask) {
     // A future log that a restart left on disk may hold a tail the current log
     // dropped while no task ran, which no in-memory mark tells of.
     let mut owes_epoch_check = true;
-    macro_rules! wait_retry_or_cancel {
-        ($cancel:expr, $backoff:expr) => {
-            tokio::select! {
-                () = $cancel.cancelled() => break,
-                () = tokio::time::sleep($backoff.to_std()) => continue,
-            }
-        };
-    }
+
     loop {
         if cancel.is_cancelled() {
             break;
@@ -111,7 +111,10 @@ pub(super) async fn replicator_loop(task: ReplicatorTask) {
                     error = %e,
                     "future-log replicator could not truncate the future log; retrying"
                 );
-                wait_retry_or_cancel!(cancel, policy.retry_backoff);
+                if wait_retry_or_cancel(&cancel, policy.retry_backoff).await {
+                    break;
+                }
+                continue;
             }
             owed_cut = None;
             owes_epoch_check = false;
@@ -126,12 +129,18 @@ pub(super) async fn replicator_loop(task: ReplicatorTask) {
                     error = %e,
                     "future-log replicator catch-up failed; retrying"
                 );
-                wait_retry_or_cancel!(cancel, policy.retry_backoff);
+                if wait_retry_or_cancel(&cancel, policy.retry_backoff).await {
+                    break;
+                }
+                continue;
             }
         };
 
         if advance.throttled {
-            wait_retry_or_cancel!(cancel, policy.retry_backoff);
+            if wait_retry_or_cancel(&cancel, policy.retry_backoff).await {
+                break;
+            }
+            continue;
         }
 
         if !advance.caught_up {

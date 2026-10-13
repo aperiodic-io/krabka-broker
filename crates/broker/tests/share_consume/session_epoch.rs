@@ -9,8 +9,8 @@ use {
         harness::{ConsumptionFixture, join, produce_n, single_record_consumption_fixture, wire},
         share_rpc::{acquired_count, fetch_until_acquired, share_fetch_req},
         support::share::{
-            ShareAck, ShareFetchSetup, ShareSessionEpoch, ShareSessionSetup, acknowledge_success,
-            empty_session_request,
+            MemberSession, ShareAck, ShareFetchSetup, ShareSessionEpoch, ShareSessionSetup,
+            acknowledge_success, empty_session_request,
         },
     },
     assert2::assert,
@@ -68,7 +68,7 @@ async fn session_epoch_validation() {
 
     // A member with no live session sending a non-zero epoch →
     // SHARE_SESSION_NOT_FOUND (122).
-    let (ghost, _) = join(&client, "g1", "t").await;
+    let MemberSession { member: ghost, .. } = join(&client, "g1", "t").await;
     let not_found: ShareFetchResponse = client
         .send(
             share_fetch_req()

@@ -11,7 +11,7 @@ use {
             NON_EMPTY_GROUP, NONE, fetch_until_acquired, join, seeded_empty_group,
             wait_for_share_init,
         },
-        support::share::ShareSessionSetup,
+        support::share::{MemberSession, ShareSessionSetup},
     },
     assert2::assert,
     krabka_protocol::owned::alter_share_group_offsets_request::{
@@ -85,7 +85,7 @@ async fn alter_resets_empty_group() {
     // The first join does not initialize the already-initialized partition
     // again, so the acquire reads the reset SPSO 5 via the invalidated leader
     // cache.
-    let (member, _epoch) = join(&client, "g1", "t").await;
+    let MemberSession { member, .. } = join(&client, "g1", "t").await;
     let row = fetch_until_acquired(&client, ShareSessionSetup::opening(&member, tid)).await;
     assert!(
         row.acquired_records[0].first_offset == 5,
@@ -102,7 +102,9 @@ async fn alter_non_empty_group_fenced() {
     let (_permit, broker, client, _dir, tid) = Box::pin(seeded_empty_group().call()).await;
 
     // Live member present (steady-state heartbeat), never leaves.
-    let (_member, _epoch) = join(&client, "g1", "t").await;
+    let MemberSession {
+        member: _member, ..
+    } = join(&client, "g1", "t").await;
     wait_for_share_init(&broker, "g1", tid, 0).await;
 
     let resp = client

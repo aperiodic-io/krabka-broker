@@ -17,6 +17,7 @@
 //! [`system_timer`] is the real-time timer those loops run on outside tests.
 
 use {
+    krabka_units::convert::TimeExt as _,
     qubit_clock::{
         MonotonicClock, MonotonicInstant, StdMonotonicClock, StdTimer, TimeError, Timer,
         TimerFuture,
@@ -26,6 +27,12 @@ use {
         time::{Duration, SystemTime, UNIX_EPOCH},
     },
 };
+
+/// Initial and subsequent delays for a maintenance sweep.
+pub(crate) struct SweepCadence {
+    pub(crate) first: Duration,
+    pub(crate) later: Duration,
+}
 
 /// Cadence and metadata authority shared by local log-maintenance sweeps.
 #[derive(Clone)]
@@ -39,6 +46,14 @@ pub(crate) struct MetadataSweepConfig {
 }
 
 impl MetadataSweepConfig {
+    pub(crate) fn periodic_cadence(&self) -> SweepCadence {
+        let interval = self.interval.to_std();
+        SweepCadence {
+            first: interval,
+            later: interval,
+        }
+    }
+
     pub(crate) fn system(interval: krabka_units::Time) -> Self {
         Self {
             interval,

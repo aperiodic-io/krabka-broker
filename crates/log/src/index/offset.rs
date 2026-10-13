@@ -45,7 +45,7 @@ pub struct OffsetIndex {
     io: std::sync::Arc<dyn LogIo>,
     /// Entries currently in the file. The constructor loads them into memory
     /// lazily.
-    entries: Vec<(u32, u32)>,
+    entries: Vec<IndexEntry<u32, u32>>,
 }
 
 impl OffsetIndex {
@@ -78,12 +78,10 @@ impl OffsetIndex {
     /// `relative_offset <= target`, or `None` when every entry is above it.
     #[must_use]
     pub fn floor_entry(&self, target: u32) -> Option<OffsetIndexEntry> {
-        let above = self
-            .entries
-            .partition_point(|&(relative_offset, _)| relative_offset <= target);
+        let above = self.entries.partition_point(|entry| entry.key <= target);
         above.checked_sub(1).map(|index| {
-            let (relative_offset, position) = self.entries[index];
-            OffsetIndexEntry::new(relative_offset, position)
+            let entry = self.entries[index];
+            OffsetIndexEntry::new(entry.key, entry.coordinate)
         })
     }
 
@@ -113,7 +111,7 @@ impl OffsetIndex {
     pub fn last_entry(&self) -> Option<OffsetIndexEntry> {
         self.entries
             .last()
-            .map(|&(relative_offset, position)| OffsetIndexEntry::new(relative_offset, position))
+            .map(|entry| OffsetIndexEntry::new(entry.key, entry.coordinate))
     }
 }
 
@@ -129,7 +127,7 @@ mod tests {
         std::{fs::OpenOptions, io::Write},
     };
 
-    seed_index_fixture!(OffsetIndex, u32);
+    krabka_macros::index_seed_helpers!(OffsetIndex, u32);
 
     fn reference_index() -> IndexFixture<OffsetIndex> {
         populated_index("00000000000000000000.index", &[

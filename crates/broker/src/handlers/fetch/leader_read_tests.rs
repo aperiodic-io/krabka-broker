@@ -21,7 +21,10 @@ use {
         broker::BrokerHandle,
         codes,
         fetch_session::INVALID_SESSION_ID,
-        handlers::test_support::{StartedBroker, default_records_batch, seed_partition_replicas},
+        handlers::test_support::{
+            CaseOutcomes, StartedBroker, collect_topic_cases, default_records_batch,
+            seed_partition_replicas, wait_for_bound_partition,
+        },
         partition::Partition,
         test_support::{KafkaErrorCode, append_partition_batch},
     },
@@ -113,24 +116,26 @@ async fn partition(
         .call()
         .await;
 
-    wait_for_local_partition!(
-        (shared, partition),
-        broker,
+    let shared = broker.broker_arc_for_test();
+    let partition = wait_for_bound_partition(
+        &shared,
         topic,
-        partition,
-        partition
-            .current_leader
-            .load(std::sync::atomic::Ordering::Acquire)
-            == leader.0
-            && (leader != THIS_NODE
-                || partition
-                    .replica_state
-                    .lock()
-                    .await
-                    .isr
-                    .contains(&krabka_raft::NodeId(OTHER_NODE.0))),
-        "the broker holds the partition in its role"
-    );
+        async |partition| {
+            partition
+                .current_leader
+                .load(std::sync::atomic::Ordering::Acquire)
+                == leader.0
+                && (leader != THIS_NODE
+                    || partition
+                        .replica_state
+                        .lock()
+                        .await
+                        .isr
+                        .contains(&krabka_raft::NodeId(OTHER_NODE.0)))
+        },
+        "the broker holds the partition in its role",
+    )
+    .await;
 
     let mut batch = default_records_batch(&[b"first", b"second"]);
     append_partition_batch(&partition, &mut batch);
@@ -342,48 +347,48 @@ async fn a_read_needs_the_leader_and_an_assigned_follower() {
     ];
 
     let StartedBroker { broker, dir: _dir } = start_with_idle_follower().await;
-    topic_case_outcomes!(
-        (actual, want),
-        (index, case, label, name),
-        "leader-read",
-        cases,
-        {
-            let partition = partition()
-                .broker(&broker)
-                .topic(&name)
-                .topic_id(uuid::Uuid::from_u128(index + 1))
-                .leader(case.leader.0)
-                .call()
-                .await;
-
-            let response = fetch(
-                &broker,
-                case.version,
-                &request()
-                    .version(case.version)
-                    .sender(case.sender)
-                    .topic(&name)
-                    .call(),
-            )
+    let CaseOutcomes {
+        actual,
+        expected: want,
+    } = collect_topic_cases("leader-read", cases, async |row| {
+        let partition = partition()
+            .broker(&broker)
+            .topic(&row.topic)
+            .topic_id(uuid::Uuid::from_u128(row.index + 1))
+            .leader(row.case.leader.0)
+            .call()
             .await;
-            let mut tracked_followers: Vec<u64> = partition
-                .replica_state
-                .lock()
-                .await
-                .per_follower
-                .keys()
-                .map(|node| node.0)
-                .collect();
-            tracked_followers.sort_unstable();
-            actual.push(Outcome {
-                case: label.clone(),
+
+        let response = fetch(
+            &broker,
+            row.case.version,
+            &request()
+                .version(row.case.version)
+                .sender(row.case.sender)
+                .topic(&row.topic)
+                .call(),
+        )
+        .await;
+        let mut tracked_followers: Vec<u64> = partition
+            .replica_state
+            .lock()
+            .await
+            .per_follower
+            .keys()
+            .map(|node| node.0)
+            .collect();
+        tracked_followers.sort_unstable();
+        CaseOutcomes {
+            actual: Outcome {
+                case: row.label.clone(),
                 response,
                 high_watermark: partition.high_watermark().await,
                 tracked_followers,
-            });
-            want.push(expected(case, label, &name));
+            },
+            expected: expected(row.case, row.label, &row.topic),
         }
-    );
+    })
+    .await;
     broker.shutdown().await;
 
     assert!(actual == want);

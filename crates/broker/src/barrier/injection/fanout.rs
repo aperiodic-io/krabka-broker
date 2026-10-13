@@ -200,6 +200,7 @@ mod tests {
                     MarkerPlacement, MockRemoteMarkerWriter,
                     test_support::{at, fast_config, marker, source},
                 },
+                marker::BarrierMarker,
                 metrics::BrokerBarrierMetrics,
                 state::TargetPartition,
                 test_support::{check_control_marker, open_partition, topic_records},
@@ -273,15 +274,64 @@ mod tests {
         assert!(placed == maplit::btreemap! {at("orders", 0) => offset});
     }
 
-    macro_rules! remote_fixture {
-        (
-            $registry:ident, $controller:ident, $metrics:ident, $config:ident = $configuration:expr
-        ) => {
-            let $registry = PartitionRegistry::new();
-            let $controller = source(&topic_records("orders", 1, NodeId(2)));
-            let $metrics = BrokerBarrierMetrics::new(BrokerMetrics::new());
-            let $config = $configuration;
-        };
+    struct RemoteFixture {
+        registry: PartitionRegistry,
+        controller: Arc<dyn MetadataSource>,
+        metrics: BrokerBarrierMetrics,
+        config: BarrierConfig,
+    }
+    fn remote_fixture(config: impl FnOnce() -> BarrierConfig) -> RemoteFixture {
+        let registry = PartitionRegistry::new();
+        let controller = source(&topic_records("orders", 1, NodeId(2)));
+        let metrics = BrokerBarrierMetrics::new(BrokerMetrics::new());
+        let config = config();
+        RemoteFixture {
+            registry,
+            controller,
+            metrics,
+            config,
+        }
+    }
+
+    impl RemoteFixture {
+        fn fanout<'a>(
+            &'a self,
+            remote: Option<&'a Arc<dyn RemoteMarkerWriter>>,
+        ) -> MarkerFanout<'a> {
+            test_fanout(
+                &self.registry,
+                &self.controller,
+                remote,
+                &self.metrics,
+                &self.config,
+            )
+        }
+
+        async fn check_placement(&self, remote: MockRemoteMarkerWriter, offset: Offset) {
+            check_remote_placement(
+                &self.registry,
+                &self.controller,
+                remote,
+                &self.metrics,
+                &self.config,
+                offset,
+            )
+            .await;
+        }
+    }
+
+    fn remote_once(
+        write: impl FnMut(
+            NodeId,
+            &BarrierMarker,
+            &[TargetPartition],
+        ) -> Result<Vec<MarkerPlacement>, BrokerError>
+        + Send
+        + 'static,
+    ) -> MockRemoteMarkerWriter {
+        let mut remote = MockRemoteMarkerWriter::new();
+        remote.expect_write_markers().times(1).returning(write);
+        remote
     }
 
     fn placements(targets: &[TargetPartition], offset: Offset) -> Vec<MarkerPlacement> {
@@ -344,49 +394,33 @@ mod tests {
 
     #[tokio::test]
     async fn a_remote_partition_goes_through_the_transport_seam() {
-        remote_fixture!(registry, controller, metrics, config = fast_config());
+        let fixture = remote_fixture(fast_config);
 
-        let mut remote = MockRemoteMarkerWriter::new();
-        remote
-            .expect_write_markers()
-            .times(1)
-            .returning(|leader, _marker, targets| {
-                assert!(leader == NodeId(2));
-                Ok(placements(targets, Offset(77)))
-            });
-        check_remote_placement(
-            &registry,
-            &controller,
-            remote,
-            &metrics,
-            &config,
-            Offset(77),
-        )
-        .await;
+        let remote = remote_once(|leader, _marker, targets| {
+            assert!(leader == NodeId(2));
+            Ok(placements(targets, Offset(77)))
+        });
+        fixture.check_placement(remote, Offset(77)).await;
     }
 
     #[tokio::test]
     async fn invalid_remote_placements_do_not_enter_the_cut() {
-        remote_fixture!(registry, controller, metrics, config = fast_config());
+        let fixture = remote_fixture(fast_config);
 
-        let mut remote = MockRemoteMarkerWriter::new();
-        remote
-            .expect_write_markers()
-            .times(1)
-            .returning(|_leader, _marker, _targets| {
-                Ok(vec![
-                    MarkerPlacement {
-                        target: at("orders", 0),
-                        offset: Offset(-1),
-                    },
-                    MarkerPlacement {
-                        target: at("unrequested", 0),
-                        offset: Offset(9),
-                    },
-                ])
-            });
+        let remote = remote_once(|_leader, _marker, _targets| {
+            Ok(vec![
+                MarkerPlacement {
+                    target: at("orders", 0),
+                    offset: Offset(-1),
+                },
+                MarkerPlacement {
+                    target: at("unrequested", 0),
+                    offset: Offset(9),
+                },
+            ])
+        });
         let remote: Arc<dyn RemoteMarkerWriter> = Arc::new(remote);
-        let fanout = test_fanout(&registry, &controller, Some(&remote), &metrics, &config);
+        let fanout = fixture.fanout(Some(&remote));
         let mut placed = BTreeMap::new();
 
         fanout
@@ -398,17 +432,12 @@ mod tests {
 
     #[tokio::test]
     async fn the_fan_out_retries_a_leader_that_failed_once() {
-        remote_fixture!(
-            registry,
-            controller,
-            metrics,
-            config = BarrierConfig {
-                injection_timeout: secs(30),
-                retry_backoff: millis(1),
-                retry_backoff_max: millis(1),
-                ..BarrierConfig::default()
-            }
-        );
+        let fixture = remote_fixture(|| BarrierConfig {
+            injection_timeout: secs(30),
+            retry_backoff: millis(1),
+            retry_backoff_max: millis(1),
+            ..BarrierConfig::default()
+        });
 
         let mut remote = MockRemoteMarkerWriter::new();
         let mut calls = 0;
@@ -422,20 +451,12 @@ mod tests {
                 }
                 Ok(placements(targets, Offset(12)))
             });
-        check_remote_placement(
-            &registry,
-            &controller,
-            remote,
-            &metrics,
-            &config,
-            Offset(12),
-        )
-        .await;
+        fixture.check_placement(remote, Offset(12)).await;
     }
 
     #[tokio::test]
     async fn a_deadline_that_runs_out_returns_what_it_placed() {
-        remote_fixture!(registry, controller, metrics, config = fast_config());
+        let fixture = remote_fixture(fast_config);
 
         let mut remote = MockRemoteMarkerWriter::new();
         remote
@@ -445,7 +466,7 @@ mod tests {
             });
         let remote: Arc<dyn RemoteMarkerWriter> = Arc::new(remote);
 
-        let fanout = test_fanout(&registry, &controller, Some(&remote), &metrics, &config);
+        let fanout = fixture.fanout(Some(&remote));
         let placed = place_one(fanout).await;
         assert!(placed.is_empty());
     }

@@ -2,6 +2,8 @@
 //! `cleanup.policy` holds `compact` refuses a batch that holds a record with no
 //! key, with `INVALID_RECORD` and one record error per keyless record.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AllowAllAuthorizer, broker::BrokerHandle, codes,
@@ -164,7 +166,8 @@ async fn a_compacted_topic_refuses_a_record_without_a_key() {
     const KEYED: &[Option<&[u8]>] = &[Some(b"k0"), Some(b"k1")];
     const KEYLESS: &[Option<&[u8]>] = &[None, Some(b"k1"), None];
 
-    let (broker, _dir) = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let cases = [
         ("delete", KEYED),
         ("delete", KEYLESS),

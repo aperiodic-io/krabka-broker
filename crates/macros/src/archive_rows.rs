@@ -46,7 +46,8 @@ pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, ParseError> {
             #[variant({{ entries }}{{ view }}.len() - {{ index }}{{ view }})]
             while {{ index }} < {{ entries }}.len() {
                 let {{ previous }} = if {{ index }} == 0 { None } else { Some({{ entries }}[{{ index }} - 1]) };
-                let ({{ first }}, {{ second }}) = {{ entries }}[{{ index }}];
+                let {{ first }} = {{ entries }}[{{ index }}].key;
+                let {{ second }} = {{ entries }}[{{ index }}].coordinate;
                 if !({{ valid }}) {
                     return Err(());
                 }

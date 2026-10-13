@@ -10,6 +10,9 @@ thread_local! {
     static STEPS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ProbeAction;
+
 #[derive(Clone)]
 struct ProbeModel {
     safe: bool,
@@ -22,7 +25,7 @@ struct ProbeState {
 }
 
 impl Model for ProbeModel {
-    type Action = ();
+    type Action = ProbeAction;
     type State = ProbeState;
 
     fn init_states(&self) -> Vec<Self::State> {
@@ -34,11 +37,11 @@ impl Model for ProbeModel {
 
     fn actions(&self, state: &Self::State, actions: &mut Vec<Self::Action>) {
         if !state.advanced {
-            actions.push(());
+            actions.push(ProbeAction);
         }
     }
 
-    fn next_state(&self, state: &Self::State, (): Self::Action) -> Option<Self::State> {
+    fn next_state(&self, state: &Self::State, _: Self::Action) -> Option<Self::State> {
         (!state.advanced).then_some(ProbeState {
             safe: state.safe,
             advanced: true,
@@ -104,15 +107,22 @@ fn valid_models_reach_checks_pin_and_properties() {
 
 #[test]
 fn failing_properties_abort_at_the_declared_diagnostic_position() {
-    for (runner, expected) in [
-        (properties_first as fn(ProbeModel, &str, usize), vec![
-            "bfs",
-            "native_checks",
-        ]),
-        (properties_last, vec!["bfs", "native_checks", "pin"]),
+    struct RunnerCase {
+        runner: fn(ProbeModel, &str, usize),
+        expected: Vec<&'static str>,
+    }
+    for case in [
+        RunnerCase {
+            runner: properties_first,
+            expected: vec!["bfs", "native_checks"],
+        },
+        RunnerCase {
+            runner: properties_last,
+            expected: vec!["bfs", "native_checks", "pin"],
+        },
     ] {
         STEPS.with(|steps| steps.borrow_mut().clear());
-        assert!(catch_unwind(|| runner(ProbeModel { safe: false }, "probe", 2)).is_err());
-        STEPS.with(|steps| assert!(*steps.borrow() == expected));
+        assert!(catch_unwind(|| (case.runner)(ProbeModel { safe: false }, "probe", 2)).is_err());
+        STEPS.with(|steps| assert!(*steps.borrow() == case.expected));
     }
 }

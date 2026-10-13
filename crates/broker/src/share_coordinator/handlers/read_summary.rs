@@ -40,43 +40,49 @@ async fn read_summaries(
     image: &MetadataImage,
     req: ReadShareGroupStateSummaryRequest,
 ) -> ReadShareGroupStateSummaryResponse {
-    if req.group_id.is_empty() || super::empty_partition_data!(req) {
+    if req.group_id.is_empty()
+        || super::empty_partition_data(&req.topics, |topic| topic.partitions.is_empty())
+    {
         return ReadShareGroupStateSummaryResponse::default();
     }
-    let results = super::state_results!(req, ReadStateSummaryResult, |group_id, topic_id, pd| {
-        match coordinator
-            .read_summary_checked(image, group_id, topic_id, pd.partition)
-            .await
-        {
-            Ok(Some((state_epoch, leader_epoch, start_offset, delivery_complete_count))) => {
-                PartitionResult {
-                    partition: pd.partition,
-                    state_epoch,
-                    leader_epoch,
-                    start_offset: start_offset.0,
-                    delivery_complete_count,
-                    ..Default::default()
+    let results = krabka_macros::share_state_results!(
+        req,
+        ReadStateSummaryResult,
+        |group_id, topic_id, pd| {
+            match coordinator
+                .read_summary_checked(image, group_id, topic_id, pd.partition)
+                .await
+            {
+                Ok(Some((state_epoch, leader_epoch, start_offset, delivery_complete_count))) => {
+                    PartitionResult {
+                        partition: pd.partition,
+                        state_epoch,
+                        leader_epoch,
+                        start_offset: start_offset.0,
+                        delivery_complete_count,
+                        ..Default::default()
+                    }
                 }
+                // Kafka's `PartitionFactory` sentinels for a key with no state.
+                Ok(None) => PartitionResult {
+                    partition: pd.partition,
+                    state_epoch: 0,
+                    leader_epoch: 0,
+                    start_offset: UNINITIALIZED_START_OFFSET,
+                    delivery_complete_count: UNINITIALIZED_DELIVERY_COMPLETE_COUNT,
+                    ..Default::default()
+                },
+                // Kafka's `toErrorResponseData`: the code and the message, and
+                // the schema default for every other field.
+                Err(error) => PartitionResult {
+                    partition: pd.partition,
+                    error_code: error.code(),
+                    error_message: Some(error_message(error)),
+                    ..Default::default()
+                },
             }
-            // Kafka's `PartitionFactory` sentinels for a key with no state.
-            Ok(None) => PartitionResult {
-                partition: pd.partition,
-                state_epoch: 0,
-                leader_epoch: 0,
-                start_offset: UNINITIALIZED_START_OFFSET,
-                delivery_complete_count: UNINITIALIZED_DELIVERY_COMPLETE_COUNT,
-                ..Default::default()
-            },
-            // Kafka's `toErrorResponseData`: the code and the message, and
-            // the schema default for every other field.
-            Err(error) => PartitionResult {
-                partition: pd.partition,
-                error_code: error.code(),
-                error_message: Some(error_message(error)),
-                ..Default::default()
-            },
         }
-    });
+    );
 
     ReadShareGroupStateSummaryResponse {
         results,
@@ -101,8 +107,16 @@ fn error_message(error: ShareStateError) -> String {
 #[cfg(test)]
 mod tests {
     use {
-        super::*,
-        crate::codes,
+        super::{
+            PartitionResult, ReadShareGroupStateSummaryRequest, ReadShareGroupStateSummaryResponse,
+            read_summaries,
+        },
+        crate::{
+            codes,
+            share_coordinator::handlers::test_support::{
+                EmptyStateRequests, StateReply, StoredStateRow, check_stored_rows, state_response,
+            },
+        },
         krabka_protocol::{
             UnknownTaggedFields,
             owned::read_share_group_state_summary_request::{PartitionData, ReadStateSummaryData},
@@ -113,22 +127,24 @@ mod tests {
     const TOPIC: uuid::Uuid = uuid::Uuid::from_bytes([41; 16]);
     const WIRE_TOPIC: ProtoUuid = ProtoUuid([41; 16]);
 
-    super::super::test_support::request_fixture! {
-        ReadShareGroupStateSummaryRequest, ReadStateSummaryData, PartitionData;
-        fn request(group_id: &str, [], partitions: &[i32]);
-        topic WIRE_TOPIC; |partition| {
+    fn request(group_id: &str, partitions: &[i32]) -> ReadShareGroupStateSummaryRequest {
+        krabka_macros::share_state_request! {
+            ReadShareGroupStateSummaryRequest, ReadStateSummaryData;
+            group [group_id];
+            topic [WIRE_TOPIC];
+            partitions [partitions.iter().map(|&partition| {
             PartitionData { partition, ..Default::default() }
+            }).collect()];
         }
     }
 
-    super::super::test_support::response_fixture!(
-        ReadShareGroupStateSummaryResponse,
-        ReadStateSummaryResult,
-        PartitionResult,
-        WIRE_TOPIC
-    );
+    fn response(partitions: Vec<PartitionResult>) -> ReadShareGroupStateSummaryResponse {
+        state_response(WIRE_TOPIC, partitions)
+    }
 
-    super::super::test_support::error_row_fixture!(PartitionResult);
+    fn error_row(partition: i32, code: i16, message: &str) -> PartitionResult {
+        ReadShareGroupStateSummaryResponse::error_row(partition, code, Some(message))
+    }
 
     /// The whole `ReadShareGroupStateSummaryResponse` for each request shape,
     /// over topic T with two partitions and state for partition 0 only, as
@@ -157,49 +173,62 @@ mod tests {
             unknown_tagged_fields: UnknownTaggedFields(vec![]),
         };
         let empty = ReadShareGroupStateSummaryResponse::default();
-        // (led, request, expected response)
+        // Each row owns its request and independently expected response.
         let rows = [
-            (true, request("share-group", &[0]), response(vec![stored])),
-            (true, request("share-group", &[1]), response(vec![missing])),
-            (
-                false,
-                request("share-group", &[0]),
-                response(vec![error_row(
+            StoredStateRow {
+                led: true,
+                request: request("share-group", &[0]),
+                expected: response(vec![stored]),
+            },
+            StoredStateRow {
+                led: true,
+                request: request("share-group", &[1]),
+                expected: response(vec![missing]),
+            },
+            StoredStateRow {
+                led: false,
+                request: request("share-group", &[0]),
+                expected: response(vec![error_row(
                     0,
                     codes::NOT_COORDINATOR,
                     "Unable to read share group state summary: This is not the correct coordinator.",
                 )]),
-            ),
-            (
-                true,
-                request("share-group", &[-1]),
-                response(vec![error_row(
+            },
+            StoredStateRow {
+                led: true,
+                request: request("share-group", &[-1]),
+                expected: response(vec![error_row(
                     -1,
                     codes::INVALID_REQUEST,
                     "The partition id cannot be a negative number.",
                 )]),
-            ),
-            (
-                true,
-                request("share-group", &[2]),
-                response(vec![error_row(
+            },
+            StoredStateRow {
+                led: true,
+                request: request("share-group", &[2]),
+                expected: response(vec![error_row(
                     2,
                     codes::UNKNOWN_TOPIC_OR_PARTITION,
                     "This server does not host this topic-partition.",
                 )]),
-            ),
-            (true, request("", &[0]), empty.clone()),
-            (true, request("share-group", &[]), empty.clone()),
-            (
-                true,
-                super::super::test_support::no_topics!(
-                    ReadShareGroupStateSummaryRequest,
-                    "share-group"
-                ),
-                empty,
-            ),
+            },
         ];
+        let empty_requests = EmptyStateRequests {
+            group: request("", &[0]),
+            partitions: request("share-group", &[]),
+            topics: ReadShareGroupStateSummaryRequest {
+                group_id: "share-group".into(),
+                ..Default::default()
+            },
+        };
 
-        super::super::test_support::stored_response_rows!(rows, TOPIC, (2, 0), read_summaries);
+        check_stored_rows(
+            rows.into_iter().chain(empty_requests.into_rows(empty)),
+            TOPIC,
+            2,
+            0,
+            read_summaries,
+        )
+        .await;
     }
 }

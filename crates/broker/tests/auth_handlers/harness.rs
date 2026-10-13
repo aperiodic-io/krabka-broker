@@ -80,7 +80,7 @@ pub fn admin_plain_password() -> String { ['s', 'e', 'c', 'r', 'e', 't'].iter().
 pub fn wrong_scram_password() -> String { ['h', 'u', 'n', 't', 'e', 'r', '2'].iter().collect() }
 
 // One length-prefixed request/response exchange, bound to this suite.
-crate::socket_round_trip_fixture!(pub round_trip, "krabka-sasl-test");
+krabka_macros::wire_test_driver!(socket pub round_trip, "krabka-sasl-test");
 
 /// Post-auth Metadata proves the session survived and the data plane remains reachable.
 pub async fn metadata_probe(stream: &mut TcpStream, corr_id: i32) -> io::Result<()> {

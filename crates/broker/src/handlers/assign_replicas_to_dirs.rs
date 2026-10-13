@@ -112,10 +112,10 @@ mod tests {
             *,
         },
         crate::{
-            broker::Broker,
+            broker::{Broker, BrokerHandle},
             handlers::{
                 assign_replicas_to_dirs::test_support::DirectoryAssignmentSetup,
-                test_support as handler_fixture_support,
+                test_support::{self as handler_fixture_support, StartedBroker},
             },
             test_support::{
                 self as broker_fixture_support, peer, principal, request_context,
@@ -131,31 +131,41 @@ mod tests {
             },
             primitives::uuid::Uuid as ProtocolUuid,
         },
+        std::{future::Future, sync::Arc},
     };
 
-    macro_rules! seeded_topic_fixture {
-        (
-            (
-                $handle:ident,
-                $directory:ident,
-                $broker:ident,
-                $epoch:ident,
-                $dir_id:ident,
-                $topic_id:ident
-            )
-        ) => {
-            krabka_macros::broker_test_setup! {
-                bind($handle, $directory, $broker);
-                boot [crate::test_support::start_broker_with(|_| {})];
-                ready controller_leader;
-            };
-            let $epoch = own_broker_epoch(&$broker);
-            let $dir_id = uuid::Uuid::from_u128(0xAA);
-            let $topic_id = uuid::Uuid::from_u128(0xBB);
-            seed_topic(&$broker, $topic_id).await;
-        };
+    /// The seeded topic's broker resources and independently selected directory coordinates.
+    struct SeededTopicFixture {
+        broker_epoch: i64,
+        dir_uuid: uuid::Uuid,
+        topic_uuid: uuid::Uuid,
+        broker: Arc<Broker>,
+        _directory: tempfile::TempDir,
+        handle: BrokerHandle,
     }
 
+    async fn seeded_topic_fixture(
+        start: impl Future<Output = StartedBroker>,
+    ) -> SeededTopicFixture {
+        let StartedBroker {
+            broker: handle,
+            dir: directory,
+        } = start.await;
+        let broker = handle.broker_arc_for_test();
+        wait_for_controller_leader(&broker).await;
+        let broker_epoch = own_broker_epoch(&broker);
+        let dir_uuid = uuid::Uuid::from_u128(0xAA);
+        let topic_uuid = uuid::Uuid::from_u128(0xBB);
+        seed_topic(&broker, topic_uuid).await;
+        SeededTopicFixture {
+            broker_epoch,
+            dir_uuid,
+            topic_uuid,
+            broker,
+            _directory: directory,
+            handle,
+        }
+    }
     fn check_partition_directory(broker: &Broker, directory: uuid::Uuid) {
         let image = broker.controller.current_image();
         let partition = image.partition("t", 0).expect("partition");
@@ -181,14 +191,7 @@ mod tests {
     /// topic does not have.
     #[tokio::test]
     async fn handle_answers_each_partition_with_kafkas_error_code() {
-        seeded_topic_fixture!((
-            broker_handle,
-            _dir,
-            broker,
-            broker_epoch,
-            dir_uuid,
-            topic_uuid
-        ));
+        let fixture = seeded_topic_fixture(broker_fixture_support::start_broker_with(|_| {})).await;
 
         let cases = [
             (Report::KnownPartition, codes::NONE),
@@ -200,16 +203,16 @@ mod tests {
         let mut expected = Vec::with_capacity(cases.len());
         for (report, error_code) in cases {
             let (topic_id, partition_index) = match report {
-                Report::KnownPartition => (topic_uuid, 0),
-                Report::UnknownPartition => (topic_uuid, 7),
+                Report::KnownPartition => (fixture.topic_uuid, 0),
+                Report::UnknownPartition => (fixture.topic_uuid, 7),
                 Report::UnknownTopicId => (uuid::Uuid::from_u128(0xCC), 0),
                 Report::ZeroTopicId => (uuid::Uuid::nil(), 0),
             };
             let resp = handle_allowed(
-                &broker,
+                &fixture.broker,
                 request(DirectoryAssignmentSetup {
-                    broker_epoch,
-                    dir: dir_uuid,
+                    broker_epoch: fixture.broker_epoch,
+                    dir: fixture.dir_uuid,
                     topic: topic_id,
                     partitions: &[partition_index],
                     ..Default::default()
@@ -223,7 +226,7 @@ mod tests {
                 krabka_macros::unthrottled_wire!(AssignReplicasToDirsResponse {
                     error_code: codes::NONE,
                     directories: vec![krabka_macros::tagged_wire!(RespDirData {
-                        id: ProtocolUuid(dir_uuid.into_bytes()),
+                        id: ProtocolUuid(fixture.dir_uuid.into_bytes()),
                         topics: vec![krabka_macros::tagged_wire!(RespTopicData {
                             topic_id: ProtocolUuid(topic_id.into_bytes()),
                             partitions: vec![krabka_macros::tagged_wire!(RespPartData {
@@ -236,9 +239,9 @@ mod tests {
             ));
         }
         assert!(actual == expected);
-        check_partition_directory(&broker, dir_uuid);
+        check_partition_directory(&fixture.broker, fixture.dir_uuid);
 
-        broker_handle.shutdown().await;
+        fixture.handle.shutdown().await;
     }
 
     /// Seed topic "t" with id `topic_uuid` and partition 0 on broker 1.
@@ -343,15 +346,8 @@ mod tests {
     /// commits nothing.
     #[tokio::test]
     async fn handle_needs_cluster_action() {
-        krabka_macros::broker_test_setup! {
-            bind(broker_handle, _dir, broker);
-            boot [handler_fixture_support::start_with_principal_grants()];
-        };
-        wait_for_controller_leader(&broker).await;
-        let broker_epoch = own_broker_epoch(&broker);
-        let dir_uuid = uuid::Uuid::from_u128(0xAA);
-        let topic_uuid = uuid::Uuid::from_u128(0xBB);
-        seed_topic(&broker, topic_uuid).await;
+        let fixture =
+            seeded_topic_fixture(handler_fixture_support::start_with_principal_grants()).await;
 
         let cases = [
             ("none", codes::CLUSTER_AUTHORIZATION_FAILED),
@@ -366,11 +362,11 @@ mod tests {
             let user = principal(grants);
             let ctx = request_context(&user, &address, "assign-test");
             let resp = handle(
-                &broker,
+                &fixture.broker,
                 request(DirectoryAssignmentSetup {
-                    broker_epoch,
-                    dir: dir_uuid,
-                    topic: topic_uuid,
+                    broker_epoch: fixture.broker_epoch,
+                    dir: fixture.dir_uuid,
+                    topic: fixture.topic_uuid,
                     ..Default::default()
                 }),
                 VERSION,
@@ -380,7 +376,7 @@ mod tests {
             .expect("AssignReplicasToDirs handler");
             assert!(resp.error_code == expected_error, "{grants}: {resp:?}");
         }
-        broker_handle.shutdown().await;
+        fixture.handle.shutdown().await;
     }
 
     /// Kafka's `ClusterControlManager.checkBrokerEpoch`, which
@@ -390,25 +386,18 @@ mod tests {
     /// assignment.
     #[tokio::test]
     async fn handle_fences_stale_and_unregistered_brokers() {
-        seeded_topic_fixture!((
-            broker_handle,
-            _dir,
-            broker,
-            broker_epoch,
-            dir_uuid,
-            topic_uuid
-        ));
+        let fixture = seeded_topic_fixture(broker_fixture_support::start_broker_with(|_| {})).await;
 
         // A stale epoch is refused, and the seeded directory slot is
         // untouched. `+ 1` rather than `- 1`: a registered epoch of 0 would
         // otherwise turn "stale" into `-1`, which means "not provided" and
         // matches any registration (see `validation::check_broker_epoch`).
         let stale = handle_allowed(
-            &broker,
+            &fixture.broker,
             request(DirectoryAssignmentSetup {
-                broker_epoch: broker_epoch + 1,
-                dir: dir_uuid,
-                topic: topic_uuid,
+                broker_epoch: fixture.broker_epoch + 1,
+                dir: fixture.dir_uuid,
+                topic: fixture.topic_uuid,
                 ..Default::default()
             }),
         )
@@ -416,7 +405,8 @@ mod tests {
         .expect("AssignReplicasToDirs handler");
         assert!(stale.error_code == codes::STALE_BROKER_EPOCH, "{stale:?}");
         assert!(
-            broker
+            fixture
+                .broker
                 .controller
                 .current_image()
                 .partition("t", 0)
@@ -427,11 +417,11 @@ mod tests {
 
         // The current epoch succeeds and commits the assignment.
         let current = handle_allowed(
-            &broker,
+            &fixture.broker,
             request(DirectoryAssignmentSetup {
-                broker_epoch,
-                dir: dir_uuid,
-                topic: topic_uuid,
+                broker_epoch: fixture.broker_epoch,
+                dir: fixture.dir_uuid,
+                topic: fixture.topic_uuid,
                 ..Default::default()
             }),
         )
@@ -439,24 +429,25 @@ mod tests {
         .expect("AssignReplicasToDirs handler");
         assert!(current.error_code == codes::NONE, "{current:?}");
         assert!(
-            broker
+            fixture
+                .broker
                 .controller
                 .current_image()
                 .partition("t", 0)
                 .expect("partition")
                 .directories
-                == vec![dir_uuid]
+                == vec![fixture.dir_uuid]
         );
 
         // `-1` ("not provided") also succeeds: it is the epoch
-        // `crate::assign_dirs::build_request` sends for this broker's own
+        // `crate::assign_dirs::build_request` sends for this fixture.broker's own
         // self-reported directory assignments.
         let unspecified = handle_allowed(
-            &broker,
+            &fixture.broker,
             request(DirectoryAssignmentSetup {
                 broker_epoch: -1,
-                dir: dir_uuid,
-                topic: topic_uuid,
+                dir: fixture.dir_uuid,
+                topic: fixture.topic_uuid,
                 ..Default::default()
             }),
         )
@@ -464,7 +455,7 @@ mod tests {
         .expect("AssignReplicasToDirs handler");
         assert!(unspecified.error_code == codes::NONE, "{unspecified:?}");
 
-        broker_handle.shutdown().await;
+        fixture.handle.shutdown().await;
     }
 
     /// An id that names no registration is refused with

@@ -33,7 +33,7 @@ use {
     },
     assert2::{assert, check},
     krabka_protocol::owned::{
-        alter_configs_request::{AlterConfigsRequest, AlterableConfig},
+        alter_configs_request::{AlterConfigsRequest, AlterConfigsResource, AlterableConfig},
         alter_configs_response::{AlterConfigsResourceResponse, AlterConfigsResponse},
     },
     std::sync::Arc,
@@ -110,15 +110,12 @@ async fn dispatch_preserves_mixed_resource_order_and_duplicates() {
     handle.shutdown().await;
 }
 
-macro_rules! invalid_config_row {
-    (($response:ident, $row:ident), $request:expr) => {
-        let $response = Box::pin(drive_one(Arc::new(DenyAll), $request)).await;
-        assert!($response.responses.len() == 1);
-        let $row = &$response.responses[0];
-        assert!($row.error_code == codes::INVALID_REQUEST);
-    };
+async fn invalid_config_row(request: AlterConfigsResource) -> AlterConfigsResponse {
+    let response = Box::pin(drive_one(Arc::new(DenyAll), request)).await;
+    assert!(response.responses.len() == 1);
+    assert!(response.responses[0].error_code == codes::INVALID_REQUEST);
+    response
 }
-
 #[tokio::test]
 async fn handle_preserves_resource_identity_for_unsupported_type() {
     let resp = Box::pin(drive_one(
@@ -267,7 +264,8 @@ async fn duplicate_config_key_is_a_validation_error_even_when_unauthorized() {
     let mut duplicated = resource(RESOURCE_TYPE_TOPIC, "orders");
     duplicated.configs.push(duplicated.configs[0].clone());
 
-    invalid_config_row!((resp, row), duplicated);
+    let resp = invalid_config_row(duplicated).await;
+    let row = &resp.responses[0];
     assert!(row.error_message.as_deref() == Some("Error due to duplicate config keys"));
 }
 
@@ -286,7 +284,8 @@ async fn null_config_value_is_a_validation_error_even_when_unauthorized() {
         })
         .collect();
 
-    invalid_config_row!((resp, row), resource);
+    let resp = invalid_config_row(resource).await;
+    let row = &resp.responses[0];
     // Kafka joins the names with `String.join(", ", ...)`.
     assert!(
         row.error_message.as_deref()

@@ -9,11 +9,17 @@ use {
     proc_macro::{Delimiter, Group, TokenStream as NativeTokenStream, TokenTree},
 };
 
-fn additions(item: &ItemStruct, role: &str) -> Result<(TokenStream, TokenStream), ParseError> {
+struct FieldAdditions {
+    prefix: TokenStream,
+    suffix: TokenStream,
+}
+
+fn additions(item: &ItemStruct, role: &str) -> Result<FieldAdditions, ParseError> {
     let visibility = &item.vis;
+    let fields = named_fields(item, "reconciliation_fields")?;
     if role == "member" {
-        return Ok((
-            moxy::template! {
+        return Ok(FieldAdditions {
+            prefix: moxy::template! {
                 {{ visibility }} id: String,
                 {{ visibility }} member_epoch: i32,
                 {{ visibility }} assignment_state: MemberAssignmentState,
@@ -21,10 +27,9 @@ fn additions(item: &ItemStruct, role: &str) -> Result<(TokenStream, TokenStream)
                 {{ visibility }} assigned: Vec<i32>,
                 {{ visibility }} pending_revocation: Vec<i32>,
             },
-            TokenStream::new(),
-        ));
+            suffix: TokenStream::new(),
+        });
     }
-    let fields = named_fields(item, "reconciliation_fields")?;
     if !fields.first().is_some_and(|field| {
         field
             .ident
@@ -49,20 +54,20 @@ fn additions(item: &ItemStruct, role: &str) -> Result<(TokenStream, TokenStream)
             "members must be Vec<ConcreteMember>",
         ));
     }
-    Ok((
-        moxy::template! {
+    Ok(FieldAdditions {
+        prefix: moxy::template! {
             {{ visibility }} group_epoch: i32,
             /// The metadata hash that the group recorded last.
             {{ visibility }} metadata_hash: i64,
             {{ visibility }} target_epoch: i32,
         },
-        moxy::template! {
+        suffix: moxy::template! {
             /// Ground-truth ownership, sorted by member id and partition.
-            {{ visibility }} client_owned: Vec<(String, Vec<i32>)>,
+            {{ visibility }} client_owned: Vec<MemberPartitions>,
             /// Last advertised assignment, which the faithful client follows, sorted by id and partition.
-            {{ visibility }} advertised: Vec<(String, Vec<i32>)>,
+            {{ visibility }} advertised: Vec<MemberPartitions>,
         },
-    ))
+    })
 }
 
 pub(crate) fn expand(
@@ -72,7 +77,7 @@ pub(crate) fn expand(
     let role = mode(metadata.clone(), ["member", "group"])?;
     let parsed_tokens: TokenStream = item.clone().into();
     let parsed: ItemStruct = moxy::parse!({ parsed_tokens })?;
-    let (prefix, suffix) = additions(&parsed, role)?;
+    let FieldAdditions { prefix, suffix } = additions(&parsed, role)?;
     let mut tokens: Vec<_> = item.into_iter().collect();
     let Some(TokenTree::Group(body)) = tokens.pop() else {
         return Err(ParseError::new(
@@ -111,23 +116,45 @@ pub(crate) fn expand(
 
 #[cfg(test)]
 mod tests {
-    use {super::additions, assert2::assert};
+    use {
+        super::{FieldAdditions, additions},
+        assert2::assert,
+    };
 
     #[test]
     fn member_prefix_and_group_surroundings_keep_original_order() {
         let item =
             moxy::parse!("pub struct Projection { members: Vec<Member>, extra: usize }").unwrap();
-        let (prefix, suffix) = additions(&item, "group").unwrap();
+        let FieldAdditions { prefix, suffix } = additions(&item, "group").unwrap();
         let prefix = prefix.to_string();
         assert!(prefix.find("group_epoch").unwrap() < prefix.find("metadata_hash").unwrap());
         assert!(prefix.find("metadata_hash").unwrap() < prefix.find("target_epoch").unwrap());
         let suffix = suffix.to_string();
         assert!(suffix.find("client_owned").unwrap() < suffix.find("advertised").unwrap());
-        let (prefix, suffix) = additions(&item, "member").unwrap();
+        let FieldAdditions { prefix, suffix } = additions(&item, "member").unwrap();
         assert!(suffix.is_empty());
         assert!(
             prefix.to_string().find("assigned").unwrap()
                 < prefix.to_string().find("pending_revocation").unwrap()
         );
+    }
+    #[test]
+    fn field_groups_require_named_fields_and_a_concrete_first_member_list() {
+        for declaration in [
+            "struct Projection;",
+            "struct Projection { extra: usize, members: Vec<Member> }",
+            "struct Projection { members: Option<Member> }",
+            "struct Projection { members: Vec<Member<T>> }",
+            "struct Projection { members: Vec<Member, Other> }",
+        ] {
+            let item = moxy::parse!({ declaration }).unwrap();
+            assert!(additions(&item, "group").is_err(), "{declaration}");
+        }
+        let unnamed = moxy::parse!("struct Projection(Member);").unwrap();
+        assert!(additions(&unnamed, "member").is_err());
+        let visible = moxy::parse!("pub(super) struct Projection { target: Vec<i32> }").unwrap();
+        let fields = additions(&visible, "member").unwrap();
+        assert!(fields.prefix.to_string().contains("pub"));
+        assert!(fields.prefix.to_string().contains("MemberAssignmentState"));
     }
 }

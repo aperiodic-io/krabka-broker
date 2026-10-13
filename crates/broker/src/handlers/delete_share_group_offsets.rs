@@ -246,7 +246,7 @@ mod tests {
     use {
         super::{TOPIC_AUTHORIZATION_FAILED_MESSAGE, handle, top_level},
         crate::{
-            authorizer::{AuthorizationResult, Authorizer},
+            authorizer::AuthorizationResult,
             broker::BrokerHandle,
             codes,
             coordinator::unified::{
@@ -257,14 +257,17 @@ mod tests {
                 },
             },
             handlers::{
-                RequestContext, create_topics::handle as create_topics_handle,
-                test_support as handler_fixture_support,
+                RequestContext,
+                create_topics::handle as create_topics_handle,
+                test_support::{
+                    self as handler_fixture_support, ShareRefusalCase, ShareRefusalPolicy,
+                },
             },
             share_coordinator::{
                 handlers::test_support::lead_share_state_partitions,
                 persister_client::SharePersister,
             },
-            test_support::{DenyAll, ShareApiSupport, start_share_broker},
+            test_support::{StartedBroker as HandlerStartedBroker, start_share_broker},
         },
         assert2::assert,
         krabka_metadata::{AclOperation, ResourceType},
@@ -307,7 +310,7 @@ mod tests {
     #[derive(Debug)]
     struct DenyReadOnTopics(HashSet<&'static str>);
 
-    test_authorizer!(DenyReadOnTopics, (self, _source, request), {
+    krabka_macros::test_authorizer!(DenyReadOnTopics, request; {
         if request.resource_type == ResourceType::Topic
             && request.operation == AclOperation::Read
             && self.0.contains(request.resource_name)
@@ -418,19 +421,12 @@ mod tests {
 
     #[tokio::test]
     async fn handle_error_scenarios_preserve_expected_rows() {
-        type Case<'a> = (
-            &'a str,
-            Arc<dyn Authorizer>,
-            ShareApiSupport,
-            Vec<&'a str>,
-            DeleteShareGroupOffsetsResponse,
-        );
         let version = delete_share_group_offsets_response::MAX_VERSION;
-        let cases: Vec<Case<'_>> = vec![
-            (
+        let cases: Vec<ShareRefusalCase<Vec<&str>, DeleteShareGroupOffsetsResponse>> = vec![
+            ShareRefusalPolicy::unsupported(
                 "disabled feature returns top-level unsupported version",
-                Arc::new(crate::authorizer::AllowAllAuthorizer),
-                crate::test_support::ShareApiSupport::Disabled,
+            )
+            .with_input(
                 vec!["missing"],
                 krabka_macros::unthrottled_wire!(DeleteShareGroupOffsetsResponse {
                     error_code: codes::UNSUPPORTED_VERSION,
@@ -438,10 +434,10 @@ mod tests {
                     responses: Vec::new(),
                 }),
             ),
-            (
+            ShareRefusalPolicy::group_denied(
                 "denied group returns top-level authorization failure",
-                Arc::new(crate::test_support::ControllerPeerAllowed(DenyAll)),
-                crate::test_support::ShareApiSupport::Enabled,
+            )
+            .with_input(
                 vec!["missing"],
                 krabka_macros::unthrottled_wire!(DeleteShareGroupOffsetsResponse {
                     error_code: codes::GROUP_AUTHORIZATION_FAILED,
@@ -451,9 +447,9 @@ mod tests {
             ),
         ];
         krabka_macros::share_refusal_matrix! {
-            case(case, authorizer, share_enabled, topics, expected) [cases];
+            case(row) [cases];
             bind(broker_handle, _dir, broker, ctx, resp);
-            invoke [handle(&broker, request("g1", &topics), version, &ctx)];
+            invoke [handle(&broker, request("g1", &row.input), version, &ctx)];
         };
     }
 
@@ -693,7 +689,10 @@ mod tests {
 
         for DenialCase { case, denied_names } in cases {
             let denied: HashSet<&'static str> = denied_names.iter().copied().collect();
-            let (broker_handle, _dir) = start_share_broker()
+            let HandlerStartedBroker {
+                broker: broker_handle,
+                dir: _dir,
+            } = start_share_broker()
                 .authorizer(Arc::new(DenyReadOnTopics(denied.clone())))
                 .call()
                 .await;

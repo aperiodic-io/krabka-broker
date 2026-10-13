@@ -19,8 +19,7 @@
 
 use {
     self::sweep::tick_all,
-    crate::{metrics::BrokerMetrics, partition_registry::PartitionRegistry, time_util},
-    krabka_units::convert::TimeExt as _,
+    crate::{metrics::BrokerMetrics, partition_registry::PartitionRegistry},
     std::sync::Arc,
     tokio_util::sync::CancellationToken,
 };
@@ -33,7 +32,7 @@ mod test_support;
 mod tests;
 
 /// Tunables for [`run`], shared with the other local log-maintenance sweep.
-pub(crate) type LogRetentionConfig = time_util::MetadataSweepConfig;
+pub(crate) use crate::time_util::MetadataSweepConfig as LogRetentionConfig;
 
 /// Spawned task entry point.
 pub(crate) async fn run(
@@ -65,7 +64,7 @@ pub(crate) async fn run(
     let timer = Arc::clone(&cfg.timer);
     krabka_macros::sweep_loop! {
         timer [&*timer];
-        cadence [(cfg.interval.to_std(), cfg.interval.to_std())];
+        cadence [cfg.periodic_cadence()];
         shutdown [&shutdown];
         task [TASK];
         sweep {

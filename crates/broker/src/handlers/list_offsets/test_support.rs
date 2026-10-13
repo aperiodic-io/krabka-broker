@@ -1,6 +1,8 @@
 //! The client and wire fixtures that more than one `ListOffsets` test module
 //! needs, so each of them drives the handler through the same request shape.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::sentinels::UNKNOWN_EPOCH,
     crate::{
@@ -65,7 +67,10 @@ pub(super) struct ClientBroker<Dirs> {
 
 /// A default local topic whose log is ready for timestamp and sentinel queries.
 pub(super) async fn local_topic(topic: &str) -> ClientBroker<tempfile::TempDir> {
-    let (broker, directory) = start_broker_no_audit().await;
+    let HandlerStartedBroker {
+        broker,
+        dir: directory,
+    } = start_broker_no_audit().await;
     let client = client_for(&broker).await;
     create_topic(&client, topic, Vec::new()).await;
     broker.wait_until_partition_present(topic, 0).await;
@@ -84,7 +89,10 @@ pub(super) async fn remote_topic(
 ) -> ClientBroker<[tempfile::TempDir; 2]> {
     let remote_dir = tempfile::tempdir().expect("remote tempdir");
     let remote_path = remote_dir.path().to_path_buf();
-    let (broker, directory) = start_broker_no_audit_with(move |config| {
+    let HandlerStartedBroker {
+        broker,
+        dir: directory,
+    } = start_broker_no_audit_with(move |config| {
         config.remote_storage_backend = Some(RemoteStorageBackend::Local { dir: remote_path });
     })
     .await;
@@ -151,7 +159,7 @@ pub(super) async fn list_one_at_epoch(
 #[derive(Debug)]
 pub(super) struct DenyNamed(pub(super) std::collections::HashSet<&'static str>);
 
-test_authorizer!(DenyNamed, (self, _source, req), {
+krabka_macros::test_authorizer!(DenyNamed, req; {
     if self.0.contains(req.resource_name) {
         crate::authorizer::AuthorizationResult::Deny
     } else {

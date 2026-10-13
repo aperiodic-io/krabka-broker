@@ -1,5 +1,7 @@
 use {
-    super::DisklessRetentionPolicy, crate::log_index::upper_range_cursor, creusot_std::prelude::*,
+    super::DisklessRetentionPolicy,
+    crate::log_index::{RangeEntry, upper_range_cursor},
+    creusot_std::prelude::*,
 };
 
 /// The bytes of the oldest `count` ranges.
@@ -177,27 +179,27 @@ pub const fn diskless_object_reclaimable(referenced: bool, grace_elapsed: bool) 
 
 /// Select the covering logical range, or the first successor after a gap.
 #[requires(forall<i: Int> 0 <= i && i < entries@.len()
-    ==> entries@[i].0@ <= entries@[i].1@)]
+    ==> entries@[i].key@ <= entries@[i].coordinate@)]
 #[requires(forall<i: Int, j: Int> 0 <= i && i < j && j < entries@.len()
-    ==> entries@[i].1@ < entries@[j].0@)]
+    ==> entries@[i].coordinate@ < entries@[j].key@)]
 #[ensures(match result {
     Some(index) => index@ < entries@.len()
-        && ((entries@[index@].0@ <= requested@ && requested@ <= entries@[index@].1@)
-            || (requested@ < entries@[index@].0@
+        && ((entries@[index@].key@ <= requested@ && requested@ <= entries@[index@].coordinate@)
+            || (requested@ < entries@[index@].key@
                 && index@ > 0
-                && entries@[index@ - 1].1@ < requested@)),
+                && entries@[index@ - 1].coordinate@ < requested@)),
     None => entries@.len() == 0
-        || requested@ < entries@[0].0@
-        || entries@[entries@.len() - 1].1@ < requested@,
+        || requested@ < entries@[0].key@
+        || entries@[entries@.len() - 1].coordinate@ < requested@,
 })]
 #[must_use]
-pub fn diskless_logical_range(entries: &[(i64, i64)], requested: i64) -> Option<usize> {
+pub fn diskless_logical_range(entries: &[RangeEntry], requested: i64) -> Option<usize> {
     let lo = upper_range_cursor(entries, requested);
     if lo == 0 {
         return None;
     }
     let floor = lo - 1;
-    if requested <= entries[floor].1 {
+    if requested <= entries[floor].coordinate {
         Some(floor)
     } else if lo < entries.len() {
         Some(lo)

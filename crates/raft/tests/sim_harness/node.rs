@@ -4,6 +4,7 @@
 
 use {
     super::node_log::SimNodeLog,
+    krabka_kraft_core::simulation_support::PartitionMessage,
     krabka_raft::kraft::{
         QuorumStateMachine,
         event::Event,
@@ -13,14 +14,12 @@ use {
 
 /// A message in flight on the bus: a destination node plus the event that node
 /// observes. The `src` field is recorded for partition filtering.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, krabka_macros::PartitionMessage)]
 pub(super) struct Message {
     pub(super) src: NodeId,
     pub(super) dst: NodeId,
     pub(super) event: Event,
 }
-
-krabka_kraft_core::impl_partition_message!(Message, NodeId);
 
 /// A node and everything the harness owns on its behalf.
 pub(super) struct Node<L: SimNodeLog> {

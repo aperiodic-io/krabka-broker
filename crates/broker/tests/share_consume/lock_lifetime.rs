@@ -13,7 +13,7 @@ use {
             share_renew,
         },
         support::share::{
-            ConsumptionSetup, ShareFetchSetup, ShareRecordCount, ShareSessionEpoch,
+            ConsumptionSetup, MemberSession, ShareFetchSetup, ShareRecordCount, ShareSessionEpoch,
             ShareSessionSetup, permitted_topic_fixture,
         },
     },
@@ -184,7 +184,7 @@ async fn lock_fixture(lock_duration: Duration, max_delivery_attempts: Option<i16
             .call(),
     )
     .await;
-    let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
+    let MemberSession { member, .. } = initialize_consumption(&broker, &client, ConsumptionSetup {
         topic_id: tid,
         count: ShareRecordCount(1),
     })

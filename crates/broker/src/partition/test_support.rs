@@ -7,16 +7,13 @@
 //! of this fixture would be a second thing to keep in step with `Partition`.
 //! [`test_partition_with_writer`] is `pub(crate)` for the same reason: the
 //! group coordinator's offsets log appends through a real writer in its tests.
-
 use {
     crate::{
         delivery::DeliveryHandles,
-        log_dir_status::LogDirRegistry,
         partition::{
             Partition, WriterMessage, empty_marker_materialization, initial_replication_target,
         },
-        partition_writer::run,
-        producer_state::ProducerState,
+        partition_writer::{WriterServices, run},
         replica_state::ReplicaState,
         test_support::{PartitionRecordsSetup, partition_records_batch},
     },
@@ -113,11 +110,7 @@ pub(crate) fn test_partition_with_writer() -> (Partition, tempfile::TempDir) {
             storage,
             rx,
             signals,
-            (
-                LogDirRegistry::default(),
-                Arc::new(ProducerState::new()),
-                None,
-            ),
+            WriterServices::default(),
         ))
     });
     (p, dir)

@@ -1,4 +1,4 @@
-use creusot_std::prelude::*;
+use {crate::log_index::TimeEntry, creusot_std::prelude::*};
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.
 #[cfg(creusot)]
@@ -25,24 +25,13 @@ fn finished_selection(
     }
 }
 
-macro_rules! finished_selection_kernel {
-    ($(#[$attribute:meta])* $visibility:vis fn $name:ident;
-        arrays ($starts:ident, $ends:ident, $finished:ident);
-        latest $choice:expr $(; parameter $latest:ident)?;
-        body $body:block
-    ) => {
-        #[requires($starts@.len() == $ends@.len() && $starts@.len() == $finished@.len())]
-        #[ensures(finished_selection($starts@, $ends@, $finished@, result, $starts@.len(), $choice))]
-        $(#[$attribute])*
-        $visibility fn $name($starts: &[i64], $ends: &[i64], $finished: &[bool] $(, $latest: bool)?) -> Option<usize> $body
-    };
-}
-
-finished_selection_kernel! {
- fn select_finished_index;
-arrays (starts, ends, finished);
-latest latest; parameter latest;
-body {
+#[krabka_macros::finished_selection(latest)]
+fn select_finished_index(
+    starts: &[i64],
+    ends: &[i64],
+    finished: &[bool],
+    latest: bool,
+) -> Option<usize> {
     let mut best: Option<usize> = None;
     let mut index = 0usize;
     #[invariant(index@ <= starts@.len())]
@@ -68,32 +57,31 @@ body {
     }
     best
 }
-}
 
-finished_selection_kernel! {
+#[krabka_macros::finished_selection(false)]
 /// Select the earliest valid finished remote segment.
 ///
 /// The three slices are parallel arrays supplied from one metadata listing.
 /// Negative or inverted ranges are not candidates, even when their lifecycle
 /// state says the copy finished.
 #[must_use]
-pub fn tiered_earliest_finished_index;
-arrays (starts, ends, finished);
-latest false;
-body {
+pub fn tiered_earliest_finished_index(
+    starts: &[i64],
+    ends: &[i64],
+    finished: &[bool],
+) -> Option<usize> {
     select_finished_index(starts, ends, finished, false)
 }
-}
 
-finished_selection_kernel! {
+#[krabka_macros::finished_selection(true)]
 /// Select the finished remote segment with the greatest valid inclusive end.
 #[must_use]
-pub fn tiered_latest_finished_index;
-arrays (starts, ends, finished);
-latest true;
-body {
+pub fn tiered_latest_finished_index(
+    starts: &[i64],
+    ends: &[i64],
+    finished: &[bool],
+) -> Option<usize> {
     select_finished_index(starts, ends, finished, true)
-}
 }
 
 /// Select the valid leader epoch whose start is greatest at or below a
@@ -142,26 +130,26 @@ pub fn tiered_owning_epoch_index(
 /// they are, and the last counted entry is then the latest safe one.
 #[ensures(result@ <= entries@.len())]
 #[ensures(forall<i: Int> 0 <= i && i < result@
-    ==> entries@[i].0@ < target_timestamp@)]
+    ==> entries@[i].key@ < target_timestamp@)]
 #[ensures(forall<i: Int> 1 <= i && i < result@
-    ==> entries@[i - 1].1@ < entries@[i].1@)]
+    ==> entries@[i - 1].coordinate@ < entries@[i].coordinate@)]
 #[ensures(result@ < entries@.len() ==>
-    (result@ > 0 && entries@[result@].1@ <= entries@[result@ - 1].1@)
-        || entries@[result@].0@ >= target_timestamp@)]
+    (result@ > 0 && entries@[result@].coordinate@ <= entries@[result@ - 1].coordinate@)
+        || entries@[result@].key@ >= target_timestamp@)]
 #[must_use]
-pub fn remote_time_index_candidate_count(entries: &[(i64, u32)], target_timestamp: i64) -> usize {
+pub fn remote_time_index_candidate_count(entries: &[TimeEntry], target_timestamp: i64) -> usize {
     let mut count = 0usize;
     #[invariant(count@ <= entries@.len())]
     #[invariant(forall<i: Int> 0 <= i && i < count@
-        ==> entries@[i].0@ < target_timestamp@)]
+        ==> entries@[i].key@ < target_timestamp@)]
     #[invariant(forall<i: Int> 1 <= i && i < count@
-        ==> entries@[i - 1].1@ < entries@[i].1@)]
+        ==> entries@[i - 1].coordinate@ < entries@[i].coordinate@)]
     #[variant(entries@.len() - count@)]
     while count < entries.len() {
-        if count > 0 && entries[count].1 <= entries[count - 1].1 {
+        if count > 0 && entries[count].coordinate <= entries[count - 1].coordinate {
             break;
         }
-        if entries[count].0 >= target_timestamp {
+        if entries[count].key >= target_timestamp {
             break;
         }
         count += 1;

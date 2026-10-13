@@ -251,29 +251,8 @@ fn partition_record_from_setup(setup: SupervisorPartitionSetup<'_>) -> MetadataR
     })
 }
 
-macro_rules! supervisor_partition_builder {
-    ($name:ident -> $result:ty = $constructor:path) => {
-        #[bon::builder]
-        pub(super) fn $name(
-            #[builder(default = "t")] topic: &'_ str,
-            #[builder(into, default)] partition: PartitionIndex,
-            #[builder(into, default = NodeId(1))] leader: NodeId,
-            #[builder(default = vec![NodeId(1), NodeId(2), NodeId(3)])] replicas: Vec<NodeId>,
-            #[builder(into, default)] epoch: LeaderEpoch,
-        ) -> $result {
-            $constructor(SupervisorPartitionSetup {
-                topic,
-                partition,
-                leader,
-                replicas,
-                epoch,
-            })
-        }
-    };
-}
-
-supervisor_partition_builder!(topic_partition_records -> [MetadataRecord; 2] = topic_partition_records_from_setup);
-supervisor_partition_builder!(partition_record -> MetadataRecord = partition_record_from_setup);
+krabka_macros::fixture_constructors! { supervisor: pub(super) topic_partition_records -> [MetadataRecord; 2] = topic_partition_records_from_setup; }
+krabka_macros::fixture_constructors! { supervisor: pub(super) partition_record -> MetadataRecord = partition_record_from_setup; }
 
 pub(super) fn broker_record(node_id: NodeId) -> BrokerRegistrationRecord {
     BrokerRegistrationRecord {

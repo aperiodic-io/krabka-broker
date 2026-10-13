@@ -9,7 +9,10 @@ use {
     crate::{
         control_plane::wait_for_registry_len,
         support,
-        wire::{CONTROL, accepted, frozen_topic_with_record, refused, wait_controlled_partitions},
+        wire::{
+            CONTROL, accepted, frozen_topic_with_record, produce_outcome, refused,
+            wait_controlled_partitions,
+        },
     },
     assert2::check,
     krabka_protocol::krabka::freeze::PATTERN_TYPE_LITERAL,
@@ -42,8 +45,11 @@ async fn a_freeze_survives_a_controller_restart() {
 
     let frozen = support::topic_id_for(&client, "orders").await;
     let control = support::topic_id_for(&client, CONTROL).await;
-    crate::wire::check_produce!(&broker, &client;
-        "orders", frozen => refused("literal", "orders", "cutover", 1), CONTROL, control => accepted(1));
+    check!(
+        produce_outcome(&broker, &client, "orders", frozen).await
+            == refused("literal", "orders", "cutover", 1)
+    );
+    check!(produce_outcome(&broker, &client, CONTROL, control).await == accepted(1));
 
     broker.shutdown().await;
 }

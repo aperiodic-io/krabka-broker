@@ -12,7 +12,7 @@ pub use crate::support::share::{
 };
 use {
     crate::support::share::{
-        ConsumptionFixture, ConsumptionSetup, ShareRecordCount, ShareSessionSetup,
+        ConsumptionFixture, ConsumptionSetup, MemberSession, ShareRecordCount, ShareSessionSetup,
         consumption_fixture, join as join_share_group, permitted_topic_fixture, start_topic,
     },
     assert2::assert,
@@ -43,9 +43,12 @@ pub async fn wait_for_share_init(
 ///
 /// The function drives steady-state heartbeats, so the lifecycle hook
 /// initializes the share state of the subscribed partitions. It returns
-/// `(member_id, member_epoch)`, so the caller can leave with the live epoch.
-pub async fn join(client: &Client, group: &str, topic: &str) -> (String, i32) {
-    let (member_id, mut epoch) = join_share_group(client, group, topic).await;
+/// its member id and epoch, so the caller can leave with the live epoch.
+pub async fn join(client: &Client, group: &str, topic: &str) -> MemberSession {
+    let MemberSession {
+        member: member_id,
+        mut epoch,
+    } = join_share_group(client, group, topic).await;
 
     for _ in 0..3 {
         let hb = client
@@ -64,7 +67,10 @@ pub async fn join(client: &Client, group: &str, topic: &str) -> (String, i32) {
         // than waiting on a single observable state (share init is awaited separately).
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    (member_id, epoch)
+    MemberSession {
+        member: member_id,
+        epoch,
+    }
 }
 
 /// Leaves the group with `member_epoch == -1`.
@@ -83,12 +89,12 @@ pub async fn leave(client: &Client, group: &str, member_id: &str) {
     assert!(resp.error_code == 0, "leave failed: {:?}", resp.error_code);
 }
 
-crate::share_first_fetch_fixture!(fetch_until_acquired, Initial);
+krabka_macros::share_first_fetch!(fetch_until_acquired, Initial);
 
-crate::share_consumption_fixture!(
+krabka_macros::share_consumption_driver!(
     initialize_consumption,
     join,
-    |broker, client, member, epoch, tid| wait_for_share_init(broker, "g1", tid, 0)
+    |broker, client, member, epoch, tid| [wait_for_share_init(broker, "g1", tid, 0)]
 );
 
 /// Initialize the persisted topic/group fixture before a restart scenario.
@@ -103,7 +109,7 @@ pub async fn initialized_topic(
     String,
 ) {
     let (broker, client, tid) = start_topic().cfg(broker_config(log_dir)).call().await;
-    let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
+    let MemberSession { member, .. } = initialize_consumption(&broker, &client, ConsumptionSetup {
         topic_id: tid,
         count,
     })

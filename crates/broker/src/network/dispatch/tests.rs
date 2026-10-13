@@ -2,7 +2,6 @@
 //! header metadata the KIP-853 voter RPCs need, and an end-to-end drive of the
 //! serve loop over a real socket. [`throttle_mute`] holds the KIP-219 tests,
 //! which drive the same loop against a seeded client quota.
-
 use {
     super::{test_support::DEFAULT_MAX_FRAME_BYTES, *},
     crate::{
@@ -12,7 +11,7 @@ use {
         authorizer::AuthorizationResult,
         codes,
         config::BrokerConfig,
-        handlers::registry::build_registry,
+        handlers::{registry::build_registry, test_support::StartedBroker},
         metrics::{
             ApiKeyLabel, BrokerMetrics, ConnectionCloseReason, ConnectionCloseReasonLabel,
             SaslMechanismLabel, UNKNOWN_LABEL,
@@ -122,7 +121,10 @@ async fn raft_voter_registry_routes_to_real_handlers() {
         body
     }
 
-    let (handle, _dir) = start_broker_with(|cfg| {
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with(|cfg| {
         cfg.authorizer = std::sync::Arc::new(DenyAll);
     })
     .await;
@@ -176,7 +178,10 @@ async fn inter_broker_only_apis_close_the_connection_on_a_client_listener() {
             .get(api_key)
             .unwrap_or_else(|| panic!("registry carries api_key {api_key}"));
 
-        let (handle, _dir) = start_broker_with(|_| {}).await;
+        let StartedBroker {
+            broker: handle,
+            dir: _dir,
+        } = start_broker_with(|_| {}).await;
         let broker = handle.broker_arc_for_test();
 
         let ServeLoop { addr, serve } = serve_loop(
@@ -639,7 +644,10 @@ async fn serve_frames(
     mechanisms: Option<Vec<krabka_security::SaslMechanism>>,
     requests: Vec<bytes::Bytes>,
 ) -> BrokerMetrics {
-    let (handle, _dir) = start_broker_with(|_| {}).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with(|_| {}).await;
     let broker = handle.broker_arc_for_test();
     let metrics = broker.metrics.clone();
 
@@ -982,7 +990,10 @@ async fn a_sasl_frame_on_a_non_sasl_listener_keeps_the_principal() {
         ),
     ];
 
-    let (handle, _dir) = start_broker_with(|cfg| {
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with(|cfg| {
         cfg.authorizer = std::sync::Arc::new(DenyCertificatePrincipal);
         cfg.plain_credentials
             .insert("alice".to_string(), "wonderland".to_string());
@@ -1071,7 +1082,10 @@ async fn a_sasl_frame_on_a_non_sasl_listener_keeps_the_principal() {
 mod request_budget {
     use {
         super::{KafkaCodec, active_closes, close, request_frame},
-        crate::{BrokerHandle, broker::Broker, network::dispatch::test_support::plaintext_loop},
+        crate::{
+            broker::Broker, handlers::test_support::StartedBroker,
+            network::dispatch::test_support::plaintext_loop,
+        },
         assert2::{assert, check},
         futures_util::{SinkExt as _, StreamExt as _},
     };
@@ -1115,7 +1129,7 @@ mod request_budget {
 
     use crate::test_support::start_broker_with as broker_with;
 
-    async fn byte_budget_broker() -> (BrokerHandle, tempfile::TempDir) {
+    async fn byte_budget_broker() -> StartedBroker {
         broker_with(|cfg| cfg.queued_max_request_bytes = Some(budget())).await
     }
 
@@ -1127,7 +1141,10 @@ mod request_budget {
     /// nothing else can hold a handler open for as long as the assertion needs.
     #[tokio::test]
     async fn a_second_request_waits_for_the_capacity_the_first_holds() {
-        let (handle, _dir) = broker_with(|cfg| cfg.queued_max_requests = 1).await;
+        let StartedBroker {
+            broker: handle,
+            dir: _dir,
+        } = broker_with(|cfg| cfg.queued_max_requests = 1).await;
         let broker = handle.broker_arc_for_test();
 
         let held = std::sync::Arc::clone(&broker.queued_requests_sem)
@@ -1181,7 +1198,10 @@ mod request_budget {
     /// rather than test anything -- and the frame is deliberately bigger.
     #[tokio::test]
     async fn a_frame_over_the_whole_byte_budget_closes_the_connection() {
-        let (handle, _dir) = byte_budget_broker().await;
+        let StartedBroker {
+            broker: handle,
+            dir: _dir,
+        } = byte_budget_broker().await;
         let broker = handle.broker_arc_for_test();
 
         let mut served = serve(&broker).await;
@@ -1223,7 +1243,10 @@ mod request_budget {
     /// once the response is written.
     #[tokio::test]
     async fn a_frame_within_the_byte_budget_is_served_and_gives_the_bytes_back() {
-        let (handle, _dir) = byte_budget_broker().await;
+        let StartedBroker {
+            broker: handle,
+            dir: _dir,
+        } = byte_budget_broker().await;
         let broker = handle.broker_arc_for_test();
         let broker_for_budget = std::sync::Arc::clone(&broker);
         let available = move || {

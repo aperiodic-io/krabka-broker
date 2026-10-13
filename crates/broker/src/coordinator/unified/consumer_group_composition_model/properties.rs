@@ -15,7 +15,7 @@ use {
     },
     crate::coordinator::unified::actor::reconciliation_model_support::{
         advertised_disjoint, apply_client_move, apply_member_heartbeat, client_moves,
-        exclusive_ownership, overlaps_others, owned_map,
+        exclusive_ownership, owned_map,
     },
     stateright::{Model, Property},
     std::collections::BTreeMap,
@@ -71,7 +71,7 @@ impl Model for CgcModel {
         // ----- non-vacuity witnesses -----
         // A current-epoch commit was accepted (the fence's accept path fires).
         sometimes "offset_advanced" => |s| {
-            s.committed.iter().any(|&(_, o)| o > 0)
+            s.committed.iter().any(|row| row.offset > 0)
         },
         // The reconciliation actually advanced a member's epoch past its first
         // generation — so `Stale`/`Forward` commits are genuinely distinct from
@@ -87,13 +87,13 @@ impl Model for CgcModel {
             s.members.iter().any(|m| {
                     m.assignment_epochs
                         .iter()
-                        .any(|&(_, assigned_at)| assigned_at < m.member_epoch)
+                        .any(|row| row.epoch < m.member_epoch)
                 })
         },
         // A handoff state: a partition is in one member's target while another
         // member currently owns it (the baton is mid-pass).
         sometimes "handoff_witness" => |s| {
-            overlaps_others(s.members.iter().map(|member| (&member.id, &member.target)), &s.client_owned)
+            s.handoff_witness()
         },
 
         }
@@ -102,6 +102,7 @@ impl Model for CgcModel {
     fn init_states(&self) -> Vec<Self::State> { vec![CgcState::empty(vec![])] }
 
     fn within_boundary(&self, state: &Self::State) -> bool {
-        state.group_epoch <= self.max_epoch && state.committed.iter().all(|&(_, o)| o <= MAX_OFFSET)
+        state.group_epoch <= self.max_epoch
+            && state.committed.iter().all(|row| row.offset <= MAX_OFFSET)
     }
 }

@@ -34,13 +34,20 @@ use {
     },
 };
 
-macro_rules! singleton_metadata_topic {
-    ($topic:ty, $partition:expr) => {{
-        let mut topic: $topic = Default::default();
-        topic.topic_name = METADATA_TOPIC.to_string();
-        topic.partitions = vec![$partition];
-        topic
-    }};
+fn begin_metadata_topic(partition: bqe_req::PartitionData) -> bqe_req::TopicData {
+    bqe_req::TopicData {
+        topic_name: METADATA_TOPIC.to_string(),
+        partitions: vec![partition],
+        ..Default::default()
+    }
+}
+
+fn end_metadata_topic(partition: eqe_req::PartitionData) -> eqe_req::TopicData {
+    eqe_req::TopicData {
+        topic_name: METADATA_TOPIC.to_string(),
+        partitions: vec![partition],
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
@@ -208,16 +215,13 @@ impl PeerRequest {
                             ..Default::default()
                         })
                         .collect(),
-                    topics: vec![singleton_metadata_topic!(
-                        bqe_req::TopicData,
-                        bqe_req::PartitionData {
-                            partition_index: METADATA_PARTITION,
-                            voter_directory_id: uuid_to_wire(voter_directory_id),
-                            leader_id: node_to_wire(leader_id),
-                            leader_epoch: epoch_to_wire(leader_epoch),
-                            ..Default::default()
-                        }
-                    )],
+                    topics: vec![begin_metadata_topic(bqe_req::PartitionData {
+                        partition_index: METADATA_PARTITION,
+                        voter_directory_id: uuid_to_wire(voter_directory_id),
+                        leader_id: node_to_wire(leader_id),
+                        leader_epoch: epoch_to_wire(leader_epoch),
+                        ..Default::default()
+                    })],
                     ..Default::default()
                 };
                 Some(encode_body(&req, QUORUM_EPOCH_VERSION))
@@ -233,27 +237,24 @@ impl PeerRequest {
                 // v0, `PreferredCandidates` from v1.
                 let req = EndQuorumEpochRequest {
                     cluster_id: cluster_id_to_wire(cluster_id),
-                    topics: vec![singleton_metadata_topic!(
-                        eqe_req::TopicData,
-                        eqe_req::PartitionData {
-                            partition_index: METADATA_PARTITION,
-                            leader_id: node_to_wire(leader_id),
-                            leader_epoch: epoch_to_wire(leader_epoch),
-                            preferred_successors: preferred_candidates
-                                .iter()
-                                .map(|candidate| node_to_wire(candidate.id))
-                                .collect(),
-                            preferred_candidates: preferred_candidates
-                                .iter()
-                                .map(|candidate| eqe_req::ReplicaInfo {
-                                    candidate_id: node_to_wire(candidate.id),
-                                    candidate_directory_id: uuid_to_wire(candidate.directory_id),
-                                    ..Default::default()
-                                })
-                                .collect(),
-                            ..Default::default()
-                        }
-                    )],
+                    topics: vec![end_metadata_topic(eqe_req::PartitionData {
+                        partition_index: METADATA_PARTITION,
+                        leader_id: node_to_wire(leader_id),
+                        leader_epoch: epoch_to_wire(leader_epoch),
+                        preferred_successors: preferred_candidates
+                            .iter()
+                            .map(|candidate| node_to_wire(candidate.id))
+                            .collect(),
+                        preferred_candidates: preferred_candidates
+                            .iter()
+                            .map(|candidate| eqe_req::ReplicaInfo {
+                                candidate_id: node_to_wire(candidate.id),
+                                candidate_directory_id: uuid_to_wire(candidate.directory_id),
+                                ..Default::default()
+                            })
+                            .collect(),
+                        ..Default::default()
+                    })],
                     ..Default::default()
                 };
                 Some(encode_body(&req, QUORUM_EPOCH_VERSION))

@@ -180,7 +180,9 @@ mod tests {
         resource: &AlterConfigsResource,
         image: &MetadataImage,
     ) -> Result<MetadataRecord, (i16, String)> {
-        topic_config_record_with_default_policy!(resource, image, super::topic_config_record,)
+        use crate::handlers::test_support::build_topic_config_record_with_default_policy;
+
+        build_topic_config_record_with_default_policy(resource, image, super::topic_config_record)
     }
 
     #[test]

@@ -3,6 +3,8 @@
 //! `ClassicGroup.validateOffsetCommit` and `ConsumerGroup.validateOffsetCommit`,
 //! and how it refuses a partition whose metadata is too large.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::WireUuid,
     crate::{
@@ -244,7 +246,8 @@ async fn commit_is_fenced_by_kafka_group_rule() {
             error_code: codes::NONE,
         },
     ];
-    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     create_topic(&broker.broker_arc_for_test()).await;
     broker.wait_until_partition_present(TOPIC, 0).await;
 
@@ -292,7 +295,7 @@ struct DenyOneTopic;
 
 const DENIED_TOPIC: &str = "denied-topic";
 
-test_authorizer!(DenyOneTopic, (self, _source, req), {
+krabka_macros::test_authorizer!(DenyOneTopic, req; {
     if req.resource_type == ResourceType::Topic && req.resource_name == DENIED_TOPIC {
         AuthorizationResult::Deny
     } else {
@@ -305,7 +308,8 @@ test_authorizer!(DenyOneTopic, (self, _source, req), {
 /// with no allowed topic never reaches the coordinator.
 #[tokio::test]
 async fn topic_read_is_checked_before_the_group() {
-    let (broker, _dir) = start_group_broker_no_audit(Arc::new(DenyOneTopic)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_group_broker_no_audit(Arc::new(DenyOneTopic)).await;
     let shared = broker.broker_arc_for_test();
     create_topic(&shared).await;
     broker.wait_until_partition_present(TOPIC, 0).await;
@@ -379,7 +383,8 @@ async fn topic_read_is_checked_before_the_group() {
 #[tokio::test]
 async fn oversized_metadata_is_refused_through_the_handler() {
     const GROUP_ID: &str = "oversized-metadata";
-    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let shared = broker.broker_arc_for_test();
     create_topic(&shared).await;
     broker.wait_until_partition_present(TOPIC, 0).await;
@@ -583,7 +588,8 @@ async fn consumer_group_commit_follows_kip_1251() {
             error_code: codes::NONE,
         },
     ];
-    let (broker, _dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker { broker, dir: _dir } =
+        start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
     let shared = broker.broker_arc_for_test();
     create_topic_with_partitions(&shared, KIP_1251_TOPIC_PARTITIONS).await;
     for partition in 0..KIP_1251_TOPIC_PARTITIONS {

@@ -228,7 +228,6 @@ pub(super) async fn handle_v3(
 
 #[cfg(test)]
 mod tests {
-
     use {
         super::*,
         crate::{
@@ -259,9 +258,9 @@ mod tests {
     /// and no transaction row.
     #[tokio::test]
     async fn handle_v4_without_cluster_action_returns_the_top_level_error() {
-        let (broker_handle, _dir) = start_broker(Arc::new(DenyAll)).await;
-        krabka_macros::request_test_identity! {
-            bind(ctx);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker(Arc::new(DenyAll))];
             user ["ANONYMOUS"];
         };
         let req = AddPartitionsToTxnRequest {
@@ -275,9 +274,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let resp = handle(&broker_handle.broker_arc_for_test(), req, 4, &ctx)
-            .await
-            .expect("handle");
+        let resp = handle(&broker, req, 4, &ctx).await.expect("handle");
 
         let expected = AddPartitionsToTxnResponse {
             throttle_time_ms: 0,
@@ -489,9 +486,9 @@ mod tests {
 
     #[tokio::test]
     async fn handle_v3_transactional_id_deny_returns_topic_rows() {
-        let (broker_handle, _dir) = start_broker(Arc::new(DenyAll)).await;
-        krabka_macros::request_test_identity! {
-            bind(ctx);
+        krabka_macros::broker_test_setup! {
+            bind(broker_handle, _dir, broker, ctx);
+            boot [start_broker(Arc::new(DenyAll))];
             user ["ANONYMOUS"];
         };
         let req = AddPartitionsToTxnRequest {
@@ -501,9 +498,7 @@ mod tests {
             v3_and_below_topics: vec![topic("alpha", &[3, 4])],
             ..Default::default()
         };
-        let resp = handle(&broker_handle.broker_arc_for_test(), req, 3, &ctx)
-            .await
-            .expect("handle");
+        let resp = handle(&broker, req, 3, &ctx).await.expect("handle");
 
         let expected = AddPartitionsToTxnResponse {
             throttle_time_ms: 0,

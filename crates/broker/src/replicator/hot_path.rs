@@ -13,11 +13,12 @@
 //!
 //! [`ReplicaSeam::replicate`] is the production `replicate_batch`: the same
 //! channel send to the same writer actor, which runs the same `append_at`.
-
 use {
     crate::{
-        config::BrokerConfig, error::BrokerError, log_dir_status::LogDirRegistry,
-        partition::Partition, partition_writer::run_with_sequencer, producer_state::ProducerState,
+        config::BrokerConfig,
+        error::BrokerError,
+        partition::Partition,
+        partition_writer::{WriterServices, run_with_sequencer},
     },
     arc_swap::ArcSwap,
     krabka_log::{Log, LogConfig, LogError, Offset},
@@ -61,11 +62,7 @@ impl ReplicaSeam {
                         storage,
                         rx,
                         signals,
-                        (
-                            LogDirRegistry::default(),
-                            Arc::new(ProducerState::new()),
-                            None,
-                        ),
+                        WriterServices::default(),
                         BrokerConfig::default().max_produce_group,
                         None,
                     ))

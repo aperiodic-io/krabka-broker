@@ -1,5 +1,7 @@
 //! Live-broker tests for the `LeaveGroup` handler.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::*,
     crate::{
@@ -48,8 +50,10 @@ fn unknown_row(member_id: &str, group_instance_id: Option<&str>) -> MemberRespon
 /// `LeaveGroupResponse` folds into the top-level code at v0-v2.
 #[tokio::test]
 async fn leave_group_answers_kafka_shapes_for_missing_and_invalid_groups() {
-    let (broker_handle, _dir) =
-        start_broker_no_audit_with(|config| config.offsets_topic_replication_factor = 1).await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| config.offsets_topic_replication_factor = 1).await;
     broker_handle.wait_until_group_coordinator_ready().await;
     let broker = broker_handle.broker_arc_for_test();
     let rows = [
@@ -119,9 +123,7 @@ async fn leave_group_answers_kafka_shapes_for_missing_and_invalid_groups() {
 /// `GROUP_AUTHORIZATION_FAILED` even for an empty group id.
 #[tokio::test]
 async fn denied_read_answers_group_authorization_failed_before_validation() {
-    let (broker_handle, _dir) =
-        start_broker_no_audit_with(|config| config.authorizer = std::sync::Arc::new(DenyAll)).await;
-    let broker = broker_handle.broker_arc_for_test();
+    krabka_macros::broker_test_setup! { bind(broker_handle, _dir, broker); boot [start_broker_no_audit_with(|config| config.authorizer = std::sync::Arc::new(DenyAll))]; };
     let request = LeaveGroupRequest {
         group_id: String::new(),
         members: vec![identity("m-a", None)],

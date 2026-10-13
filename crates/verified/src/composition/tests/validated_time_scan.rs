@@ -1,36 +1,46 @@
 use {super::*, assert2::assert};
 
-pub(super) fn prefix_oracle(entries: &[(i64, u32)], target: i64) -> (usize, u32) {
+pub(super) struct TimePrefix {
+    pub(super) count: usize,
+    pub(super) floor: u32,
+}
+
+pub(super) fn prefix_oracle(entries: &[TimeEntry], target: i64) -> TimePrefix {
     let count = entries
         .iter()
         .enumerate()
-        .position(|(i, &(time, offset))| time >= target || (i > 0 && entries[i - 1].1 >= offset))
+        .position(|(i, entry)| {
+            entry.key >= target || (i > 0 && entries[i - 1].coordinate >= entry.coordinate)
+        })
         .unwrap_or(entries.len());
-    (count, count.checked_sub(1).map_or(0, |i| entries[i].1))
+    TimePrefix {
+        count,
+        floor: count.checked_sub(1).map_or(0, |i| entries[i].coordinate),
+    }
 }
 
-pub(super) fn archive_oracle(entries: &[(i64, u32)], maximum: i64) -> bool {
+pub(super) fn archive_oracle(entries: &[TimeEntry], maximum: i64) -> bool {
     entries
         .iter()
-        .all(|&(_, offset)| i64::from(offset) <= maximum)
+        .all(|entry| i64::from(entry.coordinate) <= maximum)
         && entries
             .windows(2)
-            .all(|rows| rows[0].0 <= rows[1].0 && rows[0].1 < rows[1].1)
+            .all(|rows| rows[0].key <= rows[1].key && rows[0].coordinate < rows[1].coordinate)
 }
 
-fn check(entries: &[(i64, u32)], offsets: &[u32], times: &[i64], max: i64, min: u32, target: i64) {
-    let (count, floor) = prefix_oracle(entries, target);
+fn check(entries: &[TimeEntry], offsets: &[u32], times: &[i64], max: i64, min: u32, target: i64) {
+    let TimePrefix { count, floor } = prefix_oracle(entries, target);
     let archive_valid = archive_oracle(entries, max);
     assert!(
         validated_remote_and_local_time_starts_agree(entries, max, target)
             == archive_valid.then_some((count, floor, floor)).ok_or(())
     );
     let bounds = offsets.len() == times.len()
-        && entries.iter().all(|&(bound, coordinate)| {
+        && entries.iter().all(|entry| {
             offsets
                 .iter()
                 .zip(times)
-                .all(|(&offset, &time)| offset >= coordinate || time <= bound)
+                .all(|(&offset, &time)| offset >= entry.coordinate || time <= entry.key)
         });
     let ordered = offsets.windows(2).all(|pair| pair[0] < pair[1]);
     if bounds && ordered {
@@ -57,7 +67,7 @@ fn check(entries: &[(i64, u32)], offsets: &[u32], times: &[i64], max: i64, min: 
 proptest! {
     #[test]
     fn checked_time_scan_rejects_exactly_invalid_decoded_inputs(
-        rows in proptest::collection::vec((any::<i64>(), any::<u32>()), 0..8),
+        rows in proptest::collection::vec((any::<i64>(), any::<u32>()).prop_map(|(key, coordinate)| TimeEntry::new(key, coordinate)), 0..8),
         offsets in proptest::collection::vec(any::<u32>(), 0..8),
         times in proptest::collection::vec(any::<i64>(), 0..8),
         max in any::<i64>(), min in any::<u32>(), target in any::<i64>(),
@@ -70,7 +80,7 @@ proptest! {
         records in proptest::collection::btree_map(any::<u32>(), any::<i64>(), 0..24),
         min in any::<u32>(), target in any::<i64>(), step in 1usize..8,
     ) {
-        let (offsets, times, rows) = indexed_timestamp_records(&records, step);
+        let IndexedTimestampRecords { offsets, timestamps: times, entries: rows } = indexed_timestamp_records(&records, step);
         check(&rows, &offsets, &times, i64::from(u32::MAX), min, target);
     }
 }
@@ -79,18 +89,31 @@ proptest! {
 fn checked_time_scan_rejects_structurally_valid_false_bounds_and_padding() {
     let offsets = [0, 3, 6];
     let times = [100, 300, 200];
-    let misleading = [(0, 3)];
+    let misleading = [IndexEntry::new(0, 3)];
     assert!(validated_remote_and_local_time_starts_agree(&misleading, 6, 100) == Ok((1, 3, 3)));
     assert!(
         validated_retained_time_scan_agrees(&misleading, &offsets, &times, 6, 0, 100) == Err(())
     );
     for rows in [
         &[][..],
-        &[(100, 0), (300, 3), (300, 6)],
+        &[
+            IndexEntry::new(100, 0),
+            IndexEntry::new(300, 3),
+            IndexEntry::new(300, 6),
+        ],
         &misleading,
-        &[(100, 0), (300, 3), (300, 6), (0, 0)],
-        &[(500, 0), (100, 3), (300, 6)],
-        &[(i64::MIN, 0), (0, 0)],
+        &[
+            IndexEntry::new(100, 0),
+            IndexEntry::new(300, 3),
+            IndexEntry::new(300, 6),
+            IndexEntry::new(0, 0),
+        ],
+        &[
+            IndexEntry::new(500, 0),
+            IndexEntry::new(100, 3),
+            IndexEntry::new(300, 6),
+        ],
+        &[IndexEntry::new(i64::MIN, 0), IndexEntry::new(0, 0)],
     ] {
         for min in [0, 1, 3, 4, 6, 7, u32::MAX] {
             for target in [i64::MIN, 0, 100, 200, 300, 301, i64::MAX] {
@@ -100,8 +123,14 @@ fn checked_time_scan_rejects_structurally_valid_false_bounds_and_padding() {
     }
     // Pruning offset zero must not hide the retained match at offset three.
     assert!(
-        validated_retained_time_scan_agrees(&[(100, 0), (300, 3)], &offsets, &times, 6, 1, 100)
-            == Ok((0, 0, 0, Some(1)))
+        validated_retained_time_scan_agrees(
+            &[IndexEntry::new(100, 0), IndexEntry::new(300, 3)],
+            &offsets,
+            &times,
+            6,
+            1,
+            100
+        ) == Ok((0, 0, 0, Some(1)))
     );
 }
 
@@ -109,7 +138,7 @@ fn checked_time_scan_rejects_structurally_valid_false_bounds_and_padding() {
 fn checked_time_scan_covers_empty_malformed_and_extreme_inputs() {
     for max in [-1, 0, i64::MAX] {
         check(&[], &[], &[], max, u32::MAX, i64::MIN);
-        check(&[(i64::MIN, 0)], &[], &[], max, 0, i64::MAX);
+        check(&[IndexEntry::new(i64::MIN, 0)], &[], &[], max, 0, i64::MAX);
         check(&[], &[0], &[], max, 0, 0);
         check(&[], &[], &[0], max, 0, 0);
         check(&[], &[0, 0], &[1, 2], max, 0, 0);
@@ -117,7 +146,11 @@ fn checked_time_scan_covers_empty_malformed_and_extreme_inputs() {
     }
     let offsets = [0, 1, u32::MAX];
     let times = [i64::MAX, i64::MIN, i64::MAX];
-    let rows = [(i64::MAX, 0), (i64::MAX, 1), (i64::MAX, u32::MAX)];
+    let rows = [
+        IndexEntry::new(i64::MAX, 0),
+        IndexEntry::new(i64::MAX, 1),
+        IndexEntry::new(i64::MAX, u32::MAX),
+    ];
     for min in [0, 1, 2, u32::MAX] {
         for target in [i64::MIN, 0, i64::MAX] {
             check(&rows, &offsets, &times, i64::from(u32::MAX), min, target);

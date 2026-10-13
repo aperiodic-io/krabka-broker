@@ -13,7 +13,7 @@ use {
     crate::{
         authorizer::{AllowAllAuthorizer, Authorizer, SimpleAclAuthorizer},
         handlers::delegation_token_test_support::{
-            anonymous, authed, kp, seed_token, test_controller, token_authed,
+            TokenFixture, anonymous, authed, kp, seed_token, test_controller, token_authed,
         },
         metadata_source::MetadataSource,
         network::auth::ConnectionAuth,
@@ -23,26 +23,17 @@ use {
     krabka_metadata::{
         AclEntry, AclOperation, MetadataRecord, PatternType, PermissionType, ResourceType,
     },
-    krabka_protocol::owned::describe_delegation_token_request::{
-        DescribeDelegationTokenOwner, DescribeDelegationTokenRequest,
+    krabka_protocol::owned::{
+        describe_delegation_token_request::{
+            DescribeDelegationTokenOwner, DescribeDelegationTokenRequest,
+        },
+        describe_delegation_token_response::DescribeDelegationTokenResponse,
     },
     krabka_raft::ControllerHandle,
     krabka_security::SecretBytes,
     std::net::SocketAddr,
     tempfile::TempDir,
 };
-
-macro_rules! describe_token_response {
-    ($controller:expr, $request:expr, $authentication:expr, $secret:expr) => {
-        describe()
-            .controller($controller)
-            .authorizer(&simple_authz())
-            .maybe_request($request)
-            .maybe_authentication($authentication)
-            .maybe_secret($secret)
-            .call()
-    };
-}
 
 #[derive(Clone, Copy, Default)]
 struct DescribeTokenSetup<'a> {
@@ -51,6 +42,19 @@ struct DescribeTokenSetup<'a> {
     secret: Option<&'a SecretBytes>,
 }
 
+/// Describe with the shared ACL policy and explicit optional caller/token inputs.
+fn describe_token_response(
+    controller: &dyn MetadataSource,
+    setup: DescribeTokenSetup<'_>,
+) -> DescribeDelegationTokenResponse {
+    describe()
+        .controller(controller)
+        .authorizer(&simple_authz())
+        .maybe_request(setup.request)
+        .maybe_authentication(setup.authentication)
+        .maybe_secret(setup.secret)
+        .call()
+}
 #[bon::builder]
 fn describe(
     controller: &dyn MetadataSource,
@@ -202,7 +206,11 @@ async fn returns_auth_disabled_when_no_secret_key() {
 
 #[tokio::test]
 async fn anonymous_caller_is_rejected_without_exposing_token_hmacs() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     seed_token().controller(&controller).call().await;
 
     let resp = describe_unrestricted()
@@ -222,7 +230,11 @@ async fn anonymous_caller_is_rejected_without_exposing_token_hmacs() {
 /// `DescribeDelegationToken`.
 #[tokio::test]
 async fn token_authed_caller_is_refused_entirely() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     // alice owns both t-a and t-b: a token-authed session must not be able
     // to read either one, including its own token's sibling.
     seed_alice_tokens(&controller).await;
@@ -258,7 +270,11 @@ async fn token_authed_caller_gets_request_not_allowed_before_auth_disabled() {
 /// with `error_code = NONE`, distinct from a missing (null) list.
 #[tokio::test]
 async fn empty_owners_list_returns_no_tokens_without_error() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     seed_token().controller(&controller).call().await;
 
     let req = DescribeDelegationTokenRequest {
@@ -310,7 +326,11 @@ async fn filter_token_matches_owner_renewer_or_token_id_acl() {
         expected,
     } in cases
     {
-        token_fixture!(dir, controller, secret);
+        let TokenFixture {
+            directory: _dir,
+            controller,
+            secret,
+        } = TokenFixture::new().await;
         seed_token()
             .controller(&controller)
             .token_id("t-owner")
@@ -355,7 +375,11 @@ async fn filter_token_matches_owner_renewer_or_token_id_acl() {
 /// the owner filter matches on owner-OR-renewer, not owner alone.
 #[tokio::test]
 async fn renewer_sees_the_token_and_owner_filter_matches_renewer_too() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     // bob's token: carol is a listed renewer.
     seed_token()
         .controller(&controller)
@@ -392,12 +416,11 @@ async fn renewer_sees_the_token_and_owner_filter_matches_renewer_too() {
         ]),
         ..Default::default()
     };
-    let resp = describe_token_response!(
-        &*controller,
-        Some(&req),
-        Some(&authed("carol")),
-        Some(&secret)
-    );
+    let resp = describe_token_response(&*controller, DescribeTokenSetup {
+        request: Some(&req),
+        authentication: Some(&authed("carol")),
+        secret: Some(&secret),
+    });
     check_visible_token_ids(&resp, &["t-b"]);
     controller.cancel().await;
 }
@@ -408,7 +431,11 @@ async fn renewer_sees_the_token_and_owner_filter_matches_renewer_too() {
 /// principal — the resource-name fix this issue is about.
 #[tokio::test]
 async fn describe_acl_on_token_id_grants_exactly_that_token() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     // alice owns two tokens; bob has no owner/renewer relationship to
     // either.
     seed_alice_tokens(&controller).await;
@@ -522,7 +549,11 @@ async fn describe_tokens_acl_on_the_owner_grants_all_of_their_tokens() {
         expected,
     } in cases
     {
-        token_fixture!(dir, controller, secret);
+        let TokenFixture {
+            directory: _dir,
+            controller,
+            secret,
+        } = TokenFixture::new().await;
         seed_token()
             .controller(&controller)
             .token_id("t-a1")
@@ -584,7 +615,11 @@ async fn describe_tokens_acl_on_the_owner_grants_all_of_their_tokens() {
 /// handler never inspects HMACs) grants no visibility on its own.
 #[tokio::test]
 async fn unrelated_caller_sees_nothing() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     seed_token().controller(&controller).call().await;
 
     check_description_visibility()
@@ -649,7 +684,11 @@ async fn requester_of_a_token_minted_for_another_owner_finds_and_sees_it() {
         },
     ];
 
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     seed_admin_minted_token(&controller).await;
     seed_token()
         .controller(&controller)
@@ -677,12 +716,11 @@ async fn requester_of_a_token_minted_for_another_owner_finds_and_sees_it() {
             }),
             ..Default::default()
         };
-        let resp = describe_token_response!(
-            &*controller,
-            Some(&req),
-            Some(&authed(caller)),
-            Some(&secret)
-        );
+        let resp = describe_token_response(&*controller, DescribeTokenSetup {
+            request: Some(&req),
+            authentication: Some(&authed(caller)),
+            secret: Some(&secret),
+        });
         let visible: std::collections::HashSet<&str> = token_ids(&resp);
         let expected: std::collections::HashSet<&str> = expected.iter().copied().collect();
         assert!(
@@ -702,7 +740,11 @@ async fn describe_response_reports_the_requester_that_created_the_token() {
         DescribedDelegationToken, DescribedDelegationTokenRenewer,
     };
 
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     seed_admin_minted_token(&controller).await;
 
     let resp = describe()

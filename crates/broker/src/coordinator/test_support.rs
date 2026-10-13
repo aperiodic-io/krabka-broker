@@ -391,34 +391,6 @@ pub(crate) async fn fetch_offset(broker: &Broker, group: &str, topic: &str, vers
     response.topics[0].partitions[0].committed_offset
 }
 
-/// Land the commit-wait fixture's changes after its wait has started. Capture
-/// statements and leader/notify actions stay explicit at each caller.
-macro_rules! schedule_commit_changes {
-    ($case:ident, $partition:ident;
-        captures { $($captures:tt)* }
-        leader($leader:ident, $epoch:ident) { $($leader_action:tt)* }
-        notify { $($notify:tt)* }
-    ) => {{
-        $($captures)*
-        let $partition = ::std::sync::Arc::clone(&$partition);
-        let (moves_to, hw_later) = ($case.moves_to, $case.hw_later);
-        ::tokio::spawn(async move {
-            // The wait must start before the changes land.
-            ::tokio::time::sleep(::std::time::Duration::from_millis(20)).await;
-            if let Some(moved) = moves_to {
-                let $leader = moved.leader;
-                let $epoch = moved.epoch;
-                $($leader_action)*
-            }
-            if let Some(hw) = hw_later {
-                $partition.replica_state.lock().await.hw = ::krabka_log::Offset(hw);
-                $($notify)*
-            }
-        })
-    }};
-}
-pub(crate) use schedule_commit_changes;
-
 /// The partition's new leader and leader epoch after it moved.
 #[derive(Clone, Copy)]
 pub(crate) struct LeaderMove {

@@ -1,6 +1,8 @@
 //! Tests for the `DeleteTopics` handler driven over the wire against a live
 //! in-process broker.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         test_support::{DOOMED, gated_config, id_state, named_state, request},
@@ -12,11 +14,12 @@ use {
         codes,
         config::BreakGlassConfig,
         handlers::{
-            RequestContext,
+            RequestContext, acl_test_support as acl_fixtures,
             acl_wire::CLUSTER_RESOURCE_NAME,
             create_topics::handle as create_topics_handle,
             test_support::{
-                AclSetup, CreateTopicSetup, acl, cluster_acl, configured_topic_request_from,
+                self as handler_fixture_support, AclSetup, CreateTopicSetup, acl, cluster_acl,
+                configured_topic_request_from,
             },
         },
         metrics::AuthorizationDeniedLabel,
@@ -135,7 +138,10 @@ struct DoomedOutcome {
 /// `DeleteTopics` request for it, and answer the topic row, the topic id, and
 /// whether the topic still exists.
 async fn delete_doomed(break_glass: BreakGlassConfig) -> DoomedOutcome {
-    let (broker_handle, _dir) = start_broker_no_audit_with(move |cfg| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(move |cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.break_glass = break_glass;
     })
@@ -227,7 +233,10 @@ async fn a_refused_deletion_never_reaches_the_metadata_quorum() {
 #[tokio::test]
 async fn invalid_topic_rows_answer_invalid_request_and_delete_nothing() {
     const TOPIC: &str = "kept";
-    let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker(Arc::new(AllowAllAuthorizer)).await;
     let client = krabka_client_core::Client::builder()
         .bootstrap(broker_handle.listen_addr().to_string())
         .client_id("delete-topics-validation-test")
@@ -644,9 +653,7 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
         },
     ];
 
-    let mut actual = Vec::with_capacity(cases.len());
-    let mut expected = Vec::with_capacity(cases.len());
-    for case in cases {
+    handler_fixture_support::check_cases(cases, async |case| {
         krabka_macros::broker_test_setup! {
             bind(broker_handle, _dir, broker, p, peer);
             boot [start_broker] controller_peer;
@@ -668,7 +675,9 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             ..Default::default()
         })
         .await;
-        crate::handlers::acl_test_support::seed_case_acls!(broker, case.acls);
+        if !case.acls.is_empty() {
+            acl_fixtures::seed_case_acls(&broker, case.acls).await;
+        }
 
         let mut rows: Vec<_> = case.names.iter().map(|name| named_state(name)).collect();
         if case.by_id {
@@ -693,17 +702,22 @@ async fn rows_follow_kafkas_describe_and_delete_decisions() {
             )
             .chain([row(None, unknown_id, codes::UNKNOWN_TOPIC_ID)])
             .collect();
-        actual.push((case.label, resp, still_there));
-        expected.push((
-            case.label,
-            sorted(krabka_macros::unthrottled_wire!(DeleteTopicsResponse {
+        let actual = handler_fixture_support::LabeledCaseOutcome {
+            label: case.label,
+            response: resp,
+            state: still_there,
+        };
+        let expected = handler_fixture_support::LabeledCaseOutcome {
+            label: case.label,
+            response: sorted(krabka_macros::unthrottled_wire!(DeleteTopicsResponse {
                 responses
             })),
-            !case.deleted,
-        ));
+            state: !case.deleted,
+        };
         broker_handle.shutdown().await;
-    }
-    assert!(actual == expected);
+        handler_fixture_support::CaseOutcomes { actual, expected }
+    })
+    .await;
 }
 
 // ── #743: delete.topic.enable ───────────────────────────────────────
@@ -725,7 +739,10 @@ async fn delete_topic_enable_false_refuses_every_row() {
     let mut actual = Vec::with_capacity(cases.len());
     let mut expected = Vec::with_capacity(cases.len());
     for (enabled, version, error_code, exists) in cases {
-        let (broker_handle, _dir) = start_broker_no_audit_with(move |cfg| {
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_no_audit_with(move |cfg| {
             cfg.authorizer = Arc::new(AllowAllAuthorizer);
             cfg.delete_topic_enable = enabled;
         })

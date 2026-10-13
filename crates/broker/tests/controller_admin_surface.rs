@@ -31,10 +31,13 @@ use {
     krabka_broker::{BrokerConfig, BrokerHandle, NodeId, config::NodeRole},
     krabka_client_core::{Connection, ConnectionOptions},
     krabka_protocol::{
-        UnknownTaggedFields,
+        ProtocolRequest, UnknownTaggedFields,
         owned::{
             allocate_producer_ids_request::AllocateProducerIdsRequest,
             allocate_producer_ids_response::AllocateProducerIdsResponse,
+            alter_client_quotas_request::AlterClientQuotasRequest,
+            alter_configs_request::AlterConfigsRequest,
+            alter_partition_reassignments_request::AlterPartitionReassignmentsRequest,
             alter_partition_request::{
                 AlterPartitionRequest, BrokerState, PartitionData as AlterPartitionPartitionData,
                 TopicData as AlterPartitionTopicData,
@@ -61,13 +64,19 @@ use {
                 BrokerRegistrationRequest, Feature as RegistrationFeature,
                 Listener as RegistrationListener,
             },
+            create_acls_request::CreateAclsRequest,
             create_delegation_token_request::CreateDelegationTokenRequest,
             create_delegation_token_response::CreateDelegationTokenResponse,
             create_partitions_request::{CreatePartitionsRequest, CreatePartitionsTopic},
             create_partitions_response::{CreatePartitionsResponse, CreatePartitionsTopicResult},
+            create_topics_request::CreateTopicsRequest,
             create_topics_response::{CreatableTopicResult, CreateTopicsResponse},
+            delete_acls_request::DeleteAclsRequest,
             delete_topics_request::{DeleteTopicState, DeleteTopicsRequest},
             delete_topics_response::{DeletableTopicResult, DeleteTopicsResponse},
+            describe_acls_request::DescribeAclsRequest,
+            describe_configs_request::DescribeConfigsRequest,
+            describe_delegation_token_request::DescribeDelegationTokenRequest,
             describe_user_scram_credentials_request::{
                 DescribeUserScramCredentialsRequest, UserName,
             },
@@ -75,14 +84,19 @@ use {
                 CredentialInfo, DescribeUserScramCredentialsResponse,
                 DescribeUserScramCredentialsResult,
             },
+            elect_leaders_request::ElectLeadersRequest,
+            envelope_request::EnvelopeRequest,
             expire_delegation_token_request::ExpireDelegationTokenRequest,
             expire_delegation_token_response::ExpireDelegationTokenResponse,
+            incremental_alter_configs_request::IncrementalAlterConfigsRequest,
+            list_partition_reassignments_request::ListPartitionReassignmentsRequest,
             renew_delegation_token_request::RenewDelegationTokenRequest,
             renew_delegation_token_response::RenewDelegationTokenResponse,
             sasl_authenticate_request::SaslAuthenticateRequest,
             sasl_authenticate_response::SaslAuthenticateResponse,
             sasl_handshake_request::SaslHandshakeRequest,
             sasl_handshake_response::SaslHandshakeResponse,
+            unregister_broker_request::UnregisterBrokerRequest,
             unregister_controller_request::UnregisterControllerRequest,
             update_features_request::UpdateFeaturesRequest,
         },
@@ -217,49 +231,56 @@ struct VersionRange {
 /// vendored range, so the default and the trunk tables agree on them; trunk
 /// adds `UnregisterController`.
 fn expected_admin_versions(trunk: bool) -> std::collections::BTreeMap<i16, VersionRange> {
-    macro_rules! range {
-        ($($request:ident),+ $(,)?) => {
-            std::collections::BTreeMap::from([$((
-                krabka_protocol::owned::$request::API_KEY,
-                VersionRange {
-                    min: krabka_protocol::owned::$request::MIN_VERSION,
-                    max: krabka_protocol::owned::$request::MAX_VERSION,
-                },
-            ),)+])
-        };
-    }
-
-    let mut versions = range!(
-        create_topics_request,
-        delete_topics_request,
-        describe_acls_request,
-        create_acls_request,
-        delete_acls_request,
-        describe_configs_request,
-        alter_configs_request,
-        create_partitions_request,
-        create_delegation_token_request,
-        renew_delegation_token_request,
-        expire_delegation_token_request,
-        describe_delegation_token_request,
-        elect_leaders_request,
-        incremental_alter_configs_request,
-        alter_partition_request,
-        allocate_producer_ids_request,
-        alter_partition_reassignments_request,
-        list_partition_reassignments_request,
-        alter_client_quotas_request,
-        describe_user_scram_credentials_request,
-        alter_user_scram_credentials_request,
-        update_features_request,
-        envelope_request,
-        unregister_broker_request,
-        assign_replicas_to_dirs_request,
+    let mut versions = std::collections::BTreeMap::from(
+        [
+            admin_range::<CreateTopicsRequest>(),
+            admin_range::<DeleteTopicsRequest>(),
+            admin_range::<DescribeAclsRequest>(),
+            admin_range::<CreateAclsRequest>(),
+            admin_range::<DeleteAclsRequest>(),
+            admin_range::<DescribeConfigsRequest>(),
+            admin_range::<AlterConfigsRequest>(),
+            admin_range::<CreatePartitionsRequest>(),
+            admin_range::<CreateDelegationTokenRequest>(),
+            admin_range::<RenewDelegationTokenRequest>(),
+            admin_range::<ExpireDelegationTokenRequest>(),
+            admin_range::<DescribeDelegationTokenRequest>(),
+            admin_range::<ElectLeadersRequest>(),
+            admin_range::<IncrementalAlterConfigsRequest>(),
+            admin_range::<AlterPartitionRequest>(),
+            admin_range::<AllocateProducerIdsRequest>(),
+            admin_range::<AlterPartitionReassignmentsRequest>(),
+            admin_range::<ListPartitionReassignmentsRequest>(),
+            admin_range::<AlterClientQuotasRequest>(),
+            admin_range::<DescribeUserScramCredentialsRequest>(),
+            admin_range::<AlterUserScramCredentialsRequest>(),
+            admin_range::<UpdateFeaturesRequest>(),
+            admin_range::<EnvelopeRequest>(),
+            admin_range::<UnregisterBrokerRequest>(),
+            admin_range::<AssignReplicasToDirsRequest>(),
+        ]
+        .map(|entry| (entry.key, entry.range)),
     );
     if trunk {
-        versions.extend(range!(unregister_controller_request));
+        let entry = admin_range::<UnregisterControllerRequest>();
+        versions.insert(entry.key, entry.range);
     }
     versions
+}
+
+struct AdminVersionEntry {
+    key: i16,
+    range: VersionRange,
+}
+
+fn admin_range<R: ProtocolRequest>() -> AdminVersionEntry {
+    AdminVersionEntry {
+        key: R::API_KEY,
+        range: VersionRange {
+            min: R::MIN_VERSION,
+            max: R::MAX_VERSION,
+        },
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

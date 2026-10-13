@@ -143,39 +143,43 @@ mod tests {
         krabka_units::mebibytes,
     };
 
-    macro_rules! follower_fixture {
-        ($root:ident, $shard:ident, $directory:ident, $source:ident; $topic_id:expr) => {
-            let $root = tempfile::tempdir().unwrap();
-            let $shard = ShardId {
-                topic_id: uuid::Uuid::from_u128($topic_id),
-                partition: PartitionIndex(0),
-            };
-            let $directory = voter_dir($root.path(), "diskless", $shard, NodeId(2));
-            let mut $source = Log::open(&$directory, LogConfig::default()).unwrap();
-        };
+    struct FollowerFixture {
+        root: tempfile::TempDir,
+        shard: ShardId,
+        directory: PathBuf,
+        source: Log,
     }
-
-    macro_rules! checkpoint_follower {
-        ($directory:ident, $start:expr, $end:expr) => {
-            write_durable_offset(&$directory.join(DURABLE_OFFSET_FILE), DurableRange {
-                start: $start,
-                end: $end,
-            })
-            .unwrap()
+    fn follower_fixture(topic_id: u128) -> FollowerFixture {
+        let root = tempfile::tempdir().unwrap();
+        let shard = ShardId {
+            topic_id: uuid::Uuid::from_u128(topic_id),
+            partition: PartitionIndex(0),
         };
+        let directory = voter_dir(root.path(), "diskless", shard, NodeId(2));
+        let source = Log::open(&directory, LogConfig::default()).unwrap();
+        FollowerFixture {
+            root,
+            shard,
+            directory,
+            source,
+        }
     }
-
-    macro_rules! hydrate_follower {
-        ($root:ident, $shard:ident, $destination:ident) => {
-            hydrate_on_promotion(
-                &[$root.path().to_path_buf()],
-                "diskless",
-                $shard,
-                NodeId(2),
-                &LogConfig::default(),
-                &mut $destination,
-            )
-        };
+    fn checkpoint_follower(directory: &std::path::Path, range: DurableRange) {
+        write_durable_offset(&directory.join(DURABLE_OFFSET_FILE), range).unwrap();
+    }
+    fn hydrate_follower(
+        root: &tempfile::TempDir,
+        shard: ShardId,
+        destination: &mut Log,
+    ) -> Result<Option<Offset>, BrokerError> {
+        hydrate_on_promotion(
+            &[root.path().to_path_buf()],
+            "diskless",
+            shard,
+            NodeId(2),
+            &LogConfig::default(),
+            destination,
+        )
     }
 
     fn append_and_checkpoint(
@@ -198,7 +202,12 @@ mod tests {
         use {krabka_ids::ProducerId, krabka_protocol::records::Attributes};
 
         for marker_type in [0i16, 1, 1000, 23] {
-            follower_fixture!(root, shard, follower_dir, source; 106);
+            let FollowerFixture {
+                root,
+                shard,
+                directory: follower_dir,
+                mut source,
+            } = follower_fixture(106);
             let mut data = RecordBatch {
                 producer_id: 7,
                 producer_epoch: 0,
@@ -238,12 +247,15 @@ mod tests {
             let expected_marker = source.transaction_marker_state(ProducerId(7));
             let expected_aborts = source.aborted_in_range(Offset(0), end);
             let expected_bytes = source.read_raw(Offset(0), end, mebibytes(1)).unwrap().bytes;
-            checkpoint_follower!(follower_dir, Offset(0), end);
+            checkpoint_follower(&follower_dir, DurableRange {
+                start: Offset(0),
+                end,
+            });
             drop(source);
             let destination_dir = partition_dir(root.path(), "diskless", 0);
             let mut destination = Log::open(&destination_dir, LogConfig::default()).unwrap();
             for _ in 0..2 {
-                assert!(hydrate_follower!(root, shard, destination).unwrap() == Some(end));
+                assert!(hydrate_follower(&root, shard, &mut destination).unwrap() == Some(end));
                 assert!(
                     destination.last_stable_offset(end) == expected_lso,
                     "marker type {marker_type}"
@@ -283,7 +295,12 @@ mod tests {
         }
         for (copied_batches, destination_floor) in [(0, 0), (0, 2), (0, 4), (1, 0), (1, 2), (2, 0)]
         {
-            follower_fixture!(root, shard, follower_dir, follower; 105);
+            let FollowerFixture {
+                root,
+                shard,
+                directory: follower_dir,
+                source: mut follower,
+            } = follower_fixture(105);
             for _ in 0..2 {
                 let mut batch = RecordBatch {
                     last_offset_delta: 2,
@@ -319,12 +336,15 @@ mod tests {
             }
             follower.trim_to_offset(Offset(1)).unwrap();
             follower.sync().unwrap();
-            checkpoint_follower!(follower_dir, Offset(1), Offset(6));
+            checkpoint_follower(&follower_dir, DurableRange {
+                start: Offset(1),
+                end: Offset(6),
+            });
             drop(follower);
 
             if copied_batches == 0 && destination_floor > 1 {
                 destination.test_set_io(std::sync::Arc::new(InterruptedCopy));
-                let error = hydrate_follower!(root, shard, destination).unwrap_err();
+                let error = hydrate_follower(&root, shard, &mut destination).unwrap_err();
                 assert!(error.to_string().contains("promotion copy interrupted"));
                 assert!(
                     std::fs::read_to_string(follower_dir.join(DURABLE_OFFSET_FILE)).unwrap()
@@ -335,7 +355,9 @@ mod tests {
             }
 
             for _ in 0..2 {
-                assert!(hydrate_follower!(root, shard, destination).unwrap() == Some(Offset(6)));
+                assert!(
+                    hydrate_follower(&root, shard, &mut destination).unwrap() == Some(Offset(6))
+                );
                 let floor = Offset(destination_floor.max(1));
                 assert!(destination.log_start_offset() == floor);
                 assert!(destination.log_end_offset() == Offset(6));
@@ -362,7 +384,12 @@ mod tests {
 
     #[test]
     fn promotion_hydrates_exact_checkpointed_bytes_without_regression() {
-        follower_fixture!(root, shard, follower_dir, follower; 101);
+        let FollowerFixture {
+            root,
+            shard,
+            directory: follower_dir,
+            source: mut follower,
+        } = follower_fixture(101);
         let mut durable = RecordBatch {
             records: vec![
                 Record {
@@ -392,7 +419,7 @@ mod tests {
 
         let destination_dir = partition_dir(root.path(), "diskless", 0);
         let mut destination = Log::open(&destination_dir, LogConfig::default()).unwrap();
-        assert!(hydrate_follower!(root, shard, destination).unwrap() == Some(Offset(2)));
+        assert!(hydrate_follower(&root, shard, &mut destination).unwrap() == Some(Offset(2)));
         assert!(destination.log_end_offset() == Offset(2));
         let source = Log::open(&follower_dir, LogConfig::default()).unwrap();
         assert!(source.log_end_offset() == Offset(2));
@@ -416,7 +443,7 @@ mod tests {
         };
         destination.append(&mut newer).unwrap();
         destination.sync().unwrap();
-        assert!(hydrate_follower!(root, shard, destination).unwrap() == Some(Offset(2)));
+        assert!(hydrate_follower(&root, shard, &mut destination).unwrap() == Some(Offset(2)));
         assert!(destination.log_end_offset() == Offset(3));
         assert!(follower_dir.exists());
     }
@@ -486,7 +513,12 @@ mod tests {
 
     #[test]
     fn promotion_retries_after_reopening_a_partial_destination() {
-        follower_fixture!(root, shard, follower_dir, follower; 102);
+        let FollowerFixture {
+            root,
+            shard,
+            directory: follower_dir,
+            source: mut follower,
+        } = follower_fixture(102);
         let mut first = RecordBatch {
             records: vec![Record {
                 value: Some(Bytes::from_static(b"first")),
@@ -504,7 +536,10 @@ mod tests {
         follower.append(&mut first).unwrap();
         follower.append(&mut second).unwrap();
         follower.sync().unwrap();
-        checkpoint_follower!(follower_dir, Offset(0), Offset(2));
+        checkpoint_follower(&follower_dir, DurableRange {
+            start: Offset(0),
+            end: Offset(2),
+        });
 
         let destination_dir = partition_dir(root.path(), "diskless", 0);
         {
@@ -520,7 +555,7 @@ mod tests {
         // adopted. Reopening the canonical directory and retrying hydration
         // must retain the exact prefix and append the missing durable tail.
         let mut reopened = Log::open(&destination_dir, LogConfig::default()).unwrap();
-        assert!(hydrate_follower!(root, shard, reopened).unwrap() == Some(Offset(2)));
+        assert!(hydrate_follower(&root, shard, &mut reopened).unwrap() == Some(Offset(2)));
         assert!(reopened.log_end_offset() == Offset(2));
         assert!(
             follower

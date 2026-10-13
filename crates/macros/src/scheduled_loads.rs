@@ -1,7 +1,7 @@
-//! A visible load-task newtype with caller-target join-failure warnings.
+//! A visible named task collection with caller-target join-failure warnings.
 
 use {
-    crate::meta::{impl_block, inner_type},
+    crate::meta::{impl_block, named_fields},
     moxy::{
         ast::{Attributed, ItemStruct, ParseError},
         token::{Ident, LitStr, Span, TokenStream},
@@ -14,7 +14,18 @@ struct LoadTasks {
 }
 
 pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
-    inner_type(&item, "ScheduledLoads")?;
+    let fields = named_fields(&item, "ScheduledLoads")?;
+    if fields.len() != 1
+        || fields
+            .first()
+            .and_then(|field| field.ident.as_ref())
+            .is_none_or(|name| name != "tasks")
+    {
+        return Err(ParseError::new(
+            item.ident.span(),
+            "`ScheduledLoads` needs exactly one named `tasks` field",
+        ));
+    }
     let policy = item
         .parse_meta::<LoadTasks>("scheduled_loads")?
         .ok_or_else(|| {
@@ -35,7 +46,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
     Ok(impl_block(item, &TokenStream::new(), &moxy::template! {
         /// Waits until every load task of this refresh has ended.
         {{ visibility }} async fn finished(self) {
-            crate::task_util::finish_tasks(self.0, |{{ error }}| {
+            crate::task_util::finish_tasks(self.tasks, |{{ error }}| {
                 ::tracing::warn!(target: module_path!(), %{{ error }}, {{ message }});
             }).await;
         }
@@ -46,7 +57,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
 mod tests {
     use {
         super::expand,
-        crate::meta::{assert_rejected_structs, compact},
+        crate::meta::compact,
         assert2::assert,
         moxy::{
             ast::{ItemImpl, ItemStruct},
@@ -55,8 +66,8 @@ mod tests {
     };
 
     #[test]
-    fn finishing_consumes_the_visible_newtype_and_preserves_its_method_visibility() {
-        let input: ItemStruct = moxy::parse!({ "#[scheduled_loads(failure_message = \"partition load failed\")] pub(crate) struct Loads(Vec<JoinHandle<()>>);" }).unwrap();
+    fn finishing_consumes_the_visible_tasks_and_preserves_its_method_visibility() {
+        let input: ItemStruct = moxy::parse!({ "#[scheduled_loads(failure_message = \"partition load failed\")] pub(crate) struct Loads { tasks: Vec<JoinHandle<()>> }" }).unwrap();
         let implementation: ItemImpl = moxy::parse!({ expand(input).unwrap() }).unwrap();
         assert!(implementation.items.len() == 1);
         let method = implementation.items.first().unwrap().as_fn().unwrap();
@@ -65,7 +76,7 @@ mod tests {
         assert!(compact(&method.vis.to_token_stream()) == "pub(crate)");
         assert!(method.sig.params.inner.inputs.len() == 1);
         let tokens = compact(&implementation.to_token_stream());
-        assert!(tokens.contains("crate::task_util::finish_tasks(self.0,|error|{"));
+        assert!(tokens.contains("crate::task_util::finish_tasks(self.tasks,|error|{"));
         assert!(
             tokens
                 .contains("::tracing::warn!(target:module_path!(),%error,\"partitionloadfailed\")")
@@ -74,35 +85,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_nonnewtype_layouts_missing_and_invalid_failure_messages() {
-        assert_rejected_structs(
-            &[
-                (
-                    "missing warning metadata",
-                    "struct Loads(Vec<JoinHandle<()>>);",
-                ),
-                (
-                    "unit layout",
-                    "#[scheduled_loads(failure_message = \"failure\")] struct Loads;",
-                ),
-                (
-                    "named layout",
-                    "#[scheduled_loads(failure_message = \"failure\")] struct Loads { handles: Vec<JoinHandle<()>> }",
-                ),
-                (
-                    "two fields",
-                    "#[scheduled_loads(failure_message = \"failure\")] struct Loads(Vec<JoinHandle<()>>, bool);",
-                ),
-                (
-                    "nonstring warning",
-                    "#[scheduled_loads(failure_message = 1)] struct Loads(Vec<JoinHandle<()>>);",
-                ),
-                (
-                    "empty warning",
-                    "#[scheduled_loads(failure_message = \"\")] struct Loads(Vec<JoinHandle<()>>);",
-                ),
-            ],
-            expand,
-        );
+    fn rejects_missing_task_fields_and_invalid_failure_messages() {
+        for source in [
+            "struct Loads { tasks: Vec<JoinHandle<()>> }",
+            "#[scheduled_loads(failure_message = \"failure\")] struct Loads;",
+            "#[scheduled_loads(failure_message = \"failure\")] struct Loads { handles: Vec<JoinHandle<()>> }",
+            "#[scheduled_loads(failure_message = \"failure\")] struct Loads { tasks: Vec<JoinHandle<()>>, extra: bool }",
+            "#[scheduled_loads(failure_message = 1)] struct Loads { tasks: Vec<JoinHandle<()>> }",
+            "#[scheduled_loads(failure_message = \"\")] struct Loads { tasks: Vec<JoinHandle<()>> }",
+        ] {
+            let item: ItemStruct = moxy::parse!({ source }).unwrap();
+            assert!(expand(item).is_err(), "{source}");
+        }
     }
 }

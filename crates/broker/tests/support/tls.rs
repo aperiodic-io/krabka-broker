@@ -29,21 +29,24 @@ pub struct PinnedCertVerifier {
 }
 
 // Both protocol versions accept the signature for this already-pinned fixture certificate.
-macro_rules! accept_pinned_signature {
-    ($($name:ident),+ $(,)?) => {$(
-        fn $name(
-            &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
-            Ok(HandshakeSignatureValid::assertion())
-        }
-    )+};
-}
-
 impl ServerCertVerifier for PinnedCertVerifier {
-    accept_pinned_signature!(verify_tls12_signature, verify_tls13_signature);
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, tokio_rustls::rustls::Error> {
+        self.verify_tls12_signature(message, cert, dss)
+    }
 
     fn verify_server_cert(
         &self,

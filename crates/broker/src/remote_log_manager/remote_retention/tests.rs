@@ -8,7 +8,7 @@ use {
             test_support as fixtures,
             test_support::{
                 Backends, FakeWormArchive, archived_backends, copy_exports, local_backends,
-                missing_remote_reads, seed_finished_segments, synth_export, tier, tp,
+                seed_finished_segments, synth_export, tier, tp,
             },
         },
         time_util::now_ms,
@@ -67,9 +67,8 @@ struct RefusesDeleteRsm {
     deletes_attempted: std::sync::atomic::AtomicUsize,
 }
 
+#[krabka_macros::missing_remote_reads]
 impl RemoteStorageManager for RefusesDeleteRsm {
-    missing_remote_reads!();
-
     fn copy_log_segment_data(
         &self,
         _metadata: &RemoteLogSegmentMetadata,
@@ -486,7 +485,12 @@ fn remote_retention_eviction_set_walk_stops_at_first_non_deletable() {
 
 #[tokio::test]
 async fn remote_retention_pass_evicts_old_segments_through_lifecycle() {
-    fixtures::rolled_log_fixture!(log_dir, remote_dir, log, exports);
+    let fixtures::RolledLogFixture {
+        local: _log_dir,
+        remote: remote_dir,
+        log: _log,
+        exports,
+    } = fixtures::rolled_log_fixture();
     let Backends { rsm, rlmm } = archived_backends(remote_dir.path(), &exports).await;
     let pre = rlmm.list_remote_log_segments(&tp()).unwrap();
     assert!(!pre.is_empty());
@@ -522,9 +526,12 @@ async fn remote_retention_pass_evicts_old_segments_through_lifecycle() {
 
 #[tokio::test]
 async fn remote_retention_pass_noop_when_nothing_qualifies() {
-    fixtures::rolled_log_fixture!(log_dir, remote_dir, log, exports);
-    let (rsm, rlmm) = local_backends(remote_dir.path());
-    copy_exports(&tier(ArchiveMode::Mutable, &rsm, &rlmm), exports.clone()).await;
+    let fixture = fixtures::prepared_copy();
+    copy_exports(
+        &tier(ArchiveMode::Mutable, &fixture.rsm, &fixture.rlmm),
+        fixture.exports.clone(),
+    )
+    .await;
 
     let cfg = LogConfig {
         // Long retention; nothing is past the window.
@@ -536,8 +543,8 @@ async fn remote_retention_pass_noop_when_nothing_qualifies() {
     // is independent of wall-clock. `rolled_log` builds batches with
     // default base_timestamp=0, so picking now=1 keeps every segment
     // inside the year-long retention window.
-    assert_pass_is_a_noop(&cfg, 1, &rsm, &rlmm).await;
-    assert!(rlmm.list_remote_log_segments(&tp()).unwrap().len() == exports.len());
+    assert_pass_is_a_noop(&cfg, 1, &fixture.rsm, &fixture.rlmm).await;
+    assert!(fixture.rlmm.list_remote_log_segments(&tp()).unwrap().len() == fixture.exports.len());
 }
 
 /// With no retention settings and an unmoved floor there is nothing to
@@ -547,7 +554,7 @@ async fn remote_retention_pass_noop_when_nothing_qualifies() {
 #[tokio::test]
 async fn remote_retention_pass_no_settings_and_an_unmoved_floor_evict_nothing() {
     let remote_dir = tempfile::tempdir().unwrap();
-    let (rsm, rlmm) = local_backends(remote_dir.path());
+    let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
     seed_finished_segments(&rlmm, 3);
     let cfg = LogConfig {
         retention: None,
@@ -801,18 +808,6 @@ fn the_breach_and_the_time_window_take_the_union_of_either() {
     check!(out[1].start_offset() == 10, "past the time window");
 }
 
-/// Archive a real rolled prefix while keeping the source log and directories alive.
-macro_rules! archived_prefix_fixture {
-    ($local:ident, $remote:ident, $log:ident, $exports:ident, $rsm:ident, $rlmm:ident) => {
-        fixtures::rolled_log_fixture!($local, $remote, $log, $exports);
-        assert!($exports.len() >= 2, "the test needs a prefix to evict");
-        let Backends {
-            rsm: $rsm,
-            rlmm: $rlmm,
-        } = archived_backends($remote.path(), &$exports).await;
-    };
-}
-
 /// A breach eviction frees the archive and leaves the floor where the
 /// operator put it.
 ///
@@ -822,7 +817,14 @@ macro_rules! archived_prefix_fixture {
 /// [`remote_retention_pass_evicts_old_segments_through_lifecycle`] covers.
 #[tokio::test]
 async fn a_breach_eviction_frees_the_archive_without_moving_the_floor() {
-    archived_prefix_fixture!(log_dir, remote_dir, log, exports, rsm, rlmm);
+    let ArchivedPrefix {
+        local: _log_dir,
+        remote: _remote_dir,
+        log: _log,
+        exports,
+        rsm,
+        rlmm,
+    } = archived_prefix_fixture().await;
 
     // A `DeleteRecords` floor one past the oldest copied segment, and a topic
     // that keeps its records forever: the breach is the only axis that can
@@ -865,9 +867,14 @@ async fn a_breach_eviction_frees_the_archive_without_moving_the_floor() {
 /// above a segment that is still on local disk and still readable.
 #[tokio::test]
 async fn the_reported_floor_stops_at_a_gap_in_the_finished_segments() {
-    fixtures::rolled_log_fixture!(log_dir, remote_dir, log, exports);
+    let fixtures::RolledLogFixture {
+        local: _log_dir,
+        remote: remote_dir,
+        log: _log,
+        exports,
+    } = fixtures::rolled_log_fixture();
     assert!(exports.len() >= 3, "the test needs a segment to skip over");
-    let (rsm, rlmm) = local_backends(remote_dir.path());
+    let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
     // Copy the first and the third segment and not the second, which is what
     // a failed copy in the middle of a tick leaves behind.
     let gapped = vec![exports[0].clone(), exports[2].clone()];
@@ -896,7 +903,14 @@ async fn the_reported_floor_stops_at_a_gap_in_the_finished_segments() {
 /// log reports as `None`.
 #[tokio::test]
 async fn a_floor_nobody_moved_leaves_the_archive_alone() {
-    archived_prefix_fixture!(log_dir, remote_dir, log, exports, rsm, rlmm);
+    let ArchivedPrefix {
+        local: _log_dir,
+        remote: _remote_dir,
+        log: _log,
+        exports,
+        rsm,
+        rlmm,
+    } = archived_prefix_fixture().await;
 
     // What a restart leaves behind: a `log_start_offset` past every copied
     // segment, and nothing saying anyone deleted up to it.
@@ -1067,4 +1081,32 @@ async fn expire_remote_segments(
         rlmm,
     )
     .await
+}
+
+struct ArchivedPrefix {
+    local: tempfile::TempDir,
+    remote: tempfile::TempDir,
+    log: krabka_log::Log,
+    exports: Vec<krabka_log::SegmentExport>,
+    rsm: Arc<dyn RemoteStorageManager>,
+    rlmm: Arc<dyn RemoteLogMetadataManager>,
+}
+/// Archive a real rolled prefix while keeping the source log and directories alive.
+async fn archived_prefix_fixture() -> ArchivedPrefix {
+    let fixtures::RolledLogFixture {
+        local,
+        remote,
+        log,
+        exports,
+    } = fixtures::rolled_log_fixture();
+    assert!(exports.len() >= 2, "the test needs a prefix to evict");
+    let Backends { rsm, rlmm } = archived_backends(remote.path(), &exports).await;
+    ArchivedPrefix {
+        local,
+        remote,
+        log,
+        exports,
+        rsm,
+        rlmm,
+    }
 }

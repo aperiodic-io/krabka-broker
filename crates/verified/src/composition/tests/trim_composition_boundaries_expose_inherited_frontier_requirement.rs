@@ -56,18 +56,33 @@ fn trim_composition_boundaries_expose_inherited_frontier_requirement() {
 fn remote_timestamp_composition_handles_padding_and_conservative_rows() {
     let offsets = [0, 3, 6];
     let timestamps = [100, 300, 200];
-    let padded = [(100, 0), (300, 3), (300, 6), (0, 0), (0, 0)];
-    let conservative = [(500, 0), (100, 3), (300, 6)];
-    let min_padded = [(i64::MIN, 0), (0, 0)];
+    let padded = [
+        IndexEntry::new(100, 0),
+        IndexEntry::new(300, 3),
+        IndexEntry::new(300, 6),
+        IndexEntry::new(0, 0),
+        IndexEntry::new(0, 0),
+    ];
+    let conservative = [
+        IndexEntry::new(500, 0),
+        IndexEntry::new(100, 3),
+        IndexEntry::new(300, 6),
+    ];
+    let min_padded = [IndexEntry::new(i64::MIN, 0), IndexEntry::new(0, 0)];
     for entries in [
         &[][..],
-        &[(100, 0), (300, 3), (300, 6)][..],
+        &[
+            IndexEntry::new(100, 0),
+            IndexEntry::new(300, 3),
+            IndexEntry::new(300, 6),
+        ][..],
         &padded[..],
         &conservative[..],
         &min_padded[..],
     ] {
         for target in [i64::MIN, 100, 200, 300, 301, 500, i64::MAX] {
-            let (count, floor) = validated_time_scan::prefix_oracle(entries, target);
+            let validated_time_scan::TimePrefix { count, floor } =
+                validated_time_scan::prefix_oracle(entries, target);
             let expected = timestamps.iter().position(|time| *time >= target);
             assert!(
                 remote_timestamp_scan_preserves_first(entries, &offsets, &timestamps, target)
@@ -82,9 +97,9 @@ fn remote_timestamp_composition_handles_padding_and_conservative_rows() {
     // Structural validity alone cannot establish a truthful running maximum.
     // This sorted, in-range row skips a real earlier match.
     assert!(restore_time_index_entry_valid(None, 0, 3, 6));
-    let misleading = [(0, 3)];
+    let misleading = [IndexEntry::new(0, 3)];
     let count = remote_time_index_candidate_count(&misleading, 100);
-    assert!(count == 1 && misleading[count - 1].1 == 3);
+    assert!(count == 1 && misleading[count - 1].coordinate == 3);
     assert!(first_timestamp_index(&timestamps, 100) == Some(0));
     assert!(first_timestamp_index(&timestamps[1..], 100).map(|index| index + 1) == Some(1));
 }

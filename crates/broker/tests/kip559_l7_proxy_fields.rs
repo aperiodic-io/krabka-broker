@@ -10,8 +10,8 @@
 
 use {
     crate::support::classic::{
-        ClassicJoinSetup, ClassicTimeouts, classic_join_request, classic_sync_request,
-        join_protocol, sync_assignment,
+        ClassicJoinSetup, ClassicTimeouts, classic_join_request, classic_join_request_from,
+        classic_sync_request, join_protocol, sync_assignment,
     },
     assert2::{assert, check},
 };
@@ -58,7 +58,7 @@ async fn bootstrap_member(p: &support::InProcess) -> BootstrappedMember {
     // hasn't recorded a protocol yet).
     let r1 = p
         .client
-        .send(crate::classic_join_request_from!(join_setup()))
+        .send(classic_join_request_from(join_setup()))
         .await
         .expect("JoinGroup (bootstrap)");
     assert!(r1.error_code == 79, "expected MEMBER_ID_REQUIRED");

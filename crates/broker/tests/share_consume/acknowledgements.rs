@@ -15,8 +15,8 @@ use {
             share_fetch,
         },
         support::share::{
-            ConsumptionSetup, RetryEpochs, ShareAck, ShareSessionEpoch, ShareSessionSetup,
-            acknowledge_success, refetch_while_empty, rejoin_group, start_topic,
+            ConsumptionSetup, MemberSession, RetryEpochs, ShareAck, ShareSessionEpoch,
+            ShareSessionSetup, acknowledge_success, refetch_while_empty, rejoin_group, start_topic,
         },
     },
     assert2::{assert, check},
@@ -38,11 +38,12 @@ async fn consume_accept_restart() {
             .call()
             .await;
         tid = topic;
-        let (member, _) = initialize_consumption(&broker, &client, ConsumptionSetup {
-            topic_id: tid,
-            ..Default::default()
-        })
-        .await;
+        let MemberSession { member, .. } =
+            initialize_consumption(&broker, &client, ConsumptionSetup {
+                topic_id: tid,
+                ..Default::default()
+            })
+            .await;
         let session = ShareSessionSetup::joined(&member, tid);
 
         // First fetch (epoch 0 opens the session): acquire offsets 0..2.
@@ -86,7 +87,7 @@ async fn consume_accept_restart() {
         // must observe the recovered SPSO (past offset 2) — zero acquired.
         // Wait until the share state is recovered on the new broker, then
         // assert in a single fetch (no timing guess needed).
-        let (member, _) = join(&client, "g1", "t").await;
+        let MemberSession { member, .. } = join(&client, "g1", "t").await;
         let session = ShareSessionSetup::joined(&member, tid);
         broker.wait_for_share_state_summary("g1", tid, 0).await;
         let row = share_fetch(&client, session.fetch_at(ShareSessionEpoch(0))).await;

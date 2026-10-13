@@ -6,7 +6,6 @@
 //!
 //! The refusal must be an answer and not a panic in the connection task, and it
 //! must leave no group behind.
-
 use {
     crate::{
         authorizer::AllowAllAuthorizer,
@@ -14,6 +13,7 @@ use {
         broker::{Broker, BrokerHandle},
         codes,
         coordinator::unified::persistence::MAX_STRING_BYTES,
+        handlers::test_support::StartedBroker,
         test_support::{
             decode_response, encode_request, peer, principal, request_context, start_broker_with,
         },
@@ -197,8 +197,10 @@ struct AnsweredRow {
 }
 
 async fn anonymous_broker() -> AnonymousBroker {
-    let (handle, dir) =
-        start_broker_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
+    let StartedBroker {
+        broker: handle,
+        dir,
+    } = start_broker_with(|cfg| cfg.authorizer = Arc::new(AllowAllAuthorizer)).await;
     let broker = handle.broker_arc_for_test();
     AnonymousBroker {
         handle,

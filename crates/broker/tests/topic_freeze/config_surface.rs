@@ -13,7 +13,7 @@ use {
             self,
             configs::{ConfigMutationOutcome, ConfigOperation, alter_topic_config, topic_config},
         },
-        wire::{CONTROL, accepted, controlled_fixture, create_topic, refused},
+        wire::{CONTROL, accepted, controlled_fixture, create_topic, produce_outcome, refused},
     },
     assert2::check,
     krabka_broker::codes,
@@ -127,8 +127,11 @@ async fn neither_alter_path_can_set_or_clear_a_freeze() {
     );
 
     // The registry is untouched by all four, and the control topic gained none.
-    crate::wire::check_produce!(&p.broker, &p.client, "orders", frozen => refused("literal", "orders", "cutover", 0));
-    crate::wire::check_produce!(&p.broker, &p.client, CONTROL, control => accepted(1));
+    check!(
+        produce_outcome(&p.broker, &p.client, "orders", frozen).await
+            == refused("literal", "orders", "cutover", 0)
+    );
+    check!(produce_outcome(&p.broker, &p.client, CONTROL, control).await == accepted(1));
 
     // The alter path itself still works, so the four refusals above are about
     // the key and not about the API.

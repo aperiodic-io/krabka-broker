@@ -9,18 +9,45 @@ use {
     proc_macro::{Delimiter, Group, TokenStream as NativeTokenStream, TokenTree},
 };
 
-const CLAUSES: [(&str, bool); 6] = [
-    ("timer", false),
-    ("cadence", false),
-    ("shutdown", false),
-    ("task", false),
-    ("sweep", true),
-    ("on_shutdown", true),
+struct Clause {
+    name: &'static str,
+    block: bool,
+}
+
+const CLAUSES: [Clause; 6] = [
+    Clause {
+        name: "timer",
+        block: false,
+    },
+    Clause {
+        name: "cadence",
+        block: false,
+    },
+    Clause {
+        name: "shutdown",
+        block: false,
+    },
+    Clause {
+        name: "task",
+        block: false,
+    },
+    Clause {
+        name: "sweep",
+        block: true,
+    },
+    Clause {
+        name: "on_shutdown",
+        block: true,
+    },
 ];
 
 fn validate(input: &TokenStream) -> Result<(), ParseError> {
     let parser = Parser::from_tokens(input);
-    for (expected, block) in CLAUSES {
+    for Clause {
+        name: expected,
+        block,
+    } in CLAUSES
+    {
         expect_name(&parser, expected, &format!("expected {expected} clause"))?;
         let group = grouped_value(&parser, "expected grouped clause value")?;
         if (block && !group.delim.is_brace())
@@ -46,13 +73,13 @@ fn template() -> TokenStream {
             let cadence = __sweep_cadence;
             let shutdown = __sweep_shutdown;
             let task = __sweep_task;
-            let Some(mut tick) = crate::time_util::arm(timer, cadence.0, task) else { return; };
+            let Some(mut tick) = crate::time_util::arm(timer, cadence.first, task) else { return; };
             loop {
                 ::tokio::select! {
                     outcome = &mut tick => {
                         if !crate::time_util::fired(outcome, task) { return; }
                         __sweep_body
-                        let Some(next) = crate::time_util::arm(timer, cadence.1, task) else { return; };
+                        let Some(next) = crate::time_util::arm(timer, cadence.later, task) else { return; };
                         tick = next;
                     }
                     () = shutdown.cancelled() => {
@@ -66,23 +93,28 @@ fn template() -> TokenStream {
 }
 
 /// Recurse only through generated scaffolding; inserted caller groups are opaque.
+pub(crate) struct SpliceValue {
+    pub(crate) name: String,
+    pub(crate) group: Group,
+}
+
 pub(crate) fn splice(
     scaffold: NativeTokenStream,
-    values: &[(String, Group)],
+    values: &[SpliceValue],
     locals: &[&str],
 ) -> NativeTokenStream {
     scaffold
         .into_iter()
         .map(|token| match token {
             TokenTree::Ident(ref name)
-                if values.iter().any(|(key, _)| *key == name.to_string()) =>
+                if values.iter().any(|value| value.name == name.to_string()) =>
             {
                 TokenTree::Group(
                     values
                         .iter()
-                        .find(|(key, _)| *key == name.to_string())
+                        .find(|value| value.name == name.to_string())
                         .unwrap()
-                        .1
+                        .group
                         .clone(),
                 )
             }
@@ -125,7 +157,10 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
         } else {
             group
         };
-        (name.to_owned(), value)
+        SpliceValue {
+            name: name.to_owned(),
+            group: value,
+        }
     })
     .collect();
     Ok(splice(template().into(), &values, &[
@@ -143,11 +178,11 @@ mod tests {
 
     #[test]
     fn validates_every_clause_without_parsing_native_operations() {
-        let valid = "timer [timer::<1, 2>()]; cadence [(first(), later())]; shutdown [&shutdown]; task [TASK]; sweep { let image = cfg.current_image(); tick(image).await; } ; on_shutdown {};";
+        let valid = "timer [timer::<1, 2>()]; cadence [Cadence { first: first(), later: later() }]; shutdown [&shutdown]; task [TASK]; sweep { let image = cfg.current_image(); tick(image).await; } ; on_shutdown {};";
         assert!(validate(&valid.parse().unwrap()).is_ok());
         let output = compact(&template());
-        assert!(output.contains("arm(timer,cadence.0,task)"));
-        assert!(output.contains("arm(timer,cadence.1,task)"));
+        assert!(output.contains("arm(timer,cadence.first,task)"));
+        assert!(output.contains("arm(timer,cadence.later,task)"));
         assert!(output.contains("if!crate::time_util::fired(outcome,task){return;}"));
         for invalid in [
             "",
@@ -157,8 +192,8 @@ mod tests {
             "timer {};",
             "cadence [timer];",
             "timer [timer]",
-            "timer [timer]; cadence [(0, 1)]; shutdown [&shutdown]; task [TASK]; sweep []; on_shutdown {};",
-            "timer [timer]; cadence [(0, 1)]; shutdown [&shutdown]; task [TASK]; sweep {}; on_shutdown {}; extra",
+            "timer [timer]; cadence [Cadence { first: 0, later: 1 }]; shutdown [&shutdown]; task [TASK]; sweep []; on_shutdown {};",
+            "timer [timer]; cadence [Cadence { first: 0, later: 1 }]; shutdown [&shutdown]; task [TASK]; sweep {}; on_shutdown {}; extra",
         ] {
             assert!(validate(&invalid.parse().unwrap()).is_err(), "{invalid}");
         }

@@ -258,7 +258,9 @@ pub(super) struct Active<'a> {
 /// A caller that does not wait drops this value. The tasks run on.
 #[derive(Debug, Default, krabka_macros::ScheduledLoads)]
 #[scheduled_loads(failure_message = "__share_group_state load task failed")]
-pub(crate) struct ScheduledLoads(Vec<JoinHandle<()>>);
+pub(crate) struct ScheduledLoads {
+    tasks: Vec<JoinHandle<()>>,
+}
 
 /// Per-broker share-state coordinator.
 ///
@@ -409,7 +411,7 @@ impl ShareCoordinator {
                 })
             })
             .collect();
-        ScheduledLoads(handles)
+        ScheduledLoads { tasks: handles }
     }
 
     /// Whether `desired` (led partition to leader epoch) differs from the led

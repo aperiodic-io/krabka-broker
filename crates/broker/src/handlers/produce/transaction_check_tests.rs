@@ -7,6 +7,8 @@
 //! `Produce` v12 that one call adds every partition with one
 //! `__transaction_state` record.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{test_support::one_transactional_batch, *},
     crate::{
@@ -34,7 +36,10 @@ const PARTITIONS: i32 = 3;
 
 #[tokio::test]
 async fn a_produce_that_starts_a_transaction_on_many_partitions_makes_one_coordinator_call() {
-    let (handle_, _dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker {
+        broker: handle_,
+        dir: _dir,
+    } = start_broker_no_audit_with(|cfg| {
         cfg.transaction_state_num_partitions = 1;
         cfg.transaction_state_replication_factor = 1;
     })

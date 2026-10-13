@@ -4,13 +4,17 @@
 //! openraft-leader check, and the `submit_change` of an accepted ISR proposal
 //! are exercised together, which is why they are kept out of the module root.
 
+#[cfg(test)]
+use crate::handlers::test_support::LiveBrokerFixture;
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         test_support::{request_with_topics, seed_partition, wire_topic_id},
         *,
     },
     crate::{
-        broker::{Broker, BrokerHandle},
+        broker::Broker,
         handlers::{RequestContext, test_support as handler_fixture_support},
         test_support::{
             self as broker_fixture_support, KafkaErrorCode, dispatch_wire,
@@ -22,7 +26,6 @@ use {
         alter_partition_request::{PartitionData as ReqPartitionData, TopicData as ReqTopicData},
         alter_partition_response,
     },
-    std::sync::Arc,
 };
 
 krabka_macros::wire_codec_helpers! {
@@ -57,12 +60,19 @@ async fn check_empty_alter_partition(
 }
 
 /// Seed the controller's partition image after this broker becomes leader.
-async fn start_seeded_partition_broker() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
-    let (handle, directory) = start_broker(handler_fixture_support::allow_all_authorizer()).await;
+async fn start_seeded_partition_broker() -> LiveBrokerFixture {
+    let HandlerStartedBroker {
+        broker: handle,
+        dir: directory,
+    } = start_broker(handler_fixture_support::allow_all_authorizer()).await;
     let broker = handle.broker_arc_for_test();
     broker_fixture_support::wait_for_controller_leader(&broker).await;
     seed_partition(&broker).await;
-    (handle, directory, broker)
+    LiveBrokerFixture {
+        handle,
+        directory,
+        broker,
+    }
 }
 
 #[tokio::test]
@@ -100,7 +110,11 @@ async fn leader_accepts_empty_alter_partition_request() {
 #[tokio::test]
 async fn handle_returns_topic_partition_response_and_commits_isr_change() {
     let version = 2;
-    let (broker_handle, _dir, broker) = start_seeded_partition_broker().await;
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_seeded_partition_broker().await;
     krabka_macros::request_test_identity! {
         bind(ctx);
         user ["replica"];
@@ -123,7 +137,11 @@ async fn handle_returns_topic_partition_response_and_commits_isr_change() {
 /// the other must rebuild admission after the first commit and be fenced.
 #[tokio::test]
 async fn concurrent_isr_updates_revalidate_the_partition_epoch_at_append() {
-    let (broker_handle, _dir, broker) = start_seeded_partition_broker().await;
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_seeded_partition_broker().await;
     krabka_macros::request_test_identity! {
         bind(ctx);
         user ["replica"];
@@ -193,7 +211,11 @@ async fn topic_row_error_follows_version_and_topic_id() {
         (3, TopicIdKind::Unknown),
         (3, TopicIdKind::Zero),
     ];
-    let (broker_handle, _dir, broker) = start_seeded_partition_broker().await;
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_seeded_partition_broker().await;
     krabka_macros::request_test_identity! {
         bind(ctx);
         user ["replica"];
@@ -284,7 +306,11 @@ async fn topic_row_error_follows_version_and_topic_id() {
 #[tokio::test]
 async fn a_stale_sender_broker_epoch_refuses_the_whole_request() {
     let version = alter_partition_response::MAX_VERSION;
-    let (broker_handle, _dir, broker) = start_seeded_partition_broker().await;
+    let LiveBrokerFixture {
+        handle: broker_handle,
+        directory: _dir,
+        broker,
+    } = start_seeded_partition_broker().await;
     krabka_macros::request_test_identity! {
         bind(ctx);
         user ["replica"];

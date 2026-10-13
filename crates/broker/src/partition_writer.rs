@@ -63,24 +63,41 @@ struct WriterPartition<'a> {
     partition: PartitionIndex,
 }
 
+/// The topic and partition owned by a writer task.
+pub struct WriterIdentity {
+    pub topic: String,
+    pub partition: PartitionIndex,
+}
+
+/// The log and its current directory.
+pub struct WriterStorage {
+    pub log: Arc<Mutex<Log>>,
+    pub log_dir: Arc<ArcSwap<PathBuf>>,
+}
+
 /// Notifications, replica state, and scheduled-delivery handles used by the writer.
-pub type WriterSignals = (
-    Arc<Notify>,
-    Arc<tokio::sync::Mutex<ReplicaState>>,
-    Arc<Notify>,
-    DeliveryHandles,
-);
+pub struct WriterSignals {
+    pub append_notify: Arc<Notify>,
+    pub replica_state: Arc<tokio::sync::Mutex<ReplicaState>>,
+    pub hw_advance_notify: Arc<Notify>,
+    pub delivery: DeliveryHandles,
+}
 
 /// Storage health, producer state, and optional shared WAL used by the writer.
-pub type WriterServices = (LogDirRegistry, Arc<ProducerState>, Option<SharedWal>);
+#[derive(Default)]
+pub struct WriterServices {
+    pub log_dir_status: LogDirRegistry,
+    pub producer_state: Arc<ProducerState>,
+    pub wal: Option<SharedWal>,
+}
 
 /// Loop on the receive side of the partition's `WriterMessage` channel.
 ///
 /// The loop stops when the channel closes, that is, when all senders drop.
 #[cfg(test)]
 pub async fn run(
-    identity: (String, PartitionIndex),
-    storage: (Arc<Mutex<Log>>, Arc<ArcSwap<PathBuf>>),
+    identity: WriterIdentity,
+    storage: WriterStorage,
     rx: mpsc::Receiver<WriterMessage>,
     signals: WriterSignals,
     services: WriterServices,
@@ -98,18 +115,23 @@ pub async fn run(
 }
 
 pub async fn run_with_sequencer(
-    identity: (String, PartitionIndex),
-    storage: (Arc<Mutex<Log>>, Arc<ArcSwap<PathBuf>>),
+    WriterIdentity { topic, partition }: WriterIdentity,
+    WriterStorage { log, log_dir }: WriterStorage,
     mut rx: mpsc::Receiver<WriterMessage>,
-    signals: WriterSignals,
-    services: WriterServices,
+    WriterSignals {
+        append_notify,
+        replica_state,
+        hw_advance_notify,
+        delivery,
+    }: WriterSignals,
+    WriterServices {
+        log_dir_status,
+        producer_state,
+        wal,
+    }: WriterServices,
     max_produce_group: usize,
     sequencer: Option<Arc<dyn OffsetSequencer>>,
 ) {
-    let (topic, partition) = identity;
-    let (log, log_dir) = storage;
-    let (append_notify, replica_state, hw_advance_notify, delivery) = signals;
-    let (log_dir_status, producer_state, wal) = services;
     let storage_status = StorageStatus {
         log_dir: &log_dir,
         registry: &log_dir_status,

@@ -2,10 +2,13 @@
 use super::timestamp::{record_offsets_ordered, sparse_maxima_bound_prefix};
 use {
     super::{first_unstable_offset, indexed_timestamp_scan_finds_first},
-    crate::list_offsets::{
-        ListOffsetsBoundDecision, ListOffsetsBoundFacts, ListOffsetsSelectionDecision,
-        ListOffsetsSelectionFacts, list_offsets_bound_decision, list_offsets_kind,
-        list_offsets_selection_decision,
+    crate::{
+        list_offsets::{
+            ListOffsetsBoundDecision, ListOffsetsBoundFacts, ListOffsetsSelectionDecision,
+            ListOffsetsSelectionFacts, list_offsets_bound_decision, list_offsets_kind,
+            list_offsets_selection_decision,
+        },
+        log_index::TimeEntry,
     },
     creusot_std::prelude::*,
 };
@@ -38,7 +41,7 @@ use {
             && list_offset_candidate_visible(frontiers, request, starts@, frontiers.0@ + offsets@[i]@)),
 })]
 pub(super) fn timestamp_list_offsets_finds_first_visible(
-    entries: &[(i64, u32)],
+    entries: &[TimeEntry],
     offsets: &[u32],
     timestamps: &[i64],
     starts: &[i64],

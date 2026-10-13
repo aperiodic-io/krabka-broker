@@ -1,7 +1,10 @@
 //! Bounded model runners with explicit signatures and native checks.
 
 use {
-    crate::meta::{Tokens, bracketed_function, function_signature, is_plain_sync, parameter_ident},
+    crate::meta::{
+        BracketedFunction, Tokens, bracketed_function, function_signature, is_plain_sync,
+        parameter_ident,
+    },
     moxy::{
         ast::{FromMeta, Meta, Parse, ParseError, Parser, Path, Signature},
         token::{Ident, Spanner, TokenStream},
@@ -54,10 +57,12 @@ fn options(metadata: &TokenStream) -> Result<Runner, ParseError> {
     Ok(runner)
 }
 
-fn statements(
-    runner: Runner,
-    signature: &Signature,
-) -> Result<(TokenStream, TokenStream), ParseError> {
+struct RunnerStatements {
+    before: TokenStream,
+    after: TokenStream,
+}
+
+fn statements(runner: Runner, signature: &Signature) -> Result<RunnerStatements, ParseError> {
     let parameters = &signature.params.inner.inputs;
     if !is_plain_sync(signature) || parameters.len() != 3 || !signature.output.is_default() {
         return Err(ParseError::new(
@@ -87,18 +92,22 @@ fn statements(
         {{ pin }}(::stateright::Checker::unique_state_count(&{{ checker }}), {{ pinned }}, {{ label }});
         @if order == "properties_last" { ::stateright::Checker::assert_properties(&{{ checker }}); }
     };
-    Ok((before, after))
+    Ok(RunnerStatements { before, after })
 }
 
 pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
-    let (header, metadata, body) = bracketed_function(input, "model_runner")?;
+    let BracketedFunction {
+        header,
+        metadata,
+        body,
+    } = bracketed_function(input, "model_runner")?;
     let mut empty_function = header.clone();
     empty_function.extend([TokenTree::Group(Group::new(
         Delimiter::Brace,
         NativeTokenStream::new(),
     ))]);
     let signature = function_signature(&empty_function.into())?;
-    let (before, after) = statements(options(&metadata.into())?, &signature)?;
+    let RunnerStatements { before, after } = statements(options(&metadata.into())?, &signature)?;
     let mut generated: NativeTokenStream = before.into();
     generated.extend(body.stream());
     generated.extend(NativeTokenStream::from(after));
@@ -112,7 +121,7 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
 #[cfg(test)]
 mod tests {
     use {
-        super::{options, statements},
+        super::{RunnerStatements, options, statements},
         crate::meta::function_signature,
         assert2::assert,
     };
@@ -125,7 +134,8 @@ mod tests {
         let signature = function_signature(&header).unwrap();
         for order in ["properties_first", "properties_last"] {
             let input = format!("bfs = run_bfs, pin = pin_count, depth = DEPTH, states = STATES, checker = checker, order = \"{order}\"").parse().unwrap();
-            let (before, after) = statements(options(&input).unwrap(), &signature).unwrap();
+            let RunnerStatements { before, after } =
+                statements(options(&input).unwrap(), &signature).unwrap();
             assert!(before.to_string().contains("DEPTH"));
             assert!(before.to_string().contains("STATES"));
             let after = after.to_string();

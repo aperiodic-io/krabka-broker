@@ -16,8 +16,8 @@ use {
             client::{BrokerWithClient, connect_to_broker},
         },
         wire::{
-            CONTROL, accepted, create_controlled_topic, create_topic, now_ms, refused,
-            wait_controlled_partitions,
+            CONTROL, accepted, create_controlled_topic, create_topic, finish_with_control_record,
+            now_ms, produce_outcome, refused, wait_controlled_partitions,
         },
     },
     assert2::check,
@@ -36,8 +36,11 @@ async fn check_frozen_then_shutdown(
     frozen: WireUuid,
     control: WireUuid,
 ) {
-    crate::wire::check_produce!(&broker, client;
-        "orders", frozen => refused("literal", "orders", "incident", 0), CONTROL, control => accepted(1));
+    check!(
+        produce_outcome(&broker, client, "orders", frozen).await
+            == refused("literal", "orders", "incident", 0)
+    );
+    check!(produce_outcome(&broker, client, CONTROL, control).await == accepted(1));
     broker.shutdown().await;
 }
 
@@ -87,7 +90,7 @@ async fn require_signature_decides_whether_an_unsigned_freeze_is_accepted(requir
         control,
         ..
     } = operator_case(require_signature).await;
-    crate::wire::check_produce!(&broker, &client, "orders", frozen => accepted(1));
+    check!(produce_outcome(&broker, &client, "orders", frozen).await == accepted(1));
 
     let response = set_freeze(
         &client,
@@ -97,9 +100,8 @@ async fn require_signature_decides_whether_an_unsigned_freeze_is_accepted(requir
     check!(response.error_code == code, "{response:?}");
     wait_for_registry_len(&client, usize::from(code == codes::NONE)).await;
 
-    crate::wire::check_produce!(&broker, &client;
-        "orders", frozen => after, CONTROL, control => accepted(1));
-    broker.shutdown().await;
+    check!(produce_outcome(&broker, &client, "orders", frozen).await == after);
+    finish_with_control_record(broker, &client, control).await;
 }
 
 /// A signed freeze reaches the registry with its `key_id` and its signature
@@ -200,9 +202,11 @@ async fn an_unsigned_thaw_is_refused_whatever_require_signature_says(require_sig
     );
 
     check!(wait_for_registry_len(&client, 1).await[0].scope == "orders");
-    crate::wire::check_produce!(&broker, &client;
-        "orders", frozen => refused("literal", "orders", "incident", 0), CONTROL, control => accepted(1));
-    broker.shutdown().await;
+    check!(
+        produce_outcome(&broker, &client, "orders", frozen).await
+            == refused("literal", "orders", "incident", 0)
+    );
+    finish_with_control_record(broker, &client, control).await;
 }
 
 /// A signature captured from a freeze cannot be replayed as the thaw.

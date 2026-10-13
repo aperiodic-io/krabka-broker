@@ -273,7 +273,9 @@ impl IpNames {
 mod tests {
     use {
         super::*,
-        crate::quota::test_support::{image_with_quota, image_with_quotas, quota_record},
+        crate::quota::test_support::{
+            QuotaEntityInput, image_with_quota, image_with_quotas, quota_record,
+        },
         assert2::check,
     };
 
@@ -326,22 +328,22 @@ mod tests {
         let names = IpNames::default();
         let image = image_with_quotas(vec![
             quota_record()
-                .entity(vec![("ip", Some("0:0:0:0:0:0:0:1"))])
+                .entity(vec![QuotaEntityInput::ip(Some("0:0:0:0:0:0:0:1"))])
                 .key("connection_creation_rate")
                 .value(1.0)
                 .call(),
             quota_record()
-                .entity(vec![("ip", Some("::1"))])
+                .entity(vec![QuotaEntityInput::ip(Some("::1"))])
                 .key("connection_creation_rate")
                 .value(2.0)
                 .call(),
             quota_record()
-                .entity(vec![("ip", Some("db"))])
+                .entity(vec![QuotaEntityInput::ip(Some("db"))])
                 .key("connection_creation_rate")
                 .value(3.0)
                 .call(),
             quota_record()
-                .entity(vec![("ip", None)])
+                .entity(vec![QuotaEntityInput::ip(None)])
                 .key("connection_creation_rate")
                 .value(4.0)
                 .call(),
@@ -377,12 +379,12 @@ mod tests {
     fn update_forgets_a_host_whose_entity_is_gone() {
         let names = IpNames::default();
         let with_host = image_with_quota()
-            .entity(vec![("ip", Some("db"))])
+            .entity(vec![QuotaEntityInput::ip(Some("db"))])
             .key("connection_creation_rate")
             .value(1.0)
             .call();
         let without = image_with_quota()
-            .entity(vec![("ip", Some("other"))])
+            .entity(vec![QuotaEntityInput::ip(Some("other"))])
             .key("connection_creation_rate")
             .value(1.0)
             .call();
@@ -401,7 +403,7 @@ mod tests {
     async fn resolve_maps_a_host_name_to_an_address_the_resolver_returns() {
         let names = IpNames::default();
         let image = image_with_quota()
-            .entity(vec![("ip", Some("localhost"))])
+            .entity(vec![QuotaEntityInput::ip(Some("localhost"))])
             .key("connection_creation_rate")
             .value(1.0)
             .call();
@@ -430,7 +432,7 @@ mod tests {
 
     fn host_image(name: &str) -> MetadataImage {
         image_with_quota()
-            .entity(vec![("ip", Some(name))])
+            .entity(vec![QuotaEntityInput::ip(Some(name))])
             .key("connection_creation_rate")
             .value(1.0)
             .call()
@@ -546,12 +548,12 @@ mod tests {
         let names = IpNames::default();
         let both = image_with_quotas(vec![
             quota_record()
-                .entity(vec![("ip", Some("a"))])
+                .entity(vec![QuotaEntityInput::ip(Some("a"))])
                 .key("connection_creation_rate")
                 .value(1.0)
                 .call(),
             quota_record()
-                .entity(vec![("ip", Some("b"))])
+                .entity(vec![QuotaEntityInput::ip(Some("b"))])
                 .key("connection_creation_rate")
                 .value(1.0)
                 .call(),

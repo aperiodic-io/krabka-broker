@@ -44,8 +44,8 @@ use {
         leader_epoch::{EpochEntry, epoch_and_offset_for_entries},
         local_recovery::local_recovery_batch_step,
         log_index::{
-            offset_index_lookup, offset_index_position_at_or_after, time_index_lookup,
-            time_index_scan_start,
+            IndexEntry, OffsetEntry, TimeEntry, offset_index_lookup,
+            offset_index_position_at_or_after, time_index_lookup, time_index_scan_start,
         },
         offset_allocator::{reserve_offsets, wal_reservation_frontier},
         produce::produce_durability_frontier,
@@ -236,9 +236,9 @@ use trim::{
 
 mod timestamp;
 use timestamp::{
-    constructed_time_index_preserves_first, indexed_timestamp_scan_finds_first,
-    remote_timestamp_scan_preserves_first, running_maximum_index_entry,
-    validated_remote_and_local_time_starts_agree,
+    ConstructedTimeIndex, constructed_time_index_preserves_first,
+    indexed_timestamp_scan_finds_first, remote_timestamp_scan_preserves_first,
+    running_maximum_index_entry, validated_remote_and_local_time_starts_agree,
 };
 
 // cargo-mutants: #[cfg(creusot)] spec function; not compiled outside Creusot, so no test can tell.

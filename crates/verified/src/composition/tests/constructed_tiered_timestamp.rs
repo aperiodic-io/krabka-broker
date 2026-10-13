@@ -6,7 +6,10 @@ fn check_window(window: SparseTimestampWindow<'_>, base: i64, floor: i64, target
     let untrimmed = times.iter().position(|time| *time >= target);
     assert!(
         constructed_time_index_preserves_first(offsets, times, rows, target)
-            == (expected_rows, untrimmed)
+            == ConstructedTimeIndex {
+                entries: expected_rows,
+                selected: untrimmed
+            }
     );
     let retained = offsets
         .iter()

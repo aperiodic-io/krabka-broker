@@ -21,6 +21,8 @@
 //! `LogCapture` records what one piece of work logs, for the tests that check
 //! the level of a log line.
 
+pub(crate) use crate::handlers::test_support::StartedBroker;
+
 pub(crate) mod paused_audit;
 
 use {
@@ -268,11 +270,16 @@ where
     }
 }
 
+pub(crate) struct TemporaryPartition {
+    pub(crate) dir: tempfile::TempDir,
+    pub(crate) partition: Arc<Partition>,
+}
+
 fn temporary_partition_impl(
     topic: &str,
     partition: krabka_ids::PartitionIndex,
     storage: StorageMode,
-) -> (tempfile::TempDir, Arc<Partition>) {
+) -> TemporaryPartition {
     let directory = tempfile::tempdir().expect("tempdir");
     let partition = open_partition()
         .log_dir(directory.path())
@@ -280,7 +287,10 @@ fn temporary_partition_impl(
         .partition(partition)
         .storage(storage)
         .call();
-    (directory, partition)
+    TemporaryPartition {
+        dir: directory,
+        partition,
+    }
 }
 
 fn open_partition_impl(
@@ -301,30 +311,16 @@ fn open_partition_impl(
         .call()
 }
 
-macro_rules! standalone_partition_builder {
-    ($(#[$doc:meta])* $name:ident, [$($extra_params:tt)*], [$($extra_args:tt)*], $helper:ident -> $result:ty) => {
-        $(#[$doc])*
-        #[bon::builder]
-        pub(crate) fn $name(
-            $($extra_params)*
-            #[builder(default = StandalonePartitionSetup::default().topic)] topic: &'_ str,
-            #[builder(into, default = StandalonePartitionSetup::default().partition)]
-            partition: krabka_ids::PartitionIndex,
-            #[builder(default = StandalonePartitionSetup::default().storage)] storage: StorageMode,
-        ) -> $result {
-            $helper($($extra_args)* topic, partition, storage)
-        }
-    };
-}
+krabka_macros::fixture_constructors! { temporary_partition:
 
-standalone_partition_builder! {
     /// Own the temporary directory alongside its replica until the caller drops both.
-    temporary_partition, [], [], temporary_partition_impl -> (tempfile::TempDir, Arc<Partition>)
+ pub(crate) temporary_partition -> TemporaryPartition = temporary_partition_impl;
 }
 
-standalone_partition_builder! {
+krabka_macros::fixture_constructors! { open_partition:
+
     /// Opens a local replica with a running writer in the supplied log directory.
-    open_partition, [log_dir: &std::path::Path,], [log_dir,], open_partition_impl -> Arc<Partition>
+ pub(crate) open_partition -> Arc<Partition> = open_partition_impl;
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -815,21 +811,6 @@ impl Default for ReassignmentSetup<'_> {
     }
 }
 
-/// Apply the common assignment fields to any reassignment fixture builder.
-#[macro_export]
-macro_rules! reassignment_fields {
-    ($builder:expr, $assignment:expr) => {{
-        let assignment = $assignment;
-        $builder
-            .replicas(assignment.replicas)
-            .isr(assignment.isr)
-            .adding(assignment.adding)
-            .removing(assignment.removing)
-            .leader(assignment.leader.0)
-            .directories(assignment.directories)
-    }};
-}
-
 pub(crate) fn replica_nodes(ids: &[u64]) -> Vec<NodeId> {
     ids.iter().copied().map(NodeId).collect()
 }
@@ -1110,29 +1091,9 @@ impl Authorizer for DenyAll {
 pub(crate) struct ControllerPeerAllowed<A>(pub(crate) A);
 
 // Wrappers customize individual authorization while forwarding metadata and scans.
-macro_rules! delegate_authorizer_metadata {
-    () => {
-        fn is_configured(&self) -> bool { self.0.is_configured() }
 
-        fn decision_ttl(&self) -> Option<std::time::Duration> { self.0.decision_ttl() }
-
-        fn authorize_by_resource_type(
-            &self,
-            source: &dyn crate::authorizer::AclSource,
-            principal: &krabka_security::Principal,
-            host: &std::net::SocketAddr,
-            resource_type: krabka_metadata::ResourceType,
-            operation: krabka_metadata::AclOperation,
-        ) -> crate::authorizer::AuthorizationResult {
-            self.0
-                .authorize_by_resource_type(source, principal, host, resource_type, operation)
-        }
-    };
-}
-
+#[krabka_macros::delegate_authorizer]
 impl<A: Authorizer> Authorizer for ControllerPeerAllowed<A> {
-    delegate_authorizer_metadata!();
-
     fn authorize(
         &self,
         source: &dyn AclSource,
@@ -1158,9 +1119,8 @@ impl<A: Authorizer> Authorizer for ControllerPeerAllowed<A> {
 #[derive(Debug)]
 struct SharedAuthorizer(std::sync::Arc<dyn Authorizer>);
 
+#[krabka_macros::delegate_authorizer]
 impl Authorizer for SharedAuthorizer {
-    delegate_authorizer_metadata!();
-
     fn authorize(
         &self,
         source: &dyn AclSource,
@@ -1329,11 +1289,16 @@ pub(crate) fn sasl_principal(name: &str) -> Principal {
 pub(crate) fn peer() -> SocketAddr { "127.0.0.1:9092".parse().unwrap() }
 
 /// Empty ACL and metadata authorities for pure refusal checks.
-pub(crate) fn empty_acl_image() -> (SimpleAclAuthorizer, MetadataImage) {
-    (
-        SimpleAclAuthorizer::new(std::collections::HashSet::new()),
-        MetadataImage::new(uuid::Uuid::nil()),
-    )
+pub(crate) struct EmptyAclImage {
+    pub(crate) authorizer: SimpleAclAuthorizer,
+    pub(crate) image: MetadataImage,
+}
+
+pub(crate) fn empty_acl_image() -> EmptyAclImage {
+    EmptyAclImage {
+        authorizer: SimpleAclAuthorizer::new(std::collections::HashSet::new()),
+        image: MetadataImage::new(uuid::Uuid::nil()),
+    }
 }
 
 /// Make this broker the leader of each `__transaction_state` partition in
@@ -1808,13 +1773,16 @@ pub(crate) fn configure_single_partition_transactions(
 /// broker.
 pub(crate) fn start_broker_with(
     configure: impl FnOnce(&mut BrokerConfig),
-) -> impl std::future::Future<Output = (BrokerHandle, tempfile::TempDir)> {
+) -> impl std::future::Future<Output = StartedBroker> {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let mut cfg = BrokerConfig::for_tests(dir.path().to_path_buf());
     configure(&mut cfg);
     Box::pin(async move {
         let handle = Broker::start(cfg).await.expect("start broker");
-        (handle, dir)
+        StartedBroker {
+            broker: handle,
+            dir,
+        }
     })
 }
 
@@ -1842,7 +1810,7 @@ pub(crate) async fn finalize_share_version(broker: &Broker, level: i16) {
 /// the `for_tests` defaults.
 pub(crate) async fn start_broker_with_authorizer(
     authorizer: std::sync::Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir) {
+) -> StartedBroker {
     start_broker_with(|cfg| cfg.authorizer = authorizer).await
 }
 
@@ -1853,7 +1821,7 @@ pub(crate) async fn start_broker_with_authorizer(
 /// audit-log assertions elsewhere in the suite stay stable.
 pub(crate) fn start_broker_no_audit_with(
     configure: impl FnOnce(&mut BrokerConfig),
-) -> impl std::future::Future<Output = (BrokerHandle, tempfile::TempDir)> {
+) -> impl std::future::Future<Output = StartedBroker> {
     start_broker_with(|cfg| {
         cfg.audit_enabled = false;
         configure(cfg);
@@ -1862,8 +1830,7 @@ pub(crate) fn start_broker_no_audit_with(
 
 /// Start an in-process broker on the [`BrokerConfig::for_tests`] baseline with
 /// audit logging off.
-pub(crate) fn start_broker_no_audit()
--> impl std::future::Future<Output = (BrokerHandle, tempfile::TempDir)> {
+pub(crate) fn start_broker_no_audit() -> impl std::future::Future<Output = StartedBroker> {
     start_broker_no_audit_with(|_| {})
 }
 
@@ -1875,7 +1842,7 @@ pub(crate) fn start_broker_no_audit()
 /// stay stable.
 pub(crate) async fn start_broker_with_authorizer_no_audit(
     authorizer: std::sync::Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir) {
+) -> StartedBroker {
     start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await
 }
 
@@ -1886,10 +1853,16 @@ pub(crate) async fn start_broker_with_authorizer_no_audit(
 /// groups turned on, passes its config tweaks here.
 pub(crate) async fn start_group_broker_with(
     configure: impl FnOnce(&mut BrokerConfig),
-) -> (BrokerHandle, tempfile::TempDir) {
-    let (handle, dir) = start_broker_with(configure).await;
+) -> StartedBroker {
+    let StartedBroker {
+        broker: handle,
+        dir,
+    } = start_broker_with(configure).await;
     handle.wait_until_group_coordinator_ready().await;
-    (handle, dir)
+    StartedBroker {
+        broker: handle,
+        dir,
+    }
 }
 
 /// Start an in-process broker with `authorizer` installed, and wait until its
@@ -1900,14 +1873,14 @@ pub(crate) async fn start_group_broker_with(
 /// coordinator topic that this waits for.
 pub(crate) async fn start_group_broker(
     authorizer: std::sync::Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir) {
+) -> StartedBroker {
     start_group_broker_with(|cfg| cfg.authorizer = controller_peer_allowed(authorizer)).await
 }
 
 /// Like [`start_group_broker`], but it also disables audit logging.
 pub(crate) async fn start_group_broker_no_audit(
     authorizer: std::sync::Arc<dyn Authorizer>,
-) -> (BrokerHandle, tempfile::TempDir) {
+) -> StartedBroker {
     start_group_broker_with(|cfg| {
         cfg.audit_enabled = false;
         cfg.authorizer = controller_peer_allowed(authorizer);
@@ -1934,14 +1907,20 @@ pub(crate) struct ShareBrokerSetup {
 pub(crate) async fn start_share_broker(
     authorizer: std::sync::Arc<dyn Authorizer>,
     #[builder(default)] support: ShareApiSupport,
-) -> (BrokerHandle, tempfile::TempDir) {
+) -> StartedBroker {
     let setup = ShareBrokerSetup { support };
-    let (handle, dir) = start_group_broker(authorizer).await;
+    let StartedBroker {
+        broker: handle,
+        dir,
+    } = start_group_broker(authorizer).await;
     handle.wait_until_share_coordinator_ready().await;
     if matches!(setup.support, ShareApiSupport::Disabled) {
         finalize_share_version(&handle.broker_arc_for_test(), 0).await;
     }
-    (handle, dir)
+    StartedBroker {
+        broker: handle,
+        dir,
+    }
 }
 
 /// The outcome a [`FakeMetadataSource`] returns from `submit_change`, as a
@@ -3071,7 +3050,7 @@ pub(crate) fn topic_partitions_request(
 }
 
 /// Start the one-partition transaction fixture with grants encoded in principal names.
-pub(crate) async fn start_transaction_grant_broker() -> (BrokerHandle, tempfile::TempDir) {
+pub(crate) async fn start_transaction_grant_broker() -> StartedBroker {
     start_broker_no_audit_with(|cfg| {
         configure_single_partition_transactions(
             cfg,
@@ -3160,7 +3139,10 @@ pub(crate) fn voter_image(
 
 /// Start the allow-all fixture and wait for its local controller to lead.
 pub(crate) async fn started_controller_broker() -> (BrokerHandle, tempfile::TempDir, Arc<Broker>) {
-    let (handle, dir) = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
+    let StartedBroker {
+        broker: handle,
+        dir,
+    } = start_broker_with_authorizer(Arc::new(AllowAllAuthorizer)).await;
     let broker = handle.broker_arc_for_test();
     wait_for_controller_leader(&broker).await;
     (handle, dir, broker)

@@ -2,6 +2,8 @@
 
 #[cfg(test)]
 use crate::authorizer::SimpleAclAuthorizer;
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::acl_wire::CLUSTER_RESOURCE_NAME,
     crate::{
@@ -216,13 +218,12 @@ pub(crate) fn entity_matches_filter(
 
 #[cfg(test)]
 mod tests {
-
     use {
         super::*,
         crate::{
             authorizer::AllowAllAuthorizer,
             broker::BrokerHandle,
-            quota::test_support::{QuotaRecordSetup, QuotaValue},
+            quota::test_support::{QuotaEntityInput, QuotaRecordSetup, QuotaValue},
         },
         assert2::{assert, check},
         krabka_metadata::MetadataRecord,
@@ -503,7 +504,10 @@ mod tests {
     /// A denial carries the default message, which Kafka sends as null.
     #[tokio::test]
     async fn cluster_describe_configs_gates_the_quota_read() {
-        let (broker_handle, _dir) = start_broker(Arc::new(SimpleAclAuthorizer::new(
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(SimpleAclAuthorizer::new(
             std::collections::HashSet::new(),
         )))
         .await;
@@ -537,15 +541,21 @@ mod tests {
 
     #[tokio::test]
     async fn handle_returns_matching_quota_entry_fields() {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_quota(&broker_handle, QuotaRecordSetup {
-            entity: vec![("client-id", Some("app-1")), ("user", Some("alice"))],
+            entity: vec![
+                QuotaEntityInput::client_id(Some("app-1")),
+                QuotaEntityInput::user(Some("alice")),
+            ],
             value: QuotaValue(2048.0),
             ..Default::default()
         })
         .await;
         seed_quota(&broker_handle, QuotaRecordSetup {
-            entity: vec![("user", Some("bob"))],
+            entity: vec![QuotaEntityInput::user(Some("bob"))],
             key: "consumer_byte_rate",
             value: QuotaValue(512.0),
         })
@@ -603,10 +613,13 @@ mod tests {
             expected: DescribeClientQuotasResponse,
         }
 
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_alice_quota(&broker_handle).await;
         seed_quota(&broker_handle, QuotaRecordSetup {
-            entity: vec![("user", None)],
+            entity: vec![QuotaEntityInput::user(None)],
             value: QuotaValue(2048.0),
             ..Default::default()
         })

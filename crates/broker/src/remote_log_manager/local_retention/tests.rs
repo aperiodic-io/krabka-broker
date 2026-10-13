@@ -12,7 +12,7 @@ use {
             test_support::{
                 self as fixtures, ArchivedRetention, Backends, PartitionSnapshot, RetentionPolicy,
                 SealedRange, TempDirs, archived_backends, batch, copy_exports,
-                leading_partition_over, local_backends, partition_log_fixture, partition_snapshot,
+                leading_partition_over, local_backends, partition_snapshot,
                 rolled_tiered_partition_with_config, sealed_ranges, synth_export, three_exports,
                 tier, tp,
             },
@@ -626,16 +626,6 @@ async fn local_retention_drive_deletes_copied_segments() {
 
 // Keep the three eviction/roll oracles together while preserving each test's
 // original aborting `assert!` or accumulating `check!` behavior.
-macro_rules! evicted_local_segments {
-    ($assertion:ident, $removed:expr, $exports:expr, $partition:expr) => {{
-        $assertion!($removed == $exports.len());
-        let mut log = fixtures::partition_log_guard($partition);
-        let active_base = $exports.last().unwrap().last_offset + 1;
-        $assertion!(log.local_log_start_offset() == active_base);
-        let sealed = sealed_ranges(&mut log);
-        $assertion!(sealed == vec![SealedRange::new(active_base, log.log_end_offset() - 1)]);
-    }};
-}
 
 #[tokio::test]
 async fn local_retention_pass_deletes_finished_segments_and_returns_count() {
@@ -655,7 +645,7 @@ async fn local_retention_pass_deletes_finished_segments_and_returns_count() {
 
     // The active segment breached the window as well, so the pass rolled
     // it for the next copy.
-    evicted_local_segments!(assert, removed, exports, &partition);
+    krabka_macros::evicted_local_segments!(assert, removed, exports, &partition);
 }
 
 #[tokio::test]
@@ -681,7 +671,7 @@ async fn local_retention_still_evicts_under_a_write_once_archive() {
         })
         .await;
 
-    evicted_local_segments!(check, removed, exports, &partition);
+    krabka_macros::evicted_local_segments!(check, removed, exports, &partition);
 }
 
 /// A tiered topic whose producers stamp records far in the future keeps
@@ -714,7 +704,11 @@ async fn future_stamped_segments_leave_the_disk_only_under_trunks_rule() {
             false,
         ),
     ] {
-        partition_log_fixture!(log_dir, remote_dir, log, LogConfig {
+        let fixtures::PartitionLogFixture {
+            local: log_dir,
+            remote: remote_dir,
+            mut log,
+        } = fixtures::partition_log_fixture(|| LogConfig {
             segment_size: bytes(256),
             remote_storage_enable: true,
             local_retention: Some(millis(1)),
@@ -856,17 +850,16 @@ async fn pass_over(
 // idle.
 #[tokio::test]
 async fn a_breached_active_segment_rolls_then_tiers_then_leaves_the_disk() {
-    partition_log_fixture!(log_dir, remote_dir, log, LogConfig {
-        remote_storage_enable: true,
-        local_retention: Some(millis(1)),
-        retention: None,
-        ..LogConfig::default()
-    });
+    let fixtures::PartitionLogFixture {
+        local: log_dir,
+        remote: remote_dir,
+        mut log,
+    } = fixtures::partition_log_fixture(fixtures::idle_retention_config);
     for _ in 0..3 {
         log.append(&mut batch(2)).unwrap();
     }
     let partition = leading_partition_over(PartitionIndex(0), log_dir.path(), log);
-    let (rsm, rlmm) = local_backends(remote_dir.path());
+    let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
 
     check!(
         pass_over(&partition, &rlmm, now_ms()).await

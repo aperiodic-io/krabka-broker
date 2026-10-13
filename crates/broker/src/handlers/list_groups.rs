@@ -267,7 +267,9 @@ mod tests {
             authorizer::AllowAllAuthorizer,
             coordinator::unified::classic_state::GroupState,
             handlers::acl_wire::CLUSTER_RESOURCE_NAME,
-            test_support::{allow_acl, start_broker_no_audit_with},
+            test_support::{
+                StartedBroker as HandlerStartedBroker, allow_acl, start_broker_no_audit_with,
+            },
         },
         assert2::assert,
         krabka_metadata::{AclOperation, MetadataRecord, ResourceType},
@@ -299,7 +301,10 @@ mod tests {
     /// consumer, share or streams group reports `Empty`.
     #[tokio::test]
     async fn handler_lists_each_kind_with_its_state_and_protocol_type() {
-        let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_no_audit_with(|cfg| {
             cfg.authorizer = Arc::new(AllowAllAuthorizer);
         })
         .await;
@@ -372,7 +377,10 @@ mod tests {
         ];
 
         for (user, acls, expected_groups) in rows {
-            let (broker_handle, _dir) = start_broker_no_audit_with(|cfg| {
+            let HandlerStartedBroker {
+                broker: broker_handle,
+                dir: _dir,
+            } = start_broker_no_audit_with(|cfg| {
                 cfg.authorizer = Arc::new(SimpleAclAuthorizer::new(HashSet::from([
                     "admin".to_string()
                 ])));

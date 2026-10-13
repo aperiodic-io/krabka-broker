@@ -11,45 +11,12 @@ use {
     krabka_protocol::owned::streams_group_heartbeat_request::Topology,
 };
 
-/// Generate the same topic-name traversal for wire and stored topology shapes.
-macro_rules! define_required_topics {
-    ($topology:ty) => {
-        /// Kafka's `requiredTopics`: every source, repartition sink, repartition
-        /// source and changelog topic, deduplicated in first-seen order across
-        /// the subtopologies.
-        pub(super) fn required_topics(topology: &$topology) -> Vec<String> {
-            $crate::handlers::streams_group_heartbeat::topic_authz::dedup_first_seen(
-                topology.subtopologies.iter().flat_map(|subtopology| {
-                    subtopology
-                        .source_topics
-                        .iter()
-                        .map(String::as_str)
-                        .chain(
-                            subtopology
-                                .repartition_sink_topics
-                                .iter()
-                                .map(String::as_str),
-                        )
-                        .chain(
-                            subtopology
-                                .repartition_source_topics
-                                .iter()
-                                .map(|topic| topic.name.as_str()),
-                        )
-                        .chain(
-                            subtopology
-                                .state_changelog_topics
-                                .iter()
-                                .map(|topic| topic.name.as_str()),
-                        )
-                }),
-            )
-        }
-    };
+krabka_macros::required_topics! {
+    /// Kafka's `requiredTopics`: every source, repartition sink, repartition
+    /// source and changelog topic, deduplicated in first-seen order across
+    /// the subtopologies.
+    pub(super) fn required_topics(topology: &Topology) -> Vec<String>;
 }
-pub(crate) use define_required_topics;
-
-define_required_topics!(Topology);
 
 /// `names` with every repeat dropped, in first-seen order: the dedupe of
 /// Kafka's `requiredTopics`, shared by the heartbeat and describe views of a

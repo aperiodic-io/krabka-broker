@@ -1,5 +1,9 @@
 //! Shared group-handler fixtures and subscription authorization cases.
 
+#[cfg(test)]
+use crate::handlers::test_support::LiveBrokerFixture;
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{test_support as broker_fixture_support, test_support::principal as make_principal},
     assert2::assert,
@@ -109,11 +113,18 @@ pub(super) async fn set_group_version(broker: &Broker, level: GroupFeatureLevel)
 pub(super) async fn versioned_group_broker(
     authorizer: std::sync::Arc<dyn Authorizer>,
     level: GroupFeatureLevel,
-) -> (BrokerHandle, tempfile::TempDir, std::sync::Arc<Broker>) {
-    let (handle, dir) = start_group_broker(authorizer).await;
+) -> LiveBrokerFixture {
+    let HandlerStartedBroker {
+        broker: handle,
+        dir,
+    } = start_group_broker(authorizer).await;
     let broker = handle.broker_arc_for_test();
     set_group_version(&broker, level).await;
-    (handle, dir, broker)
+    LiveBrokerFixture {
+        handle,
+        directory: dir,
+        broker,
+    }
 }
 
 /// A bare `V1Topic` record of `partitions` partitions.
@@ -128,7 +139,6 @@ fn topic_record(name: &str, topic_id: uuid::Uuid, partitions: PartitionCount) ->
 
 use {
     crate::{
-        BrokerHandle,
         authorizer::{Authorizer, SimpleAclAuthorizer},
         broker::Broker,
         handlers::test_support::single_replica_partition,
@@ -191,8 +201,15 @@ pub(super) fn topic_with_partitions(
 pub(super) fn alice() -> krabka_security::Principal { sasl_principal("alice") }
 
 /// The authenticated user and host used together by subscription ACL probes.
-pub(super) fn alice_peer() -> (krabka_security::Principal, std::net::SocketAddr) {
-    (alice(), peer())
+pub(super) struct RequestIdentity {
+    pub(super) principal: krabka_security::Principal,
+    pub(super) peer: std::net::SocketAddr,
+}
+pub(super) fn alice_peer() -> RequestIdentity {
+    RequestIdentity {
+        principal: alice(),
+        peer: peer(),
+    }
 }
 
 /// Kafka's explicit-name Describe check, shared by consumer and share heartbeats.

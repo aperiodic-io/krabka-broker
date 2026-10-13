@@ -11,7 +11,7 @@ use {
     crate::{
         control_plane::freeze_scope,
         support::{self, producer::producer_record},
-        wire::{CONTROL, accepted, create_topic, refused},
+        wire::{CONTROL, accepted, create_topic, produce_outcome, refused},
     },
     assert2::{assert, check},
     bytes::Bytes,
@@ -139,7 +139,10 @@ async fn a_transaction_that_enlisted_before_the_freeze_still_commits() {
 
     // The freeze is live while the transaction is open: a new plain write is
     // refused, and it does not move the log.
-    crate::wire::check_produce!(&p.broker, &p.client, "orders", frozen => refused("literal", "orders", "cutover", 1));
+    check!(
+        produce_outcome(&p.broker, &p.client, "orders", frozen).await
+            == refused("literal", "orders", "cutover", 1)
+    );
 
     txn.commit()
         .await
@@ -153,7 +156,7 @@ async fn a_transaction_that_enlisted_before_the_freeze_still_commits() {
         .await;
     wait_for_stable_offset(&p.client, "orders", 2).await;
 
-    crate::wire::check_produce!(&p.broker, &p.client, CONTROL, control => accepted(1));
+    check!(produce_outcome(&p.broker, &p.client, CONTROL, control).await == accepted(1));
     producer.close().await.expect("producer close");
     p.broker.shutdown().await;
 }

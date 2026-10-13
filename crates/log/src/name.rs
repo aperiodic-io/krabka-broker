@@ -118,24 +118,22 @@ mod tests {
 
     use {super::*, assert2::assert};
 
-    macro_rules! offset_case {
-        ($name:ident, $offset:expr, $expected_filename:expr) => {
-            #[test]
-            fn $name() {
-                let formatted = format_base_offset($offset);
-                assert2::assert!(formatted == $expected_filename);
-                let parsed = parse_log_filename(&format!("{formatted}.log")).unwrap();
-                assert2::assert!(parsed == $offset);
-            }
-        };
+    fn check_offset_case(offset: i64, expected_filename: &str) {
+        let formatted = format_base_offset(offset);
+        assert!(formatted == expected_filename);
+        let parsed = parse_log_filename(&format!("{formatted}.log")).unwrap();
+        assert!(parsed == offset);
     }
 
-    offset_case!(zero, 0, "00000000000000000000");
-    offset_case!(small, 1847, "00000000000000001847");
+    #[test]
+    fn zero() { check_offset_case(0, "00000000000000000000"); }
+    #[test]
+    fn small() { check_offset_case(1847, "00000000000000001847"); }
     // Plan had "00000000001000000000000" (23 chars) which is wrong:
     // `{:020}` zero-pads to 20 chars, and 1_000_000_000_000 is 13 digits,
     // so we expect 7 leading zeros + "1000000000000" = 20 chars total.
-    offset_case!(large, 1_000_000_000_000, "00000001000000000000");
+    #[test]
+    fn large() { check_offset_case(1_000_000_000_000, "00000001000000000000"); }
 
     #[test]
     fn rejects_non_log_extension() {

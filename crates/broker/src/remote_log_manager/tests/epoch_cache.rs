@@ -88,7 +88,7 @@ fn epoch_log(partition_dir: &std::path::Path) -> Log {
 /// the archive still holds.
 async fn survivors_of_a_tick(log_dir: &std::path::Path, log: Log) -> Vec<u128> {
     let remote_dir = tempfile::tempdir().unwrap();
-    let (rsm, rlmm) = local_backends(remote_dir.path());
+    let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
     for ArchiveSegment {
         id,
         first,

@@ -11,6 +11,7 @@ use {
     crate::{
         core::QuorumStateMachine,
         event::Event,
+        simulation_support::PartitionMessage,
         types::{Epoch, NodeId, SimInstant},
     },
     krabka_units::prelude::{Time, TimeExt as _, millis},
@@ -20,14 +21,12 @@ use {
 /// observe.
 ///
 /// The bus records `src` for partition filtering and for trace labelling.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, krabka_macros::PartitionMessage)]
 pub(super) struct Message {
     pub(super) src: NodeId,
     pub(super) dst: NodeId,
     pub(super) event: Event,
 }
-
-crate::impl_partition_message!(Message, NodeId);
 
 /// A node and everything the harness owns on its behalf.
 pub(super) struct Node {

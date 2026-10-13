@@ -1,5 +1,7 @@
 //! `ListPartitionReassignments` (`api_key` 46, KIP-455).
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::Broker,
@@ -274,7 +276,10 @@ mod tests {
     /// empty index list, an idle partition, an unknown topic) gives no row.
     #[tokio::test]
     async fn success_response_lists_what_kafka_lists() {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         broker_handle
             .broker_arc_for_test()
             .controller

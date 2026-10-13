@@ -20,7 +20,7 @@ use {
     },
 };
 
-crate::plain_request_driver_fixture!(pub drive_fetch_as_plain {
+krabka_macros::wire_test_driver!(plain pub drive_fetch_as_plain {
     request: FetchRequest,
     response: FetchResponse,
     api: crate::support::wire::ApiRequestSetup {
@@ -30,7 +30,7 @@ crate::plain_request_driver_fixture!(pub drive_fetch_as_plain {
     operation: "Fetch",
 });
 
-crate::plain_request_driver_fixture!(pub drive_metadata_as_plain {
+krabka_macros::wire_test_driver!(plain pub drive_metadata_as_plain {
     request: MetadataRequest,
     response: MetadataResponse,
     api: crate::support::wire::ApiRequestSetup {
@@ -40,7 +40,7 @@ crate::plain_request_driver_fixture!(pub drive_metadata_as_plain {
     operation: "Metadata",
 });
 
-crate::plain_request_driver_fixture!(pub drive_join_group_as_plain {
+krabka_macros::wire_test_driver!(plain pub drive_join_group_as_plain {
     request: JoinGroupRequest,
     response: JoinGroupResponse,
     api: crate::support::wire::ApiRequestSetup {
@@ -50,7 +50,7 @@ crate::plain_request_driver_fixture!(pub drive_join_group_as_plain {
     operation: "JoinGroup",
 });
 
-crate::plain_request_driver_fixture!(pub drive_init_producer_id_as_plain {
+krabka_macros::wire_test_driver!(plain pub drive_init_producer_id_as_plain {
     request: InitProducerIdRequest,
     response: InitProducerIdResponse,
     api: crate::support::wire::ApiRequestSetup {

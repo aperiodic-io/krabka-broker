@@ -35,16 +35,20 @@ struct ConfigEntry {
     read_only: bool,
 }
 
-macro_rules! config_entry {
-    ($entry:ident) => {
-        ConfigEntry {
-            name: $entry.name.clone(),
-            value: $entry.value.clone(),
-            source: $entry.config_source,
-            is_sensitive: $entry.is_sensitive,
-            read_only: $entry.read_only,
-        }
-    };
+fn config_entry(
+    name: &str,
+    value: Option<&str>,
+    source: i8,
+    is_sensitive: bool,
+    read_only: bool,
+) -> ConfigEntry {
+    ConfigEntry {
+        name: name.to_owned(),
+        value: value.map(str::to_owned),
+        source,
+        is_sensitive,
+        read_only,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -81,7 +85,15 @@ async fn create_topics_returns_the_configs_describe_configs_reports() {
         .as_ref()
         .expect("KIP-525 configs list")
         .iter()
-        .map(|entry| config_entry!(entry))
+        .map(|entry| {
+            config_entry(
+                &entry.name,
+                entry.value.as_deref(),
+                entry.config_source,
+                entry.is_sensitive,
+                entry.read_only,
+            )
+        })
         .collect();
     check!(
         !from_create.is_empty(),
@@ -115,7 +127,15 @@ async fn create_topics_returns_the_configs_describe_configs_reports() {
     let from_describe: Vec<ConfigEntry> = result
         .configs
         .iter()
-        .map(|entry| config_entry!(entry))
+        .map(|entry| {
+            config_entry(
+                &entry.name,
+                entry.value.as_deref(),
+                entry.config_source,
+                entry.is_sensitive,
+                entry.read_only,
+            )
+        })
         .collect();
 
     assert!(from_create == from_describe);

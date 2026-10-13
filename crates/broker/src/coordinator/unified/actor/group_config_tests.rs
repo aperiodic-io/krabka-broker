@@ -134,7 +134,7 @@ async fn a_group_assigns_no_sooner_than_its_own_assignment_interval() {
         async |id| coordinator.get_or_create_consumer(id),
         heartbeat,
         |response| {
-            check!(response.0 == codes::NONE);
+            check!(response.error_code == codes::NONE);
         },
     )
     .await;

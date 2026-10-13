@@ -48,10 +48,12 @@ pub struct TimedSchema<const FROM: i16, const LEADING: bool> {
 impl<const FROM: i16, const LEADING: bool> Response for TimedSchema<FROM, LEADING> {
     fn encode(&self, version: ApiVersion) -> Vec<i32> {
         let error_code = i32::from(self.error_code);
-        match (version >= FROM, LEADING) {
-            (false, _) => vec![error_code],
-            (true, true) => vec![self.throttle_time_ms, error_code],
-            (true, false) => vec![error_code, self.throttle_time_ms],
+        if version < FROM {
+            vec![error_code]
+        } else if LEADING {
+            vec![self.throttle_time_ms, error_code]
+        } else {
+            vec![error_code, self.throttle_time_ms]
         }
     }
 }
@@ -148,17 +150,36 @@ fn each_probe_reports_where_its_schema_puts_the_throttle() {
         .collect();
 
     let expected = [
-        (0, 2, ThrottlePosition::Buried),
-        (0, 3, ThrottlePosition::Leading),
-        (3, 2, ThrottlePosition::Absent),
-        (3, 3, ThrottlePosition::Leading),
-        (17, 2, ThrottlePosition::Absent),
-        (17, 3, ThrottlePosition::Absent),
-    ]
-    .map(|(api_key, version, position)| Observation {
-        api_key,
-        version,
-        position,
-    });
+        Observation {
+            api_key: 0,
+            version: 2,
+            position: ThrottlePosition::Buried,
+        },
+        Observation {
+            api_key: 0,
+            version: 3,
+            position: ThrottlePosition::Leading,
+        },
+        Observation {
+            api_key: 3,
+            version: 2,
+            position: ThrottlePosition::Absent,
+        },
+        Observation {
+            api_key: 3,
+            version: 3,
+            position: ThrottlePosition::Leading,
+        },
+        Observation {
+            api_key: 17,
+            version: 2,
+            position: ThrottlePosition::Absent,
+        },
+        Observation {
+            api_key: 17,
+            version: 3,
+            position: ThrottlePosition::Absent,
+        },
+    ];
     assert!(observed == expected);
 }

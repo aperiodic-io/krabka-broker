@@ -62,12 +62,19 @@ pub(super) fn request_percentage_token_rate(rate_pct: f64) -> f64 { rate_pct * 1
 mod tests {
     use {
         super::*,
-        crate::quota::test_support::{image_with_quotas, quota_record},
+        crate::quota::test_support::{
+            QuotaEntityInput, image_with_quotas, image_with_rate, quota_record,
+        },
         assert2::assert,
         krabka_units::{millis, secs},
     };
 
-    crate::quota::test_support::image_builder!(img_with_quota, "request_percentage");
+    fn img_with_quota(
+        entity: Vec<QuotaEntityInput<'_>>,
+        rate: f64,
+    ) -> krabka_metadata::MetadataImage {
+        image_with_rate(entity, "request_percentage", rate)
+    }
 
     fn check_request_delay(image: &MetadataImage, elapsed: u64, cap: Time, expected: Time) {
         let buckets = QuotaBuckets::new();
@@ -78,7 +85,7 @@ mod tests {
 
     #[test]
     fn zero_elapsed_returns_zero_delay() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 100.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 100.0);
         check_request_delay(&img, 0, secs(1), <Time as TimeExt>::ZERO);
     }
 
@@ -92,7 +99,7 @@ mod tests {
     fn under_budget_returns_zero_delay() {
         // rate=100% ⇒ 1_000_000 µs/sec budget; 5_000 µs is well under one
         // second of capacity → no overage.
-        let img = img_with_quota(vec![("user", Some("alice"))], 100.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 100.0);
         check_request_delay(&img, 5000, secs(1), <Time as TimeExt>::ZERO);
     }
 
@@ -100,13 +107,13 @@ mod tests {
     fn overage_returns_capped_delay() {
         // rate=0.001% ⇒ 10 µs/sec budget; 1_000_000 µs of work is a colossal
         // overage → multi-day delay → capped at 1s.
-        let img = img_with_quota(vec![("user", Some("alice"))], 0.001);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 0.001);
         check_request_delay(&img, 1_000_000, secs(1), secs(1));
     }
 
     #[test]
     fn overage_uses_configured_maximum_delay() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 0.001);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 0.001);
         check_request_delay(&img, 1_000_000, millis(25), millis(25));
     }
 
@@ -117,7 +124,7 @@ mod tests {
     /// repays only kept the cap in force after the overload had ended.
     #[test]
     fn an_overload_is_forgotten_once_the_maximum_delay_has_repaid_it() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 100.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 100.0);
         let buckets = QuotaBuckets::with_window(secs(1));
         let bound = millis(20);
 
@@ -139,7 +146,7 @@ mod tests {
         // rate=100% gives a 1_000_000 us/sec budget and a one-second window a
         // one-second burst: 1_500_000 us is 500_000 over, and 500_000 more
         // leaves 1_000_000 of debt.
-        let img = img_with_quota(vec![("user", Some("alice"))], 100.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 100.0);
         let buckets = QuotaBuckets::with_window(secs(1));
 
         let first = consume_request_quota(&img, &buckets, "alice", Some(""), 1_500_000, secs(10));
@@ -157,9 +164,9 @@ mod tests {
     #[test]
     fn a_null_client_id_is_shadowed_by_a_user_default_client_quota() {
         let img = image_with_quotas(
-            [vec![("user", Some("alice"))], vec![
-                ("user", Some("alice")),
-                ("client-id", None),
+            [vec![QuotaEntityInput::user(Some("alice"))], vec![
+                QuotaEntityInput::user(Some("alice")),
+                QuotaEntityInput::client_id(None),
             ]]
             .map(|entity| {
                 quota_record()
@@ -191,7 +198,7 @@ mod tests {
         // rate=100% gives a 1_000_000 us/sec budget. A one-second window
         // starts the bucket with one second of burst, so 1_500_000 us leaves
         // a 500_000 us overage.
-        let img = img_with_quota(vec![("user", Some("alice"))], 100.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 100.0);
         let buckets = QuotaBuckets::with_window(secs(1));
 
         let delay = consume_request_quota(&img, &buckets, "alice", Some(""), 1_500_000, secs(1));

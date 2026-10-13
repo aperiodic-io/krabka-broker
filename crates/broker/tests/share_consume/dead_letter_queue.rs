@@ -23,9 +23,9 @@ use {
             fetch::{FetchLimits, RequestWaitMillis, single_partition_fetch},
             offsets::{list_offset_partition, single_partition_list_offsets},
             share::{
-                ShareAck, ShareFetchSetup, ShareRecordCount, ShareSessionEpoch, ShareSessionSetup,
-                StartedShareTopic, acknowledge_partition, acknowledge_request, acknowledge_success,
-                acknowledge_topic, join_consume_member, start_group_topic,
+                MemberSession, ShareAck, ShareFetchSetup, ShareRecordCount, ShareSessionEpoch,
+                ShareSessionSetup, StartedShareTopic, acknowledge_partition, acknowledge_request,
+                acknowledge_success, acknowledge_topic, join_consume_member, start_group_topic,
             },
             topics::topic_configs,
         },
@@ -485,7 +485,7 @@ async fn join_and_acquire(
     client: &Client,
     tid: uuid::Uuid,
 ) -> AcquiredMember {
-    let (member, _member_epoch) = join_consume_member(broker, client, tid).await;
+    let MemberSession { member, .. } = join_consume_member(broker, client, tid).await;
     let row = fetch_until_acquired(client, ShareSessionSetup {
         group: GROUP,
         ..ShareSessionSetup::opening(&member, tid)

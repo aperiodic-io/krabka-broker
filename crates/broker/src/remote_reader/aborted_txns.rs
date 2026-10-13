@@ -75,10 +75,11 @@ impl RemoteReader {
 
 #[cfg(test)]
 mod tests {
-
     use {
         super::*,
-        crate::remote_reader::test_support::{empty_reader, populated_reader_with_abort, tp},
+        crate::remote_reader::test_support::{
+            ReaderFixture, empty_reader, populated_reader_with_abort, reader_fixture, tp,
+        },
         assert2::assert,
     };
 
@@ -105,9 +106,13 @@ mod tests {
     #[tokio::test]
     async fn aborted_transactions_empty_when_segment_has_no_txnindex() {
         // The default harness writes no `.txnindex` for any segment.
-        crate::remote_reader::test_support::populated_reader_fixture!(
-            log_dir, remote_dir, reader, log, exports
-        );
+        let ReaderFixture {
+            local: _log_dir,
+            remote: _remote_dir,
+            reader,
+            log,
+        } = reader_fixture();
+        let exports = log.tierable_segments();
         let seg = &exports[0];
 
         let got = reader

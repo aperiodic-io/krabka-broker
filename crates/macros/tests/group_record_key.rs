@@ -58,29 +58,33 @@ enum RecordKey {
 
 #[test]
 fn concrete_variants_keep_wire_bytes_group_access_and_trailing_byte_acceptance() {
-    let cases: [(RecordKey, &[u8]); 3] = [
-        (
-            RecordKey::GroupMetadata {
+    struct GoldenCase {
+        key: RecordKey,
+        bytes: &'static [u8],
+    }
+    let cases = [
+        GoldenCase {
+            key: RecordKey::GroupMetadata {
                 group_id: "g".into(),
             },
-            b"\x00\x03\x00\x01g",
-        ),
-        (
-            RecordKey::MemberMetadata {
+            bytes: b"\x00\x03\x00\x01g",
+        },
+        GoldenCase {
+            key: RecordKey::MemberMetadata {
                 group_id: "g".into(),
                 member_id: "m".into(),
             },
-            b"\x00\x05\x00\x01g\x00\x01m",
-        ),
-        (
-            RecordKey::RegularExpression {
+            bytes: b"\x00\x05\x00\x01g\x00\x01m",
+        },
+        GoldenCase {
+            key: RecordKey::RegularExpression {
                 group_id: "g".into(),
                 regex: "a.*".into(),
             },
-            b"\x00\x10\x00\x01g\x00\x03a.*",
-        ),
+            bytes: b"\x00\x10\x00\x01g\x00\x03a.*",
+        },
     ];
-    for (key, golden) in cases {
+    for GoldenCase { key, bytes: golden } in cases {
         assert!(key.group_id() == "g");
         assert!(key.encode().unwrap().as_ref() == golden);
         let version = i16::from_be_bytes([golden[0], golden[1]]);

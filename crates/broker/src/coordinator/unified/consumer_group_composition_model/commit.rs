@@ -10,7 +10,7 @@ use {
     super::{
         MAX_OFFSET, TOPIC,
         projection::rebuild_group,
-        state::{CgcState, EpochKind, committed_map, member},
+        state::{CgcState, CommittedPartitionOffset, EpochKind, committed_map, member},
     },
     crate::{
         codes::{STALE_MEMBER_EPOCH, UNKNOWN_MEMBER_ID},
@@ -42,7 +42,7 @@ fn oracle_commit(s: &CgcState, id: &str, part: i32, epoch: i32) -> Result<(), i1
             held && m
                 .assignment_epochs
                 .iter()
-                .any(|&(p, assigned_at)| p == part && assigned_at <= epoch)
+                .any(|row| row.partition == part && row.epoch <= epoch)
         }
     };
     if accepted {
@@ -64,12 +64,13 @@ fn oracle_commit(s: &CgcState, id: &str, part: i32, epoch: i32) -> Result<(), i1
 pub(super) fn do_commit(last: &CgcState, id: &str, part: i32, kind: EpochKind) -> Option<CgcState> {
     let g = rebuild_group(last);
     let cur = member(last, id).map(|m| m.member_epoch);
-    let epoch = match (cur, kind) {
-        (Some(e), EpochKind::Current) => e,
-        (Some(e), EpochKind::Stale) => e - 1,
-        (Some(e), EpochKind::Forward) => e + 1,
-        (None, _) => 0,
+    let epoch = match kind {
+        EpochKind::Current => cur.unwrap_or(0),
+        EpochKind::Stale => cur.map_or(0, |epoch| epoch - 1),
+        EpochKind::Forward => cur.map_or(0, |epoch| epoch + 1),
     };
+    // GroupState's existing runtime fence takes Kafka topic/partition pairs;
+    // that tuple is confined to this fixed API boundary.
     let real =
         g.validate_offset_commit(id, None, epoch, CommitFence::Offset { api_version: 9 }, &[
             (TOPIC, part),
@@ -89,6 +90,10 @@ pub(super) fn do_commit(last: &CgcState, id: &str, part: i32, kind: EpochKind) -
     }
     *off += 1;
     let mut next = last.clone();
-    next.committed = committed.iter().map(|(&k, &v)| (k, v)).collect();
+    // std map iteration is adapted immediately into named projected coordinates.
+    next.committed = committed
+        .iter()
+        .map(|(&partition, &offset)| CommittedPartitionOffset { partition, offset })
+        .collect();
     Some(next)
 }

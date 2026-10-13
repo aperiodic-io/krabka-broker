@@ -1,6 +1,12 @@
 //! KIP-951 endpoint projection shared by Fetch, Produce and the share RPCs.
 
-use {crate::handlers::metadata::pick_endpoint_host_port, krabka_metadata::MetadataImage};
+use {
+    crate::handlers::metadata::pick_endpoint_host_port,
+    krabka_metadata::MetadataImage,
+    krabka_protocol::owned::{
+        fetch_response::FetchableTopicResponse, produce_response::TopicProduceResponse,
+    },
+};
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -57,4 +63,40 @@ pub(crate) fn leader_endpoints<R: From<LeaderEndpoint>>(
             )
         })
         .collect()
+}
+
+/// Partition leader hints in the two topic response shapes that carry them.
+pub(crate) trait LeaderHints {
+    fn leader_hints(&self) -> impl Iterator<Item = i32>;
+}
+
+impl LeaderHints for FetchableTopicResponse {
+    fn leader_hints(&self) -> impl Iterator<Item = i32> {
+        self.partitions
+            .iter()
+            .map(|partition| partition.current_leader.leader_id)
+    }
+}
+
+impl LeaderHints for TopicProduceResponse {
+    fn leader_hints(&self) -> impl Iterator<Item = i32> {
+        self.partition_responses
+            .iter()
+            .map(|partition| partition.current_leader.leader_id)
+    }
+}
+
+/// Project topic response hints through the same listener selection and node ordering.
+pub(crate) fn topic_endpoints<T: LeaderHints, R: From<LeaderEndpoint>>(
+    image: &MetadataImage,
+    connection_listener_name: &str,
+    inter_broker_listener_name: &str,
+    topics: &[T],
+) -> Vec<R> {
+    leader_endpoints(
+        image,
+        connection_listener_name,
+        inter_broker_listener_name,
+        topics.iter().flat_map(LeaderHints::leader_hints),
+    )
 }

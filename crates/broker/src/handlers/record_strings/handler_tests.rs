@@ -13,6 +13,8 @@
 //! more is over the bound, and Kafka cannot write it. The join answers with an
 //! error and no member id.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AllowAllAuthorizer,
@@ -20,33 +22,37 @@ use {
         codes,
         error::BrokerError,
         features::STREAMS_VERSION,
-        handlers::RequestContext,
+        handlers::{RequestContext, group_heartbeat_test_support::streams_request},
         test_support::{
             decode_response, encode_request, peer, principal, request_context, start_broker_with,
+            try_dispatch_context,
         },
     },
     assert2::assert,
     bytes::Bytes,
     krabka_metadata::{FeatureLevelRecord, MetadataRecord},
-    krabka_protocol::owned::{
-        consumer_group_heartbeat_request::{self, ConsumerGroupHeartbeatRequest},
-        consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
-        heartbeat_request::{self, HeartbeatRequest},
-        initialize_share_group_state_request::{
-            self, InitializeShareGroupStateRequest, InitializeStateData, PartitionData,
+    krabka_protocol::{
+        Encode,
+        owned::{
+            consumer_group_heartbeat_request::{self, ConsumerGroupHeartbeatRequest},
+            consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
+            heartbeat_request::{self, HeartbeatRequest},
+            initialize_share_group_state_request::{
+                self, InitializeShareGroupStateRequest, InitializeStateData, PartitionData,
+            },
+            initialize_share_group_state_response::InitializeShareGroupStateResponse,
+            join_group_request::{self, JoinGroupRequest, JoinGroupRequestProtocol},
+            join_group_response::JoinGroupResponse,
+            share_group_heartbeat_request::{self, ShareGroupHeartbeatRequest},
+            share_group_heartbeat_response::ShareGroupHeartbeatResponse,
+            streams_group_heartbeat_request::{self, StreamsGroupHeartbeatRequest},
+            streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
+            sync_group_request::{self, SyncGroupRequest, SyncGroupRequestAssignment},
+            sync_group_response::SyncGroupResponse,
         },
-        initialize_share_group_state_response::InitializeShareGroupStateResponse,
-        join_group_request::{self, JoinGroupRequest, JoinGroupRequestProtocol},
-        join_group_response::JoinGroupResponse,
-        share_group_heartbeat_request::{self, ShareGroupHeartbeatRequest},
-        share_group_heartbeat_response::ShareGroupHeartbeatResponse,
-        streams_group_heartbeat_request::{self, StreamsGroupHeartbeatRequest},
-        streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
-        sync_group_request::{self, SyncGroupRequest, SyncGroupRequestAssignment},
-        sync_group_response::SyncGroupResponse,
     },
     krabka_security::Principal,
-    std::{net::SocketAddr, sync::Arc, time::Duration},
+    std::{future::Future, net::SocketAddr, sync::Arc, time::Duration},
 };
 
 /// The longest string a coordinator record carries.
@@ -119,6 +125,38 @@ struct RecordIds {
     instance: String,
 }
 
+/// Prepared case data, constructed once in label, header, then record-id order.
+struct IdentityCase {
+    label: String,
+    client_id: String,
+    ids: RecordIds,
+    long: Long,
+    length: usize,
+}
+
+fn identity_case(case: usize, probe: Probe, member: &str) -> IdentityCase {
+    let label = format!("{:?} of {} bytes", probe.long, probe.length);
+    let client_id = header_client_id(probe.long, probe.length);
+    let ids = ids(case, probe.long, probe.length, member);
+    IdentityCase {
+        label,
+        client_id,
+        ids,
+        long: probe.long,
+        length: probe.length,
+    }
+}
+
+fn identity_cases<'a>(
+    probes: impl Iterator<Item = Probe> + 'a,
+    member: &'a str,
+) -> impl Iterator<Item = IdentityCase> + 'a {
+    // Enumeration's index/value pair is an iterator boundary; owned case data is named.
+    probes
+        .enumerate()
+        .map(move |(case, probe)| identity_case(case, probe, member))
+}
+
 fn join_request(
     group_id: String,
     member_id: String,
@@ -163,7 +201,10 @@ struct Env {
 
 impl Env {
     async fn start() -> Self {
-        let (handle, dir) = start_broker_with(|cfg| {
+        let HandlerStartedBroker {
+            broker: handle,
+            dir,
+        } = start_broker_with(|cfg| {
             cfg.authorizer = Arc::new(AllowAllAuthorizer);
             cfg.streams_group.enable = true;
             cfg.classic_group_initial_rebalance_delay = krabka_units::secs(0);
@@ -192,35 +233,20 @@ impl Env {
         request_context(&self.principal, &self.peer, client_id)
     }
 
+    /// Prepare encoding and context before the returned dispatch future is timed out.
+    fn dispatch<'a, R: Encode>(
+        &'a self,
+        api_key: i16,
+        version: i16,
+        request: &R,
+        client_id: &'a str,
+    ) -> impl Future<Output = Result<Bytes, BrokerError>> + 'a {
+        let encoded = encode_request(request, version);
+        let context = self.ctx(client_id);
+        async move { try_dispatch_context(&self.broker, api_key, version, &encoded, &context).await }
+    }
+
     async fn stop(self) { self.handle.shutdown().await; }
-}
-
-/// Keep encoding and context construction at the call site, before any timeout starts.
-macro_rules! dispatch_record_request {
-    ($env:ident, $api:expr, $version:expr, $request:expr, $client:expr) => {
-        crate::test_support::try_dispatch_context(
-            &$env.broker,
-            $api,
-            $version,
-            &encode_request($request, $version),
-            &$env.ctx($client),
-        )
-    };
-}
-
-/// Bind the independently labelled long-id case in the original declaration order.
-macro_rules! long_identity {
-    (
-        ($label:ident, $client:ident, $bindings:pat),
-        $case:expr,
-        $long:ident,
-        $length:ident,
-        $member:expr
-    ) => {
-        let $label = format!("{:?} of {} bytes", $long, $length);
-        let $client = header_client_id($long, $length);
-        let $bindings = ids($case, $long, $length, $member);
-    };
 }
 
 /// Create a one-partition topic, so that a streams topology can read it.
@@ -266,63 +292,52 @@ async fn finalize(broker: &Broker, feature: &'static str) {
     .expect("the image shows the feature");
 }
 
-/// Each protocol keeps its request and independent outcome checks in the same case scope.
-macro_rules! long_identity_cases {
-    ($api:ident, ($env:ident, $version:ident), ($case:ident, $long:ident, $length:ident),
-     ($label:ident, $client_id:ident, ($group_id:ident, $member_id:ident, $instance_id:ident)), $member:expr, { $($body:tt)* }) => {
-        const $version: i16 = $api::MAX_VERSION;
-        let $env = Env::start().await;
-        for ($case, Probe { long: $long, length: $length }) in cases().enumerate() {
-            long_identity!(($label, $client_id, RecordIds { group: $group_id, member: $member_id, instance: $instance_id }), $case, $long, $length, $member);
-            $($body)*
-        }
-        $env.stop().await;
-    };
-}
-
 #[tokio::test]
 async fn consumer_group_heartbeat_takes_32767_byte_ids_and_refuses_32768() {
-    long_identity_cases!(
-        consumer_group_heartbeat_request,
-        (env, VERSION),
-        (case, long, length),
-        (label, client_id, (group_id, member_id, instance_id)),
-        "member-short",
-        {
-            let request = ConsumerGroupHeartbeatRequest {
-                group_id: group_id.clone(),
-                member_id,
-                instance_id: Some(instance_id),
-                member_epoch: 0,
-                rebalance_timeout_ms: 30_000,
-                topic_partitions: Some(vec![]),
-                subscribed_topic_names: Some(vec!["t".into()]),
-                ..Default::default()
-            };
+    const VERSION: i16 = consumer_group_heartbeat_request::MAX_VERSION;
+    let env = Env::start().await;
+    for IdentityCase {
+        label,
+        client_id,
+        ids,
+        long: _long,
+        length,
+    } in identity_cases(cases(), "member-short")
+    {
+        let request = ConsumerGroupHeartbeatRequest {
+            group_id: ids.group.clone(),
+            member_id: ids.member,
+            instance_id: Some(ids.instance),
+            member_epoch: 0,
+            rebalance_timeout_ms: 30_000,
+            topic_partitions: Some(vec![]),
+            subscribed_topic_names: Some(vec!["t".into()]),
+            ..Default::default()
+        };
 
-            let result = dispatch_record_request!(
-                env,
+        let result = env
+            .dispatch(
                 consumer_group_heartbeat_request::API_KEY,
                 VERSION,
                 &request,
-                &client_id
+                &client_id,
             )
             .await;
 
-            check(&label, &result, length);
-            let response = result
-                .ok()
-                .map(|bytes| decode_response::<ConsumerGroupHeartbeatResponse>(&bytes, VERSION));
-            assert!(
-                env.broker.group_coordinator.find(&group_id).is_some() == (length <= LIMIT),
-                "{label}: the group exists only when the request was taken: {response:?}"
-            );
-            assert!(
-                response.is_none_or(|response| response.error_code == codes::NONE),
-                "{label}: the join succeeds"
-            );
-        }
-    );
+        check(&label, &result, length);
+        let response = result
+            .ok()
+            .map(|bytes| decode_response::<ConsumerGroupHeartbeatResponse>(&bytes, VERSION));
+        assert!(
+            env.broker.group_coordinator.find(&ids.group).is_some() == (length <= LIMIT),
+            "{label}: the group exists only when the request was taken: {response:?}"
+        );
+        assert!(
+            response.is_none_or(|response| response.error_code == codes::NONE),
+            "{label}: the join succeeds"
+        );
+    }
+    env.stop().await;
 }
 
 #[tokio::test]
@@ -334,17 +349,18 @@ async fn share_group_heartbeat_takes_32767_byte_ids_and_refuses_32768() {
         .filter(|probe| probe.long != Long::Instance)
         .enumerate()
     {
-        long_identity!(
-            (label, client_id, RecordIds {
-                group: group_id,
-                member: member_id,
-                ..
-            }),
-            case,
-            long,
-            length,
-            "member-short"
-        );
+        let IdentityCase {
+            label,
+            client_id,
+            ids:
+                RecordIds {
+                    group: group_id,
+                    member: member_id,
+                    ..
+                },
+            long: _long,
+            length: _length,
+        } = identity_case(case, Probe { long, length }, "member-short");
         let request = ShareGroupHeartbeatRequest {
             group_id: group_id.clone(),
             member_id,
@@ -353,14 +369,14 @@ async fn share_group_heartbeat_takes_32767_byte_ids_and_refuses_32768() {
             ..Default::default()
         };
 
-        let result = dispatch_record_request!(
-            env,
-            share_group_heartbeat_request::API_KEY,
-            VERSION,
-            &request,
-            &client_id
-        )
-        .await;
+        let result = env
+            .dispatch(
+                share_group_heartbeat_request::API_KEY,
+                VERSION,
+                &request,
+                &client_id,
+            )
+            .await;
 
         check(&label, &result, length);
         let response = result
@@ -389,45 +405,46 @@ async fn share_group_heartbeat_takes_32767_byte_ids_and_refuses_32768() {
 
 #[tokio::test]
 async fn streams_group_heartbeat_takes_32767_byte_ids_and_refuses_32768() {
-    long_identity_cases!(
-        streams_group_heartbeat_request,
-        (env, VERSION),
-        (case, long, length),
-        (label, client_id, (group_id, member_id, instance_id)),
-        "member-short",
-        {
-            let request = StreamsGroupHeartbeatRequest {
-                instance_id: (long == Long::Instance).then_some(instance_id),
-                ..crate::handlers::group_heartbeat_test_support::streams_request(
-                    &group_id, &member_id,
-                )
-            };
+    const VERSION: i16 = streams_group_heartbeat_request::MAX_VERSION;
+    let env = Env::start().await;
+    for IdentityCase {
+        label,
+        client_id,
+        ids,
+        long,
+        length,
+    } in identity_cases(cases(), "member-short")
+    {
+        let request = StreamsGroupHeartbeatRequest {
+            instance_id: (long == Long::Instance).then_some(ids.instance),
+            ..streams_request(&ids.group, &ids.member)
+        };
 
-            let result = dispatch_record_request!(
-                env,
+        let result = env
+            .dispatch(
                 streams_group_heartbeat_request::API_KEY,
                 VERSION,
                 &request,
-                &client_id
+                &client_id,
             )
             .await;
 
-            check(&label, &result, length);
-            let response = result
-                .ok()
-                .map(|bytes| decode_response::<StreamsGroupHeartbeatResponse>(&bytes, VERSION));
-            // Kafka 4.3.1 refuses a streams member with an instance id (static
-            // membership) as `INVALID_REQUEST`, so that request creates no group.
-            assert!(
-                env.broker
-                    .group_coordinator
-                    .find_streams(&group_id)
-                    .is_some()
-                    == (length <= LIMIT && long != Long::Instance),
-                "{label}: the group exists only when a join was taken: {response:?}"
-            );
-        }
-    );
+        check(&label, &result, length);
+        let response = result
+            .ok()
+            .map(|bytes| decode_response::<StreamsGroupHeartbeatResponse>(&bytes, VERSION));
+        // Kafka 4.3.1 refuses a streams member with an instance id (static
+        // membership) as `INVALID_REQUEST`, so that request creates no group.
+        assert!(
+            env.broker
+                .group_coordinator
+                .find_streams(&ids.group)
+                .is_some()
+                == (length <= LIMIT && long != Long::Instance),
+            "{label}: the group exists only when a join was taken: {response:?}"
+        );
+    }
+    env.stop().await;
 }
 
 #[tokio::test]
@@ -448,13 +465,7 @@ async fn classic_join_takes_32767_byte_ids_and_refuses_32768() {
 
         let result = tokio::time::timeout(
             Duration::from_secs(20),
-            dispatch_record_request!(
-                env,
-                join_group_request::API_KEY,
-                VERSION,
-                &request,
-                &client_id
-            ),
+            env.dispatch(join_group_request::API_KEY, VERSION, &request, &client_id),
         )
         .await
         .expect("the join answers");
@@ -498,13 +509,7 @@ async fn join(
 ) -> JoinGroupResponse {
     let bytes = tokio::time::timeout(
         Duration::from_secs(20),
-        dispatch_record_request!(
-            env,
-            join_group_request::API_KEY,
-            version,
-            request,
-            client_id
-        ),
+        env.dispatch(join_group_request::API_KEY, version, request, client_id),
     )
     .await
     .expect("the join answers")
@@ -661,15 +666,10 @@ async fn a_generated_member_id_over_32767_bytes_fails_the_join() {
             }],
             ..Default::default()
         };
-        let synced = dispatch_record_request!(
-            env,
-            sync_group_request::API_KEY,
-            SYNC_VERSION,
-            &sync,
-            &client_id
-        )
-        .await
-        .expect("the sync is not a protocol error");
+        let synced = env
+            .dispatch(sync_group_request::API_KEY, SYNC_VERSION, &sync, &client_id)
+            .await
+            .expect("the sync is not a protocol error");
         let synced = decode_response::<SyncGroupResponse>(&synced, SYNC_VERSION);
         assert!(
             (synced.error_code, synced.assignment.as_ref())
@@ -714,14 +714,14 @@ async fn initialize_share_group_state_takes_a_32767_byte_group_id_and_refuses_32
             ..Default::default()
         };
 
-        let result = dispatch_record_request!(
-            env,
-            initialize_share_group_state_request::API_KEY,
-            VERSION,
-            &request,
-            "record-strings-test"
-        )
-        .await;
+        let result = env
+            .dispatch(
+                initialize_share_group_state_request::API_KEY,
+                VERSION,
+                &request,
+                "record-strings-test",
+            )
+            .await;
 
         check(&label, &result, length);
         if let Ok(bytes) = result {
@@ -744,32 +744,30 @@ async fn initialize_share_group_state_takes_a_32767_byte_group_id_and_refuses_32
 
 #[tokio::test]
 async fn classic_heartbeat_takes_32767_byte_ids_and_refuses_32768() {
-    long_identity_cases!(
-        heartbeat_request,
-        (env, VERSION),
-        (case, long, length),
-        (label, client_id, (group_id, member_id, instance_id)),
-        "member-short",
-        {
-            let request = HeartbeatRequest {
-                group_id,
-                generation_id: 1,
-                member_id,
-                group_instance_id: Some(instance_id),
-                ..Default::default()
-            };
+    const VERSION: i16 = heartbeat_request::MAX_VERSION;
+    let env = Env::start().await;
+    for IdentityCase {
+        label,
+        client_id,
+        ids,
+        long: _long,
+        length,
+    } in identity_cases(cases(), "member-short")
+    {
+        let request = HeartbeatRequest {
+            group_id: ids.group,
+            generation_id: 1,
+            member_id: ids.member,
+            group_instance_id: Some(ids.instance),
+            ..Default::default()
+        };
 
-            // Through the dispatch adapter, which decodes the request.
-            let result = dispatch_record_request!(
-                env,
-                heartbeat_request::API_KEY,
-                VERSION,
-                &request,
-                &client_id
-            )
+        // Through the dispatch adapter, which decodes the request.
+        let result = env
+            .dispatch(heartbeat_request::API_KEY, VERSION, &request, &client_id)
             .await;
 
-            check(&label, &result, length);
-        }
-    );
+        check(&label, &result, length);
+    }
+    env.stop().await;
 }

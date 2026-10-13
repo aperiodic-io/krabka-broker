@@ -9,6 +9,8 @@
 //! sentinel offset `-1`. That matches the JVM behaviour for a replica that the
 //! broker is not a member of.
 
+#[cfg(test)]
+use crate::test_support::EmptyAclImage;
 use {
     crate::{
         broker::Broker,
@@ -247,7 +249,7 @@ mod tests {
     /// `CLUSTER_AUTHORIZATION_FAILED`.
     #[test]
     fn cluster_action_denied_yields_cluster_authorization_failed() {
-        let (authorizer, image) = empty_acl_image();
+        let EmptyAclImage { authorizer, image } = empty_acl_image();
         krabka_macros::request_test_identity! {
             bind(principal, peer, ctx);
             user ["ANONYMOUS"];

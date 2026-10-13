@@ -4,7 +4,6 @@
 //! land in a real `__consumer_offsets` partition, and reads back through the
 //! real `OffsetFetch` handler. The sweep's clock is a parameter, so a test
 //! moves time forward by passing a later `now_ms` rather than sleeping.
-
 use {
     super::{ReapedGroup, sweep},
     crate::{
@@ -23,7 +22,10 @@ use {
                 group::{CoordinatorGroup, GroupKind},
             },
         },
-        handlers::{offset_commit::handle, test_support::configured_topic_request},
+        handlers::{
+            offset_commit::handle,
+            test_support::{StartedBroker as BrokerResources, configured_topic_request},
+        },
         test_support::{
             UnixMillis, dispatch_context, encode_request, peer, principal, request_context,
             start_broker_with_authorizer_no_audit,
@@ -102,7 +104,8 @@ struct MemberlessGroup {
 /// Start a broker that holds `TOPIC`, since `OffsetCommit` answers
 /// `UNKNOWN_TOPIC_OR_PARTITION` for a topic the image does not hold.
 async fn start() -> StartedBroker {
-    let (broker, dir) = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let BrokerResources { broker, dir } =
+        start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
     broker.wait_until_group_coordinator_ready().await;
     let admin = principal("admin");
     let address = peer();

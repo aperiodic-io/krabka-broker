@@ -102,6 +102,7 @@ mod tests {
         assert2::{assert, check},
         bytes::Bytes,
         krabka_protocol::records::{Attributes, Record, RecordBatch},
+        krabka_records_legacy::{ParsedRecord, decode_message_set},
     };
 
     fn make_batch(codec: CompressionType, records: Vec<Record>) -> RecordBatch {
@@ -130,22 +131,15 @@ mod tests {
         }
     }
 
-    /// Version 4 and above returns the V2 batch unchanged.
-    /// Retain the encoded payload and decoder cursor in the original test scope.
-    macro_rules! legacy_records {
-        (
-            ($result:ident, $payload:ident, $bytes:ident, $cursor:ident, $records:ident),
-            $batch:expr,
-            $version:expr
-        ) => {
-            let $result = down_convert_for_fetch($batch, $version).unwrap();
-            let $payload = $result.expect("should have Some payload");
-            let RecordsPayload::Legacy($bytes) = $payload else {
-                panic!("expected Legacy");
-            };
-            let mut $cursor: &[u8] = &$bytes;
-            let $records = decode_message_set(&mut $cursor, $bytes.len()).unwrap();
+    fn legacy_records(batch: &RecordBatch, version: i16) -> Vec<ParsedRecord> {
+        let payload = down_convert_for_fetch(batch, version)
+            .unwrap()
+            .expect("should have Some payload");
+        let RecordsPayload::Legacy(bytes) = payload else {
+            panic!("expected Legacy");
         };
+        let mut cursor: &[u8] = &bytes;
+        decode_message_set(&mut cursor, bytes.len()).unwrap()
     }
 
     #[test]
@@ -212,10 +206,8 @@ mod tests {
     /// to the original records.
     #[test]
     fn uncompressed_batch_decodes_correctly() {
-        use krabka_records_legacy::decode_message_set;
-
         let batch = make_batch(CompressionType::None, vec![sample_record("hello", "world")]);
-        legacy_records!((result, payload, bytes, cur, recs), &batch, 3);
+        let recs = legacy_records(&batch, 3);
         assert!(recs.len() == 1);
         check!(recs[0].key.as_deref() == Some(b"hello".as_ref()));
         check!(recs[0].value.as_deref() == Some(b"world".as_ref()));
@@ -224,12 +216,10 @@ mod tests {
     /// Version 0 uses `Magic::V0`, which has no timestamps.
     #[test]
     fn version_0_uses_magic_v0() {
-        use krabka_records_legacy::decode_message_set;
-
         let mut batch = make_batch(CompressionType::None, vec![sample_record("k", "v")]);
         batch.base_timestamp = 1_700_000_000;
         batch.records[0].timestamp_delta = 500;
-        legacy_records!((result, payload, bytes, cur, recs), &batch, 0);
+        let recs = legacy_records(&batch, 0);
         // v0 has no timestamps; all timestamps are None
         assert!(recs[0].timestamp == None, "v0 should have no timestamps");
     }

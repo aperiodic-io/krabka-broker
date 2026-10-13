@@ -186,9 +186,20 @@ mod tests {
         add_voter_request().voter_id(voter_id).call()
     }
 
-    crate::handlers::raft_voter::test_dispatch!(80, AddRaftVoterRequest, AddRaftVoterResponse);
-
-    use {super::*, crate::test_support::start_broker_with_authorizer as start_broker};
+    krabka_macros::wire_codec_helpers! { test_context ["admin-client"]; }
+    krabka_macros::wire_test_driver! {
+        broker answer { request: AddRaftVoterRequest, response: AddRaftVoterResponse, api: 80 }
+    }
+    use {
+        super::*,
+        crate::{
+            handlers::{
+                raft_voter::{VoterCase, check_voter_case},
+                test_support::voter_cluster_id,
+            },
+            test_support::start_broker_with_authorizer as start_broker,
+        },
+    };
 
     /// Decode→encode round-trip at min and max versions. Guards against
     /// the response failing to encode at either end of the version range
@@ -214,22 +225,39 @@ mod tests {
     #[tokio::test]
     async fn handle_denies_cluster_alter_without_calling_reconfig() {
         let version = 1;
-        crate::handlers::raft_voter::check_denied_reconfiguration!(
-            (broker_handle, _dir, broker, ctx, resp),
+        check_voter_case(
+            VoterCase::Denied,
+            80,
             version,
-            "add-raft-voter denied"
-        );
+            |_| request(2),
+            || AddRaftVoterResponse {
+                error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
+                error_message: Some("add-raft-voter denied".into()),
+                ..Default::default()
+            },
+        )
+        .await;
     }
 
     #[tokio::test]
     async fn handle_rejects_negative_voter_id_before_reconfig() {
         let version = 1;
-        crate::handlers::raft_voter::check_invalid_voter!(
-            (broker_handle, _dir, broker, ctx, request, resp),
+        check_voter_case(
+            VoterCase::Invalid,
+            80,
             version,
-            AddRaftVoterResponse,
-            "Add voter request didn't include a valid voter"
-        );
+            |broker| {
+                let mut request = request(-7);
+                request.cluster_id = Some(voter_cluster_id(broker));
+                request
+            },
+            || AddRaftVoterResponse {
+                error_code: codes::INVALID_REQUEST,
+                error_message: Some("Add voter request didn't include a valid voter".into()),
+                ..Default::default()
+            },
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -241,7 +269,7 @@ mod tests {
             user ["admin"];
         };
         let mut request = request(2);
-        stamp_voter_request!(request, broker);
+        request.cluster_id = Some(voter_cluster_id(&broker));
         let resp = answer(&broker, version, &request, &ctx).await;
 
         assert!(

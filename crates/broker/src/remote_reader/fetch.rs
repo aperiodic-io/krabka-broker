@@ -6,6 +6,8 @@
 //! The segment resolution carries the defensive fallback that keeps a read
 //! answerable when the epoch-indexed lookup in the `RLMM` misses.
 
+#[cfg(test)]
+use crate::remote_log_manager::test_support as fixtures;
 use {
     super::RemoteReader,
     bytes::Bytes,
@@ -298,9 +300,9 @@ mod tests {
         crate::{
             remote_log_manager::test_support::local_backends,
             remote_reader::test_support::{
-                CachingReader, ReaderWithDir, caching_sparse_remote_segment_reader, empty_reader,
-                not_ready_reader, sparse_fixture_batch_bytes, sparse_fixture_second_batch_len,
-                sparse_remote_segment_reader, tp,
+                CachingReader, ReaderFixture, ReaderWithDir, caching_sparse_remote_segment_reader,
+                empty_reader, not_ready_reader, reader_fixture, sparse_fixture_batch_bytes,
+                sparse_fixture_second_batch_len, sparse_remote_segment_reader, tp,
             },
         },
         assert2::{assert, check},
@@ -487,9 +489,13 @@ mod tests {
     async fn fetch_batch_finds_segment_and_returns_first_batch() {
         // Pick an offset inside the second sealed segment. Each batch covers
         // two records, so base_offset=2 lives in segment[1] (base=2).
-        crate::remote_reader::test_support::populated_reader_fixture!(
-            log_dir, remote_dir, reader, log, exports
-        );
+        let ReaderFixture {
+            local: _log_dir,
+            remote: _remote_dir,
+            reader,
+            log,
+        } = reader_fixture();
+        let exports = log.tierable_segments();
         // Unwrap the log-layer `Offset` into this test's `i64` world at the seam.
         let target_offset = exports[1].base_offset.0;
 
@@ -564,7 +570,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_batch_returns_none_for_in_progress_segment() {
         let remote_dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) = local_backends(remote_dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
         let id = krabka_remote_storage::RemoteLogSegmentId::new(tp(), Uuid::new_v4());
         let md = RemoteLogSegmentMetadata::new(
             id,
@@ -653,9 +659,13 @@ mod tests {
         // present in the tierable-segment export, defaulted to 0 when the log
         // was written without an explicit epoch).
         // Pick an offset inside the first sealed segment.
-        crate::remote_reader::test_support::populated_reader_fixture!(
-            log_dir, remote_dir, reader, log, exports
-        );
+        let ReaderFixture {
+            local: _log_dir,
+            remote: _remote_dir,
+            reader,
+            log,
+        } = reader_fixture();
+        let exports = log.tierable_segments();
         // Unwrap the log-layer `Offset` into this test's `i64` world at the seam.
         let target_offset = exports[0].base_offset.0;
 

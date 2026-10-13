@@ -145,7 +145,7 @@ pub(super) fn img_with(
     }));
     img.apply(&MetadataRecord::V1Partition(PartitionRecord {
         partition_epoch: partition_epoch.0,
-        ..crate::reassignment_fields!(reassignment_partition(), assignment).call()
+        ..krabka_macros::reassignment_fields! { assignment { assignment } builder { reassignment_partition() } }.call()
     }));
     img
 }

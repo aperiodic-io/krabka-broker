@@ -59,7 +59,6 @@ use {
         delivery::{DELIVERY_MAX_DELAY_MS, DELIVERY_MODE, DELIVERY_SCHEDULE_MONOTONIC},
         diskless::DISKLESS,
         docs::topic_config_docs,
-        kafka_broker::roster,
         recovery::UNCLEAN_RECOVERY_STRATEGY,
         registry::{self, ConfigScope, ConfigType},
         schema::{SCHEMA_VALIDATION_KEY, SCHEMA_VALIDATION_MODE, SCHEMA_VALIDATION_VALUE},
@@ -108,42 +107,152 @@ const fn kafka(
 /// `internal.segment.bytes`, which `ConfigDef` marks internal. Internal only
 /// hides a key from `kafka-configs --help`; `LogConfig.validate` accepts it,
 /// so an alter carrying it succeeds against a real broker and must here too.
-const KAFKA_TOPIC_CONFIGS: &[KafkaTopicConfig] = roster! {
+const KAFKA_TOPIC_CONFIGS: &[KafkaTopicConfig] = &[
     kafka("cleanup.policy", ConfigType::List, Some("delete"), "delete"),
     kafka("compression.gzip.level", ConfigType::Int, Some("-1"), "6"),
     kafka("compression.lz4.level", ConfigType::Int, Some("9"), "9"),
-    kafka("compression.type", ConfigType::String, Some("producer"), "producer"),
+    kafka(
+        "compression.type",
+        ConfigType::String,
+        Some("producer"),
+        "producer",
+    ),
     kafka("compression.zstd.level", ConfigType::Int, Some("3"), "3"),
-    kafka("delete.retention.ms", ConfigType::Long, Some("86400000"), "86400000"),
-    kafka("file.delete.delay.ms", ConfigType::Long, Some("60000"), "60000"),
-    kafka("flush.messages", ConfigType::Long, Some("9223372036854775807"), "10000"),
-    kafka("flush.ms", ConfigType::Long, Some("9223372036854775807"), "1000"),
-    kafka("follower.replication.throttled.replicas", ConfigType::List, Some(""), "0:1"),
-    kafka("index.interval.bytes", ConfigType::Int, Some("4096"), "4096"),
+    kafka(
+        "delete.retention.ms",
+        ConfigType::Long,
+        Some("86400000"),
+        "86400000",
+    ),
+    kafka(
+        "file.delete.delay.ms",
+        ConfigType::Long,
+        Some("60000"),
+        "60000",
+    ),
+    kafka(
+        "flush.messages",
+        ConfigType::Long,
+        Some("9223372036854775807"),
+        "10000",
+    ),
+    kafka(
+        "flush.ms",
+        ConfigType::Long,
+        Some("9223372036854775807"),
+        "1000",
+    ),
+    kafka(
+        "follower.replication.throttled.replicas",
+        ConfigType::List,
+        Some(""),
+        "0:1",
+    ),
+    kafka(
+        "index.interval.bytes",
+        ConfigType::Int,
+        Some("4096"),
+        "4096",
+    ),
     kafka("internal.segment.bytes", ConfigType::Int, None, "1048576"),
-    kafka("leader.replication.throttled.replicas", ConfigType::List, Some(""), "0:1"),
+    kafka(
+        "leader.replication.throttled.replicas",
+        ConfigType::List,
+        Some(""),
+        "0:1",
+    ),
     kafka("local.retention.bytes", ConfigType::Long, Some("-2"), "-2"),
     kafka("local.retention.ms", ConfigType::Long, Some("-2"), "-2"),
-    kafka("max.compaction.lag.ms", ConfigType::Long, Some("9223372036854775807"), "86400000"),
-    kafka("max.message.bytes", ConfigType::Int, Some("1048588"), "1048588"),
-    kafka("message.timestamp.after.max.ms", ConfigType::Long, Some("3600000"), "3600000"),
-    kafka("message.timestamp.before.max.ms", ConfigType::Long, Some("9223372036854775807"), "3600000"),
-    kafka("message.timestamp.type", ConfigType::String, Some("CreateTime"), "CreateTime"),
-    kafka("min.cleanable.dirty.ratio", ConfigType::Double, Some("0.5"), "0.5"),
+    kafka(
+        "max.compaction.lag.ms",
+        ConfigType::Long,
+        Some("9223372036854775807"),
+        "86400000",
+    ),
+    kafka(
+        "max.message.bytes",
+        ConfigType::Int,
+        Some("1048588"),
+        "1048588",
+    ),
+    kafka(
+        "message.timestamp.after.max.ms",
+        ConfigType::Long,
+        Some("3600000"),
+        "3600000",
+    ),
+    kafka(
+        "message.timestamp.before.max.ms",
+        ConfigType::Long,
+        Some("9223372036854775807"),
+        "3600000",
+    ),
+    kafka(
+        "message.timestamp.type",
+        ConfigType::String,
+        Some("CreateTime"),
+        "CreateTime",
+    ),
+    kafka(
+        "min.cleanable.dirty.ratio",
+        ConfigType::Double,
+        Some("0.5"),
+        "0.5",
+    ),
     kafka("min.compaction.lag.ms", ConfigType::Long, Some("0"), "0"),
     kafka("min.insync.replicas", ConfigType::Int, Some("1"), "1"),
     kafka("preallocate", ConfigType::Boolean, Some("false"), "false"),
-    kafka("remote.log.copy.disable", ConfigType::Boolean, Some("false"), "false"),
-    kafka("remote.log.delete.on.disable", ConfigType::Boolean, Some("false"), "false"),
-    kafka("remote.storage.enable", ConfigType::Boolean, Some("false"), "false"),
+    kafka(
+        "remote.log.copy.disable",
+        ConfigType::Boolean,
+        Some("false"),
+        "false",
+    ),
+    kafka(
+        "remote.log.delete.on.disable",
+        ConfigType::Boolean,
+        Some("false"),
+        "false",
+    ),
+    kafka(
+        "remote.storage.enable",
+        ConfigType::Boolean,
+        Some("false"),
+        "false",
+    ),
     kafka("retention.bytes", ConfigType::Long, Some("-1"), "-1"),
-    kafka("retention.ms", ConfigType::Long, Some("604800000"), "604800000"),
-    kafka("segment.bytes", ConfigType::Int, Some("1073741824"), "1073741824"),
-    kafka("segment.index.bytes", ConfigType::Int, Some("10485760"), "10485760"),
+    kafka(
+        "retention.ms",
+        ConfigType::Long,
+        Some("604800000"),
+        "604800000",
+    ),
+    kafka(
+        "segment.bytes",
+        ConfigType::Int,
+        Some("1073741824"),
+        "1073741824",
+    ),
+    kafka(
+        "segment.index.bytes",
+        ConfigType::Int,
+        Some("10485760"),
+        "10485760",
+    ),
     kafka("segment.jitter.ms", ConfigType::Long, Some("0"), "0"),
-    kafka("segment.ms", ConfigType::Long, Some("604800000"), "604800000"),
-    kafka("unclean.leader.election.enable", ConfigType::Boolean, Some("false"), "false"),
-};
+    kafka(
+        "segment.ms",
+        ConfigType::Long,
+        Some("604800000"),
+        "604800000",
+    ),
+    kafka(
+        "unclean.leader.election.enable",
+        ConfigType::Boolean,
+        Some("false"),
+        "false",
+    ),
+];
 
 /// The topic configs Apache Kafka trunk defines beyond 4.3.1, from
 /// `storage/src/main/java/org/apache/kafka/storage/internals/log/LogConfig.java`
@@ -151,12 +260,22 @@ const KAFKA_TOPIC_CONFIGS: &[KafkaTopicConfig] = roster! {
 /// next Kafka release. krabka serves them only under
 /// `unstable.api.versions.enable`; without it, as on Kafka 4.3.1, each is an
 /// unknown topic config.
-const KAFKA_TRUNK_TOPIC_CONFIGS: &[KafkaTopicConfig] = roster! {
-    kafka("errors.deadletterqueue.group.enable", ConfigType::Boolean, Some("false"), "false"),
-    kafka("max.decompressed.message.bytes", ConfigType::Int, Some("2147483639"), "2147483639"),
+const KAFKA_TRUNK_TOPIC_CONFIGS: &[KafkaTopicConfig] = &[
+    kafka(
+        "errors.deadletterqueue.group.enable",
+        ConfigType::Boolean,
+        Some("false"),
+        "false",
+    ),
+    kafka(
+        "max.decompressed.message.bytes",
+        ConfigType::Int,
+        Some("2147483639"),
+        "2147483639",
+    ),
     kafka("remote.copy.lag.bytes", ConfigType::Long, Some("-1"), "-1"),
     kafka("remote.copy.lag.ms", ConfigType::Long, Some("0"), "0"),
-};
+];
 
 /// Every Kafka topic config, released and trunk.
 fn kafka_rosters() -> impl Iterator<Item = &'static KafkaTopicConfig> {

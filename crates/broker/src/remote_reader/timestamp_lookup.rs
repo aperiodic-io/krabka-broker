@@ -87,8 +87,9 @@ impl RemoteReader {
 mod tests {
     use {
         crate::remote_reader::test_support::{
-            ReaderWithDir, append_time_remote_segment_reader, compressed_remote_segment_reader,
-            sparse_remote_segment_reader, sparse_remote_segment_reader_with_max_timestamp, tp,
+            ReaderFixture, ReaderWithDir, append_time_remote_segment_reader,
+            compressed_remote_segment_reader, reader_fixture, sparse_remote_segment_reader,
+            sparse_remote_segment_reader_with_max_timestamp, tp,
             unordered_timestamps_remote_segment_reader,
         },
         assert2::assert,
@@ -96,9 +97,12 @@ mod tests {
 
     #[tokio::test]
     async fn timestamp_lookup_excludes_records_before_the_logical_floor() {
-        crate::remote_reader::test_support::populated_reader_fixture!(
-            log_dir, remote_dir, reader, log
-        );
+        let ReaderFixture {
+            local: _log_dir,
+            remote: _remote_dir,
+            reader,
+            log,
+        } = reader_fixture();
         let end = log.tierable_segments().last().unwrap().last_offset.0 + 1;
         for minimum in [0, 1, 3, end - 1, end, i64::MAX] {
             let expected = (minimum < end).then_some((minimum, 0));
@@ -135,9 +139,13 @@ mod tests {
 
     #[tokio::test]
     async fn offset_for_timestamp_locates_remote_segment() {
-        crate::remote_reader::test_support::populated_reader_fixture!(
-            log_dir, remote_dir, reader, log, exports
-        );
+        let ReaderFixture {
+            local: _log_dir,
+            remote: _remote_dir,
+            reader,
+            log,
+        } = reader_fixture();
+        let exports = log.tierable_segments();
         // The segment metadata copies `max_timestamp` from the export; the
         // log's batch builder leaves base_timestamp at 0 by default, so
         // every batch's max_timestamp is 0 — so segments' max_timestamps are
@@ -221,9 +229,12 @@ mod tests {
 
     #[tokio::test]
     async fn offset_for_timestamp_returns_none_when_past_last() {
-        crate::remote_reader::test_support::populated_reader_fixture!(
-            log_dir, remote_dir, reader, _log
-        );
+        let ReaderFixture {
+            local: _log_dir,
+            remote: _remote_dir,
+            reader,
+            log: _log,
+        } = reader_fixture();
         // All segments have max_ts=0 by construction (see test above); any
         // strictly-positive target is past every remote segment.
         let got = reader

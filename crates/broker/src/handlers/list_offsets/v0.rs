@@ -1,5 +1,7 @@
 //! The legacy `ListOffsets` v0 wire shape and segment-boundary lookup.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         DescribeSplit, IndexedTopic, PartitionRow, TopicPartitions,
@@ -286,20 +288,37 @@ mod tests {
         std::{sync::Arc, time::Duration},
     };
 
-    macro_rules! topic_header {
-        ($response:ident, $topic:expr, $partitions:expr) => {
-            assert!(get_array_len(&mut $response, false).unwrap() == 1);
-            assert!(get_string_owned(&mut $response).unwrap() == $topic);
-            assert!(get_array_len(&mut $response, false).unwrap() == $partitions);
-        };
+    struct ConnectedBroker {
+        handle: BrokerHandle,
+        directory: tempfile::TempDir,
+        client: krabka_client_core::Client,
+    }
+    async fn connected_broker() -> ConnectedBroker {
+        let HandlerStartedBroker {
+            broker: handle,
+            dir: directory,
+        } = start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
+        let client = client_for(&handle).await;
+        ConnectedBroker {
+            handle,
+            directory,
+            client,
+        }
     }
 
+    fn check_topic_header(response: &mut &[u8], topic: &str, partitions: usize) {
+        assert!(get_array_len(response, false).unwrap() == 1);
+        assert!(get_string_owned(response).unwrap() == topic);
+        assert!(get_array_len(response, false).unwrap() == partitions);
+    }
     #[tokio::test]
     async fn max_num_offsets_caps_legacy_segment_boundaries() {
         const TOPIC: &str = "list-offsets-v0-max";
-        let (broker_handle, _dir) =
-            start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
-        let client = client_for(&broker_handle).await;
+        let ConnectedBroker {
+            handle: broker_handle,
+            directory: _dir,
+            client,
+        } = connected_broker().await;
         create_topic(&client, TOPIC, vec![
             krabka_protocol::owned::create_topics_request::CreatableTopicConfig {
                 name: "internal.segment.bytes".into(),
@@ -338,7 +357,7 @@ mod tests {
 
         let response = answer(&broker_handle, &request).await;
         let mut response: &[u8] = &response;
-        topic_header!(response, TOPIC, 1);
+        check_topic_header(&mut response, TOPIC, 1);
         assert!(get_i32(&mut response).unwrap() == 0);
         assert!(get_i16(&mut response).unwrap() == codes::NONE);
         let count = get_array_len(&mut response, false).unwrap();
@@ -408,9 +427,11 @@ mod tests {
     #[tokio::test]
     async fn duplicate_partition_gets_invalid_request_on_every_row() {
         const TOPIC: &str = "list-offsets-v0-duplicate";
-        let (broker_handle, _dir) =
-            start_broker_with_authorizer_no_audit(Arc::new(AllowAllAuthorizer)).await;
-        let client = client_for(&broker_handle).await;
+        let ConnectedBroker {
+            handle: broker_handle,
+            directory: _dir,
+            client,
+        } = connected_broker().await;
         create_topic(&client, TOPIC, vec![]).await;
         broker_handle.wait_until_partition_present(TOPIC, 0).await;
 
@@ -430,7 +451,7 @@ mod tests {
 
         let response = answer(&broker_handle, &request).await;
         let mut response: &[u8] = &response;
-        topic_header!(response, TOPIC, 2);
+        check_topic_header(&mut response, TOPIC, 2);
         for _ in 0..2 {
             assert!(get_i32(&mut response).unwrap() == 0);
             assert!(get_i16(&mut response).unwrap() == codes::INVALID_REQUEST);

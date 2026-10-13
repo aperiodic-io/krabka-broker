@@ -18,8 +18,8 @@ use {
             UNKNOWN_SERVER_ERROR,
         },
         handlers::delegation_token_test_support::{
-            DAY_MS as RENEW_24H_MS, SecretProvision, anonymous, authed, test_controller,
-            token_authed,
+            DAY_MS as RENEW_24H_MS, SecretProvision, TokenFixture, anonymous, authed,
+            test_controller, token_authed,
         },
         test_support::{KafkaErrorCode, UnixMillis},
     },
@@ -106,7 +106,11 @@ fn refusal(
 /// refusal mints a token, and each names the owner and the requester.
 #[tokio::test]
 async fn refusals_follow_kafka_order_and_name_both_principals() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     let self_mint = CreateDelegationTokenRequest {
         max_lifetime_ms: -1,
         ..Default::default()
@@ -507,7 +511,11 @@ async fn create_tokens_acl_admits_minting_for_that_owner_only() {
 /// instead of refusing a lifetime that runs past it.
 #[tokio::test]
 async fn lifetime_past_i64_max_saturates() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     let req = CreateDelegationTokenRequest {
         max_lifetime_ms: -1,
         ..Default::default()
@@ -538,7 +546,11 @@ async fn lifetime_past_i64_max_saturates() {
 /// 1; a host that still passes one mints nothing.
 #[tokio::test]
 async fn non_positive_configured_periods_mint_nothing() {
-    token_fixture!(dir, controller, secret);
+    let TokenFixture {
+        directory: _dir,
+        controller,
+        secret,
+    } = TokenFixture::new().await;
     let req = CreateDelegationTokenRequest {
         max_lifetime_ms: -1,
         ..Default::default()

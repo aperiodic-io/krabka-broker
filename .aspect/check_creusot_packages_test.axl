@@ -32,19 +32,33 @@ _BY_CFG_REQUIRES = "#[cfg_attr(\n    creusot,\n    requires(true)\n)]\npub fn ch
 _BY_CFG_ENSURES = "#[ cfg_attr ( creusot , ensures(true) ) ]\npub fn ensured_cfg() {}\n"
 _BY_ENSURES = "#[ensures(true)]\npub fn third() {}\n"
 _ORDINARY = "pub fn ordinary() {}\n"
+_GENERATED_CONTRACTS = """pub fn expand() {
+    moxy::template! {
+        #[requires(true)]
+        #[ensures(result)]
+        pub fn checked() -> bool { true }
+    }
+}
+"""
 
-def _package(name, directory = "/w/crates/x", has_dependency = False):
-    return struct(name = name, directory = directory, has_dependency = has_dependency)
+def _package(name, directory = "/w/crates/x", has_dependency = False, is_proc_macro = False):
+    return struct(
+        name = name,
+        directory = directory,
+        has_dependency = has_dependency,
+        is_proc_macro = is_proc_macro,
+    )
 
 def _member(name):
     return "path+file:///w/crates/%s#%s@0.1.0" % (name, name)
 
-def _manifest(name, dependencies):
+def _manifest(name, dependencies, kind = "lib"):
     return {
         "id": _member(name),
         "name": name,
         "manifest_path": "/w/crates/%s/Cargo.toml" % name,
         "dependencies": [{"name": dependency} for dependency in dependencies],
+        "targets": [{"kind": [kind]}],
     }
 
 def _test_a_bare_contract_attribute_is_a_contract(_ctx):
@@ -100,10 +114,11 @@ def _test_ordinary_rust_holds_no_contract(_ctx):
 
 def _test_workspace_packages_reads_the_members(_ctx):
     metadata = {
-        "workspace_members": [_member("by-dependency"), _member("ordinary")],
+        "workspace_members": [_member("by-dependency"), _member("ordinary"), _member("generator")],
         "packages": [
             _manifest("ordinary", ["serde"]),
             _manifest("by-dependency", ["creusot-std", "serde"]),
+            _manifest("generator", ["moxy"], kind = "proc-macro"),
             {
                 "id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.0",
                 "name": "serde",
@@ -120,11 +135,19 @@ def _test_workspace_packages_reads_the_members(_ctx):
                 name = "by-dependency",
                 directory = "/w/crates/by-dependency",
                 has_dependency = True,
+                is_proc_macro = False,
+            ),
+            struct(
+                name = "generator",
+                directory = "/w/crates/generator",
+                has_dependency = False,
+                is_proc_macro = True,
             ),
             struct(
                 name = "ordinary",
                 directory = "/w/crates/ordinary",
                 has_dependency = False,
+                is_proc_macro = False,
             ),
         ],
     )
@@ -221,6 +244,29 @@ def _test_discover_sweeps_a_crate_source_tree(ctx):
         ["by-contract", "by-dependency"],
     )
 
+def _test_proc_macro_tokens_do_not_classify_the_generator_as_proof_code(ctx):
+    root = temp_tree(ctx, {
+        "generator/src/lib.rs": _GENERATED_CONTRACTS,
+        "verified-generator/src/lib.rs": _GENERATED_CONTRACTS,
+        "consumer/src/lib.rs": _BY_REQUIRES,
+    })
+    packages = [
+        _package("generator", directory = root + "/generator", is_proc_macro = True),
+        _package(
+            "verified-generator",
+            directory = root + "/verified-generator",
+            is_proc_macro = True,
+            has_dependency = True,
+        ),
+        _package("consumer", directory = root + "/consumer"),
+    ]
+    check_eq("the generated tokens resemble contracts", has_contract(_GENERATED_CONTRACTS), True)
+    check_eq(
+        "the dependency still covers generators, and real consumer contracts still count",
+        discover(ctx.std.fs, packages),
+        ["consumer", "verified-generator"],
+    )
+
 def _cargo(ctx, workspace, argv):
     result = (
         ctx.std.process.command("cargo")
@@ -235,10 +281,12 @@ def _cargo(ctx, workspace, argv):
         fail("cargo %s failed:\n%s" % (" ".join(argv), result.stderr.strip()))
     return result.stdout
 
-def _crate(name, source, dependency = False):
+def _crate(name, source, dependency = False, proc_macro = False):
     manifest = '[package]\nname = "%s"\nversion = "0.1.0"\nedition = "2024"\n' % name
     if dependency:
         manifest += '\n[dependencies]\ncreusot-std = { path = "../../../creusot-std" }\n'
+    if proc_macro:
+        manifest += "\n[lib]\nproc-macro = true\n"
     return {
         "workspace/crates/%s/Cargo.toml" % name: manifest,
         "workspace/crates/%s/src/lib.rs" % name: source,
@@ -260,6 +308,8 @@ def _test_a_real_cargo_workspace_is_swept_end_to_end(ctx):
         _crate("by-cfg-ensures", _BY_CFG_ENSURES),
         _crate("third-kernel", _BY_ENSURES),
         _crate("ordinary", _ORDINARY),
+        _crate("generator", _GENERATED_CONTRACTS, proc_macro = True),
+        _crate("verified-generator", _ORDINARY, dependency = True, proc_macro = True),
     ]:
         files.update(crate)
 
@@ -273,12 +323,12 @@ def _test_a_real_cargo_workspace_is_swept_end_to_end(ctx):
     check_eq(
         "every route into Creusot's scope, and nothing else",
         discovered,
-        ["by-cfg-ensures", "by-cfg-requires", "by-dependency", "by-requires", "third-kernel"],
+        ["by-cfg-ensures", "by-cfg-requires", "by-dependency", "by-requires", "third-kernel", "verified-generator"],
     )
     check_eq(
         "what a half-populated proofs job would miss",
         uncovered(discovered, ["by-dependency", "by-requires"]),
-        ["by-cfg-ensures", "by-cfg-requires", "third-kernel"],
+        ["by-cfg-ensures", "by-cfg-requires", "third-kernel", "verified-generator"],
     )
 
 check_creusot_packages_tests = suite("check-creusot-packages", [
@@ -300,6 +350,7 @@ check_creusot_packages_tests = suite("check-creusot-packages", [
     _test_a_script_that_no_longer_proves_the_array_is_reported,
     _test_a_missing_array_is_reported,
     _test_discover_sweeps_a_crate_source_tree,
+    _test_proc_macro_tokens_do_not_classify_the_generator_as_proof_code,
     _test_a_real_cargo_workspace_is_swept_end_to_end,
 ])
 

@@ -58,6 +58,11 @@ mod time_util {
     }
 }
 
+struct Cadence {
+    first: Duration,
+    later: Duration,
+}
+
 #[derive(Default)]
 struct Shutdown {
     cancelled: AtomicBool,
@@ -109,7 +114,7 @@ async fn drive(
     let tick = 99;
     krabka_macros::sweep_loop! {
         timer [evaluated(&events, "timer", &*timer)];
-        cadence [(evaluated(&events, "first", first), evaluated(&events, "later", Duration::from_millis(7)))];
+        cadence [Cadence { first: evaluated(&events, "first", first), later: evaluated(&events, "later", Duration::from_millis(7)) }];
         shutdown [evaluated(&events, "shutdown", &*shutdown)];
         task [evaluated(&events, "task", "test sweeper")];
         sweep {

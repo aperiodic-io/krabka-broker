@@ -120,16 +120,18 @@ mod tests {
         super::*,
         crate::{
             codes::{DELEGATION_TOKEN_EXPIRED, DELEGATION_TOKEN_OWNER_MISMATCH},
-            handlers::delegation_token_test_support::{
-                DAY_MS, MutationSeedSetup, TokenExpiryRule, TokenExpirySetup, TokenMutationIndex,
-                TokenMutationRefusalSetup, TokenPeriodMillis, TokenPersistence, authed,
-                in_mutation_window, mutation_credential_refusals, ordinary_ownership_refusals,
-                stored_expiry, test_controller,
+            handlers::{
+                delegation_token_test_support as token_fixtures,
+                delegation_token_test_support::{
+                    DAY_MS, MutationExecution, SeededToken, TokenExpiryRule, TokenExpirySetup,
+                    TokenFixture, TokenMutationRefusalSetup, TokenPeriodMillis, TokenPersistence,
+                    authed, in_mutation_window, mutation_credential_refusals,
+                    ordinary_ownership_refusals, stored_expiry,
+                },
             },
             test_support::{KafkaErrorCode, UnixMillis},
         },
         assert2::assert,
-        tempfile::TempDir,
     };
 
     /// Refusals come in Kafka's order, carry Kafka's expiry, and leave the
@@ -155,57 +157,59 @@ mod tests {
 
     #[tokio::test]
     async fn refusals_follow_kafka_order() {
-        refusal_token_fixture!((_dir, controller, secret, live, expired));
-
-        let cases = mutation_credential_refusals(&live.0)
-            .into_iter()
-            .chain(ordinary_ownership_refusals(&live.0))
-            .chain([
-                TokenMutationRefusalSetup {
-                    name: "foreign caller, expired token",
-                    authentication: authed("eve"),
-                    hmac: expired.0.clone(),
-                    period: TokenPeriodMillis(0),
-                    error: KafkaErrorCode(DELEGATION_TOKEN_OWNER_MISMATCH),
-                    ..Default::default()
-                },
-                TokenMutationRefusalSetup {
-                    name: "owner, expired token",
-                    hmac: expired.0.clone(),
-                    period: TokenPeriodMillis(0),
-                    error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
-                    ..Default::default()
-                },
-                TokenMutationRefusalSetup {
-                    name: "renewer, expired token",
-                    authentication: authed("bob"),
-                    hmac: expired.0.clone(),
-                    period: TokenPeriodMillis(1_000),
-                    error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
-                    ..Default::default()
-                },
-            ]);
-        for case in cases {
-            let resp = handle(
-                &ExpireDelegationTokenRequest {
-                    hmac: case.hmac.into(),
-                    expiry_time_period_ms: case.period.0,
-                    ..Default::default()
-                },
-                &case.authentication,
-                case.secret.get(&secret),
-                &*controller,
-            )
+        token_fixtures::check_refusals()
+            .cases(|live, expired| {
+                mutation_credential_refusals(&live.hmac)
+                    .into_iter()
+                    .chain(ordinary_ownership_refusals(&live.hmac))
+                    .chain([
+                        TokenMutationRefusalSetup {
+                            name: "foreign caller, expired token",
+                            authentication: authed("eve"),
+                            hmac: expired.hmac.clone(),
+                            period: TokenPeriodMillis(0),
+                            error: KafkaErrorCode(DELEGATION_TOKEN_OWNER_MISMATCH),
+                            ..Default::default()
+                        },
+                        TokenMutationRefusalSetup {
+                            name: "owner, expired token",
+                            hmac: expired.hmac.clone(),
+                            period: TokenPeriodMillis(0),
+                            error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
+                            ..Default::default()
+                        },
+                        TokenMutationRefusalSetup {
+                            name: "renewer, expired token",
+                            authentication: authed("bob"),
+                            hmac: expired.hmac.clone(),
+                            period: TokenPeriodMillis(1_000),
+                            error: KafkaErrorCode(DELEGATION_TOKEN_EXPIRED),
+                            ..Default::default()
+                        },
+                    ])
+            })
+            .mutation(async |controller, secret, case| {
+                let resp = handle(
+                    &ExpireDelegationTokenRequest {
+                        hmac: case.hmac.into(),
+                        expiry_time_period_ms: case.period.0,
+                        ..Default::default()
+                    },
+                    &case.authentication,
+                    case.secret.get(secret),
+                    controller,
+                )
+                .await;
+                krabka_macros::token_refusal_result!(ExpireDelegationTokenResponse, case, resp)
+            })
+            .verify(|controller, live, expired| {
+                assert!(
+                    stored_expiry(controller, "live") == Some(live.expires_at)
+                        && stored_expiry(controller, "expired") == Some(expired.expires_at)
+                );
+            })
+            .call()
             .await;
-            check_token_mutation_refusal!(resp, case, ExpireDelegationTokenResponse);
-        }
-        assert!(
-            (
-                stored_expiry(&controller, "live"),
-                stored_expiry(&controller, "expired")
-            ) == (Some(live.1), Some(expired.1))
-        );
-        controller.cancel().await;
     }
 
     /// The owner or a renewer deletes the token for a negative period, even an
@@ -213,7 +217,11 @@ mod tests {
     /// `min(max, now + period)`.
     #[tokio::test]
     async fn expires_to_kafka_deadline() {
-        token_fixture!(dir, controller, secret);
+        let TokenFixture {
+            directory: _dir,
+            controller,
+            secret,
+        } = TokenFixture::new().await;
 
         let cases = [
             ExpiryCaseSetup::default(),
@@ -277,17 +285,23 @@ mod tests {
             },
         ) in cases.into_iter().enumerate()
         {
-            seeded_token_fixture!(
-                (token_id, hmac, seeded_at, max_timestamp_ms),
-                &controller,
-                MutationSeedSetup {
-                    index: TokenMutationIndex(index),
-                    expiry_delta,
-                    maximum_delta
-                }
-            );
+            let SeededToken {
+                token_id,
+                hmac,
 
-            let (window, resp) = in_mutation_window(handle(
+                maximum: max_timestamp_ms,
+            } = token_fixtures::seed_mutation_token()
+                .controller(&controller)
+                .index(index)
+                .expiry_delta(expiry_delta)
+                .maximum_delta(maximum_delta)
+                .call()
+                .await;
+
+            let MutationExecution {
+                window,
+                response: resp,
+            } = in_mutation_window(handle(
                 &ExpireDelegationTokenRequest {
                     hmac: hmac.into(),
                     expiry_time_period_ms: period.0,
@@ -298,10 +312,17 @@ mod tests {
                 &*controller,
             ))
             .await;
-            check_token_expiry!(case, resp, TokenExpirySetup {
+            let expiry_setup = TokenExpirySetup {
                 window,
                 expectation: rule.with_cap(UnixMillis(max_timestamp_ms)),
-            });
+            };
+            expiry_setup.check(
+                case,
+                token_fixtures::TokenMutationOutcome::from_wire(
+                    resp.error_code,
+                    resp.expiry_timestamp_ms,
+                ),
+            );
             let stored = stored_expiry(&controller, &token_id);
             let want = match persistence {
                 TokenPersistence::Deleted => None,

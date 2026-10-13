@@ -191,7 +191,7 @@ mod tests {
 
     use {
         super::*,
-        crate::broker::BrokerHandle,
+        crate::{authorizer::AllowAllAuthorizer, broker::BrokerHandle},
         assert2::assert,
         krabka_metadata::{BrokerRegistrationRecord, MetadataImage, MetadataRecord, TopicRecord},
         std::sync::Arc,
@@ -304,19 +304,6 @@ mod tests {
     /// fixed order `GROUP`, `CLIENT_METRICS`, `BROKER_LOGGER`, `BROKER`,
     /// `TOPIC`, and broker rows come from `getBrokerNodes(listenerName)`, so
     /// broker 3 (SSL only) is absent. v0 lists client metrics only.
-    macro_rules! listing_fixture {
-        (($handle:ident, $directory:ident, $broker:ident, $context:ident), $topic:expr) => {
-            let ($handle, $directory) =
-                start_broker(Arc::new(crate::authorizer::AllowAllAuthorizer)).await;
-            seed_topic(&$handle, $topic).await;
-            let $broker = $handle.broker_arc_for_test();
-            krabka_macros::request_test_identity! {
-                bind($context);
-                user ["admin"];
-            };
-        };
-    }
-
     #[test]
     fn collect_resources_matches_kafka_filter_and_order() {
         let img = populated_image();
@@ -401,10 +388,23 @@ mod tests {
     }
 
     use crate::test_support::{
-        broker_registration, describe_configs_acl_cases, grant_optional_cluster_operation,
-        start_broker_with_authorizer_no_audit as start_broker,
+        StartedBroker as HandlerStartedBroker, broker_registration, describe_configs_acl_cases,
+        grant_optional_cluster_operation, start_broker_with_authorizer_no_audit as start_broker,
     };
 
+    /// Request the live topic enumeration, including broker-owned topics.
+    fn topic_listing_request() -> ListConfigResourcesRequest {
+        ListConfigResourcesRequest {
+            resource_types: vec![RESOURCE_TYPE_TOPIC],
+            ..Default::default()
+        }
+    }
+    /// Start the no-audit listing broker, then commit its topic before creating a caller.
+    async fn listing_broker(topic: &str) -> HandlerStartedBroker {
+        let started = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        seed_topic(&started.broker, topic).await;
+        started
+    }
     async fn seed_topic(handle: &BrokerHandle, name: &str) {
         handle
             .broker_arc_for_test()
@@ -426,7 +426,11 @@ mod tests {
     /// past every type KIP-1142 defines.
     #[tokio::test]
     async fn v1_unsupported_resource_type_fails_the_whole_request() {
-        listing_fixture!((broker_handle, _dir, broker, ctx), "t-a");
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, ctx);
+            boot [listing_broker("t-a")];
+            user ["admin"];
+        );
 
         let unsupported = krabka_macros::unthrottled_wire!(ListConfigResourcesResponse {
             error_code: codes::UNSUPPORTED_VERSION,
@@ -463,12 +467,13 @@ mod tests {
     /// pattern as `cluster_describe_configs_gates_the_enumeration`.
     #[tokio::test]
     async fn v1_all_supported_types_still_succeed() {
-        listing_fixture!((broker_handle, _dir, broker, ctx), "t-a");
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, ctx);
+            boot [listing_broker("t-a")];
+            user ["admin"];
+        );
 
-        let req = ListConfigResourcesRequest {
-            resource_types: vec![RESOURCE_TYPE_TOPIC],
-            ..Default::default()
-        };
+        let req = topic_listing_request();
         let resp = handle(&broker, &req, VERSION, &ctx);
 
         let topics = listed_topics(&broker, "t-a");
@@ -487,10 +492,7 @@ mod tests {
             boot [start_broker] deny_all;
             user ["alice"];
         };
-        let req = ListConfigResourcesRequest {
-            resource_types: vec![RESOURCE_TYPE_TOPIC],
-            ..Default::default()
-        };
+        let req = topic_listing_request();
 
         let resp = handle(&broker, &req, VERSION, &ctx);
 
@@ -508,16 +510,16 @@ mod tests {
     /// `CLUSTER_AUTHORIZATION_FAILED` and no resources.
     #[tokio::test]
     async fn cluster_describe_configs_gates_the_enumeration() {
-        let (broker_handle, _dir) = start_broker(Arc::new(SimpleAclAuthorizer::new(
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(SimpleAclAuthorizer::new(
             std::collections::HashSet::new(),
         )))
         .await;
         seed_topic(&broker_handle, "orders").await;
         let broker = broker_handle.broker_arc_for_test();
-        let req = ListConfigResourcesRequest {
-            resource_types: vec![RESOURCE_TYPE_TOPIC],
-            ..Default::default()
-        };
+        let req = topic_listing_request();
         let topics = listed_topics(&broker, "orders");
         let allowed = krabka_macros::unthrottled_wire!(ListConfigResourcesResponse {
             error_code: codes::NONE,
@@ -546,11 +548,12 @@ mod tests {
 
     #[tokio::test]
     async fn successful_handler_response_preserves_resource_fields() {
-        listing_fixture!((broker_handle, _dir, broker, ctx), "orders");
-        let req = ListConfigResourcesRequest {
-            resource_types: vec![RESOURCE_TYPE_TOPIC],
-            ..Default::default()
-        };
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, ctx);
+            boot [listing_broker("orders")];
+            user ["admin"];
+        );
+        let req = topic_listing_request();
 
         let resp = handle(&broker, &req, VERSION, &ctx);
 

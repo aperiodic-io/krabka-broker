@@ -112,6 +112,7 @@ impl BrokerMetrics {
 mod tests {
     use {
         super::*,
+        crate::metrics::{MetricCounterCase, assert_metric_counter_cases},
         assert2::assert,
         prometheus_client::metrics::{counter::Counter, family::Family},
     };
@@ -209,12 +210,32 @@ mod tests {
             partition: 1,
         };
         let cases = [
-            ("bytes_in", &m.partition_bytes_in, &lbl_p0, 1024),
-            ("bytes_in", &m.partition_bytes_in, &lbl_p1, 512),
-            ("bytes_out", &m.partition_bytes_out, &lbl_p0, 2048),
-            ("cpu_micros", &m.partition_cpu_micros, &lbl_p0, 500),
+            MetricCounterCase {
+                name: "bytes_in",
+                family: &m.partition_bytes_in,
+                label: &lbl_p0,
+                expected: 1024,
+            },
+            MetricCounterCase {
+                name: "bytes_in",
+                family: &m.partition_bytes_in,
+                label: &lbl_p1,
+                expected: 512,
+            },
+            MetricCounterCase {
+                name: "bytes_out",
+                family: &m.partition_bytes_out,
+                label: &lbl_p0,
+                expected: 2048,
+            },
+            MetricCounterCase {
+                name: "cpu_micros",
+                family: &m.partition_cpu_micros,
+                label: &lbl_p0,
+                expected: 500,
+            },
         ];
-        crate::metrics::assert_metric_counter_cases!(cases);
+        assert_metric_counter_cases(&cases);
         // `partition_disk_bytes` is a Gauge family (i64), so it stays
         // out of the Counter table above.
         let disk_p0 = m.partition_disk_bytes.get_or_create(&lbl_p0).get();

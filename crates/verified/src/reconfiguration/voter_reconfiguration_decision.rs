@@ -61,16 +61,24 @@ pub fn voter_reconfiguration_decision(
 }
 
 // Add and Remove both publish only the successor voter-set record.
-macro_rules! admit_voter_set_change {
-    ($version:expr; { $($count:tt)+ }) => {
-        VoterReconfigurationDecision::Admit(VoterReconfigurationPlan {
-            $($count)+,
-            next_kraft_version: $version,
-            write_voters: true,
-            write_kraft_version: false,
-            preflight_only: false,
-        })
-    };
+#[cfg_attr(creusot, ensures(match result {
+    VoterReconfigurationDecision::Admit(plan) =>
+        plan.next_voter_count@ == next_voter_count@
+        && plan.next_kraft_version@ == next_kraft_version@
+        && plan.write_voters && !plan.write_kraft_version && !plan.preflight_only,
+    _ => false,
+}))]
+fn admit_voter_set_change(
+    next_voter_count: usize,
+    next_kraft_version: u16,
+) -> VoterReconfigurationDecision {
+    VoterReconfigurationDecision::Admit(VoterReconfigurationPlan {
+        next_voter_count,
+        next_kraft_version,
+        write_voters: true,
+        write_kraft_version: false,
+        preflight_only: false,
+    })
 }
 
 /// `AddVoterHandler`: version, duplicate id, `ApiVersions` range, catch-up.
@@ -117,7 +125,7 @@ fn add_decision(voters: CurrentVoterSet, target: TargetVoter) -> VoterReconfigur
     let Some(next_voter_count) = voters.voter_count.checked_add(1) else {
         return VoterReconfigurationDecision::InvalidVersionTransition;
     };
-    admit_voter_set_change!(voters.kraft_version; { next_voter_count })
+    admit_voter_set_change(next_voter_count, voters.kraft_version)
 }
 
 /// `RemoveVoterHandler`: version, then whether `VoterSet.removeVoter`
@@ -143,7 +151,7 @@ fn remove_decision(voters: CurrentVoterSet, target: TargetVoter) -> VoterReconfi
     {
         return VoterReconfigurationDecision::VoterNotFound;
     }
-    admit_voter_set_change!(voters.kraft_version; { next_voter_count: voters.voter_count - 1 })
+    admit_voter_set_change(voters.voter_count - 1, voters.kraft_version)
 }
 
 /// `UpdateVoterHandler`: `ApiVersions` range, then the voter lookup.

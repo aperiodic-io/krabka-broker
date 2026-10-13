@@ -6,6 +6,8 @@
 //! Copies still in progress stay invisible, so a partially copied segment
 //! never widens the range a client sees.
 
+#[cfg(test)]
+use crate::remote_log_manager::test_support as fixtures;
 use {
     super::{RemoteReader, TieredOffset},
     krabka_remote_storage::{
@@ -109,7 +111,7 @@ mod tests {
         crate::{
             remote_log_manager::test_support::local_backends,
             remote_reader::test_support::{
-                ReaderWithDir, not_ready_reader,
+                ReaderFixture, ReaderWithDir, not_ready_reader, reader_fixture,
                 reader_with_metadata as assigned_reader_with_metadata, tp,
             },
         },
@@ -122,7 +124,7 @@ mod tests {
 
     fn reader_with_metadata() -> ReaderWithDir {
         let remote_dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) = local_backends(remote_dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
         ReaderWithDir {
             reader: RemoteReader::new(rsm, rlmm),
             dir: remote_dir,
@@ -290,9 +292,13 @@ mod tests {
 
     #[tokio::test]
     async fn earliest_offset_returns_lowest_finished_start() {
-        crate::remote_reader::test_support::populated_reader_fixture!(
-            log_dir, remote_dir, reader, log, exports
-        );
+        let ReaderFixture {
+            local: _log_dir,
+            remote: _remote_dir,
+            reader,
+            log,
+        } = reader_fixture();
+        let exports = log.tierable_segments();
         // Unwrap the log-layer `Offset` into this test's `i64` world at the seam.
         let expected = exports.iter().map(|e| e.base_offset.0).min().unwrap();
         let got = reader.earliest_offset(&tp()).await.unwrap();
@@ -302,16 +308,19 @@ mod tests {
     #[tokio::test]
     async fn earliest_offset_returns_none_when_no_finished_segments() {
         let remote_dir = tempfile::tempdir().unwrap();
-        let (rsm, rlmm) = local_backends(remote_dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
         let reader = RemoteReader::new(rsm, rlmm);
         assert!(reader.earliest_offset(&tp()).await.unwrap() == None);
     }
 
     #[tokio::test]
     async fn latest_tiered_offset_uses_highest_finished_segment_and_its_epoch() {
-        crate::remote_reader::test_support::populated_reader_fixture!(
-            log_dir, remote_dir, reader, log
-        );
+        let ReaderFixture {
+            local: _log_dir,
+            remote: _remote_dir,
+            reader,
+            log,
+        } = reader_fixture();
         let expected = log
             .tierable_segments()
             .iter()

@@ -1,5 +1,5 @@
 use {
-    super::{TIERED_TOPIC, out_of_range_at, tiered_broker, tiered_topic_id},
+    super::{TIERED_TOPIC, TieredBroker, out_of_range_at, tiered_broker, tiered_topic_id},
     crate::{
         broker::spawn_partition,
         remote_log_manager::{ArchiveMode, copy_eligible, test_support::tier},
@@ -45,7 +45,11 @@ fn abort_marker() -> RecordBatch {
 #[tokio::test]
 async fn remote_fetch_reports_an_abort_in_a_later_segment_or_the_local_tail() {
     for (archive_marker, retain_marker) in [(true, false), (false, true), (true, true)] {
-        let (handle, dir, _remote) = tiered_broker().await;
+        let TieredBroker {
+            handle,
+            dir,
+            remote_dir: _remote,
+        } = tiered_broker().await;
         let broker = handle.broker_arc_for_test();
         let part_dir = dir.path().join(format!("{TIERED_TOPIC}-0"));
         let mut log = Log::open(&part_dir, LogConfig {

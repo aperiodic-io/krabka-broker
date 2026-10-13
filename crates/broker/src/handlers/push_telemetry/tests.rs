@@ -5,6 +5,8 @@
 //! together, which is the only way to observe the response the handler
 //! returns for a rejected, valid, malformed or empty push.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::*,
     crate::{
@@ -170,7 +172,10 @@ async fn push_after_get_follows_kafkas_payload_checks() {
 }
 
 async fn push_after_get_checks(unstable: UnstableApiVersions) {
-    let (broker_handle, _dir) = start_broker_with(|cfg| {
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_with(|cfg| {
         cfg.client_metrics_telemetry_max = krabka_units::kibibytes(1);
         cfg.features.unstable_api_versions = unstable;
     })

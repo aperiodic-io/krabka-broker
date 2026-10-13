@@ -13,6 +13,7 @@ use {
         error::LogError,
         io::{IoTarget, LogIo, write_all},
     },
+    krabka_verified::log_index::IndexEntry,
     std::{
         fs::{File, OpenOptions},
         io::{Read, Seek, SeekFrom},
@@ -39,53 +40,13 @@ pub(crate) struct IndexSeed<Key> {
     pub(crate) coordinate: u32,
 }
 
-/// Write and flush explicit sparse-index entries, then close the writer before reopening.
-#[cfg(test)]
-macro_rules! seed_index_fixture {
-    ($index:ident, $key:ty) => {
-        fn append_entries(index: &mut $index, entries: &[crate::index::IndexSeed<$key>]) {
-            for &crate::index::IndexSeed { key, coordinate } in entries {
-                index.append(key, coordinate).unwrap();
-            }
-        }
-
-        fn write_entries(path: &std::path::Path, entries: &[crate::index::IndexSeed<$key>]) {
-            let mut index = $index::open(path).unwrap();
-            append_entries(&mut index, entries);
-            index.flush().unwrap();
-        }
-
-        fn written_index(
-            name: &str,
-            entries: &[crate::index::IndexSeed<$key>],
-        ) -> crate::test_support::TempPath {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join(name);
-            write_entries(&path, entries);
-            crate::test_support::TempPath { dir, path }
-        }
-
-        fn populated_index(
-            name: &str,
-            entries: &[crate::index::IndexSeed<$key>],
-        ) -> crate::index::IndexFixture<$index> {
-            let crate::index::IndexFixture {
-                dir,
-                path,
-                mut index,
-            } = crate::index::index_fixture(name, $index::open);
-            append_entries(&mut index, entries);
-            crate::index::IndexFixture { dir, path, index }
-        }
-    };
-}
-
 mod prelude {
     pub(super) use {
         crate::{
             error::LogError,
             io::{IoTarget, LogIo},
         },
+        krabka_verified::log_index::IndexEntry,
         std::{fs::File, path::Path},
         tracing::instrument,
         zerocopy::{
@@ -124,7 +85,7 @@ fn open_index_file(path: &Path) -> Result<OpenedFile, LogError> {
     Ok(OpenedFile { file, bytes })
 }
 
-type IndexEntries<Key> = Vec<(Key, u32)>;
+type IndexEntries<Key> = Vec<IndexEntry<Key, u32>>;
 
 /// An index file and the entries decoded from it.
 struct OpenedIndex<Key> {
@@ -135,7 +96,7 @@ struct OpenedIndex<Key> {
 fn load_index<Raw, Key>(
     path: &Path,
     invariant: &str,
-    decode: impl Fn(&Raw) -> (Key, u32),
+    decode: impl Fn(&Raw) -> IndexEntry<Key, u32>,
 ) -> Result<OpenedIndex<Key>, LogError>
 where
     Raw: FromBytes + KnownLayout + Immutable + Unaligned,
@@ -154,25 +115,28 @@ fn append_index<Key>(
     io: &dyn LogIo,
     target: IoTarget,
     bytes: &[u8],
-    entries: &mut Vec<(Key, u32)>,
+    entries: &mut Vec<IndexEntry<Key, u32>>,
     key: Key,
     coordinate: u32,
 ) -> Result<(), LogError> {
     file.seek(SeekFrom::End(0))?;
     write_all(io, target, file, bytes)?;
-    entries.push((key, coordinate));
+    entries.push(IndexEntry { key, coordinate });
     Ok(())
 }
 
 /// Decode the real prefix, stopping when the position or offset column stops increasing.
 fn increasing_index_entries<Raw, Key>(
     raws: &[Raw],
-    decode: impl Fn(&Raw) -> (Key, u32),
-) -> Vec<(Key, u32)> {
-    let mut entries: Vec<(Key, u32)> = Vec::with_capacity(raws.len());
+    decode: impl Fn(&Raw) -> IndexEntry<Key, u32>,
+) -> Vec<IndexEntry<Key, u32>> {
+    let mut entries: Vec<IndexEntry<Key, u32>> = Vec::with_capacity(raws.len());
     for raw in raws {
         let entry = decode(raw);
-        if entries.last().is_some_and(|previous| entry.1 <= previous.1) {
+        if entries
+            .last()
+            .is_some_and(|previous| entry.coordinate <= previous.coordinate)
+        {
             break;
         }
         entries.push(entry);
@@ -182,13 +146,13 @@ fn increasing_index_entries<Raw, Key>(
 
 fn truncate_index<Key>(
     file: &mut File,
-    entries: &mut Vec<(Key, u32)>,
+    entries: &mut Vec<IndexEntry<Key, u32>>,
     entry_size: usize,
     max_exclusive: u32,
 ) -> Result<(), LogError> {
     let kept = entries
         .iter()
-        .take_while(|(_, coordinate)| *coordinate < max_exclusive)
+        .take_while(|entry| entry.coordinate < max_exclusive)
         .count();
     entries.truncate(kept);
     file.set_len((kept * entry_size) as u64)?;

@@ -85,50 +85,6 @@ pub struct ApiRequestSetup {
     pub version: krabka_ids::ApiVersion,
 }
 
-/// Bind the shared Kafka exchange to a suite's original client identifier.
-#[macro_export]
-macro_rules! socket_round_trip_fixture {
-    ($(#[$attrs:meta])* $vis:vis $name:ident, $client_id:expr) => {
-        $(#[$attrs])*
-        $vis async fn $name<S: ::tokio::io::AsyncRead + ::tokio::io::AsyncWrite + Unpin>(
-            stream: &mut S,
-            setup: $crate::support::wire::SocketExchangeSetup,
-            body: &[u8],
-        ) -> ::std::io::Result<Vec<u8>> {
-            {
-                let exchange = $crate::kafka_wire::ExchangeSetup::for_socket(setup, $client_id);
-                $crate::kafka_wire::exchange_round_trip(stream, exchange, body).await
-            }
-        }
-    };
-}
-
-/// A flexible exchange whose suite pins the same correlation and client IDs.
-#[macro_export]
-macro_rules! flexible_round_trip_fixture {
-    ($(#[$attrs:meta])* $vis:vis $name:ident, $client_id:expr, $correlation:expr) => {
-        $(#[$attrs])*
-        $vis async fn $name(
-            stream: &mut ::tokio::net::TcpStream,
-            setup: $crate::support::wire::ApiRequestSetup,
-            body: &[u8],
-        ) -> ::std::io::Result<Vec<u8>> {
-            {
-                let exchange = $crate::kafka_wire::ExchangeSetup::for_socket(
-                    $crate::support::wire::SocketExchangeSetup {
-                        api_key: setup.api_key,
-                        version: setup.version,
-                        correlation: $crate::support::wire::CorrelationId($correlation),
-                        header: $crate::support::wire::HeaderEncoding::Flexible,
-                    },
-                    $client_id,
-                );
-                $crate::kafka_wire::exchange_round_trip(stream, exchange, body).await
-            }
-        }
-    };
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, derive_more::From, derive_more::Into)]
 pub struct CorrelationId(pub i32);
 
@@ -248,31 +204,4 @@ where
         let _tagged = body.get_u8();
     }
     R::decode(&mut body, version).map_err(|error| io::Error::other(format!("{context}: {error}")))
-}
-
-/// Bind a typed request and response to their wire API and codec diagnostic.
-#[macro_export]
-macro_rules! plain_request_driver_fixture {
-    ($vis:vis $name:ident {
-        request: $request:ty,
-        response: $response:ty,
-        api: $api:expr,
-        operation: $operation:literal $(,)?
-    }) => {
-        $vis async fn $name(
-            addr: ::std::net::SocketAddr,
-            request: $request,
-            authentication: &$crate::kafka_wire::PlainAuthenticationSetup<'_>,
-        ) -> ::std::io::Result<$response> {
-            $crate::kafka_wire::request_as_plain(
-                addr,
-                &request,
-                &$crate::kafka_wire::PlainRequestSetup {
-                    authentication: authentication.clone(),
-                    api: $api,
-                    operation: $operation,
-                },
-            ).await
-        }
-    };
 }

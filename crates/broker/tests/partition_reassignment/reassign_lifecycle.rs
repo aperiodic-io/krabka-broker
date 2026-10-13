@@ -17,19 +17,17 @@ use {
         },
         plaintext_wire::CLIENT_ID,
         reassign_rpc::{drive_alter_reassignments, drive_list_reassignments},
-        support::topics::{ConfiguredTopicSetup, TopicReplicationFactor},
+        support::{
+            lazy_mutex,
+            topics::{ConfiguredTopicSetup, TopicReplicationFactor},
+        },
     },
     assert2::{assert, check},
+    std::sync::OnceLock,
+    tokio::sync::{Mutex, MutexGuard},
 };
 
-// Each expansion keeps the same per-test static mutex as the original scenarios.
-macro_rules! case_lock {
-    () => {{
-        static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
-        $crate::support::lazy_mutex(&LOCK).lock().await
-    }};
-}
-
+// Each scenario retains its own static mutex while its broker cluster is alive.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn preplacement_log_dir_preference_survives_until_reassignment_materializes_the_replica() {
     let extras = [
@@ -120,7 +118,8 @@ async fn preplacement_log_dir_preference_survives_until_reassignment_materialize
 /// and `removing_replicas`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn alter_then_complete_via_isr_catchup() {
-    let _g = case_lock!();
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let CaseCluster { guard: _g, cluster } = case_cluster(&LOCK).await;
 
     let ThreeBrokerCluster {
         h1,
@@ -130,7 +129,7 @@ async fn alter_then_complete_via_isr_catchup() {
         d2: _d2,
         d3: _d3,
         ..
-    } = foo_cluster().await;
+    } = cluster;
 
     // Find which brokers are in `replicas` initially — choose target accordingly.
     let pr = h1.partition_record_for_test("foo", 0).expect("partition");
@@ -206,9 +205,9 @@ async fn alter_then_complete_via_isr_catchup() {
 /// `ListPartitionReassignments` handler must return the in-flight rows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn list_in_flight_returns_pending_rows() {
-    let _g = case_lock!();
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let CaseCluster { guard: _g, cluster } = case_cluster(&LOCK).await;
 
-    let cluster = foo_cluster().await;
     let h1 = cluster.h1;
     let (h2, h3) = (cluster.h2, cluster.h3);
 
@@ -260,8 +259,11 @@ async fn list_in_flight_returns_pending_rows() {
 /// with empty `adding_replicas` and `removing_replicas`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancel_via_null_replicas_reverts() {
-    let _lock = case_lock!();
-    let cluster = foo_cluster().await;
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let CaseCluster {
+        guard: _lock,
+        cluster,
+    } = case_cluster(&LOCK).await;
     let (h1, h2, h3) = (cluster.h1, cluster.h2, cluster.h3);
 
     let pr = h1.partition_record_for_test("foo", 0).expect("partition");
@@ -376,4 +378,15 @@ async fn foo_cluster() -> ThreeBrokerCluster {
         .await;
     wait_partition_exists(&cluster.h1, "foo", 0).await;
     cluster
+}
+
+struct CaseCluster {
+    guard: MutexGuard<'static, ()>,
+    cluster: ThreeBrokerCluster,
+}
+
+async fn case_cluster(lock: &'static OnceLock<Mutex<()>>) -> CaseCluster {
+    let guard = lazy_mutex(lock).lock().await;
+    let cluster = foo_cluster().await;
+    CaseCluster { guard, cluster }
 }

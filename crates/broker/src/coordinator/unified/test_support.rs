@@ -263,21 +263,36 @@ pub(crate) fn group_config_image(
     image
 }
 
-/// The fields every heartbeat capacity/timing contract observes.
-pub(crate) trait HeartbeatStatus {
-    fn status(self) -> (i16, i32);
+/// The response fields observed by the capacity and timing contracts.
+pub(crate) struct HeartbeatReply {
+    pub error_code: i16,
+    pub member_epoch: i32,
 }
 
-macro_rules! heartbeat_status {
-    ($($response:ty),+ $(,)?) => {$(
-        impl HeartbeatStatus for $response {
-            fn status(self) -> (i16, i32) {
-                (self.error_code, self.member_epoch)
-            }
-        }
-    )+};
+struct JoinedGroup<H> {
+    id: &'static str,
+    handle: Arc<H>,
+    epoch: i32,
 }
-heartbeat_status!(
+
+#[derive(Debug, PartialEq, Eq)]
+struct GroupEpoch {
+    id: &'static str,
+    epoch: i32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GroupStatus {
+    id: &'static str,
+    code: i16,
+}
+
+/// The fields every heartbeat capacity/timing contract observes.
+pub(crate) trait HeartbeatStatus {
+    fn status(self) -> HeartbeatReply;
+}
+
+krabka_macros::heartbeat_status!(
     krabka_protocol::owned::consumer_group_heartbeat_response::ConsumerGroupHeartbeatResponse,
     krabka_protocol::owned::share_group_heartbeat_response::ShareGroupHeartbeatResponse,
     krabka_protocol::owned::streams_group_heartbeat_response::StreamsGroupHeartbeatResponse,
@@ -294,13 +309,12 @@ pub(crate) async fn assert_single_member_limit<H, Q, R: HeartbeatStatus>(
         heartbeat(&Arc::clone(handle), request).await.status()
     };
 
-    let (code, epoch) = status("m1", 0).await;
-    assert2::check!(code == crate::codes::NONE);
-    let (code, _) = status("m2", 0).await;
-    assert2::check!(code == crate::codes::GROUP_MAX_SIZE_REACHED);
-    let (code, existing_epoch) = status("m1", epoch).await;
-    assert2::check!(code == crate::codes::NONE);
-    assert2::check!(existing_epoch == epoch);
+    let first = status("m1", 0).await;
+    assert2::check!(first.error_code == crate::codes::NONE);
+    assert2::check!(status("m2", 0).await.error_code == crate::codes::GROUP_MAX_SIZE_REACHED);
+    let existing = status("m1", first.member_epoch).await;
+    assert2::check!(existing.error_code == crate::codes::NONE);
+    assert2::check!(existing.member_epoch == first.member_epoch);
 }
 
 /// Build a one-member coordinator fixture and exercise its heartbeat limit.
@@ -323,20 +337,36 @@ pub(crate) async fn check_group_session_timeout<H, R: HeartbeatStatus>(
     let mut epochs = Vec::new();
     for group_id in ["brief", "plain"] {
         let handle = create(group_id);
-        let (code, epoch) = heartbeat(&handle, "m1", 0).await.status();
-        check!(code == crate::codes::NONE, "{group_id}");
-        epochs.push((group_id, handle, epoch));
+        let reply = heartbeat(&handle, "m1", 0).await.status();
+        check!(reply.error_code == crate::codes::NONE, "{group_id}");
+        epochs.push(JoinedGroup {
+            id: group_id,
+            handle,
+            epoch: reply.member_epoch,
+        });
     }
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     let mut answers = Vec::new();
-    for (group_id, handle, epoch) in &epochs {
-        answers.push((*group_id, heartbeat(handle, "m1", *epoch).await.status().0));
+    for group in &epochs {
+        answers.push(GroupStatus {
+            id: group.id,
+            code: heartbeat(&group.handle, "m1", group.epoch)
+                .await
+                .status()
+                .error_code,
+        });
     }
     assert!(
         answers
             == [
-                ("brief", crate::codes::UNKNOWN_MEMBER_ID),
-                ("plain", crate::codes::NONE)
+                GroupStatus {
+                    id: "brief",
+                    code: crate::codes::UNKNOWN_MEMBER_ID
+                },
+                GroupStatus {
+                    id: "plain",
+                    code: crate::codes::NONE
+                }
             ]
     );
 }
@@ -346,7 +376,7 @@ pub(crate) async fn check_group_session_timeout<H, R: HeartbeatStatus>(
 pub(crate) async fn check_group_assignment_timing<H, R: HeartbeatStatus>(
     create: impl AsyncFn(&str) -> Arc<H>,
     heartbeat: impl AsyncFn(&H, &str, i32) -> R,
-    check_first: impl Fn((i16, i32)),
+    check_first: impl Fn(HeartbeatReply),
 ) {
     use assert2::{assert, check};
     let mut joined = Vec::new();
@@ -354,20 +384,44 @@ pub(crate) async fn check_group_assignment_timing<H, R: HeartbeatStatus>(
     for group_id in ["slow", "fast", "paced"] {
         let handle = create(group_id).await;
         check!(
-            heartbeat(&handle, "m1", 0).await.status().1 == 2,
+            heartbeat(&handle, "m1", 0).await.status().member_epoch == 2,
             "{group_id}"
         );
-        joined.push((group_id, heartbeat(&handle, "m2", 0).await.status().1));
-        handles.push((group_id, handle));
+        let epoch = heartbeat(&handle, "m2", 0).await.status().member_epoch;
+        joined.push(GroupEpoch {
+            id: group_id,
+            epoch,
+        });
+        handles.push(JoinedGroup {
+            id: group_id,
+            handle,
+            epoch,
+        });
     }
-    assert!(joined == [("slow", 2), ("fast", 3), ("paced", 2)]);
+    assert!(
+        joined
+            == [
+                GroupEpoch {
+                    id: "slow",
+                    epoch: 2
+                },
+                GroupEpoch {
+                    id: "fast",
+                    epoch: 3
+                },
+                GroupEpoch {
+                    id: "paced",
+                    epoch: 2
+                }
+            ]
+    );
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-    let (_, paced) = &handles[2];
+    let paced = &handles[2].handle;
     check_first(heartbeat(paced, "m1", 2).await.status());
-    check!(heartbeat(paced, "m2", 2).await.status().1 == 3);
+    check!(heartbeat(paced, "m2", 2).await.status().member_epoch == 3);
     // The slow group still waits for the broker's minute.
-    let (_, slow) = &handles[0];
-    check!(heartbeat(slow, "m2", 2).await.status().1 == 2);
+    let slow = &handles[0].handle;
+    check!(heartbeat(slow, "m2", 2).await.status().member_epoch == 2);
 }
 
 /// Split a freshly encoded key into its leading version and body, mirroring

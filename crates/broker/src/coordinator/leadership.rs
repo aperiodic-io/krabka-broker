@@ -350,7 +350,7 @@ mod tests {
                 join_group::handle as join_group_handle, leave_group::handle as leave_group_handle,
                 list_groups::handle as list_groups_handle,
                 offset_commit::handle as offset_commit_handle,
-                offset_fetch::handle as offset_fetch_handle,
+                offset_fetch::handle as offset_fetch_handle, test_support::StartedBroker,
             },
             metrics::{BrokerMetrics, ConsumerGroupLabel, ShareGroupIdLabel},
             test_support::{
@@ -676,7 +676,10 @@ mod tests {
     /// Once the partition is served the same group is served again.
     #[tokio::test]
     async fn group_rpcs_answer_load_in_progress_until_the_partition_is_served() {
-        let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+        let StartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_no_audit_with(|config| {
             config.offsets_topic_replication_factor = 1;
         })
         .await;

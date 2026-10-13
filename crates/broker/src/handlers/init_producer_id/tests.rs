@@ -6,6 +6,8 @@
 //! `transaction.two.phase.commit.enable`, not a `transaction.version` level.
 //! Keeping them out of the module root leaves the request flow readable.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{handle as init_producer_id_handle, identity::ProducerIdentity, *},
     crate::{
@@ -14,8 +16,8 @@ use {
         broker::{Broker, BrokerHandle},
         error::BrokerError,
         handlers::{
-            RequestContext as HandlerRequestContext, context::RequestContext,
-            find_coordinator::handle as find_coordinator_handle,
+            RequestContext as HandlerRequestContext, acl_test_support as acl_fixtures,
+            context::RequestContext, find_coordinator::handle as find_coordinator_handle,
         },
         test_support::{
             ControllerPeerAllowed, start_broker_no_audit, start_broker_no_audit_with,
@@ -146,24 +148,22 @@ async fn check_timeout_answers(
     }
 }
 
-macro_rules! transaction_v2_broker {
-    (($handle:ident, $directory:ident, $broker:ident)) => {
-        krabka_macros::broker_test_setup! {
-            bind($handle, $directory, $broker);
-            boot [start_broker_no_audit_with(|config| {
-                        config.transaction_state_num_partitions = 7;
-                        config.transaction_max_timeout = secs(8);
-                        config.features.transaction_two_phase_commit_enable = true;
-                        config.features.unstable_api_versions =
-                            crate::api_catalog::UnstableApiVersions::Enabled;
-                    })];
-        };
-    };
+/// The KIP-939 test configuration precedes coordinator readiness at each caller.
+async fn transaction_v2_broker() -> HandlerStartedBroker {
+    start_broker_no_audit_with(|config| {
+        config.transaction_state_num_partitions = 7;
+        config.transaction_max_timeout = secs(8);
+        config.features.transaction_two_phase_commit_enable = true;
+        config.features.unstable_api_versions = UnstableApiVersions::Enabled;
+    })
+    .await
 }
-
 #[tokio::test]
 async fn handler_refuses_a_timeout_kafka_refuses_and_stores_the_rest_as_sent() {
-    transaction_v2_broker!((broker_handle, _dir, broker));
+    krabka_macros::broker_test_setup!(
+        bind(broker_handle, _dir, broker);
+        boot [transaction_v2_broker()];
+    );
     krabka_macros::request_test_identity! {
         bind(principal, peer, context);
         user ["admin"];
@@ -340,7 +340,10 @@ async fn kip939_fields_follow_the_two_phase_commit_config_at_transaction_version
         (true, Enabled, true, false, refused(codes::NOT_COORDINATOR)),
         (true, Enabled, false, true, refused(codes::NOT_COORDINATOR)),
     ] {
-        let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_no_audit_with(|config| {
             config.features.transaction_two_phase_commit_enable = two_phase_commit;
             config.features.unstable_api_versions = unstable;
         })
@@ -375,7 +378,10 @@ async fn kip939_fields_follow_the_two_phase_commit_config_at_transaction_version
 
 #[tokio::test]
 async fn keep_prepared_txn_without_enable_2pc_preserves_finite_timeout() {
-    transaction_v2_broker!((broker_handle, _dir, broker));
+    krabka_macros::broker_test_setup!(
+        bind(broker_handle, _dir, broker);
+        boot [transaction_v2_broker()];
+    );
     wait_for_transaction_v2_coordinator(&broker_handle).await;
     krabka_macros::request_test_identity! {
         bind(principal, peer, context);
@@ -435,8 +441,10 @@ async fn keep_prepared_txn_without_enable_2pc_preserves_finite_timeout() {
 /// id answers `INVALID_TRANSACTION_TIMEOUT` too.
 #[tokio::test]
 async fn the_timeout_check_runs_before_the_coordinator_check() {
-    let (broker_handle, _dir) =
-        start_broker_no_audit_with(|config| config.transaction_max_timeout = secs(8)).await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit_with(|config| config.transaction_max_timeout = secs(8)).await;
     let broker = broker_handle.broker_arc_for_test();
     wait_for_transaction_version_2(&broker_handle).await;
     krabka_macros::request_test_identity! {
@@ -489,7 +497,10 @@ async fn the_timeout_check_runs_before_the_coordinator_check() {
 /// `INVALID_PRODUCER_EPOCH` in place of `PRODUCER_FENCED`.
 #[tokio::test]
 async fn half_an_identity_is_invalid_and_an_old_client_gets_invalid_producer_epoch() {
-    let (broker_handle, _dir) = start_broker_no_audit().await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit().await;
     let broker = broker_handle.broker_arc_for_test();
     wait_for_transaction_v2_coordinator(&broker_handle).await;
     krabka_macros::request_test_identity! {
@@ -735,7 +746,9 @@ async fn acl_preamble_for_null_and_empty_transactional_id() {
                         HashSet::new()
                     ),))];
         };
-        crate::handlers::acl_test_support::seed_case_acls!(broker, case.acls);
+        if !case.acls.is_empty() {
+            acl_fixtures::seed_case_acls(&broker, case.acls).await;
+        }
 
         krabka_macros::request_test_identity! {
             bind(principal, peer, context);
@@ -799,7 +812,10 @@ async fn two_phase_commit_gate_is_scoped_to_enable_2pc_not_keep_prepared_txn() {
     ];
 
     for case in cases {
-        let (broker_handle, _dir) = start_broker_no_audit_with(|config| {
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker_no_audit_with(|config| {
             config.transaction_state_num_partitions = 7;
             config.transaction_max_timeout = secs(8);
             config.features.transaction_two_phase_commit_enable = true;
@@ -885,7 +901,10 @@ async fn two_phase_commit_gate_is_scoped_to_enable_2pc_not_keep_prepared_txn() {
 /// retries; the broker keeps the connection.
 #[tokio::test]
 async fn a_failed_block_allocation_answers_coordinator_load_in_progress() {
-    let (broker_handle, _dir) = start_broker_no_audit().await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker_no_audit().await;
     let broker = broker_handle.broker_arc_for_test();
     wait_for_controller_leader(&broker).await;
     broker_handle

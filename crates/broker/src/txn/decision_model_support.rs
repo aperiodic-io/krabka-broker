@@ -17,21 +17,23 @@ use {
 };
 
 /// Drive the common begin gate and generation stamp, with an optional start-clock write.
-macro_rules! begin_transaction {
-    ($state:ident; $($start:tt)*) => {
-        let prior = st($state.state);
-        if !prior.can_transition_to(TxnState::Ongoing) {
-            return None;
-        }
-        if prior != TxnState::Ongoing {
-            $($start)*
-            $state.generation = $state.epoch;
-        }
-        $state.state = TxnState::Ongoing.to_kafka_status();
-        Some(())
-    };
+pub(crate) fn begin_transaction(
+    status: &mut i8,
+    generation: &mut i16,
+    epoch: i16,
+    start: impl FnOnce(),
+) -> Option<()> {
+    let prior = TxnState::from_kafka_status(*status).expect("valid TxnState id in model");
+    if !prior.can_transition_to(TxnState::Ongoing) {
+        return None;
+    }
+    if prior != TxnState::Ongoing {
+        start();
+        *generation = epoch;
+    }
+    *status = TxnState::Ongoing.to_kafka_status();
+    Some(())
 }
-pub(crate) use begin_transaction;
 
 pub struct Initialized {
     pub entry: TxnEntry,
@@ -108,5 +110,58 @@ pub fn complete_prepared(entry: &TxnEntry, now_ms: i64) -> Option<(TxnEntry, Txn
         | TransactionReaperCompletionDecision::RejectMalformed
         | TransactionReaperCompletionDecision::RejectStaleIdentity
         | TransactionReaperCompletionDecision::RejectChangedPreparedState => None,
+    }
+}
+
+#[cfg(test)]
+mod begin_tests {
+    use {super::begin_transaction, crate::txn::state::TxnState, assert2::assert, std::cell::Cell};
+
+    #[test]
+    fn begin_stamps_only_a_fresh_transaction_and_refusal_keeps_every_field() {
+        struct BeginCase {
+            prior: TxnState,
+            allowed: bool,
+            generation: i16,
+            starts: usize,
+        }
+        for case in [
+            BeginCase {
+                prior: TxnState::Empty,
+                allowed: true,
+                generation: 9,
+                starts: 1,
+            },
+            BeginCase {
+                prior: TxnState::Ongoing,
+                allowed: true,
+                generation: 4,
+                starts: 0,
+            },
+            BeginCase {
+                prior: TxnState::PrepareCommit,
+                allowed: false,
+                generation: 4,
+                starts: 0,
+            },
+        ] {
+            let mut status = case.prior.to_kafka_status();
+            let mut generation = 4;
+            let starts = Cell::new(0);
+            let result = begin_transaction(&mut status, &mut generation, 9, || {
+                starts.set(starts.get() + 1);
+            });
+            assert!(result.is_some() == case.allowed);
+            assert!(generation == case.generation && starts.get() == case.starts);
+            assert!(
+                status
+                    == if case.allowed {
+                        TxnState::Ongoing
+                    } else {
+                        case.prior
+                    }
+                    .to_kafka_status()
+            );
+        }
     }
 }

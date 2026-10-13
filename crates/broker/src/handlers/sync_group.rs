@@ -9,6 +9,8 @@
 //! `protocol_name`, so an L7 proxy can route the call without remembering the
 //! earlier `JoinGroup` exchange.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::Broker,
@@ -178,12 +180,15 @@ mod tests {
 
     use {
         super::*,
-        crate::{handlers::group_read_denied, test_support::empty_acl_image},
+        crate::{
+            handlers::group_read_denied,
+            test_support::{EmptyAclImage, empty_acl_image},
+        },
     };
 
     #[test]
     fn group_read_denied_yields_group_authorization_failed() {
-        let (authorizer, image) = empty_acl_image();
+        let EmptyAclImage { authorizer, image } = empty_acl_image();
         krabka_macros::request_test_identity! {
             bind(principal, peer, ctx);
             user ["ANONYMOUS"];
@@ -264,9 +269,14 @@ mod tests {
                 want: codes::GROUP_AUTHORIZATION_FAILED,
             },
         ];
-        let (denied_handle, _denied_dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
-        let (allowed_handle, _allowed_dir) =
-            start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: denied_handle,
+            dir: _denied_dir,
+        } = start_group_broker_no_audit(Arc::new(DenyAll)).await;
+        let HandlerStartedBroker {
+            broker: allowed_handle,
+            dir: _allowed_dir,
+        } = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
         krabka_macros::request_test_identity! {
             bind(principal, peer, ctx);
             user ["alice"];
@@ -305,7 +315,10 @@ mod tests {
     #[tokio::test]
     async fn handle_denies_group_read_and_preserves_error_response_shape() {
         let version = sync_group_response::MAX_VERSION;
-        let (broker_handle, _dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_group_broker_no_audit(Arc::new(DenyAll)).await;
         let broker = broker_handle.broker_arc_for_test();
         krabka_macros::request_test_identity! {
             bind(principal, peer, ctx);

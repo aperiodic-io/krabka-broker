@@ -700,14 +700,14 @@ mod tests {
 
     /// A log and the temporary directory that holds its segments.
     struct LogInDir {
-        dir: tempfile::TempDir,
         log: Log,
+        dir: tempfile::TempDir,
     }
 
     fn empty_log() -> LogInDir {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = Log::open(dir.path(), LogConfig::default()).expect("open log");
-        LogInDir { dir, log }
+        LogInDir { log, dir }
     }
 
     fn aborted_transaction_log() -> LogInDir {
@@ -716,7 +716,7 @@ mod tests {
             .expect("append the transaction's one data batch");
         log.append(&mut abort_marker(ProducerId(PID)))
             .expect("append the abort marker that closes it");
-        LogInDir { dir, log }
+        LogInDir { log, dir }
     }
 
     /// A shared log with the raw bytes of its whole range and the end of it.
@@ -745,7 +745,7 @@ mod tests {
         let LogInDir { dir, mut log } = empty_log();
         log.append(&mut default_records_batch(&[b"first", b"second"]))
             .expect("append the batch under test");
-        LogInDir { dir, log }
+        LogInDir { log, dir }
     }
 
     /// The plain read the cases below vary: everything from offset 0 to
@@ -1127,16 +1127,16 @@ mod tests {
         }
     }
 
-    macro_rules! before_and_transaction {
-        ($log:ident, $partition:ident, $transaction_label:literal) => {
-            let mut $log = $partition.log.lock().expect("log mutex poisoned");
-            $log.append(&mut crate::handlers::test_support::default_records_batch(
-                &[b"before"],
-            ))
+    fn before_and_transaction<'a>(
+        partition: &'a Partition,
+        transaction_label: &str,
+    ) -> std::sync::MutexGuard<'a, Log> {
+        let mut log = partition.log.lock().expect("log mutex poisoned");
+        log.append(&mut default_records_batch(&[b"before"]))
             .expect("append the record before the transaction"); // offset 0
-            $log.append(&mut transactional_batch(ProducerId(PID)))
-                .expect($transaction_label); // offset 1
-        };
+        log.append(&mut transactional_batch(ProducerId(PID)))
+            .expect(transaction_label); // offset 1
+        log
     }
 
     /// A `read_committed` consumer sees nothing of a committed transaction
@@ -1148,7 +1148,7 @@ mod tests {
     async fn read_committed_waits_for_the_high_watermark_to_pass_the_commit_marker() {
         let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
         let transaction = {
-            before_and_transaction!(log, partition, "append the transaction's data");
+            let mut log = before_and_transaction(&partition, "append the transaction's data");
             let mut commit = abort_marker(ProducerId(PID));
             commit.records[0].key = Some(Bytes::from_static(&[0, 0, 0, 1]));
             log.append(&mut commit).expect("append the commit marker"); // offset 2
@@ -1263,7 +1263,7 @@ mod tests {
     async fn live_offsets_report_the_bounds_a_local_read_reports() {
         let (partition, _dir) = test_partition(Arc::new(tokio::sync::Notify::new()));
         {
-            before_and_transaction!(log, partition, "append the open transaction");
+            let _log = before_and_transaction(&partition, "append the open transaction");
         }
         partition.replica_state.lock().await.hw = Offset(2);
 
@@ -1313,7 +1313,7 @@ mod tests {
             log.append(&mut batch_at(*activation_ms))
                 .expect("append a batch");
         }
-        LogInDir { dir, log }
+        LogInDir { log, dir }
     }
 
     /// A read that throws answers its own partition's row, the one Kafka's

@@ -55,24 +55,33 @@ pub fn named_topic_metadata(topic: impl Into<String>) -> MetadataRequest {
 }
 
 /// Compare the complete coordinator row or response against independent call-site expectations.
-/// Every ordinary field is explicit in the tuple; tagged fields retain the original defaults.
-#[macro_export]
-macro_rules! check_expected_coordinator {
-    (@row ($key:expr, $node:expr, $host:expr, $port:expr, $error:expr, $message:expr)) => {
-        ::krabka_protocol::owned::find_coordinator_response::Coordinator {
-            key: $key.into(), node_id: $node, host: $host, port: $port,
-            error_code: $error, error_message: $message, ..Default::default()
-        }
-    };
-    (row, $actual:expr => ($($expected:expr),+)) => {
-        ::assert2::check!($actual == $crate::check_expected_coordinator!(@row ($($expected),+)));
-    };
-    (response, $actual:expr => ($($expected:expr),+)) => {
-        ::assert2::check!($actual == ::krabka_protocol::owned::find_coordinator_response::FindCoordinatorResponse {
-            coordinators: vec![$crate::check_expected_coordinator!(@row ($($expected),+))],
-            ..Default::default()
-        });
-    };
+/// Every ordinary field is explicit; tagged fields retain the original defaults.
+pub fn expected_coordinator(
+    key: &str,
+    node_id: i32,
+    host: String,
+    port: i32,
+    error_code: i16,
+    error_message: Option<String>,
+) -> krabka_protocol::owned::find_coordinator_response::Coordinator {
+    krabka_protocol::owned::find_coordinator_response::Coordinator {
+        key: key.into(),
+        node_id,
+        host,
+        port,
+        error_code,
+        error_message,
+        ..Default::default()
+    }
+}
+
+pub fn expected_coordinator_response(
+    coordinator: krabka_protocol::owned::find_coordinator_response::Coordinator,
+) -> krabka_protocol::owned::find_coordinator_response::FindCoordinatorResponse {
+    krabka_protocol::owned::find_coordinator_response::FindCoordinatorResponse {
+        coordinators: vec![coordinator],
+        ..Default::default()
+    }
 }
 
 /// The first partition of the first metadata topic whose name matches exactly.

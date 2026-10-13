@@ -106,7 +106,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<moxy::token::TokenStream, Parse
 mod tests {
     use {
         super::{EndpointArgs, expand},
-        crate::meta::{assert_rejected_structs, compact},
+        crate::meta::{RejectedStruct, assert_rejected_structs, compact},
         assert2::assert,
         moxy::ast::{FromMeta, ItemStruct, Meta},
     };
@@ -144,18 +144,18 @@ mod tests {
     fn source_struct_requires_endpoint_fields_and_its_target_attribute() {
         assert_rejected_structs(
             &[
-                (
-                    "missing attribute",
-                    "struct Endpoint { node_id: i32, host: String, port: i32, rack: Option<String> }",
-                ),
-                (
-                    "missing field",
-                    "#[node_endpoints(targets(wire::Endpoint))] struct Endpoint { node_id: i32, host: String, port: i32 }",
-                ),
-                (
-                    "generic source",
-                    "#[node_endpoints(targets(wire::Endpoint))] struct Endpoint<T> { node_id: i32, host: String, port: i32, rack: T }",
-                ),
+                RejectedStruct {
+                    label: "missing attribute",
+                    declaration: "struct Endpoint { node_id: i32, host: String, port: i32, rack: Option<String> }",
+                },
+                RejectedStruct {
+                    label: "missing field",
+                    declaration: "#[node_endpoints(targets(wire::Endpoint))] struct Endpoint { node_id: i32, host: String, port: i32 }",
+                },
+                RejectedStruct {
+                    label: "generic source",
+                    declaration: "#[node_endpoints(targets(wire::Endpoint))] struct Endpoint<T> { node_id: i32, host: String, port: i32, rack: T }",
+                },
             ],
             expand,
         );

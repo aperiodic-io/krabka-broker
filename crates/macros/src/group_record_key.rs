@@ -9,7 +9,9 @@ use {
     std::collections::HashSet,
 };
 
-struct Version(Path);
+struct Version {
+    path: Path,
+}
 
 impl FromMeta for Version {
     fn from_meta(meta: &Meta) -> Result<Self, ParseError> {
@@ -24,7 +26,7 @@ impl FromMeta for Version {
             meta.span(),
             "record version needs one constant path without arguments",
         )?;
-        Ok(Self(path))
+        Ok(Self { path })
     }
 }
 
@@ -103,7 +105,7 @@ pub(crate) fn expand(item: ItemEnum) -> Result<TokenStream, ParseError> {
                     "each record variant needs #[group_key(version = CONST)]",
                 )
             })?;
-        let version = args.version.0;
+        let version = args.version.path;
         if !versions.insert(version.to_token_stream().to_string()) {
             return Err(ParseError::new(
                 variant.ident.span(),

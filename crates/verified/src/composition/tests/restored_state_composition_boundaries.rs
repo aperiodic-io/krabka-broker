@@ -2,22 +2,32 @@ use {super::*, assert2::assert};
 
 #[test]
 fn restored_state_composition_boundaries() {
-    let time_entries = [(10, 1), (10, 3), (20, 7)];
+    let time_entries = [
+        IndexEntry::new(10, 1),
+        IndexEntry::new(10, 3),
+        IndexEntry::new(20, 7),
+    ];
     // Equal timestamps select the final equal entry, not the first one.
     assert!(time_index_lookup(&time_entries, 10) == 3);
     for entries in [
         &[][..],
         &time_entries,
-        &[(20, 1), (10, 3)],
-        &[(10, 3), (20, 3)],
-        &[(10, 11)],
+        &[IndexEntry::new(20, 1), IndexEntry::new(10, 3)],
+        &[IndexEntry::new(10, 3), IndexEntry::new(20, 3)],
+        &[IndexEntry::new(10, 11)],
     ] {
         for (lower, upper) in [(i64::MIN, 9), (10, 10), (10, 20), (20, i64::MAX)] {
             time_range::check_cursors(entries, 100, 110, lower, upper);
         }
     }
-    time_range::check_cursors(&[(10, u32::MAX)], 0, i64::from(u32::MAX), 0, 10);
-    time_range::check_cursors(&[(10, 1)], i64::MAX - 1, i64::MAX, 0, 10);
+    time_range::check_cursors(
+        &[IndexEntry::new(10, u32::MAX)],
+        0,
+        i64::from(u32::MAX),
+        0,
+        10,
+    );
+    time_range::check_cursors(&[IndexEntry::new(10, 1)], i64::MAX - 1, i64::MAX, 0, 10);
     let epochs = [
         EpochEntry {
             epoch: LeaderEpoch(2),
@@ -151,9 +161,16 @@ fn composition_boundary_witnesses() {
     }
     for (entries, valid) in [
         (&[][..], true),
-        (&[(1, 2), (3, 5), (8, 9)][..], true),
-        (&[(1, 2), (1, 3)][..], false),
-        (&[(1, 10)][..], false),
+        (
+            &[
+                IndexEntry::new(1, 2),
+                IndexEntry::new(3, 5),
+                IndexEntry::new(8, 9),
+            ][..],
+            true,
+        ),
+        (&[IndexEntry::new(1, 2), IndexEntry::new(1, 3)][..], false),
+        (&[IndexEntry::new(1, 10)][..], false),
     ] {
         for target in [0, 1, 2, 3, 8, u32::MAX] {
             assert!(validated_index_bounds_lookup(entries, target, 8, 10).is_ok() == valid);

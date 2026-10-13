@@ -10,7 +10,10 @@ use {
         broker::Broker,
         codes,
         error::BrokerError,
-        handlers::{ApiVersion, RequestContext},
+        handlers::{
+            ApiVersion, RequestContext,
+            registration_listeners::{self, ListenerFields},
+        },
     },
     krabka_metadata::{BrokerEndpoint, ControllerRegistrationRecord, MetadataRecord, NodeId},
     krabka_protocol::owned::{
@@ -117,11 +120,17 @@ pub(crate) async fn handle(
 fn decode_listeners(
     listeners: &[krabka_protocol::owned::controller_registration_request::Listener],
 ) -> Result<Vec<BrokerEndpoint>, String> {
-    crate::handlers::registration_listeners::decode!(
+    registration_listeners::decode(
         listeners,
-        "controller registration has no listeners".into(),
-        "invalid or duplicate controller listener".into(),
-        "unknown controller listener security protocol".into()
+        |listener| ListenerFields {
+            name: &listener.name,
+            host: &listener.host,
+            port: listener.port,
+            security_protocol: listener.security_protocol,
+        },
+        || "controller registration has no listeners".into(),
+        || "invalid or duplicate controller listener".into(),
+        || "unknown controller listener security protocol".into(),
     )
 }
 

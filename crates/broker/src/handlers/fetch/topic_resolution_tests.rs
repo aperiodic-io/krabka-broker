@@ -11,6 +11,8 @@
 //! The tests encode each response the way the wire carries it and decode it
 //! again, so the expected structs hold only what a client sees.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         FIRST_TOPIC_ID_VERSION, test_support::expected_refused_partition as refused_partition,
@@ -53,7 +55,8 @@ use crate::handlers::test_support::{
 type Outcome = TopicCaseOutcome<FetchResponse>;
 
 async fn start(authorizer: Arc<dyn Authorizer>) -> StartedBroker {
-    let (broker, dir) = start_broker_with_authorizer_no_audit(authorizer).await;
+    let HandlerStartedBroker { broker, dir } =
+        start_broker_with_authorizer_no_audit(authorizer).await;
     StartedBroker { broker, dir }
 }
 

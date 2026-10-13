@@ -369,7 +369,7 @@ mod tests {
             metrics::BrokerMetrics,
             quota::{
                 QuotaBuckets,
-                test_support::{check_fractional_bandwidth, image_with_quota},
+                test_support::{QuotaEntityInput, check_fractional_bandwidth, image_with_quota},
             },
             throttle::{LEADER_THROTTLED_REPLICAS_KEY, TokenBucket},
         },
@@ -380,7 +380,10 @@ mod tests {
     #[test]
     fn consume_consumer_quota_tuple_match_overage_throttles() {
         let img = image_with_quota()
-            .entity(vec![("user", Some("alice")), ("client-id", Some("app-x"))])
+            .entity(vec![
+                QuotaEntityInput::user(Some("alice")),
+                QuotaEntityInput::client_id(Some("app-x")),
+            ])
             .key("consumer_byte_rate")
             .value(1024.0)
             .call();

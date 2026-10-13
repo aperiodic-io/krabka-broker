@@ -62,13 +62,16 @@ pub(crate) async fn handle(
 mod tests {
     use {
         super::*,
-        crate::{handlers::group_read_denied, test_support::empty_acl_image},
+        crate::{
+            handlers::group_read_denied,
+            test_support::{EmptyAclImage, empty_acl_image},
+        },
         assert2::assert,
     };
 
     #[test]
     fn group_read_denied_yields_group_authorization_failed() {
-        let (authorizer, image) = empty_acl_image();
+        let EmptyAclImage { authorizer, image } = empty_acl_image();
         krabka_macros::request_test_identity! {
             bind(principal, peer, ctx);
             user ["ANONYMOUS"];

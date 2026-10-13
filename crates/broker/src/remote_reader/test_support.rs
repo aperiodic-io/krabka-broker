@@ -580,20 +580,6 @@ impl RemoteLogMetadataManager for NotReadyRlmm {
     }
 }
 
-/// Build the reader while retaining its directory guards and source log in the caller.
-macro_rules! populated_reader_fixture {
-    ($local:ident, $remote:ident, $reader:ident, $log:ident $(, $exports:ident)?) => {
-        let $local = tempfile::tempdir().unwrap();
-        let $remote = tempfile::tempdir().unwrap();
-        let crate::remote_reader::test_support::PopulatedReader {
-            reader: $reader,
-            log: $log,
-        } = crate::remote_reader::test_support::populated_reader($local.path(), $remote.path());
-        $(let $exports = $log.tierable_segments();)?
-    };
-}
-pub(crate) use populated_reader_fixture;
-
 pub fn reader_with_metadata(
     make_metadata: impl FnOnce() -> Arc<dyn RemoteLogMetadataManager>,
 ) -> ReaderWithDir {
@@ -614,3 +600,23 @@ pub fn empty_reader() -> (tempfile::TempDir, RemoteReader) {
 }
 
 pub fn not_ready_reader() -> ReaderWithDir { reader_with_metadata(|| Arc::new(NotReadyRlmm)) }
+
+/// A populated reader and source log with both directory guards retained by its caller.
+pub struct ReaderFixture {
+    pub local: tempfile::TempDir,
+    pub remote: tempfile::TempDir,
+    pub reader: RemoteReader,
+    pub log: Log,
+}
+/// Build the reader while retaining its directory guards and source log in the caller.
+pub fn reader_fixture() -> ReaderFixture {
+    let local = tempfile::tempdir().unwrap();
+    let remote = tempfile::tempdir().unwrap();
+    let PopulatedReader { reader, log } = populated_reader(local.path(), remote.path());
+    ReaderFixture {
+        local,
+        remote,
+        reader,
+        log,
+    }
+}

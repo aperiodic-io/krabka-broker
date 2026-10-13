@@ -11,7 +11,7 @@ use {
     super::*,
     crate::remote_log_manager::test_support as fixtures,
     assert2::check,
-    fixtures::{missing_remote_reads, rolled_tiered_partition_at},
+    fixtures::rolled_tiered_partition_at,
     krabka_remote_storage::{
         CustomMetadata, LogSegmentData, RemoteLogSegmentMetadata, RemoteStorageError,
     },
@@ -88,9 +88,9 @@ impl TestRsm {
     }
 }
 
-impl RemoteStorageManager for TestRsm {
-    missing_remote_reads!(delete_ok);
+#[krabka_macros::missing_remote_reads(delete_ok)]
 
+impl RemoteStorageManager for TestRsm {
     fn copy_log_segment_data(
         &self,
         metadata: &RemoteLogSegmentMetadata,

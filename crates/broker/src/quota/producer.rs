@@ -42,19 +42,30 @@ pub fn consume_producer_quota(
 mod tests {
     use {
         super::consume_producer_quota,
-        crate::quota::{QuotaBuckets, test_support::check_fractional_bandwidth},
+        crate::quota::{
+            QuotaBuckets,
+            test_support::{QuotaEntityInput, check_fractional_bandwidth, image_with_rate},
+        },
         assert2::{assert, check},
         krabka_units::{Time, convert::TimeExt, millis, secs},
     };
 
-    crate::quota::test_support::image_builder!(img_with_quota, "producer_byte_rate");
+    fn img_with_quota(
+        entity: Vec<QuotaEntityInput<'_>>,
+        rate: f64,
+    ) -> krabka_metadata::MetadataImage {
+        image_with_rate(entity, "producer_byte_rate", rate)
+    }
 
     /// One bucket per quota entity (#748): two charges share it, so the
     /// second one, which fits the rate on its own, is throttled by the first.
     #[test]
     fn producer_quota_keeps_one_bucket_per_entity() {
         let img = img_with_quota(
-            vec![("user", Some("alice")), ("client-id", Some("app"))],
+            vec![
+                QuotaEntityInput::user(Some("alice")),
+                QuotaEntityInput::client_id(Some("app")),
+            ],
             128.0,
         );
         // A one-second window keeps the burst at the configured rate, so
@@ -77,7 +88,7 @@ mod tests {
     /// the overage back, and a producer sent about twice its quota.
     #[test]
     fn the_overage_of_a_throttled_request_stays_charged() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 1_000.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 1_000.0);
         let buckets = QuotaBuckets::with_window(secs(1));
 
         // 500 bytes over the one-second burst, then 1000 more on the same
@@ -95,7 +106,10 @@ mod tests {
     #[test]
     fn producer_quota_uses_client_id_entity_precedence() {
         let img = img_with_quota(
-            vec![("user", Some("alice")), ("client-id", Some("app"))],
+            vec![
+                QuotaEntityInput::user(Some("alice")),
+                QuotaEntityInput::client_id(Some("app")),
+            ],
             128.0,
         );
         let buckets = QuotaBuckets::new();
@@ -109,7 +123,7 @@ mod tests {
 
     #[test]
     fn producer_quota_delay_reflects_exact_overage_at_configured_rate() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 1_000.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 1_000.0);
         let buckets = QuotaBuckets::with_window(secs(1));
 
         let delay = consume_producer_quota(&img, &buckets, "alice", Some("app"), 1_250);
@@ -122,7 +136,7 @@ mod tests {
     /// seconds the broker once capped it at.
     #[test]
     fn producer_quota_delay_is_not_capped() {
-        let img = img_with_quota(vec![("user", Some("alice"))], 1024.0);
+        let img = img_with_quota(vec![QuotaEntityInput::user(Some("alice"))], 1024.0);
         // The default 11-second window gives an 11 KiB burst; 20 KiB past it
         // is 20 seconds of debt at 1 KiB/s.
         let buckets = QuotaBuckets::new();

@@ -1,6 +1,8 @@
 //! Handler tests for `OffsetDelete`: the group-level refusals, Kafka's check
 //! order and the subscription guard, each as a whole response.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{
         handle,
@@ -96,8 +98,14 @@ struct Case<'a> {
 
 #[tokio::test]
 async fn offset_delete_matches_kafka_whole_responses() {
-    let (allowed, _allowed_dir) = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
-    let (denied, _denied_dir) = start_group_broker_no_audit(Arc::new(DenyAll)).await;
+    let HandlerStartedBroker {
+        broker: allowed,
+        dir: _allowed_dir,
+    } = start_group_broker_no_audit(Arc::new(AllowAllAuthorizer)).await;
+    let HandlerStartedBroker {
+        broker: denied,
+        dir: _denied_dir,
+    } = start_group_broker_no_audit(Arc::new(DenyAll)).await;
     create_topic(&allowed, "t").await;
     create_topic(&allowed, "u").await;
     let coordinator = allowed.broker_arc_for_test().group_coordinator.clone();

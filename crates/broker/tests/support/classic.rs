@@ -174,18 +174,14 @@ pub fn classic_join_request(
     }
 }
 
-#[macro_export]
-macro_rules! classic_join_request_from {
-    ($setup:expr) => {{
-        let setup = $setup;
-        $crate::support::classic::classic_join_request()
-            .group_id(setup.group_id)
-            .member_id(setup.member_id)
-            .timeouts(setup.timeouts)
-            .protocol_type(setup.protocol_type)
-            .protocols(setup.protocols)
-            .call()
-    }};
+pub fn classic_join_request_from(setup: ClassicJoinSetup) -> JoinGroupRequest {
+    classic_join_request()
+        .group_id(setup.group_id)
+        .member_id(setup.member_id)
+        .timeouts(setup.timeouts)
+        .protocol_type(setup.protocol_type)
+        .protocols(setup.protocols)
+        .call()
 }
 
 pub fn sync_assignment(

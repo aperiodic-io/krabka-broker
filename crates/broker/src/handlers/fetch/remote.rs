@@ -449,6 +449,7 @@ mod tests {
         assert2::{assert, check},
         krabka_log::{DeliveryPolicy, Log, LogConfig},
         krabka_units::prelude::millis,
+        std::sync::Arc,
     };
 
     /// KIP-405 splits the floors, and only the global one bounds the remote
@@ -579,9 +580,33 @@ mod tests {
         )
     }
 
+    struct TieredBroker {
+        handle: BrokerHandle,
+        dir: tempfile::TempDir,
+        remote_dir: tempfile::TempDir,
+    }
+
+    struct CommittedTieredFixture {
+        part: Arc<Partition>,
+        broker: Arc<Broker>,
+        owners: TieredBroker,
+    }
+
+    async fn committed_tiered_fixture() -> CommittedTieredFixture {
+        let owners = tiered_broker().await;
+        let broker = owners.handle.broker_arc_for_test();
+        let part = tiered_partition(&broker, owners.dir.path(), false).await;
+        commit_everything(&part).await;
+        CommittedTieredFixture {
+            part,
+            broker,
+            owners,
+        }
+    }
+
     /// A broker with a local archive and an in-memory RLMM, and the
     /// directories both live in.
-    async fn tiered_broker() -> (BrokerHandle, tempfile::TempDir, tempfile::TempDir) {
+    async fn tiered_broker() -> TieredBroker {
         let dir = tempfile::tempdir().expect("tempdir");
         let remote_dir = tempfile::tempdir().expect("remote tempdir");
         let mut config = BrokerConfig::for_tests(dir.path().to_path_buf());
@@ -590,7 +615,11 @@ mod tests {
         });
         config.remote_log_metadata = RlmmKind::InMemory;
         let handle = Broker::start(config).await.expect("start broker");
-        (handle, dir, remote_dir)
+        TieredBroker {
+            handle,
+            dir,
+            remote_dir,
+        }
     }
 
     /// The high watermark `tiered_partition` installs: the end of the 24
@@ -656,25 +685,16 @@ mod tests {
         }
     }
 
-    macro_rules! committed_tiered_fixture {
-        (($handle:ident, $dir:ident, $remote_dir:ident, $broker:ident, $part:ident)) => {
-            let ($handle, $dir, $remote_dir) = tiered_broker().await;
-            let $broker = $handle.broker_arc_for_test();
-            let $part = tiered_partition(&$broker, $dir.path(), false).await;
-            commit_everything(&$part).await;
-        };
-    }
-
     #[tokio::test]
     async fn a_fetch_below_the_global_log_start_never_reaches_the_remote_tier() {
         use {crate::codes, krabka_log::Offset};
 
-        committed_tiered_fixture!((broker_handle, dir, _remote_dir, broker, part));
+        let tiered = committed_tiered_fixture().await;
 
-        let out_of_range = || out_of_range_at(&part, 0);
+        let out_of_range = || out_of_range_at(&tiered.part, 0);
         // The floor has not moved, so offset 0 is the remote tier's to serve.
         let mut served = out_of_range();
-        let bytes_served = super::try_remote_read(&broker, &mut served, &part).await;
+        let bytes_served = super::try_remote_read(&tiered.broker, &mut served, &tiered.part).await;
         check!(bytes_served.is_some_and(|n| n > 0), "the tier answers");
         check!(served.out.error_code == codes::NONE);
         check!(bounds(&served.out) == served_bounds(0));
@@ -682,25 +702,28 @@ mod tests {
         // `DeleteRecords` to offset 5. The remote segment that holds offset 0
         // is still listed in the RLMM and still in the archive, and it must
         // stop being reachable all the same.
-        part.log
+        tiered
+            .part
+            .log
             .lock()
             .expect("log mutex poisoned")
             .set_log_start_offset(Offset(5))
             .expect("move the log start");
 
         let mut refused = out_of_range();
-        let bytes_served = super::try_remote_read(&broker, &mut refused, &part).await;
+        let bytes_served = super::try_remote_read(&tiered.broker, &mut refused, &tiered.part).await;
         check!(bytes_served == None, "no tier answers below the floor");
         check!(refused.out == super::refused_read(0, codes::OFFSET_OUT_OF_RANGE));
 
         // The floor itself still reads: the band above it is the tier's, and
         // the row reports the floor that moved.
-        let mut at_floor = out_of_range_at(&part, 5);
-        let bytes_served = super::try_remote_read(&broker, &mut at_floor, &part).await;
+        let mut at_floor = out_of_range_at(&tiered.part, 5);
+        let bytes_served =
+            super::try_remote_read(&tiered.broker, &mut at_floor, &tiered.part).await;
         check!(bytes_served.is_some_and(|n| n > 0), "the floor is readable");
         check!(bounds(&at_floor.out) == served_bounds(5));
 
-        broker_handle.shutdown().await;
+        tiered.owners.handle.shutdown().await;
     }
 
     /// KIP-405 routes a follower and a consumer differently over the same
@@ -730,15 +753,15 @@ mod tests {
             crate::codes, krabka_log::Offset, krabka_protocol::owned::fetch_response::PartitionData,
         };
 
-        committed_tiered_fixture!((broker_handle, dir, _remote_dir, broker, part));
+        let tiered = committed_tiered_fixture().await;
 
         let follower_at = |fetch_offset| super::PendingRead {
             is_follower_fetch: true,
-            ..out_of_range_at(&part, fetch_offset)
+            ..out_of_range_at(&tiered.part, fetch_offset)
         };
 
         let mut follower = follower_at(0);
-        let served = super::try_remote_read(&broker, &mut follower, &part).await;
+        let served = super::try_remote_read(&tiered.broker, &mut follower, &tiered.part).await;
         check!(
             served == Some(0),
             "the follower is served no archived bytes"
@@ -753,8 +776,8 @@ mod tests {
         );
 
         // A consumer at the very same offset still reads the archive.
-        let mut consumer = out_of_range_at(&part, 0);
-        let served = super::try_remote_read(&broker, &mut consumer, &part).await;
+        let mut consumer = out_of_range_at(&tiered.part, 0);
+        let served = super::try_remote_read(&tiered.broker, &mut consumer, &tiered.part).await;
         check!(
             served.is_some_and(|n| n > 0),
             "the tier answers the consumer"
@@ -772,22 +795,24 @@ mod tests {
 
         // Above the leader's log there is no tiered band to redirect into.
         let mut ahead = follower_at(10_000);
-        let served = super::try_remote_read(&broker, &mut ahead, &part).await;
+        let served = super::try_remote_read(&tiered.broker, &mut ahead, &tiered.part).await;
         check!(served == None, "no segment holds offset 10_000");
         check!(ahead.out == super::refused_read(0, codes::OFFSET_OUT_OF_RANGE));
 
         // Below the global floor the offset is gone from every tier.
-        part.log
+        tiered
+            .part
+            .log
             .lock()
             .expect("log mutex poisoned")
             .set_log_start_offset(Offset(5))
             .expect("move the log start");
         let mut deleted = follower_at(0);
-        let served = super::try_remote_read(&broker, &mut deleted, &part).await;
+        let served = super::try_remote_read(&tiered.broker, &mut deleted, &tiered.part).await;
         check!(served == None, "nothing serves an offset below the floor");
         check!(deleted.out == super::refused_read(0, codes::OFFSET_OUT_OF_RANGE));
 
-        broker_handle.shutdown().await;
+        tiered.owners.handle.shutdown().await;
     }
 
     /// A restart must not hide the archive.
@@ -801,7 +826,11 @@ mod tests {
     async fn a_restart_does_not_put_the_archive_out_of_range() {
         use crate::codes;
 
-        let (broker_handle, dir, _remote_dir) = tiered_broker().await;
+        let TieredBroker {
+            handle: broker_handle,
+            dir,
+            remote_dir: _remote_dir,
+        } = tiered_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let part = tiered_partition(&broker, dir.path(), true).await;
 
@@ -914,7 +943,11 @@ mod tests {
     async fn a_broken_archive_fails_the_partition_and_a_real_miss_stays_out_of_range() {
         use crate::codes;
 
-        let (broker_handle, dir, remote_dir) = tiered_broker().await;
+        let TieredBroker {
+            handle: broker_handle,
+            dir,
+            remote_dir,
+        } = tiered_broker().await;
         let broker = broker_handle.broker_arc_for_test();
         let part = tiered_partition(&broker, dir.path(), false).await;
 

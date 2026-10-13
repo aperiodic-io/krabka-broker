@@ -6,14 +6,18 @@
 //! disclosing the topic names through the topology.
 //!
 //! Topic traversal is shared with the heartbeat wire topology through
-//! `streams_group_heartbeat::topic_authz::define_required_topics`.
+//! the flat `required_topics!` schema declaration.
 
 use crate::{
     coordinator::unified::streams::persistence::StreamsGroupTopologyValue,
-    handlers::streams_group_heartbeat::topic_authz::define_required_topics,
+    handlers::streams_group_heartbeat::topic_authz::dedup_first_seen,
 };
 
-define_required_topics!(StreamsGroupTopologyValue);
+krabka_macros::required_topics! {
+    /// Kafka's `requiredTopics`: names from all four topic roles, deduplicated
+    /// in first-seen order across stored subtopologies.
+    pub(super) fn required_topics(topology: &StreamsGroupTopologyValue) -> Vec<String>;
+}
 
 #[cfg(test)]
 mod tests {

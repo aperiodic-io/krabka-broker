@@ -8,7 +8,7 @@ use {
         harness::{ConsumptionFixture, bootstrap_share_state, consumption_fixture, produce_n},
         share_rpc::{acquire_three_and_acknowledge, acquired_count, share_fetch},
         support::share::{
-            ShareAck, ShareSessionEpoch, ShareSessionSetup, acknowledge_success,
+            MemberSession, ShareAck, ShareSessionEpoch, ShareSessionSetup, acknowledge_success,
             join_consume_member, permitted_topic_fixture, produce_values, record_values,
             refetch_while_empty,
         },
@@ -144,7 +144,7 @@ async fn fragmented_window_records_match_acquired_offsets() {
     produce_one(&client, "t", tid, 0, "v0").await;
     produce_one(&client, "t", tid, 0, "v1").await;
     produce_one(&client, "t", tid, 0, "v2").await;
-    let (member, _member_epoch) = join_consume_member(&broker, &client, tid).await;
+    let MemberSession { member, .. } = join_consume_member(&broker, &client, tid).await;
     let session = acquire_three_and_acknowledge(
         &client,
         ShareAck::single_for(&member, tid, krabka_ids::Offset(1)),

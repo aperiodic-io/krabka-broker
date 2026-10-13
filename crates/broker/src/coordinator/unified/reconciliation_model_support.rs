@@ -22,6 +22,31 @@ use {
     },
 };
 
+/// Canonical ownership or advertisement, with the original id-before-parts hash order.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct MemberPartitions {
+    pub member_id: String,
+    pub partitions: Vec<i32>,
+}
+
+/// Borrow one assignment while checking the independent handoff oracle.
+pub struct AssignmentView<'a> {
+    pub member_id: &'a str,
+    pub partitions: &'a [i32],
+}
+
+/// An original member epoch to compare with the rebuilt group.
+pub struct MemberEpoch<'a> {
+    pub member_id: &'a str,
+    pub epoch: i32,
+}
+
+/// One faithful-client move, in the original add-before-revoke enumeration.
+pub struct ClientMove {
+    pub add: bool,
+    pub partition: i32,
+}
+
 pub const TOPIC: Uuid = Uuid([7; 16]);
 pub const TOPIC_NAME: &str = "t";
 #[derive(Debug)]
@@ -97,25 +122,31 @@ pub fn insert_modeled_member(group: &mut GroupState, member: MemberState, target
 }
 
 pub fn client_moves(
-    advertised: &[(String, Vec<i32>)],
-    owned: &[(String, Vec<i32>)],
+    advertised: &[MemberPartitions],
+    owned: &[MemberPartitions],
     id: &str,
-) -> Vec<(bool, i32)> {
+) -> Vec<ClientMove> {
     let advertised: BTreeSet<_> = advertised_for(advertised, id).into_iter().collect();
     let owned: BTreeSet<_> = owned
         .iter()
-        .find(|(member, _)| member == id)
-        .map(|(_, parts)| parts.iter().copied().collect())
+        .find(|row| row.member_id == id)
+        .map(|row| row.partitions.iter().copied().collect())
         .unwrap_or_default();
     advertised
         .iter()
-        .filter(|p| !owned.contains(*p))
-        .map(|&p| (true, p))
+        .filter(|partition| !owned.contains(*partition))
+        .map(|&partition| ClientMove {
+            add: true,
+            partition,
+        })
         .chain(
             owned
                 .iter()
-                .filter(|p| !advertised.contains(*p))
-                .map(|&p| (false, p)),
+                .filter(|partition| !advertised.contains(*partition))
+                .map(|&partition| ClientMove {
+                    add: false,
+                    partition,
+                }),
         )
         .collect()
 }
@@ -171,12 +202,12 @@ pub fn apply_member_heartbeat(
 }
 
 pub fn apply_client_move(
-    advertised: &[(String, Vec<i32>)],
+    advertised: &[MemberPartitions],
     owned: &mut BTreeMap<String, BTreeSet<i32>>,
     id: String,
     partition: i32,
     add: bool,
-) -> Option<Vec<(String, Vec<i32>)>> {
+) -> Option<Vec<MemberPartitions>> {
     let advertised_has = advertised_for(advertised, &id).contains(&partition);
     let entry = owned.entry(id).or_default();
     if advertised_has != add || entry.contains(&partition) == add {
@@ -249,66 +280,77 @@ pub fn to_map(parts: &[i32]) -> HashMap<Uuid, Vec<i32>> {
     }
 }
 
-pub fn owned_map(owned: &[(String, Vec<i32>)]) -> BTreeMap<String, BTreeSet<i32>> {
+pub fn owned_map(owned: &[MemberPartitions]) -> BTreeMap<String, BTreeSet<i32>> {
+    let mut result = BTreeMap::new();
+    for row in owned {
+        result.insert(
+            row.member_id.clone(),
+            row.partitions.iter().copied().collect(),
+        );
+    }
+    result
+}
+
+pub fn owned_to_vec(owned: &BTreeMap<String, BTreeSet<i32>>) -> Vec<MemberPartitions> {
+    // std's map iterator yields key/value pairs; the model keeps named rows.
     owned
         .iter()
-        .map(|(id, parts)| (id.clone(), parts.iter().copied().collect()))
+        .map(|(id, parts)| MemberPartitions {
+            member_id: id.clone(),
+            partitions: parts.iter().copied().collect(),
+        })
         .collect()
 }
 
-pub fn owned_to_vec(owned: &BTreeMap<String, BTreeSet<i32>>) -> Vec<(String, Vec<i32>)> {
-    owned
-        .iter()
-        .map(|(id, parts)| (id.clone(), parts.iter().copied().collect()))
-        .collect()
-}
-
-pub fn advertised_for(advertised: &[(String, Vec<i32>)], id: &str) -> Vec<i32> {
+pub fn advertised_for(advertised: &[MemberPartitions], id: &str) -> Vec<i32> {
     advertised
         .iter()
-        .find(|(member, _)| member == id)
-        .map(|(_, parts)| parts.clone())
+        .find(|row| row.member_id == id)
+        .map(|row| row.partitions.clone())
         .unwrap_or_default()
 }
 
-pub fn exclusive_ownership(owned: &[(String, Vec<i32>)]) -> bool {
+pub fn exclusive_ownership(owned: &[MemberPartitions]) -> bool {
     let mut seen = HashSet::new();
     owned
         .iter()
-        .flat_map(|(_, parts)| parts)
-        .all(|p| seen.insert(p))
+        .flat_map(|row| &row.partitions)
+        .all(|partition| seen.insert(partition))
 }
 
 /// The independent ownership oracle for the coordinator's advertised ledger.
-pub fn advertised_disjoint(
-    advertised: &[(String, Vec<i32>)],
-    owned: &[(String, Vec<i32>)],
-) -> bool {
-    !overlaps_others(advertised.iter().map(|(id, parts)| (id, parts)), owned)
+pub fn advertised_disjoint(advertised: &[MemberPartitions], owned: &[MemberPartitions]) -> bool {
+    !overlaps_others(
+        advertised.iter().map(|row| AssignmentView {
+            member_id: row.member_id.as_str(),
+            partitions: &row.partitions,
+        }),
+        owned,
+    )
 }
 
 pub fn overlaps_others<'a>(
-    mut assignments: impl Iterator<Item = (&'a String, &'a Vec<i32>)>,
-    owned: &[(String, Vec<i32>)],
+    mut assignments: impl Iterator<Item = AssignmentView<'a>>,
+    owned: &[MemberPartitions],
 ) -> bool {
-    assignments.any(|(id, parts)| {
-        parts.iter().any(|p| {
-            owned
-                .iter()
-                .any(|(other, held)| other != id && held.contains(p))
+    assignments.any(|assignment| {
+        assignment.partitions.iter().any(|partition| {
+            owned.iter().any(|row| {
+                row.member_id != assignment.member_id && row.partitions.contains(partition)
+            })
         })
     })
 }
 
 /// A transition may remove a member, but must never lower a surviving epoch.
-pub fn assert_member_epochs<'a>(members: impl Iterator<Item = (&'a str, i32)>, post: &GroupState) {
-    for (id, epoch) in members {
-        if let Some(member) = post.members.get(id) {
+pub fn assert_member_epochs<'a>(members: impl Iterator<Item = MemberEpoch<'a>>, post: &GroupState) {
+    for original in members {
+        if let Some(member) = post.members.get(original.member_id) {
             assert!(
-                member.member_epoch >= epoch,
+                member.member_epoch >= original.epoch,
                 "member_epoch regressed for {}: {} -> {}",
-                id,
-                epoch,
+                original.member_id,
+                original.epoch,
                 member.member_epoch
             );
         }
@@ -329,18 +371,43 @@ pub fn record_epoch_regression<V: Ord>(
 
 #[test]
 fn epoch_ledger_keeps_existing_violations_and_records_only_regressions() {
-    for (previous, current, regressed) in [
-        (0, 0, false),
-        (0, 1, false),
-        (1, 0, true),
-        (i16::MIN, i16::MAX, false),
-        (i16::MAX, i16::MIN, true),
+    struct EpochCase {
+        previous: i16,
+        current: i16,
+        regressed: bool,
+    }
+    for case in [
+        EpochCase {
+            previous: 0,
+            current: 0,
+            regressed: false,
+        },
+        EpochCase {
+            previous: 0,
+            current: 1,
+            regressed: false,
+        },
+        EpochCase {
+            previous: 1,
+            current: 0,
+            regressed: true,
+        },
+        EpochCase {
+            previous: i16::MIN,
+            current: i16::MAX,
+            regressed: false,
+        },
+        EpochCase {
+            previous: i16::MAX,
+            current: i16::MIN,
+            regressed: true,
+        },
     ] {
         let mut ledger = BTreeSet::from(["existing violation"]);
-        record_epoch_regression(previous, current, &mut ledger, "epoch regression");
-        record_epoch_regression(previous, current, &mut ledger, "epoch regression");
+        record_epoch_regression(case.previous, case.current, &mut ledger, "epoch regression");
+        record_epoch_regression(case.previous, case.current, &mut ledger, "epoch regression");
         assert!(ledger.contains("existing violation"));
-        assert!(ledger.contains("epoch regression") == regressed);
-        assert!(ledger.len() == if regressed { 2 } else { 1 });
+        assert!(ledger.contains("epoch regression") == case.regressed);
+        assert!(ledger.len() == if case.regressed { 2 } else { 1 });
     }
 }

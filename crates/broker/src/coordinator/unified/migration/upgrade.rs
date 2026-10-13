@@ -265,7 +265,7 @@ pub(crate) fn upgrade_pending_records(state: &ConsumerState) -> PendingRecords {
         plan.classic_group == GroupMigrationRecordAction::Tombstone;
     assert2::debug_assert!(pending.group_metadata.is_some());
     assert2::debug_assert!(pending.target_metadata.is_some());
-    super::super::persistence::assert_member_record_count!(pending, plan.member_count);
+    pending.assert_member_record_count(plan.member_count);
     pending
 }
 

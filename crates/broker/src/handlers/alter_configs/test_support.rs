@@ -5,14 +5,21 @@
 //! resource shapes and the same seeded images, so the fixtures live in one
 //! module rather than being duplicated per test file.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::{RESOURCE_TYPE_BROKER, RESOURCE_TYPE_TOPIC, handle},
     crate::{
         authorizer::Authorizer,
         handlers::test_support::metadata_topic_record,
-        test_support::{broker_registration, start_broker_with_authorizer as start_broker},
+        test_support::{
+            broker_registration, start_broker_with_authorizer as start_broker, string_pairs,
+        },
     },
-    krabka_metadata::MetadataRecord,
+    krabka_metadata::{
+        ClientMetricsConfigRecord, GroupConfigRecord, MetadataImage, MetadataRecord,
+        TopicConfigRecord,
+    },
     krabka_protocol::owned::{
         alter_configs_request::{AlterConfigsRequest, AlterConfigsResource, AlterableConfig},
         alter_configs_response::AlterConfigsResponse,
@@ -75,29 +82,43 @@ pub(super) fn image_with_topic(name: &str) -> krabka_metadata::MetadataImage {
     image
 }
 
-config_image_fixture! {
-    /// A metadata image that holds one topic and the override map it was created
-    /// with. `image_with_topic` covers the topics whose overrides do not matter.
-    pub(super) fn image_with_topic_config(name, overrides)
-    from image_with_topic(name);
-    V1TopicConfig(TopicConfigRecord { topic, overrides })
+/// A metadata image that holds one topic and the override map it was created
+/// with. `image_with_topic` covers the topics whose overrides do not matter.
+pub(super) fn image_with_topic_config(name: &str, overrides: &[(&str, &str)]) -> MetadataImage {
+    let mut image = image_with_topic(name);
+    image.apply(&MetadataRecord::V1TopicConfig(TopicConfigRecord {
+        topic: name.into(),
+        overrides: string_pairs(overrides),
+    }));
+    image
 }
 
-config_image_fixture! {
-    /// A metadata image that holds one group and the override map it was
-    /// configured with, for the same "does a replacement audit the keys it
-    /// deletes by omission" tests `image_with_topic_config` supports.
-    pub(super) fn image_with_group_config(group_id, overrides)
-    from krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-    V1GroupConfig(GroupConfigRecord { group_id, configs })
+/// A metadata image that holds one group and the override map it was
+/// configured with, for the same "does a replacement audit the keys it
+/// deletes by omission" tests `image_with_topic_config` supports.
+pub(super) fn image_with_group_config(group_id: &str, overrides: &[(&str, &str)]) -> MetadataImage {
+    let mut image = MetadataImage::new(uuid::Uuid::nil());
+    image.apply(&MetadataRecord::V1GroupConfig(GroupConfigRecord {
+        group_id: group_id.into(),
+        configs: string_pairs(overrides),
+    }));
+    image
 }
 
-config_image_fixture! {
-    /// A metadata image that holds one client-metrics subscription and the
-    /// override map it was configured with.
-    pub(super) fn image_with_client_metrics_config(name, overrides)
-    from krabka_metadata::MetadataImage::new(uuid::Uuid::nil());
-    V1ClientMetricsConfig(ClientMetricsConfigRecord { name, configs })
+/// A metadata image that holds one client-metrics subscription and the
+/// override map it was configured with.
+pub(super) fn image_with_client_metrics_config(
+    name: &str,
+    overrides: &[(&str, &str)],
+) -> MetadataImage {
+    let mut image = MetadataImage::new(uuid::Uuid::nil());
+    image.apply(&MetadataRecord::V1ClientMetricsConfig(
+        ClientMetricsConfigRecord {
+            name: name.into(),
+            configs: string_pairs(overrides),
+        },
+    ));
+    image
 }
 
 pub(super) fn group_resource(
@@ -133,7 +154,10 @@ pub(super) async fn drive_many(
     resources: Vec<AlterConfigsResource>,
 ) -> AlterConfigsResponse {
     let version = 2;
-    let (broker_handle, _dir) = start_broker(authorizer).await;
+    let HandlerStartedBroker {
+        broker: broker_handle,
+        dir: _dir,
+    } = start_broker(authorizer).await;
     let broker = broker_handle.broker_arc_for_test();
     krabka_macros::request_test_identity! {
         bind(ctx);

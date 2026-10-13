@@ -2,7 +2,7 @@
 //! passthrough predicate to the writer's `ProduceData`.
 
 use {
-    super::super::{DecodeEnv, PartitionPayload, PreparedSource, prepare_batch},
+    super::super::{DecodeEnv, PartitionPayload, PreparedBatch, PreparedSource, prepare_batch},
     crate::{
         handlers::produce::{append::build_produce_data, topic_settings::TimestampPolicy},
         metrics::BrokerMetrics,
@@ -19,22 +19,25 @@ use {
 };
 
 /// Prepare against the fixture topic with the caller's compression, metrics
-/// and version; the macro retains temporary borrows through the full expression.
-macro_rules! prepare_for_topic {
-    ($payload:expr, $compression:expr, $metrics:expr, $version:expr) => {
-        prepare_batch(
-            $payload,
-            $compression,
-            TimestampPolicy::default(),
-            false,
-            DecodeEnv {
-                topic_name: &topic(),
-                metrics: $metrics,
-                policy: RecordDecompressionPolicy::default(),
-            },
-            $version,
-        )
-    };
+/// and version; each borrow remains valid throughout preparation.
+fn prepare_for_topic(
+    payload: PartitionPayload,
+    compression: Option<CompressionType>,
+    metrics: &BrokerMetrics,
+    version: i16,
+) -> Result<PreparedBatch, i16> {
+    prepare_batch(
+        payload,
+        compression,
+        TimestampPolicy::default(),
+        false,
+        DecodeEnv {
+            topic_name: &topic(),
+            metrics,
+            policy: RecordDecompressionPolicy::default(),
+        },
+        version,
+    )
 }
 
 /// The topic name these cases record under, as the shared handle the metric
@@ -68,11 +71,11 @@ fn plain_batch() -> RecordBatch {
 }
 
 fn rejected_batch(batch: &RecordBatch) -> i16 {
-    prepare_for_topic!(
+    prepare_for_topic(
         PartitionPayload::Slice(encode(batch)),
         None,
-        &crate::metrics::BrokerMetrics::new(),
-        13
+        &BrokerMetrics::new(),
+        13,
     )
     .unwrap_err()
 }
@@ -124,7 +127,7 @@ fn dispatch_slice(
 ) -> ProduceData {
     let m = BrokerMetrics::new();
     let prepared =
-        prepare_for_topic!(PartitionPayload::Slice(slice), topic_compression, &m, 13).unwrap();
+        prepare_for_topic(PartitionPayload::Slice(slice), topic_compression, &m, 13).unwrap();
     build_produce_data(prepared, leader_epoch)
 }
 
@@ -161,7 +164,7 @@ fn passthrough_when_target_codec_equals_current() {
 fn fallback_when_null_field() {
     // A wire-null records field is rejected as INVALID_REQUEST.
     let m = BrokerMetrics::new();
-    let err = prepare_for_topic!(PartitionPayload::Null, None, &m, 13).unwrap_err();
+    let err = prepare_for_topic(PartitionPayload::Null, None, &m, 13).unwrap_err();
     assert!(err == crate::codes::INVALID_REQUEST);
 }
 
@@ -209,12 +212,7 @@ fn rejects_zstd_below_v7_and_admits_it_from_v7_on_both_paths() {
             PartitionPayload::Owned(RecordsPayload::V2(vec![b.clone()])),
         ];
         for payload in payloads {
-            let result = prepare_for_topic!(
-                payload,
-                None,
-                &crate::metrics::BrokerMetrics::new(),
-                version
-            );
+            let result = prepare_for_topic(payload, None, &BrokerMetrics::new(), version);
             if admitted {
                 assert!(result.is_ok(), "version {version}: {result:?}");
             } else {
@@ -241,7 +239,7 @@ fn admits_a_nonzero_base_offset_on_both_paths() {
         PartitionPayload::Owned(RecordsPayload::V2(vec![b])),
     ];
     for payload in payloads {
-        let prepared = prepare_for_topic!(payload, None, &crate::metrics::BrokerMetrics::new(), 13);
+        let prepared = prepare_for_topic(payload, None, &BrokerMetrics::new(), 13);
         assert!(prepared.is_ok());
     }
 }
@@ -278,8 +276,7 @@ fn rejects_invalid_client_batch_metadata_on_header_and_owned_paths() {
             PartitionPayload::Owned(RecordsPayload::V2(vec![batch])),
         ];
         for payload in payloads {
-            let err = prepare_for_topic!(payload, None, &crate::metrics::BrokerMetrics::new(), 13)
-                .unwrap_err();
+            let err = prepare_for_topic(payload, None, &BrokerMetrics::new(), 13).unwrap_err();
             assert!(err == crate::codes::INVALID_RECORD, "case: {name}");
         }
     }
@@ -366,11 +363,11 @@ fn an_undecodable_slice_gets_the_code_kafka_gives_it() {
         },
     ];
     for case in cases {
-        let error_code = prepare_for_topic!(
+        let error_code = prepare_for_topic(
             PartitionPayload::Slice(Bytes::from(case.wire)),
             None,
-            &crate::metrics::BrokerMetrics::new(),
-            13
+            &BrokerMetrics::new(),
+            13,
         )
         .unwrap_err();
         assert!(error_code == case.error_code, "{}", case.name);
@@ -383,11 +380,11 @@ fn rejects_crc_valid_malformed_record_body() {
     wire[HEADER_LEN] = 0; // zero-length first record body
     refresh_batch_crc(&mut wire);
 
-    let error = prepare_for_topic!(
+    let error = prepare_for_topic(
         PartitionPayload::Slice(Bytes::from(wire)),
         None,
-        &crate::metrics::BrokerMetrics::new(),
-        13
+        &BrokerMetrics::new(),
+        13,
     )
     .unwrap_err();
     assert!(error == crate::codes::INVALID_RECORD);
@@ -401,11 +398,11 @@ fn fallback_on_multiple_batches_in_slice() {
     let mut two = BytesMut::new();
     b.encode(&mut two).unwrap();
     b.encode(&mut two).unwrap();
-    let err = prepare_for_topic!(
+    let err = prepare_for_topic(
         PartitionPayload::Slice(two.freeze()),
         None,
-        &crate::metrics::BrokerMetrics::new(),
-        13
+        &BrokerMetrics::new(),
+        13,
     )
     .unwrap_err();
     assert!(err == crate::codes::INVALID_RECORD);
@@ -517,7 +514,7 @@ fn header_fields_drive_dedup_on_verbatim_path() {
     let wire = encode(&b);
 
     let m = BrokerMetrics::new();
-    let prepared = prepare_for_topic!(PartitionPayload::Slice(wire.clone()), None, &m, 13).unwrap();
+    let prepared = prepare_for_topic(PartitionPayload::Slice(wire.clone()), None, &m, 13).unwrap();
     assert!(matches!(prepared.source, PreparedSource::Verbatim(_)));
     check!(prepared.producer_id == 4242);
     check!(prepared.producer_epoch == 9);

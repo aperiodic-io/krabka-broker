@@ -41,8 +41,7 @@ use {
             ApiVersion, RequestContext, audit_admin_success, audit_resource, cluster_alter_denied,
             decode_request, encode_response,
             forward_to_controller::{
-                controller_listener_dispatch, guarded_operation_on_source, is_active_controller,
-                to_active_controller,
+                guarded_operation_on_source, is_active_controller, to_active_controller,
             },
             offline_replicas::live_brokers,
             stamp_unset, submit_failure_code,
@@ -88,14 +87,7 @@ pub(crate) async fn dispatch(
     ctx: &RequestContext<'_>,
 ) -> Result<Bytes, BrokerError> {
     let request = decode_request::<ElectLeadersRequest>(req_bytes, version)?;
-    controller_listener_dispatch!(
-        broker,
-        ctx,
-        request,
-        version,
-        self::handle,
-        self::request_refusal
-    );
+    let request = krabka_macros::controller_request!(broker, ctx, request, version; self::handle, self::request_refusal);
     if let Some(answer) = to_active_controller(
         broker,
         elect_leaders_request::API_KEY,

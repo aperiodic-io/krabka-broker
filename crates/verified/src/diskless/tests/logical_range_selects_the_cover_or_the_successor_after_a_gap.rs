@@ -1,8 +1,12 @@
-use super::*;
+use {super::*, crate::log_index::IndexEntry};
 
 #[test]
 fn logical_range_selects_the_cover_or_the_successor_after_a_gap() {
-    let entries = [(0, 4), (7, 9), (12, 15)];
+    let entries = [
+        IndexEntry::new(0, 4),
+        IndexEntry::new(7, 9),
+        IndexEntry::new(12, 15),
+    ];
     for (requested, expected) in [
         (-1, None),
         (0, Some(0)),

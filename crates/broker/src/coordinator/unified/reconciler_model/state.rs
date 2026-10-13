@@ -7,7 +7,7 @@
 use crate::coordinator::unified::{
     INITIAL_GROUP_EPOCH,
     actor::reconciliation_model_support::{
-        MemberHeartbeat, assert_member_epochs, owned_to_vec, parts_of,
+        MemberHeartbeat, MemberPartitions, owned_to_vec, parts_of,
     },
     consumer_state::{GroupState, MemberState},
     persistence_next_gen::MemberAssignmentState,

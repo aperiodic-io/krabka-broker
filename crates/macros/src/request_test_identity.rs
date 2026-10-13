@@ -3,7 +3,7 @@
 use {
     crate::{
         meta::{expect_name, grouped_value, native_groups},
-        sweep_loop::splice,
+        sweep_loop::{SpliceValue, splice},
     },
     moxy::{
         ast::{List, Parse, ParseError, Parser, Path, Token},
@@ -28,20 +28,29 @@ struct Identity {
     policy: ContextPolicy,
 }
 
-fn binding_names(names: &[Ident], span: Span) -> Result<(Ident, Ident, Option<Ident>), ParseError> {
+fn binding_names(names: &[Ident], span: Span) -> Result<Identity, ParseError> {
+    let mut identity = Identity {
+        principal: Ident::new("__request_principal").with_span(Span::mixed_site()),
+        peer: Ident::new("__request_peer").with_span(Span::mixed_site()),
+        context: None,
+        user: false,
+        policy: ContextPolicy::Absent,
+    };
     match names {
-        [context] => Ok((
-            Ident::new("__request_principal").with_span(Span::mixed_site()),
-            Ident::new("__request_peer").with_span(Span::mixed_site()),
-            Some(context.clone()),
-        )),
-        [principal, peer] => Ok((principal.clone(), peer.clone(), None)),
-        [principal, peer, context] => Ok((principal.clone(), peer.clone(), Some(context.clone()))),
-        _ => Err(ParseError::new(
-            span,
-            "bind one context or two/three identity names",
-        )),
+        [context] => identity.context = Some(context.clone()),
+        [principal, peer, context @ ..] if context.len() <= 1 => {
+            identity.principal = principal.clone();
+            identity.peer = peer.clone();
+            identity.context = context.first().cloned();
+        }
+        _ => {
+            return Err(ParseError::new(
+                span,
+                "bind one context or two/three identity names",
+            ));
+        }
     }
+    Ok(identity)
 }
 
 fn declaration(input: &TokenStream) -> Result<Identity, ParseError> {
@@ -60,7 +69,7 @@ fn declaration(input: &TokenStream) -> Result<Identity, ParseError> {
     }
     let names = List::<Ident, Token![,]>::parse_all(&Parser::from_tokens(&group.tokens))?;
     let names: Vec<_> = names.into_iter().collect();
-    let (principal, peer, context) = binding_names(&names, group.span())?;
+    let mut identity = binding_names(&names, group.span())?;
     let _: Token![;] = Parse::parse(&parser)?;
     let mut clauses = Vec::new();
     while !parser.is_empty() {
@@ -105,8 +114,8 @@ fn declaration(input: &TokenStream) -> Result<Identity, ParseError> {
         ));
     }
     let policy = &clauses[required.len()..];
-    let default_builder = user && context.is_some() && policy.is_empty();
-    let valid_policy = if context.is_none() {
+    let default_builder = user && identity.context.is_some() && policy.is_empty();
+    let valid_policy = if identity.context.is_none() {
         policy.is_empty()
     } else {
         default_builder
@@ -125,7 +134,7 @@ fn declaration(input: &TokenStream) -> Result<Identity, ParseError> {
             "a context needs a builder or client; connection is valid only with client",
         ));
     }
-    let policy = if context.is_none() {
+    let policy = if identity.context.is_none() {
         ContextPolicy::Absent
     } else if default_builder {
         ContextPolicy::DefaultBuilder
@@ -136,13 +145,9 @@ fn declaration(input: &TokenStream) -> Result<Identity, ParseError> {
     } else {
         ContextPolicy::Client
     };
-    Ok(Identity {
-        principal,
-        peer,
-        context,
-        user,
-        policy,
-    })
+    identity.user = user;
+    identity.policy = policy;
+    Ok(identity)
 }
 
 fn template(identity: &Identity) -> TokenStream {
@@ -180,7 +185,7 @@ fn template(identity: &Identity) -> TokenStream {
 
 pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
     let identity = declaration(&input.clone().into())?;
-    let groups = native_groups(input).skip(1);
+    let mut groups = native_groups(input).skip(1);
     let placeholders = if identity.user {
         &["__identity_value", "__context_value", "__connection_value"][..]
     } else {
@@ -191,12 +196,14 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
             "__connection_value",
         ][..]
     };
-    let values = placeholders
-        .iter()
-        .copied()
-        .zip(groups)
-        .map(|(name, group)| (name.to_owned(), Group::new(Delimiter::None, group.stream())))
-        .collect::<Vec<_>>();
+    let mut values = Vec::new();
+    for name in placeholders {
+        let Some(group) = groups.next() else { break };
+        values.push(SpliceValue {
+            name: (*name).to_owned(),
+            group: Group::new(Delimiter::None, group.stream()),
+        });
+    }
     Ok(splice(template(&identity).into(), &values, &[]))
 }
 
@@ -206,31 +213,26 @@ pub(crate) fn user_bindings(
     user: NativeTokenStream,
     client: Option<NativeTokenStream>,
 ) -> NativeTokenStream {
-    let (principal, peer, context) =
+    let mut identity =
         binding_names(names, Span::call_site()).expect("validated identity binding count");
-    let policy = if context.is_none() {
+    let policy = if identity.context.is_none() {
         ContextPolicy::Absent
     } else if client.is_some() {
         ContextPolicy::Client
     } else {
         ContextPolicy::DefaultBuilder
     };
-    let identity = Identity {
-        principal,
-        peer,
-        context,
-        user: true,
-        policy,
-    };
-    let mut values = vec![(
-        "__identity_value".to_owned(),
-        Group::new(Delimiter::None, user),
-    )];
+    identity.user = true;
+    identity.policy = policy;
+    let mut values = vec![SpliceValue {
+        name: "__identity_value".to_owned(),
+        group: Group::new(Delimiter::None, user),
+    }];
     if let Some(client) = client {
-        values.push((
-            "__context_value".to_owned(),
-            Group::new(Delimiter::None, client),
-        ));
+        values.push(SpliceValue {
+            name: "__context_value".to_owned(),
+            group: Group::new(Delimiter::None, client),
+        });
     }
     splice(template(&identity).into(), &values, &[])
 }

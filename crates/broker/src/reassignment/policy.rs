@@ -438,7 +438,9 @@ mod tests {
             expected,
         } in cases
         {
-            let image = crate::reassignment_fields!(img(), assignment).call();
+            let image =
+                krabka_macros::reassignment_fields! { assignment { assignment } builder { img() } }
+                    .call();
             let l = liveness(&[1, 2, 3, 4]).await;
 
             let updates = compute_reassignment_progress(&image, &l).await;
@@ -644,7 +646,9 @@ mod tests {
             ),
         ];
         for (case, assignment, alive) in cases {
-            let img = crate::reassignment_fields!(img(), assignment).call();
+            let img =
+                krabka_macros::reassignment_fields! { assignment { assignment } builder { img() } }
+                    .call();
             let l = liveness(&alive).await;
             let updates = compute_reassignment_progress(&img, &l).await;
             assert!(

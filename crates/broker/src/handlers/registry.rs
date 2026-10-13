@@ -3,10 +3,7 @@
 //! The root holds the handler-signature aliases, the [`dispatch_table!`] that
 //! generates an adapter and a registration for every Kafka api whose name
 //! derives the rest, and [`build_registry`], which assembles the whole table.
-//! The krabka-private table keeps a `macro_rules!` generator, which stays in
-//! this file because `macro_rules!` scope is textual: a child module sees a
-//! macro only when the definition comes before the `mod` declaration that
-//! pulls the child in.
+//! A flat Moxy table declares the krabka-private wire codes and framing.
 //!
 //! [`dispatch_table!`]: krabka_macros::dispatch_table
 
@@ -55,53 +52,6 @@ pub(crate) type AuthHandler = for<'a> fn(
     &'a ConnectionAuth,
     &'a std::net::SocketAddr,
 ) -> BoxFuture<'a, Result<Bytes, BrokerError>>;
-
-/// Registers krabka-private context dispatches by raw wire `api_key`.
-///
-/// A krabka-private api key sits at or above
-/// [`KRABKA_PRIVATE_API_KEY_FLOOR`][crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR],
-/// and `ApiKey::from_i16` returns `None` for every key in that range. So each
-/// entry names the wire code and its `flexible_min` directly, where a Kafka
-/// entry reads both from the generated schema constants. The registry entry is
-/// then the only place the framing layer can learn that the body is flexible.
-///
-/// Every krabka-private api gets [`DispatchKind::Context`], so the handler
-/// receives the [`RequestContext`] and can authorize on the principal.
-macro_rules! krabka_private_context_dispatches {
-    ($register_fn:ident; $(($adapter:ident, $api_key:path, $flexible_min:expr, $handler:path)),* $(,)?) => {
-        $(
-            fn $adapter<'a>(
-                broker: &'a Broker,
-                version: ApiVersion,
-                body: &'a [u8],
-                ctx: &'a RequestContext<'a>,
-            ) -> BoxFuture<'a, Result<Bytes, BrokerError>> {
-                Box::pin($handler(broker, version, ctx.correlation_id, body, ctx))
-            }
-        )*
-
-        pub(super) fn $register_fn(registry: &mut DispatchRegistry) {
-            let entries: &[(ApiKeyCode, ApiVersion, ContextHandler)] = &[
-                $(($api_key, $flexible_min, $adapter as ContextHandler),)*
-            ];
-            for &(api_key, flexible_min, handler) in entries {
-                assert2::assert!(
-                    api_key >= crate::handlers::KRABKA_PRIVATE_API_KEY_FLOOR,
-                    "api_key {api_key} is below the krabka-private floor"
-                );
-                assert2::assert!(
-                    registry.register(DispatchEntry::context(api_key, flexible_min, handler)),
-                    "duplicate dispatch registration for api_key {api_key}"
-                );
-                // Kafka defines no krabka-private api, so no Kafka client
-                // quota applies to one. `WriteBarrierMarkers` is inter-broker
-                // traffic, and the operator apis are not what a
-                // `request_percentage` quota is written for.
-                registry.exempt_from_request_quota(api_key);
-            }
-        }
-    };
-}
 
 mod auth;
 mod entry;

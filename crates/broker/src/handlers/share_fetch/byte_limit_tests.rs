@@ -6,6 +6,8 @@
 //! share consumer treats an acquired offset with no record as a gap, and
 //! acknowledges it as `Gap`, which archives the record without delivery.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AllowAllAuthorizer,
@@ -56,7 +58,7 @@ const PRODUCE_VERSION: i16 = 12;
 async fn start() -> StartedBroker { start_with_delivery_attempts(5).await }
 
 async fn start_with_delivery_attempts(attempts: i16) -> StartedBroker {
-    let (broker, dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker { broker, dir } = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.share_group.max_delivery_attempts = attempts;
     })
@@ -65,7 +67,7 @@ async fn start_with_delivery_attempts(attempts: i16) -> StartedBroker {
 }
 
 async fn start_with_fetch_cap(cap: i32) -> StartedBroker {
-    let (broker, dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker { broker, dir } = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.fetch_max_bytes = ByteSize::from_bytes(u64::try_from(cap).expect("positive cap"));
     })

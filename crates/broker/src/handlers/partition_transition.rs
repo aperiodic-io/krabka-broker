@@ -39,22 +39,6 @@ pub(super) fn authorize_partition(
     .map(Some)
 }
 
-/// Name a partition operation while sharing its complete approval gate.
-macro_rules! authorizer {
-    ($(#[$meta:meta])* $visibility:vis fn $name:ident = $action:ident;) => {
-        $(#[$meta])*
-        $visibility fn $name(
-            image: &krabka_metadata::MetadataImage,
-            config: &crate::config::BreakGlassConfig,
-            topic: &str,
-            partition: i32,
-        ) -> Result<Option<krabka_metadata::MetadataRecord>, crate::break_glass::gate::BreakGlassDenial> {
-            crate::handlers::partition_transition::authorize_partition(image, config, krabka_metadata::BreakGlassAction::$action, topic, partition)
-        }
-    };
-}
-pub(super) use authorizer;
-
 /// Count a refusal before resolving its target and emitting the audit event.
 pub(super) fn audit_refusal<T: AsRef<str>>(
     broker: &Broker,

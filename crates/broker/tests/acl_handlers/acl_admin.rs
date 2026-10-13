@@ -77,7 +77,7 @@ pub async fn create_topic_as_admin(addr: SocketAddr, name: &str, partitions: i32
         .await;
 }
 
-crate::plain_request_driver_fixture!(pub drive_create_acls_as_plain {
+krabka_macros::wire_test_driver!(plain pub drive_create_acls_as_plain {
     request: CreateAclsRequest,
     response: CreateAclsResponse,
     api: crate::support::wire::ApiRequestSetup {
@@ -87,7 +87,7 @@ crate::plain_request_driver_fixture!(pub drive_create_acls_as_plain {
     operation: "CreateAcls",
 });
 
-crate::plain_request_driver_fixture!(pub drive_describe_acls_as_plain {
+krabka_macros::wire_test_driver!(plain pub drive_describe_acls_as_plain {
     request: DescribeAclsRequest,
     response: DescribeAclsResponse,
     api: crate::support::wire::ApiRequestSetup {
@@ -97,7 +97,7 @@ crate::plain_request_driver_fixture!(pub drive_describe_acls_as_plain {
     operation: "DescribeAcls",
 });
 
-crate::plain_request_driver_fixture!(pub drive_delete_acls_as_plain {
+krabka_macros::wire_test_driver!(plain pub drive_delete_acls_as_plain {
     request: DeleteAclsRequest,
     response: DeleteAclsResponse,
     api: crate::support::wire::ApiRequestSetup {

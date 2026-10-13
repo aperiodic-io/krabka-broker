@@ -4,7 +4,7 @@ use {
     crate::{
         meta::{expect_name, grouped_value, native_groups},
         request_test_identity::user_bindings,
-        sweep_loop::splice,
+        sweep_loop::{SpliceValue, splice},
     },
     moxy::{
         ast::{List, Parse, ParseError, Parser, Path, Token},
@@ -71,7 +71,8 @@ fn declaration(input: &TokenStream) -> Result<Setup, ParseError> {
         Some(policy.text().to_owned())
     };
     let _: Token![;] = Parse::parse(&parser)?;
-    let (mut ready, mut leader) = (false, false);
+    let mut ready = false;
+    let mut leader = false;
     let mut user = UserPolicy::Absent;
     while !parser.is_empty() {
         let name = Ident::parse(&parser)?;
@@ -149,7 +150,7 @@ fn template(setup: &Setup) -> TokenStream {
     let policy = setup.policy.is_some();
     let leader = setup.leader;
     moxy::template! {
-        let ({{ handle }}, {{ directory }}) = @if policy {
+        let crate::handlers::test_support::StartedBroker { broker: {{ handle }}, dir: {{ directory }} } = @if policy {
             __broker_boot(@if deny { crate::handlers::test_support::deny_all_authorizer() } @else if controller_peer { crate::handlers::test_support::controller_peer_authorizer() } @else { crate::handlers::test_support::allow_all_authorizer() }).await
         } @else { __broker_boot.await };
         let {{ broker }} = {{ handle }}.broker_arc_for_test();
@@ -175,14 +176,14 @@ pub(crate) fn expand(input: NativeTokenStream) -> Result<NativeTokenStream, Pars
     let mut output = splice(
         template(&setup).into(),
         &[
-            (
-                "__broker_boot".to_owned(),
-                Group::new(boot_delimiter, boot.stream()),
-            ),
-            (
-                "__broker_ready".to_owned(),
-                Group::new(Delimiter::None, ready),
-            ),
+            SpliceValue {
+                name: "__broker_boot".to_owned(),
+                group: Group::new(boot_delimiter, boot.stream()),
+            },
+            SpliceValue {
+                name: "__broker_ready".to_owned(),
+                group: Group::new(Delimiter::None, ready),
+            },
         ],
         &[],
     );

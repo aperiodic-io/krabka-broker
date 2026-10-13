@@ -15,8 +15,8 @@ use {
         support::{
             producer::{producer_record, transactional_producer},
             share::{
-                ShareFetchSetup, ShareSessionEpoch, join_consume_member, permitted_topic_fixture,
-                record_values,
+                MemberSession, ShareFetchSetup, ShareSessionEpoch, join_consume_member,
+                permitted_topic_fixture, record_values,
             },
         },
     },
@@ -108,7 +108,7 @@ async fn read_committed_skips_open_txn_then_sees_committed() {
     // Flush the records to the log (advances HWM) but keep the txn OPEN (LSO=0).
     producer.flush().await.unwrap();
 
-    let (member, _member_epoch) = join_consume_member(&broker, &client, tid).await;
+    let MemberSession { member, .. } = join_consume_member(&broker, &client, tid).await;
 
     // A read_committed share fetch must acquire NOTHING: every record is past
     // the LSO (still 0). Poll a few times to be sure it never spuriously acquires.
@@ -249,7 +249,7 @@ async fn transaction_then_record(isolation_level: Option<&str>, commit: bool) ->
     }
     produce_n().client(&client).topic_id(tid).call().await;
 
-    let (member, _member_epoch) = join_consume_member(&broker, &client, tid).await;
+    let MemberSession { member, .. } = join_consume_member(&broker, &client, tid).await;
 
     // The member never acknowledges, so each offset is acquired at most once
     // while its lock holds. Fetch until the plain record at offset 4 arrives.

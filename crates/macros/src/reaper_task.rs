@@ -2,8 +2,8 @@
 
 use {
     crate::{
-        meta::{compact, edit_native_body, function_signature, parameter_ident},
-        sweep_loop::splice,
+        meta::{compact, edit_native_body, function_signature, is_plain_async, parameter_ident},
+        sweep_loop::{SpliceValue, splice},
     },
     moxy::{
         ast::{FnParam, FromMeta, Meta, ParseError},
@@ -15,6 +15,11 @@ use {
 #[derive(moxy::FromMeta)]
 struct Options {
     shutdown_message: String,
+}
+
+struct Parameter<'a> {
+    name: &'a str,
+    ty: &'a str,
 }
 
 fn shutdown_message(meta: &TokenStream, item: &TokenStream) -> Result<LitStr, ParseError> {
@@ -29,11 +34,7 @@ fn shutdown_message(meta: &TokenStream, item: &TokenStream) -> Result<LitStr, Pa
         ));
     }
     let signature = function_signature(item)?;
-    if signature.asyncness.is_none()
-        || signature.constness.is_some()
-        || signature.safety.is_some()
-        || signature.abi.is_some()
-        || !signature.generics.params.is_empty()
+    if !is_plain_async(&signature)
         || signature.generics.where_clause.is_some()
         || signature.params.inner.variadic.is_some()
         || !signature.output.is_default()
@@ -44,7 +45,16 @@ fn shutdown_message(meta: &TokenStream, item: &TokenStream) -> Result<LitStr, Pa
         ));
     }
     let parameters = &signature.params.inner.inputs;
-    for (name, ty) in [("interval", "Time"), ("shutdown", "CancellationToken")] {
+    for Parameter { name, ty } in [
+        Parameter {
+            name: "interval",
+            ty: "Time",
+        },
+        Parameter {
+            name: "shutdown",
+            ty: "CancellationToken",
+        },
+    ] {
         if !parameters.iter().any(|parameter| parameter_ident(parameter, "expected a named reaper parameter").is_ok_and(|ident| ident.text() == name)
             && matches!(parameter, FnParam::Typed(parameter) if compact(&moxy::template! { {{ parameter.ty }} }) == ty)) {
             return Err(ParseError::new(signature.span(), format!("reaper requires {name}: {ty}")));
@@ -69,10 +79,10 @@ pub(crate) fn expand(
     Ok(edit_native_body(item, |body| {
         splice(
             scaffold,
-            &[(
-                "__reaper_body".to_owned(),
-                Group::new(Delimiter::Brace, body),
-            )],
+            &[SpliceValue {
+                name: "__reaper_body".to_owned(),
+                group: Group::new(Delimiter::Brace, body),
+            }],
             &["tick"],
         )
     }))

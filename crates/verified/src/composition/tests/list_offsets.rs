@@ -52,7 +52,7 @@ proptest! {
         step in 1usize..8,
         epoch in -1_i32..=i32::MAX,
     ) {
-        let (offsets, timestamps, entries) = indexed_timestamp_records(&records, step);
+        let IndexedTimestampRecords { offsets, timestamps, entries } = indexed_timestamp_records(&records, step);
         let starts: Vec<_> = starts.iter().map(|s| base + i64::from(*s)).collect();
         let frontiers = (base, base + i64::from(u32::MAX) + 1, base + i64::from(hwm));
         let request = (replica, isolation, target);
@@ -66,7 +66,13 @@ proptest! {
 fn visibility_is_exclusive_and_does_not_assume_monotone_timestamps() {
     let offsets = [0, 2, 5, 7, 9];
     let timestamps = [100, 300, 200, 400, 300];
-    let entries = [(100, 0), (300, 2), (300, 5), (400, 7), (400, 9)];
+    let entries = [
+        IndexEntry::new(100, 0),
+        IndexEntry::new(300, 2),
+        IndexEntry::new(300, 5),
+        IndexEntry::new(400, 7),
+        IndexEntry::new(400, 9),
+    ];
     let frontiers = (10, 20, 20);
     for (starts, request, expected) in [
         (&[15][..], (-1, 1, 250), Some((12, 300))),

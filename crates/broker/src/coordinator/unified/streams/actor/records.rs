@@ -253,12 +253,15 @@ fn target_member_value(
     })
 }
 
-crate::coordinator::unified::persistence::flush_pending_records! {
-    actor: &ActorState, pending: PendingStreamsRecords;
-    offsets_log, coordinator, now_ms;
-    group &actor.state.group_id;
-    encode pending.into_batch(&actor.state.group_id, now_ms);
-    cache coordinator.update_streams_cache(&actor.state.group_id, snapshot_seed(actor));
+#[krabka_macros::flush_group_records(group [&actor.state.group_id]; encode [pending.into_batch(&actor.state.group_id, now_ms)];)]
+pub(super) async fn flush_pending(
+    actor: &ActorState,
+    pending: PendingStreamsRecords,
+    offsets_log: &dyn OffsetsLog,
+    coordinator: &GroupCoordinator,
+    now_ms: i64,
+) -> Result<(), BrokerError> {
+    coordinator.update_streams_cache(&actor.state.group_id, snapshot_seed(actor));
 }
 
 /// Persist the reconciler's current delta after a timer or configuration change.

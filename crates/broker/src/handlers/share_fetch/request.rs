@@ -58,44 +58,6 @@ pub(crate) fn resolve_share_identity(
     })
 }
 
-/// Keep the settings snapshot and identity bindings alive for the whole handler.
-macro_rules! share_request_identity {
-    (
-        (
-            $defaults:ident,
-            $image:ident,
-            $group:ident,
-            $settings:ident,
-            $lock_timeout:ident,
-            $member:ident
-        ),
-        $response:ident,
-        $broker:ident,
-        $request:ident,
-        $context:ident
-    ) => {
-        let $defaults = $broker.config.share_group.clone();
-        let $image = $broker.controller.current_image();
-        let crate::handlers::share_fetch::ShareRequestIdentity {
-            group: $group,
-            settings: $settings,
-            lock_timeout_ms: $lock_timeout,
-            member: $member,
-        } = match crate::handlers::share_fetch::resolve_share_identity(
-            $broker,
-            &$image,
-            $context,
-            &$defaults,
-            $request.group_id.as_ref(),
-            $request.member_id.as_ref(),
-        ) {
-            Ok(identity) => identity,
-            Err(code) => return Ok($response::error(code, None)),
-        };
-    };
-}
-pub(crate) use share_request_identity;
-
 /// One piggybacked acknowledgement batch: its offset range and the
 /// per-offset acknowledge types.
 #[derive(Debug, PartialEq, Eq)]

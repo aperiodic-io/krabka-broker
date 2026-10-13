@@ -19,9 +19,10 @@ use {
     crate::{
         broker::Broker,
         codes,
+        controller_admin::CONTROLLER_ADMIN_CONNECTION_ID,
         envelope::{self, ForwardedPrincipal, ForwardedRequest},
         error::BrokerError,
-        handlers::{ApiKeyCode, RequestContext, decode_request, encode_response},
+        handlers::{ApiKeyCode, DispatchResult, RequestContext, decode_request, encode_response},
         metadata_source::MetadataSource,
     },
     bytes::{Bytes, BytesMut},
@@ -34,7 +35,7 @@ use {
         },
     },
     krabka_raft::RaftError,
-    std::{future::Future, sync::Arc, time::Duration},
+    std::{future::Future, ops::ControlFlow, sync::Arc, time::Duration},
 };
 
 /// `Errors.UNKNOWN_SERVER_ERROR.message()`, which the
@@ -82,39 +83,50 @@ where
 /// Route a typed controller-listener request through its own response codec.
 /// Broker-listener requests continue to preprocessing and forwarding; a
 /// controller listener refuses mutations after this node loses leadership.
-macro_rules! controller_listener_dispatch {
-    ($broker:ident, $ctx:ident, $req:ident, $version:ident, $handle:path, $refusal:path) => {
-        if $ctx.connection_id == $crate::controller_admin::CONTROLLER_ADMIN_CONNECTION_ID {
-            if !$crate::handlers::forward_to_controller::is_active_controller($broker) {
-                return $crate::handlers::encode_response(
-                    &$refusal(&$req, $crate::codes::NOT_CONTROLLER, None),
-                    $version,
-                );
-            }
-            return $crate::handlers::encode_response(
-                &$handle($broker, $req, $version, $ctx).await?,
-                $version,
-            );
-        }
-    };
+pub(super) async fn controller_listener_dispatch<'a, Request, Response, Local, LocalFuture>(
+    broker: &'a Broker,
+    ctx: &'a RequestContext<'a>,
+    request: Request,
+    version: i16,
+    local: Local,
+    refusal: impl FnOnce(&Request, i16, Option<&str>) -> Response,
+) -> ControlFlow<DispatchResult, Request>
+where
+    Response: Encode,
+    Local: FnOnce(&'a Broker, Request, i16, &'a RequestContext<'a>) -> LocalFuture,
+    LocalFuture: Future<Output = Result<Response, BrokerError>>,
+{
+    if ctx.connection_id != CONTROLLER_ADMIN_CONNECTION_ID {
+        return ControlFlow::Continue(request);
+    }
+    if !is_active_controller(broker) {
+        return ControlFlow::Break(encode_response(
+            &refusal(&request, codes::NOT_CONTROLLER, None),
+            version,
+        ));
+    }
+    ControlFlow::Break(
+        local(broker, request, version, ctx)
+            .await
+            .and_then(|response| encode_response(&response, version)),
+    )
 }
-pub(super) use controller_listener_dispatch;
 
 /// Forward a broker-listener mutation before running its controller handler.
-macro_rules! forward_if_not_controller {
-    ($broker:ident, $ctx:ident, $api_key:expr, $req_bytes:ident, $version:ident, $refusal:expr) => {
-        if $ctx.connection_id != $crate::controller_admin::CONTROLLER_ADMIN_CONNECTION_ID
-            && let Some(answer) = $crate::handlers::forward_to_controller::to_active_controller(
-                $broker, $api_key, $req_bytes, $version, $ctx, $refusal,
-            )
-            .await
-        {
-            return answer;
-        }
-    };
+pub(super) async fn forward_if_not_controller(
+    broker: &Broker,
+    ctx: &RequestContext<'_>,
+    api_key: ApiKeyCode,
+    req_bytes: &[u8],
+    version: i16,
+    refusal: impl Fn(i16, Option<&str>) -> DispatchResult,
+) -> Option<DispatchResult> {
+    if ctx.connection_id == CONTROLLER_ADMIN_CONNECTION_ID {
+        None
+    } else {
+        to_active_controller(broker, api_key, req_bytes, version, ctx, refusal).await
+    }
 }
-pub(super) use forward_if_not_controller;
-
 /// `ControllerExceptions.newWrongControllerException`'s message, the one a
 /// request that only the active controller may run carries when it reaches
 /// another node.

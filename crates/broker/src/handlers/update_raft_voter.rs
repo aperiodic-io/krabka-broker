@@ -157,6 +157,15 @@ mod tests {
         }
     }
 
+    fn stamp_request(
+        broker: &Broker,
+        mut request: UpdateRaftVoterRequest,
+    ) -> UpdateRaftVoterRequest {
+        request.cluster_id = Some(voter_cluster_id(broker));
+        request.current_leader_epoch = voter_leader_epoch(broker);
+        request
+    }
+
     /// Applies one malformation to an otherwise well-formed request.
     type Mutate = fn(&mut UpdateRaftVoterRequest);
 
@@ -165,13 +174,20 @@ mod tests {
         decode_response(UpdateRaftVoterResponse);
     }
 
-    crate::handlers::raft_voter::test_dispatch!(
-        82,
-        UpdateRaftVoterRequest,
-        UpdateRaftVoterResponse
-    );
-
-    use {super::*, crate::test_support::start_broker_with_authorizer as start_broker};
+    krabka_macros::wire_codec_helpers! { test_context ["admin-client"]; }
+    krabka_macros::wire_test_driver! {
+        broker answer { request: UpdateRaftVoterRequest, response: UpdateRaftVoterResponse, api: 82 }
+    }
+    use {
+        super::*,
+        crate::{
+            handlers::{
+                raft_voter::{VoterCase, check_voter_case},
+                test_support::{voter_cluster_id, voter_leader_epoch},
+            },
+            test_support::start_broker_with_authorizer as start_broker,
+        },
+    };
 
     /// Decode and encode round-trip at the min and max versions.
     #[test]
@@ -196,10 +212,17 @@ mod tests {
     #[tokio::test]
     async fn handle_denies_cluster_alter_without_calling_reconfig() {
         let version = 0;
-        crate::handlers::raft_voter::check_denied_reconfiguration!(
-            (broker_handle, _dir, broker, ctx, resp),
-            version
-        );
+        check_voter_case(
+            VoterCase::Denied,
+            82,
+            version,
+            |_| request(2),
+            || UpdateRaftVoterResponse {
+                error_code: codes::CLUSTER_AUTHORIZATION_FAILED,
+                ..Default::default()
+            },
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -210,8 +233,7 @@ mod tests {
             boot [start_broker] allow_all;
             user ["admin"];
         };
-        let mut request = request(-7);
-        stamp_voter_request!(request, broker, leader_epoch);
+        let request = stamp_request(&broker, request(-7));
         let resp = answer(&broker, version, &request, &ctx).await;
 
         assert!(resp.error_code == codes::INVALID_REQUEST);
@@ -361,7 +383,7 @@ mod tests {
         #[derive(Debug)]
         struct GrantOnly(AclOperation);
 
-        test_authorizer!(GrantOnly, (self, _source, req), {
+        krabka_macros::test_authorizer!(GrantOnly, req; {
             if req.operation == self.0 {
                 crate::authorizer::AuthorizationResult::Allow
             } else {
@@ -483,7 +505,7 @@ mod tests {
         // The range covers the cluster's kraft.version, so Kafka's handler
         // reaches the voter lookup.
         request.k_raft_version_feature.min_supported_version = 0;
-        stamp_voter_request!(request, broker, leader_epoch);
+        let request = stamp_request(&broker, request);
         let resp = answer(&broker, version, &request, &ctx).await;
 
         assert!(resp.error_code == codes::VOTER_NOT_FOUND);

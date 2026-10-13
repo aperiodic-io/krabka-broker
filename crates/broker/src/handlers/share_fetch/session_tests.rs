@@ -8,6 +8,8 @@
 //! only after `MaxWaitMs`. An incremental response leaves out the session
 //! partitions that have nothing new.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AllowAllAuthorizer,
@@ -44,7 +46,7 @@ const VERSION: i16 = 2;
 const ACCEPT: i8 = 1;
 
 async fn start(session_max: usize) -> StartedBroker {
-    let (broker, dir) = start_broker_no_audit_with(move |cfg| {
+    let HandlerStartedBroker { broker, dir } = start_broker_no_audit_with(move |cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.share_session_cache_max_when_unlimited = session_max;
     })
@@ -394,7 +396,7 @@ async fn group_share_settings_override_the_broker_defaults() {
     // The broker's bound admits the record lock limit of 2 that the group
     // asks for, which is below Kafka's default minimum and would be capped to
     // it.
-    let (broker, _dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker { broker, dir: _dir } = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = Arc::new(AllowAllAuthorizer);
         cfg.share_session_cache_max_when_unlimited = 10_000;
         cfg.share_group.min_partition_max_record_locks = 2;

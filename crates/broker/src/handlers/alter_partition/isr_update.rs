@@ -440,32 +440,43 @@ mod tests {
         }
     }
 
-    /// Epoch-state cases use the same current partition and admission checks.
-    macro_rules! epoch_state_case {
-        ($registrations:expr, $states:expr, $error:expr, $changes:ident) => {
-            let image = image_with($registrations);
-            let mut changes = Vec::new();
-            let isr = $states;
-            let resp = handle_partition()
-                .image(&image)
-                .changes(&mut changes)
-                .new_isr(&[])
-                .new_isr_with_epochs(&isr)
-                .call();
-            assert!(resp.error_code == $error, "got {}", resp.error_code);
-            epoch_state_case!(@$changes changes);
-        };
-        (@admitted $changes:ident) => { assert!($changes.len() == 1); };
-        (@refused $changes:ident) => { assert!($changes.is_empty()); };
+    #[derive(Clone, Copy)]
+    enum EpochStateAdmission {
+        Admitted,
+        Refused,
     }
+
+    /// Epoch-state cases use the same current partition and admission checks.
+    fn epoch_state_case(
+        registrations: &[RegisteredBroker],
+        states: impl FnOnce() -> Vec<BrokerState>,
+        error: i16,
+        admission: EpochStateAdmission,
+    ) {
+        let image = image_with(registrations);
+        let mut changes = Vec::new();
+        let isr = states();
+        let response = handle_partition()
+            .image(&image)
+            .changes(&mut changes)
+            .new_isr(&[])
+            .new_isr_with_epochs(&isr)
+            .call();
+        assert!(response.error_code == error, "got {}", response.error_code);
+        match admission {
+            EpochStateAdmission::Admitted => assert!(changes.len() == 1),
+            EpochStateAdmission::Refused => assert!(changes.is_empty()),
+        }
+    }
+    use krabka_protocol::owned::alter_partition_request::BrokerState;
 
     #[test]
     fn matching_epochs_succeed() {
-        epoch_state_case!(
+        epoch_state_case(
             THREE_REGISTERED_BROKERS,
-            three_broker_states().call(),
+            || three_broker_states().call(),
             codes::NONE,
-            admitted
+            EpochStateAdmission::Admitted,
         );
     }
 
@@ -777,33 +788,33 @@ mod tests {
     #[test]
     fn stale_epoch_is_ineligible() {
         // 29 disagrees with broker 3's registered epoch 30.
-        epoch_state_case!(
+        epoch_state_case(
             THREE_REGISTERED_BROKERS,
-            three_broker_states().third(29).call(),
+            || three_broker_states().third(29).call(),
             codes::INELIGIBLE_REPLICA,
-            refused
+            EpochStateAdmission::Refused,
         );
     }
 
     #[test]
     fn unregistered_replica_is_ineligible() {
         // Broker 3 was never registered.
-        epoch_state_case!(
+        epoch_state_case(
             TWO_REGISTERED_BROKERS,
-            three_broker_states().third(-1).call(),
+            || three_broker_states().third(-1).call(),
             codes::INELIGIBLE_REPLICA,
-            refused
+            EpochStateAdmission::Refused,
         );
     }
 
     #[test]
     fn sentinel_epoch_skips_epoch_check() {
         // -1 skips the epoch comparison.
-        epoch_state_case!(
+        epoch_state_case(
             THREE_REGISTERED_BROKERS,
-            three_broker_states().first(-1).second(-1).third(-1).call(),
+            || three_broker_states().first(-1).second(-1).third(-1).call(),
             codes::NONE,
-            admitted
+            EpochStateAdmission::Admitted,
         );
     }
 

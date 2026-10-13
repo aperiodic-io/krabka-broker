@@ -16,13 +16,27 @@ use {
         error::BrokerError,
         handlers::{
             ApiVersion, CorrelationId, acl_wire::CLUSTER_RESOURCE_NAME,
-            alter_replica_log_dirs::handle, audit_admin_for, encode_response,
+            alter_replica_log_dirs::handle, audit_admin_for,
+            create_delegation_token as token_create, describe_delegation_token as token_describe,
+            encode_response, expire_delegation_token as token_expire,
+            renew_delegation_token as token_renew,
         },
         network::auth::ConnectionAuth,
     },
     bytes::Bytes,
     futures_util::future::BoxFuture,
+    krabka_protocol::owned::{
+        create_delegation_token_request::CreateDelegationTokenRequest,
+        create_delegation_token_response::CreateDelegationTokenResponse,
+        describe_delegation_token_request::DescribeDelegationTokenRequest,
+        describe_delegation_token_response::DescribeDelegationTokenResponse,
+        expire_delegation_token_request::ExpireDelegationTokenRequest,
+        expire_delegation_token_response::ExpireDelegationTokenResponse,
+        renew_delegation_token_request::RenewDelegationTokenRequest,
+        renew_delegation_token_response::RenewDelegationTokenResponse,
+    },
     krabka_units::convert::TimeExt as _,
+    std::net::SocketAddr,
 };
 
 pub(super) fn alter_replica_log_dirs_adapter<'a>(
@@ -108,132 +122,109 @@ pub(super) fn alter_replica_log_dirs_adapter<'a>(
     })
 }
 
-/// Token adapters all decode first and encode the resulting response at the
-/// negotiated version. The supplied body retains each operation's auth and audit order.
-macro_rules! token_adapter {
-    (
-        $name:ident,
-        $request_ty:path,($broker:ident, $request:ident, $auth:ident, $peer:ident),
-        $body:block
-    ) => {
-        pub(super) fn $name<'a>(
-            $broker: &'a Broker,
-            version: ApiVersion,
-            _correlation_id: CorrelationId,
-            body: &'a [u8],
-            $auth: &'a crate::network::auth::ConnectionAuth,
-            $peer: &'a std::net::SocketAddr,
-        ) -> BoxFuture<'a, Result<Bytes, BrokerError>> {
-            Box::pin(async move {
-                use krabka_protocol::Decode;
-                let mut cursor = body;
-                let $request = <$request_ty>::decode(&mut cursor, version)?;
-                let response = $body;
-                crate::handlers::encode_response(&response, version)
-            })
-        }
-    };
+#[krabka_macros::token_dispatch]
+pub(super) async fn create_delegation_token_adapter(
+    broker: &Broker,
+    req: CreateDelegationTokenRequest,
+    auth: &ConnectionAuth,
+    peer: &SocketAddr,
+) -> CreateDelegationTokenResponse {
+    let resp = token_create::handle(
+        &req,
+        auth,
+        broker.config.delegation_token_secret_key.as_ref(),
+        broker.config.delegation_token_max_lifetime.millis_i64(),
+        broker
+            .config
+            .delegation_token_default_renew_period
+            .millis_i64(),
+        &*broker.controller,
+        token_create::TokenAcl {
+            authorizer: broker.config.authorizer.as_ref(),
+            peer,
+        },
+    )
+    .await;
+    if resp.error_code == NONE {
+        audit_token_operation(broker, auth, peer, "CreateDelegationToken", &resp.token_id);
+    }
+    resp
 }
 
-token_adapter!(
-    create_delegation_token_adapter,
-    krabka_protocol::owned::create_delegation_token_request::CreateDelegationTokenRequest,
-    (broker, req, auth, peer),
-    {
-        let resp = crate::handlers::create_delegation_token::handle(
-            &req,
-            auth,
-            broker.config.delegation_token_secret_key.as_ref(),
-            broker.config.delegation_token_max_lifetime.millis_i64(),
-            broker
-                .config
-                .delegation_token_default_renew_period
-                .millis_i64(),
-            &*broker.controller,
-            crate::handlers::create_delegation_token::TokenAcl {
-                authorizer: broker.config.authorizer.as_ref(),
-                peer,
-            },
-        )
-        .await;
-        if resp.error_code == crate::codes::NONE {
-            audit_token_operation(broker, auth, peer, "CreateDelegationToken", &resp.token_id);
-        }
-        resp
-    }
-);
+#[krabka_macros::token_dispatch]
+pub(super) async fn renew_delegation_token_adapter(
+    broker: &Broker,
+    req: RenewDelegationTokenRequest,
+    auth: &ConnectionAuth,
+    peer: &SocketAddr,
+) -> RenewDelegationTokenResponse {
+    // Resolve the token id before the mutation: the response carries only
+    // the new expiry, and a delete leaves nothing to look up afterwards.
+    let token_id = token_id_for_hmac(broker, req.hmac.as_ref());
+    let resp = token_renew::handle(
+        &req,
+        auth,
+        broker.config.delegation_token_secret_key.as_ref(),
+        broker
+            .config
+            .delegation_token_default_renew_period
+            .millis_i64(),
+        &*broker.controller,
+    )
+    .await;
+    audit_token_mutation(
+        broker,
+        auth,
+        peer,
+        "RenewDelegationToken",
+        token_id.as_deref(),
+        resp.error_code,
+    );
+    resp
+}
 
-token_adapter!(
-    renew_delegation_token_adapter,
-    krabka_protocol::owned::renew_delegation_token_request::RenewDelegationTokenRequest,
-    (broker, req, auth, peer),
-    {
-        // Resolve the token id before the mutation: the response carries only
-        // the new expiry, and a delete leaves nothing to look up afterwards.
-        let token_id = token_id_for_hmac(broker, req.hmac.as_ref());
-        let resp = crate::handlers::renew_delegation_token::handle(
-            &req,
-            auth,
-            broker.config.delegation_token_secret_key.as_ref(),
-            broker
-                .config
-                .delegation_token_default_renew_period
-                .millis_i64(),
-            &*broker.controller,
-        )
-        .await;
-        audit_token_mutation(
-            broker,
-            auth,
-            peer,
-            "RenewDelegationToken",
-            token_id.as_deref(),
-            resp.error_code,
-        );
-        resp
-    }
-);
+#[krabka_macros::token_dispatch]
+pub(super) async fn expire_delegation_token_adapter(
+    broker: &Broker,
+    req: ExpireDelegationTokenRequest,
+    auth: &ConnectionAuth,
+    peer: &SocketAddr,
+) -> ExpireDelegationTokenResponse {
+    let token_id = token_id_for_hmac(broker, req.hmac.as_ref());
+    let resp = token_expire::handle(
+        &req,
+        auth,
+        broker.config.delegation_token_secret_key.as_ref(),
+        &*broker.controller,
+    )
+    .await;
+    audit_token_mutation(
+        broker,
+        auth,
+        peer,
+        "ExpireDelegationToken",
+        token_id.as_deref(),
+        resp.error_code,
+    );
+    resp
+}
 
-token_adapter!(
-    expire_delegation_token_adapter,
-    krabka_protocol::owned::expire_delegation_token_request::ExpireDelegationTokenRequest,
-    (broker, req, auth, peer),
-    {
-        let token_id = token_id_for_hmac(broker, req.hmac.as_ref());
-        let resp = crate::handlers::expire_delegation_token::handle(
-            &req,
-            auth,
-            broker.config.delegation_token_secret_key.as_ref(),
-            &*broker.controller,
-        )
-        .await;
-        audit_token_mutation(
-            broker,
-            auth,
-            peer,
-            "ExpireDelegationToken",
-            token_id.as_deref(),
-            resp.error_code,
-        );
-        resp
-    }
-);
-
-token_adapter!(
-    describe_delegation_token_adapter,
-    krabka_protocol::owned::describe_delegation_token_request::DescribeDelegationTokenRequest,
-    (broker, req, auth, peer),
-    {
-        crate::handlers::describe_delegation_token::handle(
-            &req,
-            auth,
-            broker.config.delegation_token_secret_key.as_ref(),
-            &*broker.controller,
-            peer,
-            broker.config.authorizer.as_ref(),
-        )
-    }
-);
+#[krabka_macros::token_dispatch]
+pub(super) async fn describe_delegation_token_adapter(
+    broker: &Broker,
+    req: DescribeDelegationTokenRequest,
+    auth: &ConnectionAuth,
+    peer: &SocketAddr,
+) -> DescribeDelegationTokenResponse {
+    token_describe::handle(
+        &req,
+        auth,
+        broker.config.delegation_token_secret_key.as_ref(),
+        &*broker.controller,
+        peer,
+        broker.config.authorizer.as_ref(),
+    )
+}
 
 fn audit_token_mutation(
     broker: &Broker,

@@ -142,4 +142,4 @@ pub async fn share_renew(
 // retries until the acquire pass actually returns records. Leadership and
 // materialization of both the data partition and `__share_group_state` may
 // still be settling. Asserts the supplied invariant on the resulting row.
-crate::share_first_fetch_fixture!(fetch_until_acquired, Incremental);
+krabka_macros::share_first_fetch!(fetch_until_acquired, Incremental);

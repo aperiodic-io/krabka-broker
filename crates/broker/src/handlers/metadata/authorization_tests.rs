@@ -6,6 +6,8 @@
 //! each case asks about topics of its own, so a topic one case auto-creates is
 //! never missing in another.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::{AuthorizationResult, Authorizer},
@@ -59,7 +61,7 @@ impl Grants {
     }
 }
 
-test_authorizer!(Grants, (self, _source, request), {
+krabka_macros::test_authorizer!(Grants, request; {
     if request.principal.name != TESTER
         || self.0.lock().expect("grants").contains(&Grant {
             resource_type: request.resource_type,
@@ -100,7 +102,7 @@ struct Fixture {
 async fn start(auto_create_topics_enable: bool) -> Fixture {
     let grants = Arc::new(Grants::default());
     let authorizer: Arc<dyn Authorizer> = Arc::clone(&grants) as Arc<dyn Authorizer>;
-    let (broker, dir) = start_broker_no_audit_with(|cfg| {
+    let HandlerStartedBroker { broker, dir } = start_broker_no_audit_with(|cfg| {
         cfg.authorizer = authorizer;
         cfg.auto_create_topics_enable = auto_create_topics_enable;
     })

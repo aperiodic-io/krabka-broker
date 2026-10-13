@@ -20,15 +20,15 @@
 //!
 //! Each field takes one optional `#[metric(...)]` attribute:
 //!
-//! - `help = "..."` — the help text. Every registered field needs one.
-//! - `name = "..."` — the registered name. The default is the field name with
+//! - `help = "..."` â€” the help text. Every registered field needs one.
+//! - `name = "..."` â€” the registered name. The default is the field name with
 //!   a trailing `_total` removed, because `prometheus-client` appends `_total`
 //!   to the name of a counter itself.
-//! - `buckets = EXPR` — construct a `Histogram` over `EXPR`. On a
+//! - `buckets = EXPR` â€” construct a `Histogram` over `EXPR`. On a
 //!   `Family<_, Histogram>` field, construct the family so that each of its
 //!   histograms uses `EXPR`.
-//! - `new = EXPR` — construct the field with `EXPR`.
-//! - `skip` — construct the field, but do not register it.
+//! - `new = EXPR` â€” construct the field with `EXPR`.
+//! - `skip` â€” construct the field, but do not register it.
 //!
 //! ```ignore
 //! #[derive(krabka_macros::RegisterMetrics)]
@@ -211,22 +211,22 @@
 //! the value. Both take the struct's visibility. One `#[refined(...)]`
 //! attribute configures it:
 //!
-//! - `rule(<type>)` — the `refined_type` rule, such as `GreaterU32<0>`.
+//! - `rule(<type>)` â€” the `refined_type` rule, such as `GreaterU32<0>`.
 //!   Required. It goes in parentheses because a generic type does not parse
 //!   after `=`.
-//! - `getter = name` — the getter's name. The default is `into_value`.
-//! - `string_error` — `new` returns `String`, the rule's error text, rather
+//! - `getter = name` â€” the getter's name. The default is `into_value`.
+//! - `string_error` â€” `new` returns `String`, the rule's error text, rather
 //!   than `refined_type::result::Error<T>`.
-//! - `label = "..."` — with `string_error`, `new` returns
+//! - `label = "..."` â€” with `string_error`, `new` returns
 //!   `"<label>: <rule error>"`.
-//! - `default = EXPR` — implement `Default` as `Self::new(EXPR)`, which panics
+//! - `default = EXPR` â€” implement `Default` as `Self::new(EXPR)`, which panics
 //!   when `EXPR` breaks the rule.
-//! - `from_str` — implement `FromStr` with `Err = String`: the field type's
+//! - `from_str` â€” implement `FromStr` with `Err = String`: the field type's
 //!   own `parse`, then `new`, each error as its text.
-//! - `display` — implement `Display` as the field's.
-//! - `parse_fn = name` — add a free `fn name(&str) -> Result<Self, String>`
+//! - `display` â€” implement `Display` as the field's.
+//! - `parse_fn = name` â€” add a free `fn name(&str) -> Result<Self, String>`
 //!   that parses the way `from_str` does.
-//! - `quantity = ByteSize`, `Time` or `Frequency` — the field is a whole
+//! - `quantity = ByteSize`, `Time` or `Frequency` â€” the field is a whole
 //!   number of bytes, milliseconds or Hz, and `new` takes the `krabka_units`
 //!   quantity. It refuses a fraction, an infinity, or a count the field type
 //!   cannot hold with `"<label>: must be a whole number of <unit> that fits in
@@ -234,7 +234,7 @@
 //!   `string_error`, adds `TryFrom<quantity>` through `new`, makes `from_str`
 //!   parse with `krabka_units::parse` and `display` print the quantity's
 //!   `human()` text, and makes `default` take a quantity.
-//! - `quantity_getter = name` — with `quantity`, add a getter that returns the
+//! - `quantity_getter = name` â€” with `quantity`, add a getter that returns the
 //!   value as its quantity.
 //!
 //! ```ignore
@@ -265,15 +265,15 @@
 //! its arm matches with `{ .. }` or `(..)`. One optional `#[enum_str(...)]`
 //! attribute on the enum configures it:
 //!
-//! - `case = "..."` — how a variant name becomes its text: `"snake_case"`,
+//! - `case = "..."` â€” how a variant name becomes its text: `"snake_case"`,
 //!   `"kebab-case"`, `"lowercase"` or `"UPPERCASE"`. Without it the text is
 //!   the variant name unchanged.
-//! - `as_str = name` — the method's name.
-//! - `parse` or `parse = name` — add `fn parse(&str) -> Option<Self>`, under
+//! - `as_str = name` â€” the method's name.
+//! - `parse` or `parse = name` â€” add `fn parse(&str) -> Option<Self>`, under
 //!   that name, over the unit variants.
-//! - `all` — add `const ALL: [Self; N]`, every variant in declaration order.
+//! - `all` â€” add `const ALL: [Self; N]`, every variant in declaration order.
 //!   Every variant must be a unit variant.
-//! - `label_value` — implement `prometheus_client`'s `EncodeLabelValue` as the
+//! - `label_value` â€” implement `prometheus_client`'s `EncodeLabelValue` as the
 //!   text. The crate must depend on `prometheus-client`.
 //!
 //! A variant's own `#[enum_str(...)]` takes `name = "..."`, its text in place
@@ -1814,18 +1814,27 @@ pub fn reaper_task(
 }
 
 mod archive_rows;
+mod authorization_refusal;
 mod broker_test_setup;
 mod described_group_rows;
 mod forwardable_requests;
+mod freeze_refusal_rules;
 mod group_record_key;
+mod handler_wire_fixtures;
 mod model_properties;
 mod model_runner;
+mod quorum_epoch_wire;
 mod reconciliation_fields;
 mod reconciliation_operations;
 mod reconciliation_projection;
 mod request_test_identity;
 mod scheduled_loads;
+mod share_fixture_schemas;
 mod share_refusal_matrix;
+mod share_state_constructors;
+mod share_state_operation;
+mod share_state_results;
+mod simulation_message;
 
 /// Declare forwardable API keys and decode each embedded body with its selected request type.
 #[moxy::function]
@@ -1855,6 +1864,87 @@ pub fn reconciliation_member(item: ItemStruct) -> Result<TokenStream, ParseError
 #[moxy::derive(GroupRecordKey, attributes(group_key))]
 pub fn group_record_key(item: ItemEnum) -> Result<TokenStream, ParseError> {
     group_record_key::expand(item)
+}
+
+/// Implement partition routing from a visible simulation message declaration.
+#[moxy::derive(PartitionMessage)]
+pub fn partition_message(item: ItemStruct) -> Result<TokenStream, ParseError> {
+    simulation_message::expand(item)
+}
+
+/// Adapt the external quorum-epoch request types listed at the caller.
+#[moxy::function]
+pub fn quorum_epoch_requests(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    quorum_epoch_wire::requests(&input.into()).map(Into::into)
+}
+
+/// Map native voter listeners to the selected quorum wire endpoint type.
+#[moxy::function]
+pub fn voter_endpoints(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    quorum_epoch_wire::voter_endpoints(input)
+}
+
+/// Supply the common quorum-epoch response layout under an explicit function signature.
+#[moxy::function]
+pub fn quorum_epoch_encoder(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    quorum_epoch_wire::encoder(input)
+}
+
+/// Encode a typed authorization refusal with its optional native message expression.
+#[moxy::function]
+pub fn authorization_refusal(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    authorization_refusal::expand(input)
+}
+
+/// Share an exhaustive freeze mutation inventory under explicit runtime and logical headers.
+#[moxy::function]
+pub fn freeze_refusal_rules(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    freeze_refusal_rules::expand(input)
+}
+
+/// Construct the fixed empty ACL matching filter for the selected external request type.
+#[moxy::function]
+pub fn empty_match_acl_filter(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    handler_wire_fixtures::empty_match_acl_filter(&input.into()).map(Into::into)
+}
+
+/// Compare a delegation-token refusal with the full selected wire response.
+#[moxy::function]
+pub fn token_refusal_result(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    handler_wire_fixtures::token_refusal_result(&input.into()).map(Into::into)
+}
+
+/// Construct an external share-state request from visible field expressions.
+#[moxy::function]
+pub fn share_state_request(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    share_state_constructors::expand(input)
+}
+
+/// Associate share-state response schemas with the listed request types.
+#[moxy::function]
+pub fn share_fixture_schemas(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    share_fixture_schemas::expand(&input.into()).map(Into::into)
+}
+
+/// Adapt the listed external response rows to the partition-result trait.
+#[moxy::function]
+pub fn share_partition_results(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    described_group_rows::partition_results(&input.into()).map(Into::into)
+}
+
+/// Run native share-state partition operations concurrently while preserving request order.
+#[moxy::function]
+pub fn share_state_results(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    share_state_results::expand(input)
+}
+
+/// Add shared active-state admission and reply handling to a visible async method.
+#[moxy::attribute]
+pub fn share_state_operation(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    share_state_operation::expand(&meta.into(), item)
 }
 
 /// Derive group projection construction and epoch checks from its visible fields.
@@ -2055,4 +2145,259 @@ mod export_contract_tests {
         // Dispatch and throttle tables permit zero entries; fixtures need arguments.
         assert!(accepted == ["dispatch_table", "throttle_probes"]);
     }
+}
+
+mod verified_index;
+
+/// Declare a verified binary-search cursor over named index entries.
+#[moxy::function]
+pub fn sorted_index_cursor(input: TokenStream) -> Result<TokenStream, ParseError> {
+    verified_index::cursor(input)
+}
+
+/// Declare a verified last-predecessor lookup over named index entries.
+#[moxy::function]
+pub fn index_floor_lookup(input: TokenStream) -> Result<TokenStream, ParseError> {
+    verified_index::floor(input)
+}
+
+/// Add the contract of a remote finished-segment selection.
+#[moxy::attribute]
+pub fn finished_selection(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    verified_index::finished(meta, item)
+}
+
+/// Add the shared domain and proof annotations of a round-robin site lemma.
+#[moxy::attribute]
+pub fn round_robin_site_lemma(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    verified_index::site(meta, item)
+}
+
+mod fixture_methods;
+mod group_record_flush;
+mod unit_schema;
+
+/// Describe a visible human-unit schema marker.
+#[moxy::derive(UnitSchema, attributes(unit_schema))]
+pub fn unit_schema(item: ItemStruct) -> Result<TokenStream, ParseError> {
+    unit_schema::expand(item)
+}
+
+/// Append the shared metadata forwarding methods to an authorizer implementation.
+#[moxy::attribute]
+pub fn delegate_authorizer(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    fixture_methods::authorizer(meta, item)
+}
+
+/// Append missing-read behavior to an explicit remote-log implementation.
+#[moxy::attribute]
+pub fn missing_remote_reads(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    fixture_methods::remote(meta, item)
+}
+
+/// Preserve the visible flush body inside the shared group-log append boundary.
+#[moxy::attribute]
+pub fn flush_group_records(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    group_record_flush::expand(meta, item)
+}
+
+mod handler_wire_rows;
+
+/// Build offset-fetch rows for an explicit table of wire schemas.
+#[moxy::function]
+pub fn offset_fetch_rows(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    handler_wire_rows::offset_fetch_rows(&input.into()).map(Into::into)
+}
+
+/// Build a share-group refusal with the caller's owned fields.
+#[moxy::function]
+pub fn share_group_denial(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    handler_wire_rows::share_group_denial(&input.into()).map(Into::into)
+}
+
+/// Project acknowledgement batches while preserving the native expression.
+#[moxy::function]
+pub fn acknowledgement_batches(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    handler_wire_rows::acknowledgement_batches(input)
+}
+
+mod coordinator_fixtures;
+
+/// Declare heartbeat fixtures with named status observations.
+#[moxy::function]
+pub fn heartbeat_status(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    coordinator_fixtures::heartbeat(&input.into()).map(Into::into)
+}
+
+/// Preserve native key-boundary observations in generated coordinator tests.
+#[moxy::function]
+pub fn member_key_boundaries(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    coordinator_fixtures::key_boundaries(input)
+}
+
+/// Schedule explicit commit changes and preserve caller-owned async actions.
+#[moxy::function]
+pub fn schedule_commit_changes(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    coordinator_fixtures::commit_changes(input)
+}
+
+mod bounded_unit_modules;
+
+/// Declare concrete bounded human-unit serde modules from one flat table.
+#[moxy::function]
+pub fn bounded_unit_modules(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    bounded_unit_modules::expand(&input.into()).map(Into::into)
+}
+
+mod fixture_constructors;
+
+/// Declare fixture constructors from the existing election, supervisor and quota domains.
+#[moxy::function]
+pub fn fixture_constructors(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    fixture_constructors::expand(&input.into()).map(Into::into)
+}
+
+mod wire_test_driver;
+
+/// Declare wire drivers that call the existing socket and framing helpers.
+#[moxy::function]
+pub fn wire_test_driver(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    wire_test_driver::expand(&input.into()).map(Into::into)
+}
+
+mod replication_target_guard;
+
+/// Acquire the local replication target with the original caller-level drop behavior.
+#[moxy::function]
+pub fn replication_target_guard(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    replication_target_guard::expand(&input.into()).map(Into::into)
+}
+
+mod share_test_drivers;
+
+/// Declare a first share fetch through the existing client helper.
+#[moxy::function]
+pub fn share_first_fetch(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    share_test_drivers::acquisition(&input.into()).map(Into::into)
+}
+
+/// Declare a share-consumption driver with native caller operations.
+#[moxy::function]
+pub fn share_consumption_driver(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    share_test_drivers::consumption(input)
+}
+
+mod index_seed_helpers;
+
+/// Declare typed sparse-index fixture helpers with explicit index and key types.
+#[moxy::function]
+pub fn index_seed_helpers(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    index_seed_helpers::expand(&input.into()).map(Into::into)
+}
+
+/// Route `(broker, context, request, version; operation, refusal)` through the
+/// controller listener, continuing with the request or returning its completed dispatch.
+#[moxy::function]
+pub fn controller_request(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    handler_wire_rows::controller_request(input)
+}
+
+mod config_alter_handler;
+
+/// Declare the shared configuration handler with explicit wire and audit policies.
+#[moxy::function]
+pub fn config_alter_handler(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    config_alter_handler::expand(&input.into()).map(Into::into)
+}
+
+mod fixture_expressions;
+
+/// Verify a guard response and return its typed value.
+#[moxy::function]
+pub fn guard_response(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    fixture_expressions::guard_response(&input.into()).map(Into::into)
+}
+
+/// Read the evicted local segment state with the declared retention policy.
+#[moxy::function]
+pub fn evicted_local_segments(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    fixture_expressions::evicted_segments(&input.into()).map(Into::into)
+}
+
+/// Apply reassignment fields in the caller's explicit expression order.
+#[moxy::function]
+pub fn reassignment_fields(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    fixture_expressions::reassignment(input)
+}
+
+mod share_request_identity;
+
+/// Resolve a share request identity before entering the native handler body.
+#[moxy::attribute]
+pub fn share_request_identity(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    share_request_identity::expand(meta.into(), item)
+}
+
+mod group_fixture_tables;
+mod partition_gate;
+mod private_dispatch_table;
+mod string_mutations;
+
+/// Declare partition authorization gates with explicit actions.
+#[moxy::function]
+pub fn partition_gate(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    partition_gate::expand(&input.into()).map(Into::into)
+}
+
+/// Declare private request adapters and their registration table.
+#[moxy::function]
+pub fn private_dispatch_table(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    private_dispatch_table::expand(&input.into()).map(Into::into)
+}
+
+/// Declare required and optional string mutation cases.
+#[moxy::function]
+pub fn string_mutations(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    string_mutations::expand(&input.into()).map(Into::into)
+}
+
+/// Declare member identity fixtures with explicit schema fields.
+#[moxy::function]
+pub fn member_identity_fixtures(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    group_fixture_tables::member_identity(input)
+}
+
+/// Declare required-topic traversal for a topology schema.
+#[moxy::function]
+pub fn required_topics(input: NativeTokenStream) -> Result<NativeTokenStream, ParseError> {
+    group_fixture_tables::required_topics(&input.into()).map(Into::into)
+}
+
+mod token_dispatch;
+
+/// Adapt an owned delegation-token handler to negotiated wire dispatch.
+#[moxy::attribute]
+pub fn token_dispatch(
+    meta: NativeTokenStream,
+    item: NativeTokenStream,
+) -> Result<NativeTokenStream, ParseError> {
+    token_dispatch::expand(meta.into(), item)
 }

@@ -198,7 +198,7 @@ async fn an_answer_waits_for_the_commit_under_its_term() {
         part.install_leader_change(1, 0).await;
         part.replica_state.lock().await.hw = Offset(case.hw_now);
 
-        let changes = crate::coordinator::test_support::schedule_commit_changes!(
+        let changes = krabka_macros::schedule_commit_changes!(
             case, part;
             captures {  }
             leader(leader, epoch) { part.install_leader_change(leader, epoch).await; }

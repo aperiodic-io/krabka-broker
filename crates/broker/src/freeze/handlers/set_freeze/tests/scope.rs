@@ -6,8 +6,8 @@
 use {
     super::{
         super::checks::{check_limit, check_scope, live_entry, prepare, record_of},
-        ALICE, ALICE_KEY, AliceKeyConfiguration, PROPOSAL, alice_key_configuration, freeze_request,
-        image,
+        ALICE, ALICE_KEY, AliceKeyConfiguration, PROPOSAL, alice_key_configuration, freeze_fixture,
+        freeze_request, image, with_alice_freeze_env,
     },
     crate::{
         codes,
@@ -96,7 +96,9 @@ fn a_freeze_that_replaces_a_live_entry_does_not_meet_the_ceiling(
         },
         ..config
     };
-    freeze_fixture!(image, principal, peer, ctx; &[("orders", PatternType::Literal)] ; env, config);
+    let fixture = freeze_fixture(image(&[("orders", PatternType::Literal)]));
+    let ctx = fixture.context();
+    let env = fixture.environment(&config, &ctx);
 
     let outcome = prepare(&env, &freeze_request(scope, PATTERN_TYPE_LITERAL));
     check!(outcome.err().map(|r| r.code) == expected);
@@ -184,20 +186,53 @@ fn an_unsigned_record_takes_the_brokers_clock() {
 
 #[test]
 fn a_pattern_type_byte_that_names_no_scope_kind_is_an_invalid_request() {
-    let AliceKeyConfiguration {
-        dir: _dir, config, ..
-    } = alice_key_configuration();
-    freeze_fixture!(image, principal, peer, ctx; &[] ; env, config);
-
-    for (label, byte, expected) in [
-        ("literal", PATTERN_TYPE_LITERAL, None),
-        ("prefixed", PATTERN_TYPE_PREFIXED, None),
-        ("any", 1_i8, Some(codes::INVALID_REQUEST)),
-        ("unknown", 0, Some(codes::INVALID_REQUEST)),
-        ("match", 2, Some(codes::INVALID_REQUEST)),
-        ("a byte no build knows", 9, Some(codes::INVALID_REQUEST)),
-    ] {
-        let outcome = prepare(&env, &freeze_request("orders", byte));
-        check!(outcome.err().map(|r| r.code) == expected, "{label}");
+    struct PatternCase {
+        label: &'static str,
+        byte: i8,
+        error: Option<i16>,
     }
+    with_alice_freeze_env(
+        || image(&[]),
+        |_fixture, env| {
+            for case in [
+                PatternCase {
+                    label: "literal",
+                    byte: PATTERN_TYPE_LITERAL,
+                    error: None,
+                },
+                PatternCase {
+                    label: "prefixed",
+                    byte: PATTERN_TYPE_PREFIXED,
+                    error: None,
+                },
+                PatternCase {
+                    label: "any",
+                    byte: 1,
+                    error: Some(codes::INVALID_REQUEST),
+                },
+                PatternCase {
+                    label: "unknown",
+                    byte: 0,
+                    error: Some(codes::INVALID_REQUEST),
+                },
+                PatternCase {
+                    label: "match",
+                    byte: 2,
+                    error: Some(codes::INVALID_REQUEST),
+                },
+                PatternCase {
+                    label: "a byte no build knows",
+                    byte: 9,
+                    error: Some(codes::INVALID_REQUEST),
+                },
+            ] {
+                let outcome = prepare(env, &freeze_request("orders", case.byte));
+                check!(
+                    outcome.err().map(|r| r.code) == case.error,
+                    "{}",
+                    case.label
+                );
+            }
+        },
+    );
 }

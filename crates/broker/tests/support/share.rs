@@ -160,7 +160,7 @@ pub async fn produce_values(
         .call()
         .await;
 }
-pub async fn join(client: &Client, group: &str, topic: &str) -> (String, i32) {
+pub async fn join(client: &Client, group: &str, topic: &str) -> MemberSession {
     let resp = client
         .send(ShareGroupHeartbeatRequest {
             group_id: group.into(),
@@ -174,7 +174,10 @@ pub async fn join(client: &Client, group: &str, topic: &str) -> (String, i32) {
     assert!(resp.error_code == 0, "join failed: {:?}", resp.error_code);
     let member_id = resp.member_id.expect("the broker echoes the member id");
     let member_epoch = resp.member_epoch;
-    (member_id, member_epoch)
+    MemberSession {
+        member: member_id,
+        epoch: member_epoch,
+    }
 }
 
 /// Produce a supplied batch, preserving its timestamps and record geometry on retries.
@@ -824,26 +827,6 @@ pub fn empty_session_request(
     }
 }
 
-/// Generate a typed first-acquisition driver with explicit incremental-session behavior.
-#[macro_export]
-macro_rules! share_first_fetch_fixture {
-    ($name:ident, $mode:ident) => {
-        pub async fn $name(
-            client: &::krabka_client_core::Client,
-            session: $crate::support::share::ShareSessionSetup<'_>,
-        ) -> ::krabka_protocol::owned::share_fetch_response::PartitionData {
-            $crate::support::share::fetch_until_acquired(
-                client,
-                $crate::support::share::share_fetch_req()
-                    .session(session)
-                    .call(),
-                $crate::support::share::FetchSessionMode::$mode,
-            )
-            .await
-        }
-    };
-}
-
 pub fn acknowledgement(
     first_offset: i64,
     last_offset: i64,
@@ -972,10 +955,10 @@ pub async fn join_consume_member(
     broker: &krabka_broker::BrokerHandle,
     client: &Client,
     tid: uuid::Uuid,
-) -> (String, i32) {
-    let (member, epoch) = join(client, "g1", "t").await;
-    wait_for_share_init(broker, client, &member, epoch, tid).await;
-    (member, epoch)
+) -> MemberSession {
+    let session = join(client, "g1", "t").await;
+    wait_for_share_init(broker, client, &session.member, session.epoch, tid).await;
+    session
 }
 
 #[derive(Clone, Copy, krabka_macros::FieldDefaults)]
@@ -1001,14 +984,19 @@ impl ConsumptionFixture {
     }
 }
 
+pub struct MemberSession {
+    pub member: String,
+    pub epoch: i32,
+}
+
 /// Retain every topic owner while the suite-specific initializer joins and waits.
 #[bon::builder]
 pub async fn consumption_fixture(
     #[builder(into, default = ShareRecordCount (3))] count: ShareRecordCount,
-    initialize: impl AsyncFn(&krabka_broker::BrokerHandle, &Client, ConsumptionSetup) -> (String, i32),
+    initialize: impl AsyncFn(&krabka_broker::BrokerHandle, &Client, ConsumptionSetup) -> MemberSession,
 ) -> ConsumptionFixture {
     let (permit, broker, client, dir, tid) = Box::pin(permitted_topic_fixture().call()).await;
-    let (member, _) = initialize(&broker, &client, ConsumptionSetup {
+    let MemberSession { member, .. } = initialize(&broker, &client, ConsumptionSetup {
         topic_id: tid,
         count,
     })
@@ -1021,31 +1009,4 @@ pub async fn consumption_fixture(
         tid,
         member,
     }
-}
-
-/// Generate the common g1/t setup while retaining each suite's join and readiness policy.
-#[macro_export]
-macro_rules! share_consumption_fixture {
-    ($(#[$attributes:meta])* $name:ident, $join:path,
-        |$broker:ident, $client:ident, $member:ident, $epoch:ident, $tid:ident| $wait:expr
-    ) => {
-        $(#[$attributes])*
-        pub async fn $name(
-            $broker: &::krabka_broker::BrokerHandle,
-            $client: &::krabka_client_core::Client,
-            setup: $crate::support::share::ConsumptionSetup,
-        ) -> (String, i32) {
-            let $tid = setup.topic_id;
-            $crate::support::share::bootstrap_share_state($broker, $client, "g1").await;
-            $crate::support::share::produce_n()
-                .client($client)
-                .topic_id($tid)
-                .count(setup.count.0)
-                .call()
-                .await;
-            let ($member, $epoch) = ($join)($client, "g1", "t").await;
-            ($wait).await;
-            ($member, $epoch)
-        }
-    };
 }

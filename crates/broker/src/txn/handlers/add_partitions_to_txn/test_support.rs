@@ -1,12 +1,12 @@
 //! Fixtures shared by the `AddPartitionsToTxn` unit tests: a request topic
 //! entry, and the fully pinned response row that a whole-value comparison
 //! checks the handler's output against.
-
 use {
     crate::{
         authorizer::Authorizer,
         broker::{Broker, BrokerHandle},
         coordinator::test_support::single_replica_partition,
+        handlers::test_support::StartedBroker,
         test_support::{configure_single_partition_transactions, start_broker_no_audit_with},
         txn::{
             state::{TopicPartition, TxnEntry},
@@ -133,7 +133,10 @@ pub(in crate::txn::handlers) struct CoordinatorBroker {
 pub(in crate::txn::handlers) async fn start_coordinator(
     authorizer: std::sync::Arc<dyn Authorizer>,
 ) -> CoordinatorBroker {
-    let (handle, dir) = start_broker_no_audit_with(|cfg| {
+    let StartedBroker {
+        broker: handle,
+        dir,
+    } = start_broker_no_audit_with(|cfg| {
         configure_single_partition_transactions(cfg, authorizer);
     })
     .await;

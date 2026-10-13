@@ -214,24 +214,25 @@ mod tests {
         }
     }
 
-    /// Keep the borrowed context and its log-directory registry in each caller's scope.
-    macro_rules! partition_context {
-        (($status:ident, $context:ident), $partitions:expr, $image:expr) => {
-            let $status = LogDirRegistry::default();
-            let $context = LeadershipContext {
-                partitions: $partitions,
-                log_dir_status: &$status,
-                image: $image,
-                node_id: krabka_audit::NodeId(1),
-            };
-        };
+    fn partition_context<'a>(
+        log_dir_status: &'a LogDirRegistry,
+        partitions: &'a PartitionRegistry,
+        image: &'a MetadataImage,
+    ) -> LeadershipContext<'a> {
+        LeadershipContext {
+            partitions,
+            log_dir_status,
+            image,
+            node_id: krabka_audit::NodeId(1),
+        }
     }
 
     #[test]
     fn image_without_the_partition_is_always_unknown_topic_or_partition() {
         let empty = MetadataImage::new(Uuid::nil());
         let partitions = PartitionRegistry::new();
-        partition_context!((log_dir_status, ctx), &partitions, &empty);
+        let log_dir_status = LogDirRegistry::default();
+        let ctx = partition_context(&log_dir_status, &partitions, &empty);
         for replica_id in [-1, -2, 3] {
             let got = resolve_leadership("orders", 0, replica_id, -1, ctx);
             assert!(
@@ -245,7 +246,8 @@ mod tests {
     async fn known_partition_not_held_locally_reflects_the_image_leader_unless_debugging() {
         let image = image_with_topic("orders", 2);
         let partitions = PartitionRegistry::new();
-        partition_context!((log_dir_status, ctx), &partitions, &image);
+        let log_dir_status = LogDirRegistry::default();
+        let ctx = partition_context(&log_dir_status, &partitions, &image);
 
         for (replica_id, want) in [
             (-1, Err(codes::NOT_LEADER_OR_FOLLOWER)),
@@ -268,7 +270,8 @@ mod tests {
             partitions,
             ..
         } = hosted_fixture().image_leader(2).call().await;
-        partition_context!((log_dir_status, ctx), &partitions, &image);
+        let log_dir_status = LogDirRegistry::default();
+        let ctx = partition_context(&log_dir_status, &partitions, &image);
 
         let refused = resolve_leadership("orders", 0, -1, -1, ctx).map(|_| ());
         assert!(refused == Err(codes::NOT_LEADER_OR_FOLLOWER));
@@ -285,7 +288,8 @@ mod tests {
             partition,
             dir: _dir,
         } = hosted_fixture().role(InstalledRole::Leader).call().await;
-        partition_context!((log_dir_status, ctx), &partitions, &image);
+        let log_dir_status = LogDirRegistry::default();
+        let ctx = partition_context(&log_dir_status, &partitions, &image);
         let resolved = resolve_leadership("orders", 0, -1, -1, ctx);
         assert!(resolved.is_ok());
 
@@ -307,7 +311,8 @@ mod tests {
             partition,
             dir: _dir,
         } = hosted_fixture().call().await;
-        partition_context!((log_dir_status, ctx), &partitions, &image);
+        let log_dir_status = LogDirRegistry::default();
+        let ctx = partition_context(&log_dir_status, &partitions, &image);
 
         let got = resolve_leadership("orders", 0, -1, -1, ctx).map(|_| ());
         assert!(got == Err(codes::NOT_LEADER_OR_FOLLOWER));
@@ -333,7 +338,8 @@ mod tests {
             krabka_ids::PartitionIndex(0),
             partition.clone(),
         );
-        partition_context!((log_dir_status, ctx), &partitions, &image);
+        let log_dir_status = LogDirRegistry::default();
+        let ctx = partition_context(&log_dir_status, &partitions, &image);
 
         let stale = resolve_leadership("orders", 0, -1, 2, ctx).map(|_| ());
         assert!(stale == Err(codes::FENCED_LEADER_EPOCH));

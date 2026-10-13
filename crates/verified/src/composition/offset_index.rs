@@ -1,6 +1,7 @@
 use {
     super::{
-        offset_index_lookup, offset_index_position_at_or_after, restore_offset_index_entry_valid,
+        OffsetEntry, offset_index_lookup, offset_index_position_at_or_after,
+        restore_offset_index_entry_valid,
     },
     creusot_std::prelude::*,
 };
@@ -9,12 +10,12 @@ use {
 #[cfg(creusot)]
 #[cfg_attr(test, mutants::skip)]
 #[logic(open)]
-pub fn offset_archive_valid(entries: Seq<(u32, u32)>, max_relative: Int, log_bytes: Int) -> bool {
+pub fn offset_archive_valid(entries: Seq<OffsetEntry>, max_relative: Int, log_bytes: Int) -> bool {
     pearlite! {
         (forall<i: Int> 0 <= i && i < entries.len()
-            ==> entries[i].0@ <= max_relative && entries[i].1@ < log_bytes)
+            ==> entries[i].key@ <= max_relative && entries[i].coordinate@ < log_bytes)
         && (forall<i: Int, j: Int> 0 <= i && i < j && j < entries.len()
-            ==> entries[i].0@ < entries[j].0@ && entries[i].1@ < entries[j].1@)
+            ==> entries[i].key@ < entries[j].key@ && entries[i].coordinate@ < entries[j].coordinate@)
     }
 }
 
@@ -26,28 +27,28 @@ krabka_macros::validate_archive_rows! {
     Err(()) => !offset_archive_valid(entries@, max_relative@, log_bytes@),
     Ok((floor, ceiling)) => offset_archive_valid(entries@, max_relative@, log_bytes@)
         && (entries@.len() == 0 || floor@ < log_bytes@)
-        && ((floor@ == 0 && forall<i: Int> 0 <= i && i < entries@.len() ==> entries@[i].0@ > target@)
-            || exists<i: Int> 0 <= i && i < entries@.len() && entries@[i].0@ <= target@
-                && floor == entries@[i].1
-                && forall<j: Int> i < j && j < entries@.len() ==> entries@[j].0@ > target@)
+        && ((floor@ == 0 && forall<i: Int> 0 <= i && i < entries@.len() ==> entries@[i].key@ > target@)
+            || exists<i: Int> 0 <= i && i < entries@.len() && entries@[i].key@ <= target@
+                && floor == entries@[i].coordinate
+                && forall<j: Int> i < j && j < entries@.len() ==> entries@[j].key@ > target@)
         && match ceiling {
-            None => forall<i: Int> 0 <= i && i < entries@.len() ==> entries@[i].0@ < target@,
+            None => forall<i: Int> 0 <= i && i < entries@.len() ==> entries@[i].key@ < target@,
             Some(position) => floor@ <= position@ && position@ < log_bytes@
-                && exists<i: Int> 0 <= i && i < entries@.len() && target@ <= entries@[i].0@
-                    && position == entries@[i].1
-                    && forall<j: Int> 0 <= j && j < i ==> entries@[j].0@ < target@,
+                && exists<i: Int> 0 <= i && i < entries@.len() && target@ <= entries@[i].key@
+                    && position == entries@[i].coordinate
+                    && forall<j: Int> 0 <= j && j < i ==> entries@[j].key@ < target@,
         },
 })]
 pub(super) fn validated_index_bounds_lookup(
-    entries: &[(u32, u32)],
+    entries: &[OffsetEntry],
     target: u32,
     max_relative: i64,
     log_bytes: u64,
 ) -> Result<(u32, Option<u32>), ()>;
     entries, i, previous, relative, position;
-    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> entries@[j].0@ <= max_relative@ && entries@[j].1@ < log_bytes@)]
+    #[invariant(forall<j: Int> 0 <= j && j < i@ ==> entries@[j].key@ <= max_relative@ && entries@[j].coordinate@ < log_bytes@)]
     #[invariant(forall<j: Int, k: Int> 0 <= j && j < k && k < i@
-        ==> entries@[j].0@ < entries@[k].0@ && entries@[j].1@ < entries@[k].1@)]
+        ==> entries@[j].key@ < entries@[k].key@ && entries@[j].coordinate@ < entries@[k].coordinate@)]
     ;
         restore_offset_index_entry_valid(previous, relative, position, max_relative, log_bytes);
     let floor = offset_index_lookup(entries, target);

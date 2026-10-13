@@ -7,6 +7,8 @@
 //! fails the whole request. Each table row is one request, and the tests
 //! compare the whole response as a client decodes it.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::{AllowAllAuthorizer, AuthorizationResult, Authorizer},
@@ -42,7 +44,7 @@ const TOPIC_B: &str = "resolution-b";
 #[derive(Debug)]
 struct DenyTopicDescribe;
 
-test_authorizer!(DenyTopicDescribe, (self, _source, request), {
+krabka_macros::test_authorizer!(DenyTopicDescribe, request; {
     if request.resource_type == ResourceType::Topic && request.operation == AclOperation::Describe {
         AuthorizationResult::Deny
     } else {
@@ -117,7 +119,8 @@ struct Fixture {
 }
 
 async fn start(authorizer: Arc<dyn Authorizer>) -> Fixture {
-    let (broker, dir) = start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await;
+    let HandlerStartedBroker { broker, dir } =
+        start_broker_no_audit_with(|cfg| cfg.authorizer = authorizer).await;
     let client = krabka_client_core::Client::builder()
         .bootstrap(broker.listen_addr().to_string())
         .client_id("metadata-resolution-test")

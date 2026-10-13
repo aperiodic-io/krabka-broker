@@ -96,28 +96,54 @@ pub(crate) fn audit_resource(
 
 #[cfg(test)]
 mod tests {
-    use {super::*, assert2::assert, std::net::SocketAddr};
+    use {
+        super::*,
+        crate::test_support::sasl_principal,
+        assert2::assert,
+        krabka_audit::{AuditLog, AuditReceiver},
+        krabka_security::Principal,
+        std::{net::SocketAddr, sync::Arc},
+    };
 
     /// The channel and authenticated caller used by both admin audit paths.
-    macro_rules! audit_fixture {
-        (($log:ident, $rx:ident),($principal:ident, $peer:ident, $ctx:ident)) => {
-            let ($log, mut $rx) = krabka_audit::AuditLog::new(8);
-            let $principal = crate::test_support::sasl_principal("admin");
-            let $peer: SocketAddr = "192.0.2.10:9092".parse().unwrap();
-            let $ctx = RequestContext::new(
-                &$principal,
-                &$peer,
-                "admin-client",
-                "connection-a",
-                false,
-                "PLAINTEXT",
-            );
-        };
+    struct AuditFixture {
+        log: Arc<AuditLog>,
+        receiver: AuditReceiver,
+        principal: Principal,
+        peer: SocketAddr,
     }
 
+    fn audit_fixture() -> AuditFixture {
+        let (log, receiver) = AuditLog::new(8);
+        let principal = sasl_principal("admin");
+        let peer = "192.0.2.10:9092".parse().unwrap();
+        AuditFixture {
+            log,
+            receiver,
+            principal,
+            peer,
+        }
+    }
+
+    fn audit_context<'a>(principal: &'a Principal, peer: &'a SocketAddr) -> RequestContext<'a> {
+        RequestContext::new(
+            principal,
+            peer,
+            "admin-client",
+            "connection-a",
+            false,
+            "PLAINTEXT",
+        )
+    }
     #[test]
     fn audit_admin_emits_admin_operation_event() {
-        audit_fixture!((log, rx), (principal, peer, ctx));
+        let AuditFixture {
+            log,
+            receiver: mut rx,
+            principal,
+            peer,
+        } = audit_fixture();
+        let ctx = audit_context(&principal, &peer);
 
         audit_admin(
             log.as_ref(),
@@ -169,7 +195,13 @@ mod tests {
 
     #[test]
     fn audit_admin_success_skips_an_empty_resource_list() {
-        audit_fixture!((log, rx), (principal, peer, ctx));
+        let AuditFixture {
+            log,
+            receiver: mut rx,
+            principal,
+            peer,
+        } = audit_fixture();
+        let ctx = audit_context(&principal, &peer);
 
         audit_admin_success(log.as_ref(), &ctx, "AlterConfigs", Vec::new());
         assert!(rx.try_recv().is_err(), "no resource changed, no record");

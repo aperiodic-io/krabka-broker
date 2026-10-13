@@ -686,7 +686,7 @@ mod tests {
             },
         },
         assert2::{assert, check},
-        fixtures::{local_backends, partition_log, partition_log_fixture, sweep_counts},
+        fixtures::{local_backends, partition_log, sweep_counts},
         krabka_ids::PartitionIndex,
         krabka_log::{LogConfig, Offset},
         krabka_metadata::{MetadataImage, MetadataRecord},
@@ -733,7 +733,7 @@ mod tests {
         partitions.insert("orders".into(), PartitionIndex(0), partition);
 
         let controller: Arc<dyn MetadataSource> = Arc::new(fixed_source(image_with_orders_topic()));
-        let (rsm, rlmm) = local_backends(remote_dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(run(
             RemoteLogManagerContext {
@@ -763,12 +763,19 @@ mod tests {
 
     #[tokio::test]
     async fn tick_all_copies_local_leader_remote_enabled_partition() {
-        fixtures::rolled_partition_fixture!(log_dir, remote_dir, partitions, partition);
+        let fixtures::RolledPartitionFixture {
+            local: _log_dir,
+            remote: remote_dir,
+            registry: partitions,
+            partition,
+        } = fixtures::rolled_partition_fixture(fixtures::rolled_partition_config);
         let export_count = fixtures::sealed_segment_count(&partition);
         assert!(export_count >= 2, "test needs multiple sealed segments");
-        fixtures::registered_sweep_fixture!(
-            partitions, controller, rsm, rlmm, partition, remote_dir
-        );
+        let fixtures::RegisteredFixture {
+            controller: _controller,
+            rsm: _rsm,
+            rlmm,
+        } = fixtures::registered_sweep_fixture(&partitions, partition, remote_dir.path()).await;
 
         test_support::assert_finished_segments(&rlmm, export_count);
     }
@@ -795,27 +802,22 @@ mod tests {
     // a partition nothing writes to any more.
     #[tokio::test]
     async fn two_sweeps_tier_an_idle_partition_through_its_active_segment() {
-        partition_log_fixture!(log_dir, remote_dir, log, LogConfig {
-            remote_storage_enable: true,
-            local_retention: Some(millis(1)),
-            retention: None,
-            retention_size: None,
-            ..LogConfig::default()
-        });
+        let fixtures::PartitionLogFixture {
+            local: log_dir,
+            remote: remote_dir,
+            mut log,
+        } = fixtures::partition_log_fixture(fixtures::idle_retention_config);
         for _ in 0..3 {
             log.append(&mut test_support::batch(2)).unwrap();
         }
         let partition =
             test_support::leading_partition_over(PartitionIndex(0), log_dir.path(), log);
         let partitions = PartitionRegistry::new();
-        fixtures::register_fixture!(
-            partitions,
+        let fixtures::RegisteredFixture {
             controller,
             rsm,
             rlmm,
-            Arc::clone(&partition),
-            remote_dir
-        );
+        } = fixtures::register_fixture(&partitions, Arc::clone(&partition), remote_dir.path());
 
         for (sweep, expected) in [
             (
@@ -872,7 +874,7 @@ mod tests {
         let partitions = PartitionRegistry::new();
         partitions.insert("orders".into(), PartitionIndex(0), partition);
         let controller = fixed_source(image);
-        let (rsm, rlmm) = local_backends(remote_dir.path());
+        let fixtures::Backends { rsm, rlmm } = local_backends(remote_dir.path());
         tick_all(
             &partitions,
             &controller,
@@ -1092,7 +1094,12 @@ mod tests {
     /// metadata for records nobody may read.
     #[tokio::test]
     async fn tick_all_never_copies_a_segment_under_the_log_start() {
-        fixtures::rolled_partition_fixture!(log_dir, remote_dir, partitions, partition);
+        let fixtures::RolledPartitionFixture {
+            local: _log_dir,
+            remote: remote_dir,
+            registry: partitions,
+            partition,
+        } = fixtures::rolled_partition_fixture(fixtures::rolled_partition_config);
         // A floor at the second sealed segment's base, with every local file
         // still on disk: `set_log_start_offset` moves the pointer and deletes
         // nothing, which is the state a remote-retention advance leaves.
@@ -1104,14 +1111,11 @@ mod tests {
             log.set_log_start_offset(floor).expect("move the log start");
             (floor, exports.len())
         };
-        fixtures::register_fixture!(
-            partitions,
+        let fixtures::RegisteredFixture {
             controller,
             rsm,
             rlmm,
-            Arc::clone(&partition),
-            remote_dir
-        );
+        } = fixtures::register_fixture(&partitions, Arc::clone(&partition), remote_dir.path());
 
         // Two sweeps: the second is where a copy/delete cycle would show.
         for sweep in 1..=2 {
@@ -1148,16 +1152,15 @@ mod tests {
     /// leader's `CopySegmentFinished` set off `__remote_log_metadata` without
     /// ever having copied a byte itself.
     async fn follower_sweep(leader_already_copied: bool) -> FollowerSweep {
-        fixtures::rolled_partition_fixture!(
-            log_dir,
-            remote_dir,
-            partitions,
+        let fixtures::RolledPartitionFixture {
+            local: _log_dir,
+            remote: remote_dir,
+            registry: partitions,
             partition,
-            LogConfig {
-                local_retention_size: Some(NO_BYTES),
-                ..fixtures::rolled_partition_config()
-            }
-        );
+        } = fixtures::rolled_partition_fixture(|| LogConfig {
+            local_retention_size: Some(NO_BYTES),
+            ..fixtures::rolled_partition_config()
+        });
         partition.current_leader.store(2, Ordering::Relaxed);
         let exports = partition
             .log
@@ -1165,14 +1168,11 @@ mod tests {
             .expect("partition log mutex poisoned")
             .tierable_segments();
         let sealed_before = exports.len();
-        fixtures::register_fixture!(
-            partitions,
+        let fixtures::RegisteredFixture {
             controller,
             rsm,
             rlmm,
-            Arc::clone(&partition),
-            remote_dir
-        );
+        } = fixtures::register_fixture(&partitions, Arc::clone(&partition), remote_dir.path());
         if leader_already_copied {
             copy_eligible(
                 &tier(ArchiveMode::Mutable, &rsm, &rlmm),
@@ -1243,21 +1243,19 @@ mod tests {
 
     #[tokio::test]
     async fn tick_all_skips_remote_storage_disabled_partition() {
-        fixtures::rolled_partition_fixture!(
-            log_dir,
-            remote_dir,
-            partitions,
-            partition,
-            LogConfig {
-                remote_storage_enable: false,
-                ..fixtures::rolled_partition_config()
-            }
-        );
-        fixtures::registered_sweep_fixture!(
-            partitions, controller, rsm, rlmm, partition, remote_dir
-        );
+        let fixture = fixtures::swept_partition_fixture(|| LogConfig {
+            remote_storage_enable: false,
+            ..fixtures::rolled_partition_config()
+        })
+        .await;
 
-        assert!(rlmm.list_remote_log_segments(&tp()).unwrap().is_empty());
+        assert!(
+            fixture
+                .rlmm
+                .list_remote_log_segments(&tp())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// KIP-950 `remote.log.copy.disable`: the read-only tier copies nothing
@@ -1265,29 +1263,44 @@ mod tests {
     /// so the difference is the flag and not the fixture.
     #[tokio::test]
     async fn copy_disable_stops_the_copy_and_nothing_else() {
-        for (case, copy_disable, want_segments) in
-            [("copying", false, true), ("copy disabled", true, false)]
-        {
-            fixtures::rolled_partition_fixture!(
-                log_dir,
-                remote_dir,
-                partitions,
-                partition,
-                LogConfig {
-                    remote_tier: krabka_log::RemoteTierFlags {
-                        copy_disable,
-                        delete_on_disable: false,
-                    },
-                    ..fixtures::rolled_partition_config()
-                }
-            );
-            fixtures::registered_sweep_fixture!(
-                partitions, controller, rsm, rlmm, partition, remote_dir
-            );
+        struct CopyPolicyCase {
+            label: &'static str,
+            copy_disable: bool,
+            expect_segments: bool,
+        }
+        for CopyPolicyCase {
+            label,
+            copy_disable,
+            expect_segments,
+        } in [
+            CopyPolicyCase {
+                label: "copying",
+                copy_disable: false,
+                expect_segments: true,
+            },
+            CopyPolicyCase {
+                label: "copy disabled",
+                copy_disable: true,
+                expect_segments: false,
+            },
+        ] {
+            let fixture = fixtures::swept_partition_fixture(|| LogConfig {
+                remote_tier: krabka_log::RemoteTierFlags {
+                    copy_disable,
+                    delete_on_disable: false,
+                },
+                ..fixtures::rolled_partition_config()
+            })
+            .await;
 
             check!(
-                !rlmm.list_remote_log_segments(&tp()).unwrap().is_empty() == want_segments,
-                "{case}"
+                !fixture
+                    .rlmm
+                    .list_remote_log_segments(&tp())
+                    .unwrap()
+                    .is_empty()
+                    == expect_segments,
+                "{label}"
             );
         }
     }
@@ -1298,15 +1311,17 @@ mod tests {
     /// one, so no fetch is left pointing at a segment that is gone.
     #[tokio::test]
     async fn disabling_with_delete_on_disable_erases_the_tier() {
-        fixtures::rolled_partition_fixture!(log_dir, remote_dir, partitions, partition);
-        fixtures::register_fixture!(
-            partitions,
+        let fixtures::RolledPartitionFixture {
+            local: _log_dir,
+            remote: remote_dir,
+            registry: partitions,
+            partition,
+        } = fixtures::rolled_partition_fixture(fixtures::rolled_partition_config);
+        let fixtures::RegisteredFixture {
             controller,
             rsm,
             rlmm,
-            Arc::clone(&partition),
-            remote_dir
-        );
+        } = fixtures::register_fixture(&partitions, Arc::clone(&partition), remote_dir.path());
 
         // Copy first: the delete below has to have something to erase.
         fixtures::sweep_mutable(&partitions, &controller, &rsm, &rlmm).await;

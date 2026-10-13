@@ -60,6 +60,8 @@
 //! never as null. This is the only API that reports ELR; Kafka's Metadata
 //! schema has no field for it in any version. See [`crate::elr`].
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::{AuthorizationResult, authorize_topics},
@@ -424,7 +426,7 @@ mod tests {
     use {
         super::*,
         crate::{
-            authorizer::AllowAllAuthorizer,
+            authorizer::{AllowAllAuthorizer, Authorizer},
             broker::BrokerHandle,
             elr::state::test_records,
             handlers::{
@@ -528,7 +530,7 @@ mod tests {
     #[derive(Debug)]
     struct DenyTopics(&'static [&'static str]);
 
-    test_authorizer!(DenyTopics, (self, _source, request), {
+    krabka_macros::test_authorizer!(DenyTopics, request; {
         if request.resource_type == ResourceType::Topic
             && request.operation == AclOperation::Describe
             && self.0.contains(&request.resource_name)
@@ -652,29 +654,23 @@ mod tests {
         ]
     }
 
-    macro_rules! seeded_topics_fixture {
-        (
-            ($handle:ident, $dir:ident, $broker:ident, $ctx:ident), $authorizer:expr, $topics:expr
-        ) => {
-            let ($handle, $dir) = start_broker($authorizer).await;
-            for setup in $topics {
-                seed_topic(&$handle, setup).await;
-            }
-            let $broker = $handle.broker_arc_for_test();
-            krabka_macros::request_test_identity! {
-                bind($ctx);
-                user ["admin"];
-            };
-        };
+    /// Evaluate topic setup after startup, then commit every topic before caller identity.
+    async fn seeded_topics_broker<'a, Topics>(
+        authorizer: Arc<dyn Authorizer>,
+        topics: impl FnOnce() -> Topics,
+    ) -> HandlerStartedBroker
+    where
+        Topics: IntoIterator<Item = TopicSetup<'a>>,
+    {
+        let started = start_broker(authorizer).await;
+        for setup in topics() {
+            seed_topic(&started.broker, setup).await;
+        }
+        started
     }
-
     #[tokio::test]
     async fn denied_topic_survives_truncation() {
-        seeded_topics_fixture!(
-            (broker_handle, _dir, broker, ctx),
-            Arc::new(DenyTopics(&["c"])),
-            ordered_a_b_topics()
-        );
+        krabka_macros::broker_test_setup!(bind(broker_handle, _dir, broker, ctx); boot [seeded_topics_broker(Arc::new(DenyTopics(&["c"])), ordered_a_b_topics)]; user ["admin"];);
         // Budget of 1: "a" fills it, "b" is truncated with no row (the
         // partition-budget-at-topic-boundary rule), "c" is denied. Without
         // the fix, "c" would vanish instead of appearing after "b".
@@ -719,7 +715,10 @@ mod tests {
     /// cursor's offset into `a`.
     #[tokio::test]
     async fn cursor_offset_on_a_denied_topic_does_not_leak_onto_the_next_topic() {
-        let (broker_handle, _dir) = start_broker(Arc::new(DenyTopics(&["a"]))).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(DenyTopics(&["a"]))).await;
         seed_topic(&broker_handle, TopicSetup {
             topic: "a",
             ..TopicSetup::single_replica()
@@ -784,11 +783,7 @@ mod tests {
     /// pagination walks them.
     #[tokio::test]
     async fn duplicate_requested_names_dedupe_and_sort() {
-        seeded_topics_fixture!(
-            (broker_handle, _dir, broker, ctx),
-            Arc::new(crate::authorizer::AllowAllAuthorizer),
-            ordered_a_b_topics()
-        );
+        krabka_macros::broker_test_setup!(bind(broker_handle, _dir, broker, ctx); boot [seeded_topics_broker(Arc::new(AllowAllAuthorizer), ordered_a_b_topics)]; user ["admin"];);
         let req = request()
             .topics(
                 vec!["b", "a", "b", "a"]
@@ -828,14 +823,10 @@ mod tests {
     )]
     #[test_macro(tokio::test)]
     async fn invalid_cursor_fails_the_whole_request(cursor: Option<RequestCursor>) {
-        seeded_topics_fixture!(
-            (broker_handle, _dir, broker, ctx),
-            Arc::new(crate::authorizer::AllowAllAuthorizer),
-            [TopicSetup {
+        krabka_macros::broker_test_setup!(bind(broker_handle, _dir, broker, ctx); boot [seeded_topics_broker(Arc::new(AllowAllAuthorizer), || [TopicSetup {
                 topic: "a",
                 ..TopicSetup::single_replica()
-            }]
-        );
+            }])]; user ["admin"];);
         let req = request().maybe_cursor(cursor).call();
 
         let resp = describe(&broker, req, &ctx).await;
@@ -857,15 +848,11 @@ mod tests {
     /// response_partition_limit), 1)`.
     #[tokio::test]
     async fn zero_partition_limit_floors_to_one() {
-        seeded_topics_fixture!(
-            (broker_handle, _dir, broker, ctx),
-            Arc::new(crate::authorizer::AllowAllAuthorizer),
-            [TopicSetup {
+        krabka_macros::broker_test_setup!(bind(broker_handle, _dir, broker, ctx); boot [seeded_topics_broker(Arc::new(AllowAllAuthorizer), || [TopicSetup {
                 topic: "a",
                 partitions: PartitionCount(2),
                 ..TopicSetup::single_replica()
-            }]
-        );
+            }])]; user ["admin"];);
         let req = request().response_partition_limit(0).call();
 
         let resp = describe(&broker, req, &ctx).await;
@@ -903,7 +890,10 @@ mod tests {
     async fn budget_exhausted_at_topic_boundary_emits_no_row_for_the_next_topic(
         next_topic_exists: bool,
     ) {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_topic(&broker_handle, TopicSetup {
             topic: "a",
             ..TopicSetup::single_replica()
@@ -1086,7 +1076,10 @@ mod tests {
     /// renders `Elr: `.
     #[tokio::test]
     async fn response_partition_carries_the_elr_the_image_holds() {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_topic_with_elr(&broker_handle, "0:2:3").await;
         let broker = broker_handle.broker_arc_for_test();
         let topic = orders_topic(&broker).await;
@@ -1120,7 +1113,10 @@ mod tests {
     /// struct-field-deletion mutant, which would set it to 0.
     #[tokio::test]
     async fn response_partition_carries_leader_epoch() {
-        let (broker_handle, _dir) = start_broker(Arc::new(AllowAllAuthorizer)).await;
+        let HandlerStartedBroker {
+            broker: broker_handle,
+            dir: _dir,
+        } = start_broker(Arc::new(AllowAllAuthorizer)).await;
         seed_topic_with_epoch(&broker_handle, LeaderEpoch(9)).await;
         let broker = broker_handle.broker_arc_for_test();
         let topic = orders_topic(&broker).await;

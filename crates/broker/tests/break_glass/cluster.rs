@@ -10,6 +10,7 @@ use {
     crate::{
         principals::{APPROVERS, USERS, principal},
         support::{self, OperatorKeysSetup, client::connect_owned},
+        topics::create_topic,
     },
     assert2::assert,
     krabka_broker::{
@@ -55,15 +56,29 @@ impl Cluster {
     }
 }
 
-/// Connect the requested principals in order before creating their shared topic.
-macro_rules! client_fixture {
-    ($cluster:ident = $boot:expr; $($client:ident => $user:expr),+; topic($owner:ident, $topic:expr, $partitions:expr)) => {
-        let $cluster = $boot.await;
-        $(let $client = $cluster.client($user).await;)+
-        $crate::topics::create_topic(&$owner, $topic, $partitions).await;
-    };
+pub(super) struct ClusterClients<const N: usize> {
+    pub(super) cluster: Cluster,
+    pub(super) clients: [Client; N],
 }
-pub(super) use client_fixture;
+
+/// Connect the requested principals in order before creating their shared topic.
+pub(super) async fn client_fixture<const N: usize>(
+    cluster: Cluster,
+    users: [&str; N],
+    topic: &str,
+    replication_factor: i16,
+) -> ClusterClients<N> {
+    let mut clients = Vec::with_capacity(N);
+    for user in users {
+        clients.push(cluster.client(user).await);
+    }
+    create_topic(&clients[0], topic, replication_factor).await;
+    let clients = clients
+        .try_into()
+        .ok()
+        .expect("one client per requested principal");
+    ClusterClients { cluster, clients }
+}
 
 /// Mint one operator key per approver under `dir`.
 fn mint_keys(dir: &std::path::Path) -> Vec<support::OperatorKey> {

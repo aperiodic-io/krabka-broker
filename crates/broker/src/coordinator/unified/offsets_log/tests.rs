@@ -130,7 +130,7 @@ async fn a_write_completes_only_when_committed_under_its_term() {
             epoch: LeaderEpoch(0),
         };
 
-        let changes = crate::coordinator::test_support::schedule_commit_changes!(
+        let changes = krabka_macros::schedule_commit_changes!(
             case, partition;
             captures { let metadata = Arc::clone(&metadata); }
             leader(leader, epoch) { metadata.set_image(offsets_image(leader, epoch)); }

@@ -89,7 +89,7 @@ pub(crate) fn expand(item: ItemStruct) -> Result<TokenStream, ParseError> {
         pub fn open(path: &Path) -> Result<Self, crate::error::LogError> {
             let crate::index::OpenedIndex { file, entries } =
                 crate::index::load_index::<{{ raw }}, _>(
-                    path, {{ invariant }}, |raw| (raw.key.get(), raw.coordinate.get()),
+                    path, {{ invariant }}, |raw| krabka_verified::log_index::IndexEntry::new(raw.key.get(), raw.coordinate.get()),
                 )?;
             Ok(Self { file, io: crate::io::file_io(), entries })
         }

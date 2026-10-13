@@ -1,7 +1,10 @@
 """The proofs job proves every workspace package Creusot speaks about.
 
-A crate enters Creusot's scope the moment it depends on `creusot-std` or carries
-a `requires`/`ensures` contract, and nothing links that to the package list
+A crate enters Creusot's scope the moment it depends on `creusot-std` or its
+non-proc-macro sources carry a `requires`/`ensures` contract. Proc-macro sources
+can contain contract tokens they generate for consumers, rather than contracts
+on their own code; their dependency still brings them into scope. Nothing links
+that scope to the package list
 `tools/creusot/prove.sh` runs `cargo creusot` over. A crate that gains a
 contract and is never added to that list is verified by nobody while looking
 verified; this is what notices.
@@ -127,8 +130,8 @@ def has_contract(text):
 def workspace_packages(metadata):
     """The workspace members of a decoded `cargo metadata --no-deps` document.
 
-    Each is `struct(name, directory, has_dependency)`: the package name, the
-    directory holding its manifest, and whether it depends on `creusot-std`.
+    Each records the package name, manifest directory, `creusot-std` dependency,
+    and whether Cargo identifies a proc-macro target.
     Packages outside the workspace are dropped, so a dependency of a member
     that happens to carry contracts is not mistaken for one.
     """
@@ -144,6 +147,10 @@ def workspace_packages(metadata):
             name = package["name"],
             directory = manifest[:-len(_MANIFEST_SUFFIX)],
             has_dependency = _depends_on_creusot(package),
+            is_proc_macro = any([
+                "proc-macro" in target["kind"]
+                for target in package.get("targets", [])
+            ]),
         ))
     return sorted(found, key = lambda package: package.name)
 
@@ -232,6 +239,13 @@ def _holds_contract(fs, package):
     The sweep stops at the first source that does: only the answer matters, and
     the largest crate here holds well over a thousand files.
     """
+
+    # These sources implement host-side token generators. Contract tokens in
+    # their templates belong to the consuming crate, not to the generator.
+    # A generator that uses Creusot itself remains covered by the independent
+    # dependency route in `creusot_packages`.
+    if package.is_proc_macro:
+        return False
     for relative in walk_suffix(fs, package.directory, ".rs"):
         if has_contract(fs.read_to_string(package.directory + "/" + relative)):
             return True

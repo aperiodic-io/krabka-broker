@@ -17,6 +17,7 @@ use {
                 },
             },
         },
+        handlers::test_support::StartedBroker,
         test_support::start_broker_with,
     },
     assert2::{assert, check},
@@ -186,7 +187,10 @@ async fn assert_streams_group_helpers_observe_live_actor_view(
 
 #[tokio::test]
 async fn group_handle_helpers_observe_live_actor_views() {
-    let (handle, _dir) = start_broker_with(|_| {}).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with(|_| {}).await;
     let broker = handle.broker_arc_for_test();
 
     let group_id = "handle-next-gen-group-mutant";

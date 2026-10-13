@@ -5,17 +5,20 @@ use {
     stateright::{Expectation, Model, Property},
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ProbeAction;
+
 struct ProbeModel;
 
 impl Model for ProbeModel {
-    type Action = ();
+    type Action = ProbeAction;
     type State = usize;
 
     fn init_states(&self) -> Vec<Self::State> { vec![0] }
 
     fn actions(&self, _: &Self::State, _: &mut Vec<Self::Action>) {}
 
-    fn next_state(&self, _: &Self::State, (): Self::Action) -> Option<Self::State> { None }
+    fn next_state(&self, _: &Self::State, _: Self::Action) -> Option<Self::State> { None }
 
     fn properties(&self) -> Vec<Property<Self>> {
         krabka_macros::model_properties! {

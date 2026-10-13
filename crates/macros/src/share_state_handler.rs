@@ -1,8 +1,11 @@
 //! Share-state admission and global denial rows without nested macro expansion.
 
-use moxy::{
-    ast::{Parse, ParseError, Parser, Path, Token},
-    token::{Ident, TokenStream},
+use {
+    crate::meta::broker_handler_signature,
+    moxy::{
+        ast::{Parse, ParseError, Parser, Path, Token},
+        token::{Ident, TokenStream},
+    },
 };
 
 pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
@@ -19,16 +22,12 @@ pub(crate) fn expand(input: &TokenStream) -> Result<TokenStream, ParseError> {
     if !parser.is_empty() {
         return Err(parser.error("expected four wire types and one serving function name"));
     }
+    let signature = broker_handler_signature(&request, &response);
     Ok(moxy::template! {
         /// Checks `ClusterAction` on the cluster, then serves the request.
         ///
         #[doc = concat!("Kafka's `KafkaApis` answers a denied principal with `", stringify!({{ response }}), ".toGlobalErrorResponse`: `CLUSTER_AUTHORIZATION_FAILED` on every requested partition, and the share coordinator does not run.")]
-        pub(crate) async fn handle(
-            broker: &crate::broker::Broker,
-            req: {{ request }},
-            _version: i16,
-            ctx: &crate::handlers::RequestContext<'_>,
-        ) -> Result<{{ response }}, crate::error::BrokerError> {
+        {{ signature }} {
             Ok(if super::cluster_action_denied(broker, ctx) {
                 {{ response }} {
                     results: req.topics.iter().map(|topic| {{ result }} {

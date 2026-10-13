@@ -15,7 +15,7 @@ use {
     assert2::{assert, check},
     krabka_ids::PartitionIndex,
     krabka_metadata::NodeId,
-    krabka_units::secs,
+    krabka_units::{convert::TimeExt as _, secs},
 };
 
 /// Block until the sweep has counted `want` clean passes, or give up.

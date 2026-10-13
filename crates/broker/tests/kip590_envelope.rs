@@ -250,23 +250,24 @@ fn envelope_from(
 }
 
 // The expected bytes and whole refusal tuples remain explicit at each scenario.
-macro_rules! served_embedded_header {
-    ($response:ident, $expected:expr, $body:ident $(, $context:tt)?) => {
-        check!($response.error_code == 0 $(, $context)?);
-        assert!(let Some(response_data) = $response.response_data);
-        assert!(let Some((header, mut $body)) = response_data.split_at_checked(5));
-        check!(header == $expected $(, $context)?);
-    };
+fn served_embedded_body<'a>(
+    response: &'a EnvelopeResponse,
+    expected: &[u8],
+    context: &str,
+) -> &'a [u8] {
+    check!(response.error_code == 0, "{context}");
+    assert!(let Some(response_data) = &response.response_data);
+    assert!(let Some((header, body)) = response_data.split_at_checked(5));
+    check!(header == expected, "{context}");
+    body
 }
 
-macro_rules! check_refused {
-    ($broker:expr, $topic:expr, $response:ident => $expected:expr) => {
-        check!(($response.error_code, $response.response_data) == $expected);
-        check!(
-            $broker.controller_image_for_test().topic($topic).is_none(),
-            "the embedded request must not have run"
-        );
-    };
+fn check_refused(broker: &BrokerHandle, topic: &str, response: &EnvelopeResponse, code: i16) {
+    check!(response.error_code == code && response.response_data.is_none());
+    check!(
+        broker.controller_image_for_test().topic(topic).is_none(),
+        "the embedded request must not have run"
+    );
 }
 
 /// The whole forwarding round trip: an `Envelope` carrying a `CreateTopics`
@@ -286,7 +287,7 @@ async fn a_forwarded_create_topics_is_served_and_answered_in_the_clients_own_byt
     )
     .await;
 
-    served_embedded_header!(response, [0x5A, 0x5A, 0x12, 0x34, 0x00], body);
+    let mut body = served_embedded_body(&response, &[0x5A, 0x5A, 0x12, 0x34, 0x00], "");
 
     let version = krabka_protocol::owned::create_topics_response::MAX_VERSION;
     assert!(let Ok(created) = CreateTopicsResponse::decode(&mut body, version));
@@ -542,7 +543,7 @@ async fn an_unparseable_client_host_address_is_an_invalid_request() {
     )
     .await;
 
-    check_refused!(broker, TOPIC, response => (42, None));
+    check_refused(&broker, TOPIC, &response, 42);
 }
 
 /// A forwarded `AllocateProducerIds` (67) is authorized against the principal
@@ -613,7 +614,7 @@ async fn a_forwarded_allocate_producer_ids_needs_cluster_action_for_the_embedded
         )
         .await;
 
-        served_embedded_header!(response, [0x5A, 0x5A, 0x12, 0x34, 0x00], body, "{name}");
+        let mut body = served_embedded_body(&response, &[0x5A, 0x5A, 0x12, 0x34, 0x00], name);
 
         let allocated = AllocateProducerIdsResponse::decode(
             &mut body,
@@ -658,7 +659,7 @@ async fn an_envelope_from_a_peer_without_cluster_action_is_refused() {
     )
     .await;
 
-    check_refused!(broker, TOPIC, response => (31, None));
+    check_refused(&broker, TOPIC, &response, 31);
 }
 
 /// An embedded request at a version this broker does not serve is an
@@ -695,7 +696,7 @@ async fn an_embedded_version_the_broker_does_not_serve_is_refused() {
     )
     .await;
 
-    check_refused!(broker, TOPIC, response => (35, None));
+    check_refused(&broker, TOPIC, &response, 35);
 }
 
 /// `EnvelopeUtils` answers an embedded request it cannot parse in the

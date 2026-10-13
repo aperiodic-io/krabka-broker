@@ -439,12 +439,14 @@ mod tests {
                     PartitionInput, PartitionOutcome, PartitionServices, process_partition,
                 },
                 prepare::PreparedSource,
-                test_support::{encode_batch, image_with_topic, pipeline_input},
+                test_support::{PipelineFixture, encode_batch, image_with_topic, pipeline_input},
             },
             test_support::{repeated_records_batch, spawn_standalone_partition},
         },
         assert2::{assert, check},
         bytes::Bytes,
+        krabka_ids::NodeId,
+        krabka_metadata::MetadataImage,
         krabka_protocol::records::{Record, RecordBatch},
         std::{sync::Arc, time::Duration},
     };
@@ -463,17 +465,25 @@ mod tests {
         }
     }
 
-    /// A transactional batch without a producer id is refused before any
-    /// transaction check.
-    macro_rules! single_leader_fixture {
-        (($directory:ident, $image:ident, $fixture:ident)) => {
-            let $directory = tempfile::tempdir().unwrap();
-            let $image = Arc::new(image_with_topic("orders", &[1]));
-            let $fixture =
-                crate::handlers::produce::test_support::PipelineFixture::new(krabka_ids::NodeId(1));
-        };
+    struct SingleLeaderFixture {
+        pipeline: PipelineFixture,
+        image: Arc<MetadataImage>,
+        dir: tempfile::TempDir,
     }
 
+    fn single_leader_fixture() -> SingleLeaderFixture {
+        let dir = tempfile::tempdir().unwrap();
+        let image = Arc::new(image_with_topic("orders", &[1]));
+        let pipeline = PipelineFixture::new(NodeId(1));
+        SingleLeaderFixture {
+            pipeline,
+            image,
+            dir,
+        }
+    }
+
+    /// A transactional batch without a producer id is refused before any
+    /// transaction check.
     #[tokio::test]
     async fn transactional_produce_rejects_malformed_producers() {
         let directory = tempfile::tempdir().expect("tempdir");
@@ -524,9 +534,13 @@ mod tests {
             (12, false, false),
         ];
         for (version, verification_enabled, appends) in cases {
-            single_leader_fixture!((dir, image, fixture));
-            let part = fixture.partition(dir.path(), "orders", &image).await;
-            fixture
+            let leader = single_leader_fixture();
+            let part = leader
+                .pipeline
+                .partition(leader.dir.path(), "orders", &leader.image)
+                .await;
+            leader
+                .pipeline
                 .partitions
                 .insert("orders".into(), krabka_ids::PartitionIndex(0), part);
 
@@ -554,7 +568,7 @@ mod tests {
                     },
                     ..pipeline_input("orders", PartitionPayload::Slice(payload))
                 },
-                fixture.services(&image),
+                leader.pipeline.services(&leader.image),
             )
             .await
             .expect("process partition")
@@ -656,10 +670,13 @@ mod tests {
     async fn duplicate_acks_all_waits_for_last_offset_plus_one() {
         use krabka_protocol::owned::produce_response::PartitionProduceResponse;
 
-        single_leader_fixture!((dir, image, fixture));
+        let leader = single_leader_fixture();
 
         // Materialize the local leader replica for "orders"-0.
-        let part = fixture.partition(dir.path(), "orders", &image).await;
+        let part = leader
+            .pipeline
+            .partition(leader.dir.path(), "orders", &leader.image)
+            .await;
         // Push LEO to 3 so the HW can be clamped to 2 (one below the target).
         {
             let mut batch = repeated_records_batch().count(3).call();
@@ -672,14 +689,16 @@ mod tests {
         assert!(part.log_end_offset() == krabka_log::Offset(3));
         part.set_follower_hw(krabka_log::Offset(2)).await;
         assert!(part.high_watermark().await == krabka_log::Offset(2));
-        fixture
+        leader
+            .pipeline
             .partitions
             .insert("orders".into(), krabka_ids::PartitionIndex(0), part);
 
         // Pre-seed the dedup tracker so the incoming batch is a Duplicate whose
         // recorded base_offset is 0 and span is 0..=2.
         let pid: i64 = 7777;
-        fixture
+        leader
+            .pipeline
             .producer_state
             .commit(
                 "orders",
@@ -703,7 +722,7 @@ mod tests {
                 acks: -1,
                 ..pipeline_input("orders", PartitionPayload::Slice(payload))
             },
-            fixture.services(&image),
+            leader.pipeline.services(&leader.image),
         )
         .await
         .expect("process partition");
@@ -717,7 +736,7 @@ mod tests {
                     std::time::Instant::now() + Duration::from_millis(50),
                     |partition, admitted_topic_id| {
                         current_effective_min_isr(
-                            &image,
+                            &leader.image,
                             (&partition.topic, partition.index.0),
                             admitted_topic_id,
                             (krabka_audit::NodeId(1), 1),
@@ -749,9 +768,10 @@ mod tests {
 
         const PRODUCER_ID: i64 = 4242;
 
-        single_leader_fixture!((dir, image, fixture));
-        let part_handle = fixture
-            .register_partition(dir.path(), "orders", &image)
+        let leader = single_leader_fixture();
+        let part_handle = leader
+            .pipeline
+            .register_partition(leader.dir.path(), "orders", &leader.image)
             .await;
 
         // Batch `n` holds two records with sequences `2n` and `2n + 1`, and
@@ -774,8 +794,8 @@ mod tests {
                 base_timestamp: 1000,
                 ..Default::default()
             });
-            let fixture = &fixture;
-            let image = &image;
+            let fixture = &leader.pipeline;
+            let image = &leader.image;
             async move {
                 process_partition(
                     pipeline_input("orders", PartitionPayload::Slice(payload)),
@@ -910,9 +930,10 @@ mod tests {
             (History::EntryExpired, 0, Disabled, appended_at(1), 2),
         ];
         for (history, base_sequence, unstable, want, log_end) in cases {
-            single_leader_fixture!((dir, image, fixture));
-            let part_handle = fixture
-                .register_partition(dir.path(), "orders", &image)
+            let leader = single_leader_fixture();
+            let part_handle = leader
+                .pipeline
+                .register_partition(leader.dir.path(), "orders", &leader.image)
                 .await;
 
             let produce = |base_sequence: i32| {
@@ -922,8 +943,8 @@ mod tests {
                     base_sequence,
                     ..repeated_records_batch().call()
                 });
-                let fixture = &fixture;
-                let image = &image;
+                let fixture = &leader.pipeline;
+                let image = &leader.image;
                 async move {
                     process_partition(
                         pipeline_input("orders", PartitionPayload::Slice(payload)),
@@ -952,7 +973,8 @@ mod tests {
                 History::EntryExpired => {
                     assert!(produce(0).await == appended_at(0));
                     check!(
-                        fixture
+                        leader
+                            .pipeline
                             .producer_state
                             .expire_older_than(i64::MAX, krabka_units::millis(0))
                             .await

@@ -8,24 +8,63 @@ use moxy::{
     token::{Group, Ident, Span, Spanner, TokenStream, TokenTree},
 };
 
+/// The common broker request-handler signature, with explicit wire schemas.
+pub(crate) fn broker_handler_signature(request: &Path, response: &Path) -> TokenStream {
+    moxy::template! {
+        pub(crate) async fn handle(
+            broker: &crate::broker::Broker,
+            req: {{ request }},
+            _version: i16,
+            ctx: &crate::handlers::RequestContext<'_>,
+        ) -> Result<{{ response }}, crate::error::BrokerError>
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct RejectedStruct<'a> {
+    pub(crate) label: &'a str,
+    pub(crate) declaration: &'a str,
+}
+
 #[cfg(test)]
 pub(crate) fn assert_rejected_structs(
-    cases: &[(&str, &str)],
+    cases: &[RejectedStruct<'_>],
     expand: impl Fn(ItemStruct) -> Result<TokenStream, ParseError>,
 ) {
-    for &(label, declaration) in cases {
-        let item: ItemStruct = moxy::parse!({ declaration }).expect(label);
-        assert2::assert!(expand(item).is_err(), "{label}");
+    for case in cases {
+        let item: ItemStruct = moxy::parse!({ case.declaration }).expect(case.label);
+        assert2::assert!(expand(item).is_err(), "{}", case.label);
     }
 }
 
 /// A safe, synchronous Rust signature without constness or generic parameters.
 pub(crate) fn is_plain_sync(signature: &Signature) -> bool {
-    signature.asyncness.is_none()
-        && signature.constness.is_none()
+    signature.asyncness.is_none() && has_plain_qualifiers(signature)
+}
+
+/// An async signature without constness, unsafety, an ABI or generic parameters.
+pub(crate) fn is_plain_async(signature: &Signature) -> bool {
+    signature.asyncness.is_some() && has_plain_qualifiers(signature)
+}
+
+fn has_plain_qualifiers(signature: &Signature) -> bool {
+    signature.constness.is_none()
         && signature.safety.is_none()
         && signature.abi.is_none()
         && signature.generics.params.is_empty()
+}
+
+/// Read a nonempty external-schema table with the caller's domain error.
+pub(crate) fn nonempty_paths(
+    input: &TokenStream,
+    message: &str,
+) -> Result<List<Path, Token![,]>, ParseError> {
+    let parser = Parser::from_tokens(input);
+    let paths: List<Path, Token![,]> = List::parse_all(&parser)?;
+    if paths.is_empty() {
+        return Err(parser.error(message));
+    }
+    Ok(paths)
 }
 
 pub(crate) fn parameter_ident<'a>(
@@ -34,6 +73,7 @@ pub(crate) fn parameter_ident<'a>(
 ) -> Result<&'a Ident, ParseError> {
     if let FnParam::Typed(parameter) = parameter
         && let Pattern::Ident(name) = parameter.pat.as_ref()
+        && name.ident.text() != "_"
         && name.by_ref.is_none()
         && name.subpat.is_none()
     {
@@ -41,6 +81,37 @@ pub(crate) fn parameter_ident<'a>(
     } else {
         Err(ParseError::new(parameter.span(), message))
     }
+}
+
+/// Validate a concrete async declaration and return its named parameter types.
+pub(crate) fn named_async_parameter_types(
+    signature: &Signature,
+    names: &[&str],
+    message: &str,
+) -> Result<Vec<String>, ParseError> {
+    let parameters = &signature.params.inner.inputs;
+    if !is_plain_async(signature)
+        || signature.generics.where_clause.is_some()
+        || signature.params.inner.variadic.is_some()
+        || parameters.len() != names.len()
+    {
+        return Err(ParseError::new(signature.span(), message));
+    }
+    parameters
+        .iter()
+        .zip(names)
+        .map(|(parameter, name)| {
+            let FnParam::Typed(parameter) = parameter else {
+                return Err(ParseError::new(signature.span(), message));
+            };
+            if !parameter.attrs.is_empty()
+                || compact(&moxy::template! { {{ parameter.pat }} }) != *name
+            {
+                return Err(ParseError::new(signature.span(), message));
+            }
+            Ok(compact(&moxy::template! { {{ parameter.ty }} }))
+        })
+        .collect()
 }
 
 /// Parse an ordinary function's header while keeping its operation body opaque.
@@ -85,17 +156,16 @@ pub(crate) fn finish_braced_body(parser: &Parser, message: &str) -> Result<(), P
 }
 
 /// Split a complete declaration's trailing metadata and operation body as native tokens.
+pub(crate) struct BracketedFunction {
+    pub(crate) header: proc_macro::TokenStream,
+    pub(crate) metadata: proc_macro::TokenStream,
+    pub(crate) body: proc_macro::Group,
+}
+
 pub(crate) fn bracketed_function(
     input: proc_macro::TokenStream,
     macro_name: &str,
-) -> Result<
-    (
-        proc_macro::TokenStream,
-        proc_macro::TokenStream,
-        proc_macro::Group,
-    ),
-    ParseError,
-> {
+) -> Result<BracketedFunction, ParseError> {
     use proc_macro::{Delimiter, TokenTree};
 
     let mut tokens: Vec<_> = input.into_iter().collect();
@@ -123,7 +193,19 @@ pub(crate) fn bracketed_function(
             format!("{macro_name} needs bracketed metadata before its body"),
         ));
     }
-    Ok((tokens.into_iter().collect(), metadata.stream(), body))
+    Ok(BracketedFunction {
+        header: tokens.into_iter().collect(),
+        metadata: metadata.stream(),
+        body,
+    })
+}
+
+/// Wrap generated statements as one native brace expression.
+pub(crate) fn native_expression(body: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    proc_macro::TokenStream::from_iter([proc_macro::TokenTree::Group(proc_macro::Group::new(
+        proc_macro::Delimiter::Brace,
+        body,
+    ))])
 }
 
 /// Collect top-level native declaration bodies without traversing caller operations.
@@ -364,4 +446,90 @@ pub(crate) fn no_arguments(tokens: TokenStream, macro_name: &str) -> Result<(), 
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::*, assert2::assert, moxy::token::ToTokenStream};
+
+    #[test]
+    fn async_and_sync_policies_share_only_qualifier_checks() {
+        let asynchronous = function_signature(&"async fn perform() {}".parse().unwrap()).unwrap();
+        assert!(is_plain_async(&asynchronous));
+        assert!(!is_plain_sync(&asynchronous));
+        let synchronous = function_signature(&"fn perform() {}".parse().unwrap()).unwrap();
+        assert!(is_plain_sync(&synchronous));
+        assert!(!is_plain_async(&synchronous));
+        for source in [
+            "const fn perform() {}",
+            "unsafe fn perform() {}",
+            "async unsafe fn perform() {}",
+            "extern \"C\" fn perform() {}",
+            "async extern \"C\" fn perform() {}",
+            "fn perform<T>() {}",
+            "async fn perform<T>() {}",
+        ] {
+            let signature = function_signature(&source.parse().unwrap()).unwrap();
+            assert!(
+                !is_plain_sync(&signature) && !is_plain_async(&signature),
+                "{source}"
+            );
+        }
+        let signature = function_signature(
+            &"async fn perform() where Concrete: Trait {}"
+                .parse()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(is_plain_async(&signature));
+    }
+
+    #[test]
+    fn schema_tables_preserve_paths_and_domain_errors() {
+        let paths = nonempty_paths(
+            &"wire::First, ::wire::Second,".parse().unwrap(),
+            "response schemas",
+        )
+        .unwrap();
+        assert!(paths.len() == 2);
+        assert!(compact(&paths[0].to_token_stream()) == "wire::First");
+        assert!(compact(&paths[1].to_token_stream()) == "::wire::Second");
+        let error = nonempty_paths(&TokenStream::new(), "response schemas")
+            .err()
+            .expect("empty schema table rejected");
+        assert!(error.to_string().contains("response schemas"));
+        for invalid in ["Type extra", "Type;", "Type, 42"] {
+            assert!(nonempty_paths(&invalid.parse().unwrap(), "response schemas").is_err());
+        }
+    }
+
+    #[test]
+    fn concrete_paths_reject_generics_and_trailing_expressions() {
+        for valid in ["Type", "crate::module::Type", "::module::VALUE"] {
+            let tokens = valid.parse().unwrap();
+            assert!(plain_path(&tokens, Span::call_site(), "concrete path").is_ok());
+        }
+        for invalid in ["", "Type<T>", "Type + Other", "Type::method()"] {
+            let tokens = invalid.parse().unwrap();
+            assert!(plain_path(&tokens, Span::call_site(), "concrete path").is_err());
+        }
+    }
+
+    #[test]
+    fn named_clauses_keep_opaque_groups_and_reject_missing_values() {
+        let tokens = "body { nested!(if ready { a() } else { b() }); }"
+            .parse()
+            .unwrap();
+        let parser = Parser::from_tokens(&tokens);
+        assert!(expect_name(&parser, "body", "body clause").unwrap() == "body");
+        let body = grouped_value(&parser, "operation body").unwrap();
+        assert!(body.delim.is_brace());
+        assert!(compact(&body.tokens) == "nested!(ifready{a()}else{b()});");
+        assert!(parser.is_empty());
+        assert!(grouped_value(&parser, "missing value").is_err());
+        let tokens = "wrong literal".parse().unwrap();
+        let parser = Parser::from_tokens(&tokens);
+        assert!(expect_name(&parser, "body", "body clause").is_err());
+        assert!(grouped_value(&parser, "group expected").is_err());
+    }
 }

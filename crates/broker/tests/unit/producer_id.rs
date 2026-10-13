@@ -9,6 +9,7 @@
 use {
     crate::support::{
         self,
+        discovery::{expected_coordinator, expected_coordinator_response},
         transactions::{claim_idempotent_producer, init_producer_request},
     },
     assert2::{assert, check},
@@ -67,14 +68,34 @@ async fn find_coordinator_txn_creates_topic_then_returns_local_broker() {
     // Kafka's `KafkaApis.getCoordinator`: the lookup finds no
     // __transaction_state, asks for it, and answers COORDINATOR_NOT_AVAILABLE
     // (15) with `Node.noNode()`.
-    crate::check_expected_coordinator!(response, first => ("my-tid", -1, String::new(), -1, 15, None));
+    check!(
+        first
+            == expected_coordinator_response(expected_coordinator(
+                "my-tid",
+                -1,
+                String::new(),
+                -1,
+                15,
+                None
+            ))
+    );
 
     // The retried lookup resolves the partition leader, which is this broker
     // (the only broker in the cluster).
     let retried =
         support::find_coordinator(&p.client, support::KEY_TYPE_TRANSACTION, "my-tid").await;
     let listen = p.broker.listen_addr();
-    crate::check_expected_coordinator!(row, retried => ("my-tid", 1, listen.ip().to_string(), i32::from(listen.port()), 0, None));
+    check!(
+        retried
+            == expected_coordinator(
+                "my-tid",
+                1,
+                listen.ip().to_string(),
+                i32::from(listen.port()),
+                0,
+                None
+            )
+    );
     p.broker.shutdown().await;
 }
 

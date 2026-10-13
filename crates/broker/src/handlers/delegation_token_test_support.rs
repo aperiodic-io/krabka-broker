@@ -18,93 +18,156 @@ use {
 };
 
 /// The controller, directory and HMAC secret used by token wire fixtures.
-macro_rules! token_fixture {
-    ($directory:ident, $controller:ident, $secret:ident) => {
-        let $directory = TempDir::new().unwrap();
-        let $controller = test_controller($directory.path().into()).await;
-        let $secret = SecretBytes::new(b"k".to_vec());
-    };
+pub(super) struct TokenFixture {
+    pub(super) directory: tempfile::TempDir,
+    pub(super) controller: Arc<ControllerHandle>,
+    pub(super) secret: krabka_security::SecretBytes,
 }
 
-/// Bind the refusal fixture's resources in the original test scope.
-macro_rules! refusal_token_fixture {
-    (($directory:ident, $controller:ident, $secret:ident, $live:ident, $expired:ident)) => {
-        let crate::handlers::delegation_token_test_support::RefusalFixture {
-            directory: $directory,
-            controller: $controller,
-            secret: $secret,
-            live: $live,
-            expired: $expired,
-        } = crate::handlers::delegation_token_test_support::RefusalFixture::new().await;
-    };
+impl TokenFixture {
+    pub(super) async fn new() -> Self {
+        let ControllerResources {
+            directory,
+            controller,
+        } = controller_resources().await;
+        Self::with_controller(directory, controller)
+    }
+
+    fn with_controller(directory: tempfile::TempDir, controller: Arc<ControllerHandle>) -> Self {
+        let secret = krabka_security::SecretBytes::new(b"k".to_vec());
+        Self {
+            directory,
+            controller,
+            secret,
+        }
+    }
+}
+
+struct ControllerResources {
+    directory: tempfile::TempDir,
+    controller: Arc<ControllerHandle>,
+}
+async fn controller_resources() -> ControllerResources {
+    let directory = tempfile::TempDir::new().unwrap();
+    let controller = test_controller(directory.path().into()).await;
+    ControllerResources {
+        directory,
+        controller,
+    }
 }
 
 #[derive(Clone, Copy, Default, derive_more::Display, derive_more::From, derive_more::Into)]
 pub(super) struct TokenMutationIndex(pub usize);
 
-#[derive(Clone, Copy, krabka_macros::FieldDefaults)]
-pub(super) struct MutationSeedSetup {
-    pub index: TokenMutationIndex,
-    #[default(TokenPeriodMillis(60_000))]
-    pub expiry_delta: TokenPeriodMillis,
-    #[default(TokenPeriodMillis(DAY_MS))]
-    pub maximum_delta: TokenPeriodMillis,
-}
-
-/// Seed one mutation case against the same wall-clock reading for both limits.
-macro_rules! seeded_token_fixture {
-    (
-        ($token_id:ident, $hmac:ident, $seeded_at:ident, $maximum:ident),
-        $controller:expr,
-        $setup:expr
-    ) => {
-        let seed_setup = $setup;
-        let $token_id = format!("tok-{}", seed_setup.index.0);
-        let $hmac = crate::handlers::delegation_token_test_support::hmac_for(&$token_id);
-        let $seeded_at = crate::time_util::now_ms();
-        let $maximum = $seeded_at + seed_setup.maximum_delta.0;
-        let mutation_defaults =
-            crate::handlers::delegation_token_test_support::TokenSetup::for_mutation();
-        crate::handlers::delegation_token_test_support::seed_token()
-            .controller($controller)
-            .token_id(&$token_id)
-            .owner(mutation_defaults.owner)
-            .maybe_requester(mutation_defaults.requester)
-            .issued_at(mutation_defaults.issued_at)
-            .expires_at($seeded_at + seed_setup.expiry_delta.0)
-            .max_expires_at($maximum)
-            .renewers(mutation_defaults.renewers)
-            .call()
-            .await;
-    };
-}
-
 /// Kafka's default `delegation.token.expiry.time.ms`.
 pub(super) const DAY_MS: i64 = 24 * 60 * 60 * 1_000;
 
-pub(super) type RefusalToken = (Vec<u8>, i64);
+pub(super) struct RefusalToken {
+    pub(super) hmac: Vec<u8>,
+    pub(super) expires_at: i64,
+}
+pub(super) struct RefusalTokens {
+    pub(super) live: RefusalToken,
+    pub(super) expired: RefusalToken,
+}
 
 pub(super) struct RefusalFixture {
-    pub(super) directory: tempfile::TempDir,
-    pub(super) controller: Arc<ControllerHandle>,
-    pub(super) secret: krabka_security::SecretBytes,
+    pub(super) resources: TokenFixture,
     pub(super) live: RefusalToken,
     pub(super) expired: RefusalToken,
 }
 
 impl RefusalFixture {
     pub(super) async fn new() -> Self {
-        let directory = tempfile::TempDir::new().unwrap();
-        let controller = test_controller(directory.path().into()).await;
-        let (live, expired) = refusal_tokens(&controller).await;
-        Self {
+        let ControllerResources {
             directory,
             controller,
-            secret: krabka_security::SecretBytes::new(b"k".to_vec()),
+        } = controller_resources().await;
+        let RefusalTokens { live, expired } = refusal_tokens(&controller).await;
+        Self {
+            resources: TokenFixture::with_controller(directory, controller),
             live,
             expired,
         }
     }
+}
+
+pub(super) struct SeededToken {
+    pub(super) token_id: String,
+    pub(super) hmac: Vec<u8>,
+    pub(super) maximum: i64,
+}
+
+/// Seed one mutation case against one wall-clock reading for both limits.
+#[bon::builder]
+pub(super) async fn seed_mutation_token(
+    controller: &ControllerHandle,
+    #[builder(into)] index: TokenMutationIndex,
+    #[builder(into, default = TokenPeriodMillis(60_000))] expiry_delta: TokenPeriodMillis,
+    #[builder(into, default = TokenPeriodMillis(DAY_MS))] maximum_delta: TokenPeriodMillis,
+) -> SeededToken {
+    let token_id = format!("tok-{}", index.0);
+    let hmac = hmac_for(&token_id);
+    let seeded_at = now_ms();
+    let maximum = seeded_at + maximum_delta.0;
+    let defaults = TokenSetup::for_mutation();
+    seed_token()
+        .controller(controller)
+        .token_id(&token_id)
+        .owner(defaults.owner)
+        .maybe_requester(defaults.requester)
+        .issued_at(defaults.issued_at)
+        .expires_at(seeded_at + expiry_delta.0)
+        .max_expires_at(maximum)
+        .renewers(defaults.renewers)
+        .call()
+        .await;
+    SeededToken {
+        token_id,
+        hmac,
+        maximum,
+    }
+}
+
+pub(super) struct MutationResponse<Response> {
+    pub(super) actual: Response,
+    pub(super) expected: Response,
+    pub(super) case: &'static str,
+}
+/// Retain the token resources through each ordered refusal and the final storage check.
+#[bon::builder]
+pub(super) async fn check_refusals<Cases, Response>(
+    cases: impl FnOnce(&RefusalToken, &RefusalToken) -> Cases,
+    mut mutation: impl AsyncFnMut(
+        &ControllerHandle,
+        &krabka_security::SecretBytes,
+        TokenMutationRefusalSetup,
+    ) -> MutationResponse<Response>,
+    verify: impl FnOnce(&ControllerHandle, &RefusalToken, &RefusalToken),
+) where
+    Cases: IntoIterator<Item = TokenMutationRefusalSetup>,
+    Response: PartialEq + std::fmt::Debug,
+{
+    let RefusalFixture {
+        resources:
+            TokenFixture {
+                directory: _directory,
+                controller,
+                secret,
+            },
+        live,
+        expired,
+    } = RefusalFixture::new().await;
+    for case in cases(&live, &expired) {
+        let MutationResponse {
+            actual,
+            expected,
+            case,
+        } = mutation(&controller, &secret, case).await;
+        assert!(actual == expected, "{case}");
+    }
+    verify(&controller, &live, &expired);
+    controller.cancel().await;
 }
 
 #[derive(Clone, Copy, Default)]
@@ -204,18 +267,6 @@ pub(super) fn ordinary_ownership_refusals(hmac: &[u8]) -> [TokenMutationRefusalS
             .caller(identity.caller)
             .call()
     })
-}
-
-/// Compare the complete API-specific wire response with independent refusal data.
-macro_rules! check_token_mutation_refusal {
-    ($response:ident, $case:ident, $ty:ident) => {
-        let expected = $ty {
-            error_code: $case.error.0,
-            expiry_timestamp_ms: $case.expiry.0,
-            ..Default::default()
-        };
-        assert2::assert!($response == expected, "{}", $case.name);
-    };
 }
 
 /// The shared credential and HMAC refusals precede each API's ownership and expiry checks.
@@ -416,26 +467,44 @@ pub(super) async fn seed_token(
 }
 
 /// A live token and one just expired, both with the same future maximum.
-pub(super) async fn refusal_tokens(
-    controller: &ControllerHandle,
-) -> ((Vec<u8>, i64), (Vec<u8>, i64)) {
+pub(super) async fn refusal_tokens(controller: &ControllerHandle) -> RefusalTokens {
+    struct TokenToSeed<'a> {
+        id: &'a str,
+        token: &'a RefusalToken,
+    }
     let now = now_ms();
-    let live = (hmac_for("live"), now + 60_000);
-    let expired = (hmac_for("expired"), now - 1);
-    for (token_id, (_, expiry)) in [("live", &live), ("expired", &expired)] {
+    let live = RefusalToken {
+        hmac: hmac_for("live"),
+        expires_at: now + 60_000,
+    };
+    let expired = RefusalToken {
+        hmac: hmac_for("expired"),
+        expires_at: now - 1,
+    };
+
+    for seed in [
+        TokenToSeed {
+            id: "live",
+            token: &live,
+        },
+        TokenToSeed {
+            id: "expired",
+            token: &expired,
+        },
+    ] {
         seed_token()
             .controller(controller)
-            .token_id(token_id)
+            .token_id(seed.id)
             .owner(TokenSetup::for_mutation().owner)
             .maybe_requester(TokenSetup::for_mutation().requester)
             .issued_at(TokenSetup::for_mutation().issued_at)
-            .expires_at(*expiry)
+            .expires_at(seed.token.expires_at)
             .max_expires_at(now + DAY_MS)
             .renewers(TokenSetup::for_mutation().renewers)
             .call()
             .await;
     }
-    (live, expired)
+    RefusalTokens { live, expired }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -444,14 +513,21 @@ pub(super) struct TokenMutationWindow {
     after: UnixMillis,
 }
 
+pub(super) struct MutationExecution<Response> {
+    pub(super) window: TokenMutationWindow,
+    pub(super) response: Response,
+}
 /// Pin independent wall-clock bounds around execution of a token mutation.
 pub(super) async fn in_mutation_window<F: std::future::Future>(
     mutation: F,
-) -> (TokenMutationWindow, F::Output) {
+) -> MutationExecution<F::Output> {
     let before = UnixMillis(now_ms());
     let response = mutation.await;
     let after = UnixMillis(now_ms());
-    (TokenMutationWindow { before, after }, response)
+    MutationExecution {
+        window: TokenMutationWindow { before, after },
+        response,
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -504,6 +580,25 @@ pub(super) struct TokenMutationOutcome {
     pub expiry: UnixMillis,
 }
 
+impl TokenMutationOutcome {
+    pub(super) fn from_wire(error_code: i16, expiry_timestamp_ms: i64) -> Self {
+        Self {
+            error: KafkaErrorCode(error_code),
+            expiry: UnixMillis(expiry_timestamp_ms),
+        }
+    }
+}
+
+impl TokenExpirySetup {
+    pub(super) fn check(self, case: &str, outcome: TokenMutationOutcome) {
+        check_expiry_window()
+            .case(case)
+            .outcome(outcome)
+            .window(self.window)
+            .expectation(self.expectation)
+            .call();
+    }
+}
 /// The expiry lies in the independently pinned clock window, or equals the lifetime cap.
 #[bon::builder]
 pub(super) fn check_expiry_window(
@@ -532,22 +627,6 @@ pub(super) fn check_expiry_window(
         }
         ExpiryExpectation::LifetimeCap(maximum) => assert!(outcome.expiry == maximum, "{case}"),
     }
-}
-
-macro_rules! check_token_expiry {
-    ($case:expr, $response:expr, $setup:expr) => {
-        crate::handlers::delegation_token_test_support::check_expiry_window()
-            .case($case)
-            .outcome(
-                crate::handlers::delegation_token_test_support::TokenMutationOutcome {
-                    error: crate::test_support::KafkaErrorCode($response.error_code),
-                    expiry: crate::test_support::UnixMillis($response.expiry_timestamp_ms),
-                },
-            )
-            .window($setup.window)
-            .expectation($setup.expectation)
-            .call();
-    };
 }
 
 pub(super) fn stored_expiry(controller: &ControllerHandle, token_id: &str) -> Option<i64> {

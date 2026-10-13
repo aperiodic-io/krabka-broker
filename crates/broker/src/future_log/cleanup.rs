@@ -101,16 +101,29 @@ mod tests {
         tokio_util::sync::CancellationToken,
     };
 
-    macro_rules! pending_move_fixture {
-        ($dir:ident, $log:ident, $logs:ident, $started:ident, $dropped:ident) => {
-            let $dir = tempdir().expect("tempdir");
-            let $log = Arc::new(Mutex::new(
-                Log::open($dir.path(), LogConfig::default()).expect("open future log"),
-            ));
-            let $logs = DashMap::new();
-            let $started = Arc::new(AtomicU64::new(0));
-            let $dropped = Arc::new(AtomicU64::new(0));
-        };
+    struct PendingMoveFixture {
+        dir: tempfile::TempDir,
+        log: Arc<Mutex<Log>>,
+        // FutureLogState's existing task registry uses topic/partition keys.
+        logs: DashMap<(String, PartitionIndex), Arc<FutureLogState>>,
+        started: Arc<AtomicU64>,
+        dropped: Arc<AtomicU64>,
+    }
+    fn pending_move_fixture() -> PendingMoveFixture {
+        let dir = tempdir().expect("tempdir");
+        let log = Arc::new(Mutex::new(
+            Log::open(dir.path(), LogConfig::default()).expect("open future log"),
+        ));
+        let logs = DashMap::new();
+        let started = Arc::new(AtomicU64::new(0));
+        let dropped = Arc::new(AtomicU64::new(0));
+        PendingMoveFixture {
+            dir,
+            log,
+            logs,
+            started,
+            dropped,
+        }
     }
 
     struct DropCounter(Arc<AtomicU64>);
@@ -131,7 +144,13 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_moves_cancels_and_awaits_every_task() {
-        pending_move_fixture!(dir, future_log, future_logs, started, dropped);
+        let PendingMoveFixture {
+            dir,
+            log: future_log,
+            logs: future_logs,
+            started,
+            dropped,
+        } = pending_move_fixture();
         let mut cancels = Vec::new();
 
         for partition in [PartitionIndex(0), PartitionIndex(1)] {
@@ -166,7 +185,13 @@ mod tests {
 
     #[tokio::test]
     async fn abort_moves_cancels_and_aborts_every_task() {
-        pending_move_fixture!(dir, future_log, future_logs, started, dropped);
+        let PendingMoveFixture {
+            dir,
+            log: future_log,
+            logs: future_logs,
+            started,
+            dropped,
+        } = pending_move_fixture();
         let cancel = CancellationToken::new();
         let task = pending_move(&started, &dropped);
         future_logs.insert(

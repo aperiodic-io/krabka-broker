@@ -89,19 +89,16 @@ krabka_macros::decoded_dispatch! {
     )
         [request = DeleteTopicsRequest, binding(req)] -> DispatchResult
     {
-        forward_if_not_controller!(
-            broker,
-            ctx,
-            delete_topics_request::API_KEY,
-            req_bytes,
-            version,
-            |code, _| {
+        if let Some(answer) = forward_if_not_controller(
+            broker, ctx, delete_topics_request::API_KEY, req_bytes, version, |code, _| {
                 encode_response(
                     &delete_topics_response(request_error_results(&req, code), 0),
                     version,
                 )
             }
-        );
+        ).await {
+            return answer;
+        }
         if !is_active_controller(broker) {
             return encode_response(
                 &delete_topics_response(request_error_results(&req, codes::NOT_CONTROLLER), 0),

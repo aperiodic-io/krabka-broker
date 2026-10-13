@@ -12,6 +12,7 @@ use {
         AbortedTxnIndexEntry, OffsetIndexEntry, TimeIndexEntry, parse_offset_index,
         parse_time_index, parse_txn_index,
     },
+    krabka_verified::log_index::IndexEntry,
     object_store::path::Path,
 };
 
@@ -111,7 +112,9 @@ pub(super) fn validate_offset_index(
         let position = entry.position.get();
 
         if !krabka_verified::restore_offset_index_entry_valid(
-            previous.map(|row: &OffsetIndexEntry| (row.relative_offset.get(), row.position.get())),
+            previous.map(|row: &OffsetIndexEntry| {
+                IndexEntry::new(row.relative_offset.get(), row.position.get())
+            }),
             relative_offset,
             position,
             max_relative,
@@ -156,7 +159,9 @@ pub(super) fn validate_time_index(
         let relative_offset = entry.relative_offset.get();
 
         if !krabka_verified::restore_time_index_entry_valid(
-            previous.map(|row: &TimeIndexEntry| (row.timestamp.get(), row.relative_offset.get())),
+            previous.map(|row: &TimeIndexEntry| {
+                IndexEntry::new(row.timestamp.get(), row.relative_offset.get())
+            }),
             timestamp,
             relative_offset,
             max_relative,

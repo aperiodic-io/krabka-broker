@@ -8,6 +8,8 @@
 //! characters) with `INVALID_REQUEST`. They do not ask the group coordinator
 //! whether the member exists.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         authorizer::AuthorizationResult,
@@ -41,7 +43,7 @@ const LOCK_TIMEOUT_MS: i32 = 30_000;
 #[derive(Debug)]
 struct ReadOneGroup;
 
-test_authorizer!(ReadOneGroup, (self, _source, request), {
+krabka_macros::test_authorizer!(ReadOneGroup, request; {
     if request.resource_type == ResourceType::Group
         && request.operation == AclOperation::Read
         && request.resource_name != READABLE
@@ -53,18 +55,9 @@ test_authorizer!(ReadOneGroup, (self, _source, request), {
 });
 
 async fn start() -> StartedBroker {
-    let (broker, dir) = start_broker_with_authorizer_no_audit(Arc::new(ReadOneGroup)).await;
+    let HandlerStartedBroker { broker, dir } =
+        start_broker_with_authorizer_no_audit(Arc::new(ReadOneGroup)).await;
     StartedBroker { broker, dir }
-}
-
-macro_rules! share_request_identity {
-    (($user:ident, $address:ident, $ctx:ident)) => {
-        krabka_macros::request_test_identity! {
-            bind($user, $address, $ctx);
-            user ["share-consumer"];
-            client ["share-client"];
-        };
-    };
 }
 
 /// One row: the group id, the member id, and the top-level error code of
@@ -176,7 +169,7 @@ async fn dispatch_share_fetch(
 async fn group_and_member_ids_are_checked_in_kafka_order() {
     let StartedBroker { broker, dir: _dir } = start().await;
     let shared = broker.broker_arc_for_test();
-    share_request_identity!((user, address, ctx));
+    krabka_macros::request_test_identity!(bind(user, address, ctx); user ["share-consumer"]; client ["share-client"];);
     let fetch_version = share_fetch_response::MAX_VERSION;
     let acknowledge_version = share_acknowledge_response::MAX_VERSION;
 
@@ -227,7 +220,7 @@ async fn group_and_member_ids_are_checked_in_kafka_order() {
 async fn a_member_the_group_does_not_know_still_fetches() {
     let StartedBroker { broker, dir: _dir } = start().await;
     let shared = broker.broker_arc_for_test();
-    share_request_identity!((user, address, ctx));
+    krabka_macros::request_test_identity!(bind(user, address, ctx); user ["share-consumer"]; client ["share-client"];);
     let version = share_fetch_response::MAX_VERSION;
     let _actor = shared.group_coordinator.get_or_create_share(READABLE);
 

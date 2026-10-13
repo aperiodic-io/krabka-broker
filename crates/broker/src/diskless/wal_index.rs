@@ -4,9 +4,12 @@ pub(crate) use krabka_remote_storage::diskless::{
     WalDeleteFloorKey, WalDeleteFloorRecord, WalFlushRecord, WalIndexEntry, WalIndexKey,
 };
 use {
-    krabka_verified::diskless::{
-        DisklessRetentionPolicy, diskless_logical_range, diskless_retention_prefix,
-        diskless_span_extension,
+    krabka_verified::{
+        diskless::{
+            DisklessRetentionPolicy, diskless_logical_range, diskless_retention_prefix,
+            diskless_span_extension,
+        },
+        log_index::IndexEntry,
     },
     std::collections::{BTreeMap, HashMap, HashSet},
     uuid::Uuid,
@@ -301,12 +304,14 @@ impl WalIndexCache {
         let indexed: Vec<_> = entries.values().collect();
         let logical: Vec<_> = indexed
             .iter()
-            .map(|range| (range.entry.first_offset, range.entry.last_offset))
+            .map(|range| IndexEntry::new(range.entry.first_offset, range.entry.last_offset))
             .collect();
         // Replay supplies this invariant. Fail closed if a truncated or
         // otherwise malformed index violates the proof kernel's preconditions.
-        if logical.iter().any(|(first, last)| first > last)
-            || logical.windows(2).any(|pair| pair[0].1 >= pair[1].0)
+        if logical.iter().any(|range| range.key > range.coordinate)
+            || logical
+                .windows(2)
+                .any(|pair| pair[0].coordinate >= pair[1].key)
         {
             return None;
         }

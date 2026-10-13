@@ -8,7 +8,10 @@
 use {
     crate::support::{
         self,
-        discovery::{api_versions, topic_metadata_request},
+        discovery::{
+            api_versions, expected_coordinator, expected_coordinator_response,
+            topic_metadata_request,
+        },
         topics::{creatable_topic, create_topic_request},
     },
     assert2::{assert, check},
@@ -66,10 +69,30 @@ async fn find_coordinator_creates_the_offsets_topic_then_returns_self() {
         ..Default::default()
     };
     let first = p.client.send(req).await.expect("FindCoordinator");
-    crate::check_expected_coordinator!(response, first => ("any-group", -1, String::new(), -1, 15, None));
+    check!(
+        first
+            == expected_coordinator_response(expected_coordinator(
+                "any-group",
+                -1,
+                String::new(),
+                -1,
+                15,
+                None
+            ))
+    );
 
     let retried = support::find_coordinator(&p.client, support::KEY_TYPE_GROUP, "any-group").await;
     let listen = p.broker.listen_addr();
-    crate::check_expected_coordinator!(row, retried => ("any-group", 1, listen.ip().to_string(), i32::from(listen.port()), 0, None));
+    check!(
+        retried
+            == expected_coordinator(
+                "any-group",
+                1,
+                listen.ip().to_string(),
+                i32::from(listen.port()),
+                0,
+                None
+            )
+    );
     p.broker.shutdown().await;
 }

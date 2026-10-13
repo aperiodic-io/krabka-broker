@@ -8,12 +8,13 @@ use {
     super::seed::snapshot_seed,
     crate::{
         coordinator::unified::{
-            OffsetRecordBatchBuilder,
+            GroupCoordinator, OffsetRecordBatchBuilder,
             assignor::TopicIdPartition,
             member_records::{
                 MemberRecordFamilies, MemberRecordLists, MemberTombstone, MemberValues,
                 append_removed_members, append_target_records,
             },
+            offsets_log::OffsetsLog,
             share::{
                 persistence::{
                     DeletingTopic, ShareGroupCurrentMemberAssignmentValue, ShareGroupKey,
@@ -338,12 +339,15 @@ fn topic_partitions_infos<'a>(
     topics
 }
 
-crate::coordinator::unified::persistence::flush_pending_records! {
-    state: &ShareGroupState, pending: PendingShareRecords;
-    offsets_log, coordinator, now_ms;
-    group &state.group_id;
-    encode pending.into_batch(&state.group_id, now_ms);
-    cache coordinator.update_share_cache(&state.group_id, snapshot_seed(state));
+#[krabka_macros::flush_group_records(group [&state.group_id]; encode [pending.into_batch(&state.group_id, now_ms)];)]
+pub(super) async fn flush_pending(
+    state: &ShareGroupState,
+    pending: PendingShareRecords,
+    offsets_log: &dyn OffsetsLog,
+    coordinator: &GroupCoordinator,
+    now_ms: i64,
+) -> Result<(), BrokerError> {
+    coordinator.update_share_cache(&state.group_id, snapshot_seed(state));
 }
 
 /// The wall-clock reading this actor stamps share-group records with, in
@@ -424,7 +428,7 @@ mod tests {
     // The keys of the share-group records write the group id and the member
     // id with an `INT16` length. A string of 32767 bytes encodes, and one of
     // 32768 bytes makes the whole batch an error, not a panic in the actor.
-    crate::coordinator::unified::persistence::key_string_boundaries!(PendingShareRecords, || {
+    krabka_macros::member_key_boundaries!(PendingShareRecords; factory [|| {
         PendingShareRecords {
             group_metadata: Some(ShareGroupMetadataValue {
                 epoch: 1,
@@ -435,5 +439,5 @@ mod tests {
             current_per_member: vec![("m".into(), None)],
             ..Default::default()
         }
-    });
+    }];);
 }

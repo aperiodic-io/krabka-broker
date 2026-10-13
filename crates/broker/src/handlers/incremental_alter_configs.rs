@@ -34,8 +34,7 @@ use {
         },
         handlers::{
             ApiVersion, DispatchResult, RequestContext, audit_resource, config_resource_refusal,
-            encode_response,
-            forward_to_controller::{controller_listener_dispatch, to_active_controller_or_handle},
+            encode_response, forward_to_controller::to_active_controller_or_handle,
             response_encoding::ErrorRow as _,
         },
     },
@@ -94,22 +93,11 @@ krabka_macros::decoded_dispatch! {
         req_bytes: &[u8],
         ctx: &RequestContext<'_>,
     )
-        [request = IncrementalAlterConfigsRequest, binding(mut req)] -> DispatchResult
+        [request = IncrementalAlterConfigsRequest, binding(req)] -> DispatchResult
     {
-        controller_listener_dispatch!(
-            broker,
-            ctx,
-            req,
-            version,
-            self::handle,
-            self::request_refusal
-        );
+        let mut req = krabka_macros::controller_request!(broker, ctx, req, version; self::handle, self::request_refusal);
         let image = broker.controller.current_image();
-        let duplicates = super::alter_configs::duplicate_resource_flags(
-            req.resources
-                .iter()
-                .map(|resource| (resource.resource_type, resource.resource_name.as_str())),
-        );
+        let duplicates = super::alter_configs::duplicate_resource_flags(req.resources.iter());
         let mut local = Vec::new();
         let mut local_indices = Vec::new();
         let mut indexed_responses = Vec::new();
@@ -198,10 +186,7 @@ fn request_refusal(
     }
 }
 
-super::alter_configs::config_alter_handler!(
-    IncrementalAlterConfigsRequest => IncrementalAlterConfigsResponse,
-    "IncrementalAlterConfigs", audit_resources_for, process_resource
-);
+krabka_macros::config_alter_handler! { request = IncrementalAlterConfigsRequest, response = IncrementalAlterConfigsResponse, operation = "IncrementalAlterConfigs", audit = audit_resources_for, process = process_resource, audits_in_process = false }
 
 /// Audit names include the resource and keys, never sensitive config values.
 fn audit_resources_for(
@@ -225,11 +210,7 @@ fn audit_resources_for(
 /// [`super::alter_configs::duplicate_resource_flags`].
 #[cfg(test)]
 fn resource_duplicate_flags(resources: &[AlterConfigsResource]) -> Vec<bool> {
-    super::alter_configs::duplicate_resource_flags(
-        resources
-            .iter()
-            .map(|resource| (resource.resource_type, resource.resource_name.as_str())),
-    )
+    super::alter_configs::duplicate_resource_flags(resources.iter())
 }
 
 /// Kafka's `ConfigAdminManager.preprocess` shape checks, with a null value

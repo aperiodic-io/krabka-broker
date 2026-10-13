@@ -1,10 +1,10 @@
 //! Portable write stalls, continuing progress, and request-budget release.
-
 use {
     super::WriteIdle,
     crate::{
         SslPrincipalMapper,
         config::ListenerSpec,
+        handlers::test_support::StartedBroker,
         network::{
             dispatch::{serve_connection_stream, test_support::plaintext_loop},
             fetch_writer::SendfileSink,
@@ -115,7 +115,10 @@ async fn stalled_sendfile_obeys_the_same_idle_window() {
 
 #[tokio::test]
 async fn stalled_connection_returns_broker_queue_permits_and_other_requests_proceed() {
-    let (handle, _directory) = start_broker_with(|config| {
+    let StartedBroker {
+        broker: handle,
+        dir: _directory,
+    } = start_broker_with(|config| {
         config.connections_max_idle = Some(krabka_units::millis(100));
         config.queued_max_requests = 1;
         config.queued_max_request_bytes = Some(krabka_units::bytes(65_536));

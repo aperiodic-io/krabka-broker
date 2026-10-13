@@ -45,6 +45,8 @@
 //!    installed role can lag the other way while a promotion prepares the
 //!    log.
 
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     crate::{
         broker::Broker,
@@ -262,8 +264,9 @@ mod tests {
                 produce::test_support::image_with_topic, test_support::seed_partition_replicas,
             },
             test_support::{
-                self as broker_fixture_support, append_partition_batch, record_values,
-                start_broker_no_audit, start_broker_with_authorizer_no_audit, temporary_partition,
+                self as broker_fixture_support, TemporaryPartition, append_partition_batch,
+                record_values, start_broker_no_audit, start_broker_with_authorizer_no_audit,
+                temporary_partition,
             },
         },
         assert2::assert,
@@ -290,7 +293,7 @@ mod tests {
         payments_describe: bool,
     }
 
-    test_authorizer!(TestAuthorizer, (self, _source, req), {
+    krabka_macros::test_authorizer!(TestAuthorizer, req; {
         let allow = match (req.resource_type, req.operation) {
             (ResourceType::Cluster, AclOperation::ClusterAction) => self.cluster_action,
             (ResourceType::Topic, AclOperation::Describe) if req.resource_name == "orders" => true,
@@ -449,7 +452,10 @@ mod tests {
     async fn leader_check_needs_the_installed_role_and_the_image_to_name_this_node() {
         let image = image_with_topic("orders", &[1, 2]);
 
-        let (_dir, partition) = temporary_partition().call();
+        let TemporaryPartition {
+            dir: _dir,
+            partition,
+        } = temporary_partition().call();
 
         // (this node, installed leader, refused)
         let cases = [
@@ -620,7 +626,7 @@ mod tests {
             offset_for_leader_epoch_request::MAX_VERSION as VERSION,
         };
 
-        let (broker, _dir) = start_broker_no_audit().await;
+        let HandlerStartedBroker { broker, dir: _dir } = start_broker_no_audit().await;
 
         let leader_topic = seeded_topic()
             .broker_handle(&broker)

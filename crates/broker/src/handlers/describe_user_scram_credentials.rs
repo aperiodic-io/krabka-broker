@@ -207,38 +207,10 @@ mod tests {
         std::sync::Arc,
     };
 
-    macro_rules! empty_describe_fixture {
-        (
-            (
-                $handle:ident,
-                $directory:ident,
-                $broker:ident,
-                $principal:ident,
-                $peer:ident,
-                $context:ident,
-                $response:ident
-            ),
-            $authorizer:expr
-        ) => {
-            krabka_macros::broker_test_setup! {
-                bind($handle, $directory, $broker, $principal, $peer, $context);
-                boot [crate::test_support::start_broker_with_authorizer($authorizer)];
-                user ["alice"];
-                client ["scram-describe-test"];
-            };
-            let $response = handle(
-                &$broker,
-                &DescribeUserScramCredentialsRequest::default(),
-                0,
-                &$context,
-            );
-        };
-    }
-
     #[derive(Debug)]
     struct ClusterDescribeOnly;
 
-    test_authorizer!(ClusterDescribeOnly, (self, _source, req), {
+    krabka_macros::test_authorizer!(ClusterDescribeOnly, req; {
         if req.resource_type == ResourceType::Cluster
             && req.resource_name == crate::handlers::acl_wire::CLUSTER_RESOURCE_NAME
             && req.operation == AclOperation::Describe
@@ -249,7 +221,13 @@ mod tests {
         AuthorizationResult::Deny
     });
 
-    use {super::*, crate::authorizer::AuthorizationResult};
+    use {
+        super::*,
+        crate::{
+            authorizer::AuthorizationResult,
+            test_support::{DenyAll, start_broker_with_authorizer},
+        },
+    };
 
     /// A SCRAM credential to seed: its user, mechanism and iteration count.
     #[derive(Clone, Copy)]
@@ -441,12 +419,27 @@ mod tests {
         }
     }
 
+    /// An empty users filter asks for all credentials at the initial protocol version.
+    fn empty_describe_response(
+        broker: &Broker,
+        context: &RequestContext<'_>,
+    ) -> DescribeUserScramCredentialsResponse {
+        handle(
+            broker,
+            &DescribeUserScramCredentialsRequest::default(),
+            0,
+            context,
+        )
+    }
     #[tokio::test]
     async fn handle_allows_cluster_describe_authorization() {
-        empty_describe_fixture!(
-            (broker_handle, _dir, broker, principal, peer, ctx, resp),
-            Arc::new(ClusterDescribeOnly)
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, principal, peer, ctx);
+            boot [start_broker_with_authorizer(Arc::new(ClusterDescribeOnly))];
+            user ["alice"];
+            client ["scram-describe-test"];
         );
+        let resp = empty_describe_response(&broker, &ctx);
 
         assert!(
             resp == krabka_macros::unthrottled_wire!(DescribeUserScramCredentialsResponse {
@@ -461,10 +454,13 @@ mod tests {
 
     #[tokio::test]
     async fn handle_rejects_without_cluster_describe_authorization() {
-        empty_describe_fixture!(
-            (broker_handle, _dir, broker, principal, peer, ctx, resp),
-            Arc::new(crate::test_support::DenyAll,)
+        krabka_macros::broker_test_setup!(
+            bind(broker_handle, _dir, broker, principal, peer, ctx);
+            boot [start_broker_with_authorizer(Arc::new(DenyAll,))];
+            user ["alice"];
+            client ["scram-describe-test"];
         );
+        let resp = empty_describe_response(&broker, &ctx);
 
         assert!(
             resp == krabka_macros::unthrottled_wire!(DescribeUserScramCredentialsResponse {

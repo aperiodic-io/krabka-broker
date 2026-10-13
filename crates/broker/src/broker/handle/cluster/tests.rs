@@ -3,6 +3,7 @@ use {
     crate::{
         broker::test_support::{metadata_partition_record, submit_metadata_topic_partition},
         config::BrokerConfig,
+        handlers::test_support::StartedBroker,
         test_support::start_broker_with,
     },
     assert2::{assert, check},
@@ -184,7 +185,10 @@ async fn wait_helpers_remain_pending_until_their_conditions_are_met() {
         excluded: u64,
     }
 
-    let (handle, _dir) = start_broker_with(|_| {}).await;
+    let StartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with(|_| {}).await;
     let timeout = std::time::Duration::from_millis(75);
     let topic_id = uuid::Uuid::from_u128(0xFEED);
 

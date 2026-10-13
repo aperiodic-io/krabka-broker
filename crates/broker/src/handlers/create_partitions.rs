@@ -88,14 +88,11 @@ krabka_macros::decoded_dispatch! {
     )
         [request = CreatePartitionsRequest, binding(req)] -> DispatchResult
     {
-        forward_if_not_controller!(
-            broker,
-            ctx,
-            create_partitions_request::API_KEY,
-            req_bytes,
-            version,
-            |code, message| encode_response(&request_refusal(&req, code, message), version)
-        );
+        if let Some(answer) = forward_if_not_controller(
+            broker, ctx, create_partitions_request::API_KEY, req_bytes, version, |code, message| encode_response(&request_refusal(&req, code, message), version)
+        ).await {
+            return answer;
+        }
         if !is_active_controller(broker) {
             return encode_response(&request_refusal(&req, codes::NOT_CONTROLLER, None), version);
         }

@@ -218,11 +218,15 @@ mod tests {
         super::*,
         crate::{
             codes,
-            handlers::alter_user_scram_credentials::{
-                answer,
-                test_support::{
-                    KAFKA_DUPLICATE_RESOURCE, expected_result, mixed_mechanisms, start_broker,
-                    test_context, valid_upsertion, valid_upsertion_for_mechanism,
+            handlers::{
+                RequestContext,
+                alter_user_scram_credentials::{
+                    answer,
+                    test_support::{
+                        KAFKA_DUPLICATE_RESOURCE, expected_response, expected_result,
+                        mixed_mechanisms, start_broker, test_context, valid_upsertion,
+                        valid_upsertion_for_mechanism,
+                    },
                 },
             },
         },
@@ -231,18 +235,38 @@ mod tests {
         krabka_security::scram::MIN_SCRAM_ITERATIONS,
     };
 
+    struct CredentialState {
+        mechanism: SaslMechanism,
+        present: bool,
+    }
+
+    const NO_CREDENTIALS: [CredentialState; 2] = [
+        CredentialState {
+            mechanism: SaslMechanism::ScramSha256,
+            present: false,
+        },
+        CredentialState {
+            mechanism: SaslMechanism::ScramSha512,
+            present: false,
+        },
+    ];
+
     /// Check the response and unchanged credential image for a refused request.
-    macro_rules! check_refusal {
-        (($response:ident, $expected:ident, $image:ident), $broker:ident, $request:ident, $context:ident,
-            $code:expr, $message:expr, [$($mechanism:expr => $state:ident),+ $(,)?]) => {
-            let $response = answer(&$broker, $request, &$context).await;
-            let $expected = crate::handlers::alter_user_scram_credentials::test_support::expected_response(vec![
-                expected_result("alice", $code, Some($message)),
-            ]);
-            assert!($response == $expected);
-            let $image = $broker.controller.current_image();
-            $(assert!($image.scram_credential("alice", $mechanism).$state());)+
-        };
+    async fn check_refusal(
+        broker: &Broker,
+        request: AlterUserScramCredentialsRequest,
+        context: &RequestContext<'_>,
+        code: i16,
+        message: &str,
+        credentials: &[CredentialState],
+    ) {
+        let response = answer(broker, request, context).await;
+        let expected = expected_response(vec![expected_result("alice", code, Some(message))]);
+        assert!(response == expected);
+        let image = broker.controller.current_image();
+        for state in credentials {
+            assert!(image.scram_credential("alice", state.mechanism).is_some() == state.present);
+        }
     }
 
     #[tokio::test]
@@ -296,7 +320,15 @@ mod tests {
             ..Default::default()
         };
 
-        check_refusal!((resp, expected, image), broker, req, ctx, KAFKA_DUPLICATE_RESOURCE, "A user credential cannot be altered twice in the same request", [SaslMechanism::ScramSha256 => is_none, SaslMechanism::ScramSha512 => is_none]);
+        check_refusal(
+            &broker,
+            req,
+            &ctx,
+            KAFKA_DUPLICATE_RESOURCE,
+            "A user credential cannot be altered twice in the same request",
+            &NO_CREDENTIALS,
+        )
+        .await;
         broker_handle.shutdown().await;
     }
 
@@ -334,7 +366,24 @@ mod tests {
         };
         let req = mixed_mechanisms("alice");
 
-        check_refusal!((resp, expected, image), broker, req, ctx, KAFKA_DUPLICATE_RESOURCE, "A user credential cannot be altered twice in the same request", [SaslMechanism::ScramSha512 => is_some, SaslMechanism::ScramSha256 => is_none]);
+        check_refusal(
+            &broker,
+            req,
+            &ctx,
+            KAFKA_DUPLICATE_RESOURCE,
+            "A user credential cannot be altered twice in the same request",
+            &[
+                CredentialState {
+                    mechanism: SaslMechanism::ScramSha512,
+                    present: true,
+                },
+                CredentialState {
+                    mechanism: SaslMechanism::ScramSha256,
+                    present: false,
+                },
+            ],
+        )
+        .await;
         broker_handle.shutdown().await;
     }
 
@@ -348,7 +397,15 @@ mod tests {
         };
         let req = mixed_mechanisms("alice");
 
-        check_refusal!((resp, expected, image), broker, req, ctx, codes::RESOURCE_NOT_FOUND, "Attempt to delete a user credential that does not exist", [SaslMechanism::ScramSha256 => is_none, SaslMechanism::ScramSha512 => is_none]);
+        check_refusal(
+            &broker,
+            req,
+            &ctx,
+            codes::RESOURCE_NOT_FOUND,
+            "Attempt to delete a user credential that does not exist",
+            &NO_CREDENTIALS,
+        )
+        .await;
         broker_handle.shutdown().await;
     }
 }

@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::handlers::test_support::StartedBroker as HandlerStartedBroker;
 use {
     super::*,
     crate::{
@@ -200,7 +202,10 @@ async fn send(
 /// Both levels are finalized through `UpdateFeatures`.
 #[tokio::test]
 async fn handle_unregisters_a_registered_controller_as_trunk_does() {
-    let (handle, _dir) = start_broker_with(|cfg| {
+    let HandlerStartedBroker {
+        broker: handle,
+        dir: _dir,
+    } = start_broker_with(|cfg| {
         // Trunk's 4.4-IV2 is past 4.3.1's latest production level, so the
         // node has to support unstable feature levels to finalize it.
         cfg.features.unstable_feature_versions = krabka_raft::UnstableFeatureVersions::Enabled;

@@ -93,55 +93,11 @@ fn names_only_the_metadata_partition<'a>(
         })
 }
 
-/// The shared wire shape of Begin/EndQuorumEpoch, before their distinct transitions.
-trait QuorumEpochRequest {
-    fn cluster_id(&self) -> Option<&str>;
-    fn topics(&self) -> impl ExactSizeIterator<Item = RequestedTopic<'_>>;
-    fn leader(&self) -> Option<RequestedLeader>;
-    fn endpoints(&self) -> impl Iterator<Item = ListenerAddress<'_>>;
+krabka_macros::quorum_epoch_requests! {
+    /// The shared wire shape of Begin/EndQuorumEpoch, before their distinct transitions.
+    trait QuorumEpochRequest;
+    BeginQuorumEpochRequest, EndQuorumEpochRequest
 }
-
-macro_rules! quorum_epoch_request {
-    ($request:ty) => {
-        impl QuorumEpochRequest for $request {
-            fn cluster_id(&self) -> Option<&str> { self.cluster_id.as_deref() }
-
-            fn topics(&self) -> impl ExactSizeIterator<Item = RequestedTopic<'_>> {
-                self.topics.iter().map(|topic| RequestedTopic {
-                    name: topic.topic_name.as_str(),
-                    partitions: topic
-                        .partitions
-                        .iter()
-                        .map(|partition| partition.partition_index)
-                        .collect(),
-                })
-            }
-
-            fn leader(&self) -> Option<RequestedLeader> {
-                self.topics
-                    .first()?
-                    .partitions
-                    .first()
-                    .map(|partition| RequestedLeader {
-                        id: partition.leader_id,
-                        epoch: partition.leader_epoch,
-                    })
-            }
-
-            fn endpoints(&self) -> impl Iterator<Item = ListenerAddress<'_>> {
-                self.leader_endpoints
-                    .iter()
-                    .map(|endpoint| ListenerAddress {
-                        name: endpoint.name.as_str(),
-                        host: endpoint.host.as_str(),
-                        port: endpoint.port,
-                    })
-            }
-        }
-    };
-}
-quorum_epoch_request!(BeginQuorumEpochRequest);
-quorum_epoch_request!(EndQuorumEpochRequest);
 
 impl Engine {
     /// The responder's leader id, epoch and leader endpoint.

@@ -35,25 +35,29 @@ async fn initialize_state(
     if req.group_id.is_empty() || req.topics.is_empty() {
         return InitializeShareGroupStateResponse::default();
     }
-    let results = super::state_results!(req, InitializeStateResult, |group_id, topic_id, pd| {
-        let result = coordinator
-            .initialize(
-                image,
-                group_id,
-                topic_id,
-                pd.partition,
-                pd.state_epoch,
-                Offset(pd.start_offset),
-            )
-            .await;
-        let (error_code, error_message) = super::operation_result(result, "initialize");
-        PartitionResult {
-            partition: pd.partition,
-            error_code,
-            error_message,
-            ..Default::default()
+    let results = krabka_macros::share_state_results!(
+        req,
+        InitializeStateResult,
+        |group_id, topic_id, pd| {
+            let result = coordinator
+                .initialize(
+                    image,
+                    group_id,
+                    topic_id,
+                    pd.partition,
+                    pd.state_epoch,
+                    Offset(pd.start_offset),
+                )
+                .await;
+            let verdict = super::operation_result(result, "initialize");
+            PartitionResult {
+                partition: pd.partition,
+                error_code: verdict.code,
+                error_message: verdict.message,
+                ..Default::default()
+            }
         }
-    });
+    );
 
     InitializeShareGroupStateResponse {
         results,
@@ -161,7 +165,11 @@ mod tests {
         }
     }
 
-    super::super::test_support::response_fixture!(InitializeShareGroupStateResponse, InitializeStateResult, PartitionResult; keyed);
+    use crate::share_coordinator::handlers::test_support::StateResponseSetup;
+
+    fn response(setup: StateResponseSetup<'_>) -> InitializeShareGroupStateResponse {
+        setup.response()
+    }
 
     #[bon::builder]
     fn unknown_topic_response(
@@ -224,7 +232,7 @@ mod tests {
                 name: "an equal epoch and start offset",
                 leadership: StateLeadership::Led,
                 request: request().epoch(5).offset(10).call(),
-                response: response(StateResponseSetup::default()),
+                response: response(StateResponseSetup::for_topic(TOPIC)),
                 summary: Some((5, 0, Offset(10), 0)),
                 appended: if trunk {
                     vec![]
@@ -242,7 +250,7 @@ mod tests {
                 name: "an equal epoch with a new start offset writes the next snapshot",
                 leadership: StateLeadership::Led,
                 request: request().epoch(5).offset(20).call(),
-                response: response(StateResponseSetup::default()),
+                response: response(StateResponseSetup::for_topic(TOPIC)),
                 summary: Some((5, 0, Offset(20), 0)),
                 appended: vec![
                     snapshot()
@@ -259,7 +267,7 @@ mod tests {
                 response: response(StateResponseSetup {
                     code: KafkaErrorCode(codes::FENCED_STATE_EPOCH),
                     message: Some(fenced),
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 summary: Some((5, 0, Offset(10), 0)),
                 appended: vec![],
@@ -270,7 +278,7 @@ mod tests {
                 request: request().partition(1).offset(-1).call(),
                 response: response(StateResponseSetup {
                     partition: PartitionIndex(1),
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 summary: Some((1, 0, Offset(-1), -1)),
                 appended: vec![snapshot().offset(-1).delivery_complete(-1).call()],
@@ -283,7 +291,7 @@ mod tests {
                     partition: PartitionIndex(-1),
                     code: KafkaErrorCode(codes::INVALID_REQUEST),
                     message: Some("The partition id cannot be a negative number."),
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 summary: None,
                 appended: vec![],
@@ -298,7 +306,7 @@ mod tests {
                     response: response(StateResponseSetup {
                         code: KafkaErrorCode(codes::INVALID_REQUEST),
                         message: Some("The state epoch cannot be a negative number."),
-                        ..Default::default()
+                        ..StateResponseSetup::for_topic(TOPIC)
                     }),
                     summary: Some((5, 0, Offset(10), 0)),
                     appended: vec![],
@@ -308,7 +316,7 @@ mod tests {
                     name: "a state epoch of -1",
                     leadership: StateLeadership::Led,
                     request: request().epoch(-1).call(),
-                    response: response(StateResponseSetup::default()),
+                    response: response(StateResponseSetup::for_topic(TOPIC)),
                     summary: Some((-1, 0, Offset(0), 0)),
                     appended: vec![snapshot().snapshot_epoch(1).state_epoch(-1).call()],
                 }
@@ -346,7 +354,7 @@ mod tests {
                     message: Some(
                         "Unable to initialize share group state: This is not the correct coordinator.",
                     ),
-                    ..Default::default()
+                    ..StateResponseSetup::for_topic(TOPIC)
                 }),
                 summary: None,
                 appended: vec![],

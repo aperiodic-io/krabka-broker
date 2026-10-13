@@ -47,19 +47,22 @@ const API_VERSIONS_KEY: i16 = 18;
 /// the reported back-off at this, so no response may carry more.
 const QUOTA_THROTTLE_MAX_MS: i32 = 1000;
 
-macro_rules! throttled_response {
-    ($stream:expr, $drive:path, $failure:tt) => {{
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut correlation = 11;
-        loop {
-            let response = $drive($stream, correlation).await;
-            correlation += 1;
-            if response.throttle_time_ms > 0 {
-                break response;
-            }
-            assert!(Instant::now() <= deadline, $failure);
+async fn throttled_response<R>(
+    stream: &mut TcpStream,
+    drive: impl AsyncFn(&mut TcpStream, i32) -> R,
+    throttle: impl Fn(&R) -> i32,
+    failure: &str,
+) -> R {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut correlation = 11;
+    loop {
+        let response = drive(stream, correlation).await;
+        correlation += 1;
+        if throttle(&response) > 0 {
+            return response;
         }
-    }};
+        assert!(Instant::now() <= deadline, "{failure}");
+    }
 }
 
 /// Test 2: a low `(user=alice) producer_byte_rate` throttles a produce.
@@ -428,11 +431,13 @@ async fn request_percentage_throttle_is_echoed_on_a_patched_api() {
 
     // Drive the same request until the request bucket runs dry. Each request
     // charges its own handler time, so the first one over budget is throttled.
-    let throttled = throttled_response!(
+    let throttled = throttled_response(
         &mut stream,
         drive_add_offsets_to_txn,
-        "no request-quota throttle on AddOffsetsToTxn after 15s"
-    );
+        |response| response.throttle_time_ms,
+        "no request-quota throttle on AddOffsetsToTxn after 15s",
+    )
+    .await;
 
     // The patch touched the leading int32 and nothing else: every other field
     // still decodes to what the unthrottled response carried.
@@ -531,11 +536,13 @@ async fn request_percentage_throttle_is_reported_on_api_versions() {
 
     set_request_time_quota(&handle, addr).await;
 
-    let throttled = throttled_response!(
+    let throttled = throttled_response(
         &mut stream,
         drive_api_versions,
-        "no request-quota throttle on ApiVersions after 15s"
-    );
+        |response| response.throttle_time_ms,
+        "no request-quota throttle on ApiVersions after 15s",
+    )
+    .await;
 
     // The handler set the field on the typed response, so nothing else moved:
     // the advertised table and the feature rows are the baseline's. The
