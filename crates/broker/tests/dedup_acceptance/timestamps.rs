@@ -208,3 +208,37 @@ async fn a_batch_refused_for_its_timestamps_indexes_nothing() {
     assert!(contents.records == [stored_key(0, "a"), stored_key(1, "b")]);
     p.broker.shutdown().await;
 }
+
+/// On a KFC-1 scheduled topic a batch's `max_timestamp` is its delivery time,
+/// and `delivery.schedule.monotonic` refuses a batch whose delivery time runs
+/// behind the partition's. Dropping the duplicate that set a batch's delivery
+/// time must not lower it, or dedup would refuse a batch the broker accepts
+/// without dedup.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_partial_drop_keeps_a_scheduled_batch_delivery_time() {
+    let p = support::start().await;
+    let t = topic()
+        .p(&p)
+        .name("scheduled")
+        .extra_configs(&[
+            ("delivery.mode", "scheduled"),
+            ("delivery.schedule.monotonic", "true"),
+        ])
+        .call()
+        .await;
+    t.await_log_config(|config| config.schedule_order == krabka_log::ScheduleOrder::Monotonic)
+        .await;
+    let later = 20_000;
+    let sooner = 10_000;
+
+    let first = t.send(&[Rec::key("x").aged(-later)]).await;
+    let second = t
+        .send(&[Rec::key("y").aged(-sooner), Rec::key("x").aged(-later)])
+        .await;
+
+    // Nothing is due yet, so a consumer reads nothing: the produce rows are
+    // the evidence. Without dedup the second batch would be accepted, and so
+    // it must be with dedup.
+    check!(first == appended_at(0));
+    assert!(second == appended_at(1));
+}

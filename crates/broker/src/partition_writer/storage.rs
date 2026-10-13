@@ -71,7 +71,7 @@ pub(crate) fn flag_storage_failure(
 /// serving after a poison. The alternative, `expect`, silently kills the writer
 /// task because its `JoinHandle` is discarded. That takes the whole partition
 /// offline. `into_inner` recovers the guard and keeps the partition live.
-pub(super) fn lock_log(log: &Mutex<Log>) -> std::sync::MutexGuard<'_, Log> {
+pub(crate) fn lock_log(log: &Mutex<Log>) -> std::sync::MutexGuard<'_, Log> {
     log.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

@@ -31,6 +31,7 @@ use {
         },
         client_metrics::ClientMetrics,
         config::BrokerConfig,
+        config_keys::resolve_dedup_topic_config,
         cordoned_log_dirs::spawn_watcher,
         dedup::DedupRuntime,
         delegation_token_cleanup::{
@@ -282,6 +283,9 @@ pub(super) async fn start_broker_runtime(
         &supervisor_shutdown,
     );
     let dedup = Arc::new(DedupRuntime::from_config(config, metrics.clone())?);
+    let metadata = Arc::clone(controller);
+    dedup.set_resolver(move |topic| resolve_dedup_topic_config(&metadata.current_image(), topic));
+    dedup.spawn_ticker(supervisor_shutdown.child_token());
     let supervisor_handle = spawn_replicator_supervisor(
         config,
         controller,

@@ -2,21 +2,17 @@
 
 use {
     super::{
-        config::DedupConfig,
-        identity::{RecordIdentity, indexes_batch, record_identity, visit_owned_batch},
+        config::{DedupConfig, DedupRuntime},
+        identity::{BatchSource, identities_of, indexes_batch},
         rebuild::rebuild_from_log,
-        rewrite::drop_records,
+        rewrite::{Rewritten, drop_records},
     },
-    crate::{metrics::DedupCounterDelta, partition::ProduceData},
-    bytes::Bytes,
+    crate::{metrics::DedupCounterDelta, partition::ProduceData, partition_writer::lock_log},
     krabka_compression::RecordDecompressionPolicy,
-    krabka_dedup::{DedupCounters, DedupRecord, DedupWindowFilter, Undo},
+    krabka_dedup::{Classification, DedupCounters, DedupRecord, DedupWindowFilter, Undo},
     krabka_log::{Log, Offset},
-    krabka_protocol::records::{
-        Attributes, RecordBatch, RecordBorrowed, TimestampType, validate_one_v2_batch,
-    },
     std::{
-        sync::{Arc, Mutex, PoisonError},
+        sync::{Arc, Mutex},
         time::{Duration, Instant},
     },
     tracing::warn,
@@ -51,29 +47,24 @@ pub(crate) enum PendingAppend {
     },
 }
 
-/// The records of a batch that the index reads after its append.
-#[derive(Debug)]
-pub(crate) enum ObservedBatch {
-    /// Nothing to read: a control or a transactional batch.
-    Empty,
-    /// One wire batch.
-    Bytes(Bytes),
-    /// A decoded batch.
-    Owned(RecordBatch),
+/// The identities of a batch, read before the batch moved into the log, that
+/// the index adds once the append succeeds.
+///
+/// It holds one digest and timestamp per record, not a copy of the batch: a
+/// follower reads every batch it replicates through one of these, so a copy
+/// would cost an allocation per record and per header on the replication
+/// path.
+#[derive(Debug, Default)]
+pub(crate) struct ObservedBatch {
+    records: Vec<DedupRecord>,
 }
 
-impl ObservedBatch {
-    /// The records a leader appends for `data`.
-    fn of_produce(data: &ProduceData) -> Self {
-        match data {
-            ProduceData::Verbatim(batch) if !batch.is_transactional => {
-                Self::Bytes(batch.bytes.clone())
-            }
-            ProduceData::Owned(batch) if indexes_batch(batch.attributes) => {
-                Self::Owned(batch.clone())
-            }
-            _ => Self::Empty,
-        }
+/// The records a leader appends for `data`, as an index reads them.
+pub(crate) fn produce_source(data: &ProduceData) -> BatchSource<'_> {
+    match data {
+        ProduceData::Verbatim(batch) if !batch.is_transactional => BatchSource::Wire(&batch.bytes),
+        ProduceData::Owned(batch) if indexes_batch(batch.attributes) => BatchSource::Owned(batch),
+        _ => BatchSource::Empty,
     }
 }
 
@@ -99,6 +90,8 @@ pub(crate) struct PartitionDedup {
     topic: Arc<str>,
     partition: i32,
     active: Option<ActiveIndex>,
+    /// Whether the broker's idle ticker holds this index.
+    tracked: bool,
 }
 
 #[derive(Debug)]
@@ -172,29 +165,26 @@ impl ActiveIndex {
         self.covered_through = None;
     }
 
+    /// Read the identities of `source` under this index's rule.
+    fn identities(&self, source: BatchSource<'_>) -> ObservedBatch {
+        ObservedBatch {
+            records: identities_of(
+                source,
+                self.config.settings.key_header.as_deref(),
+                self.policy(),
+            ),
+        }
+    }
+
     /// Add the identities of an appended batch.
     ///
-    /// `append_time_ms` replaces each record's timestamp when the log stamps
-    /// the batch with its append time as it appends it.
-    fn observe(&mut self, batch: &ObservedBatch, append_time_ms: Option<i64>, now_ms: i64) {
-        let policy = self.policy();
-        let key_header = self.config.settings.key_header.clone();
-        let key_header = key_header.as_deref();
-        let filter = &mut self.filter;
-        let populate = |identity: RecordIdentity| {
-            if let RecordIdentity::Indexed(record) = identity
-                && let Some(digest) = record.identity
-            {
-                filter.populate(digest, record.timestamp_ms, now_ms);
-            }
-        };
-        match batch {
-            ObservedBatch::Empty => {}
-            ObservedBatch::Owned(batch) => {
-                visit_owned_batch(batch, key_header, append_time_ms, populate);
-            }
-            ObservedBatch::Bytes(bytes) => {
-                visit_wire_batch(bytes, key_header, append_time_ms, policy, populate);
+    /// `stamp` replaces each record's timestamp when the log stamped the batch
+    /// with its append time.
+    fn observe(&mut self, batch: &ObservedBatch, stamp: Option<i64>, now_ms: i64) {
+        for record in &batch.records {
+            if let Some(digest) = record.identity {
+                self.filter
+                    .populate(digest, stamp.unwrap_or(record.timestamp_ms), now_ms);
             }
         }
     }
@@ -206,6 +196,8 @@ impl ActiveIndex {
         let delta = DedupCounterDelta {
             records_dropped: now.dropped_records - then.dropped_records,
             records_unindexed: now.unindexed_records - then.unindexed_records,
+            records_expired_on_arrival: now.expired_on_arrival_records
+                - then.expired_on_arrival_records,
             records_skew_clamped: now.skew_clamped_records - then.skew_clamped_records,
             capacity_evicted_entries: now.capacity_evicted_entries - then.capacity_evicted_entries,
             batches_rebuilt: now.rebuilt_batches - then.rebuilt_batches,
@@ -217,54 +209,13 @@ impl ActiveIndex {
     }
 }
 
-/// Call `visit` with the identity of every record of one wire batch.
-///
-/// A batch that does not validate is skipped. The log accepted these bytes,
-/// so this happens only to a batch the index cannot read, and an index that
-/// lacks some identities is narrower, never wrong.
-fn visit_wire_batch(
-    bytes: &[u8],
-    key_header: Option<&str>,
-    append_time_ms: Option<i64>,
-    policy: RecordDecompressionPolicy,
-    mut visit: impl FnMut(RecordIdentity),
-) {
-    let Ok(validated) = validate_one_v2_batch(bytes) else {
-        return;
-    };
-    let attributes = Attributes(validated.header.attributes.get());
-    if !indexes_batch(attributes) {
-        return;
-    }
-    let base_timestamp = validated.header.base_timestamp.get();
-    let max_timestamp = validated.header.max_timestamp.get();
-    let timestamp_of =
-        |record: &RecordBorrowed<'_>| match (append_time_ms, attributes.timestamp_type()) {
-            (Some(stamp), _) => stamp,
-            (None, TimestampType::LogAppendTime) => max_timestamp,
-            (None, TimestampType::CreateTime) => {
-                base_timestamp.saturating_add(record.timestamp_delta)
-            }
-        };
-    let _ = validated.validate_records_with(policy, |record| {
-        visit(record_identity(
-            record.key,
-            record
-                .headers
-                .iter()
-                .map(|header| (header.key, header.value)),
-            key_header,
-            timestamp_of(record),
-        ));
-    });
-}
-
 impl PartitionDedup {
     pub(crate) fn new(topic: Arc<str>, partition: i32) -> Self {
         Self {
             topic,
             partition,
             active: None,
+            tracked: false,
         }
     }
 
@@ -308,22 +259,46 @@ impl PartitionDedup {
         self.report_metrics();
     }
 
-    /// Adopt the config that a produce job carries when it differs from the
-    /// current one.
+    /// Apply the config the replica supervisor sent.
+    ///
+    /// Returns the broker runtime the first time the index is on after a
+    /// push, so the writer can hand the index to the idle ticker; see
+    /// [`DedupRuntime::track`].
+    pub(crate) fn apply_pushed(
+        &mut self,
+        config: Option<DedupConfig>,
+    ) -> Option<Arc<DedupRuntime>> {
+        self.configure(config);
+        let active = self.active.as_ref().filter(|_| !self.tracked)?;
+        self.tracked = true;
+        Some(Arc::clone(&active.config.runtime))
+    }
+
+    /// Settle a disagreement between a produce job's config and the index's.
     ///
     /// The produce handler reads the topic config from the newest metadata
-    /// image it has, and the replica supervisor pushes the same config a
-    /// little later. Adopting it here means that the first produce to a new
-    /// topic is deduplicated even before that push arrives.
+    /// image it has, and the replica supervisor pushes it to this partition a
+    /// little later. So a job can carry a newer config than the index has:
+    /// right after a topic is created or an operator changed it. A job can
+    /// also carry an older one: it was prepared from an image read before the
+    /// change. The two look the same from here, so neither copy is trusted:
+    /// the index takes the config the broker's newest image holds now, which
+    /// is never older than the job's. A job prepared before dedup was turned
+    /// off therefore cannot turn it back on, and a job prepared after a change
+    /// does not wait for the supervisor.
+    ///
+    /// Without a resolver (a writer-level test), the job's config is taken.
     pub(crate) fn adopt(&mut self, job: Option<&DedupJob>) {
         let Some(job) = job else { return };
         let same = self
             .active
             .as_ref()
             .is_some_and(|active| active.config.settings == job.config.settings);
-        if !same {
-            self.configure(Some(job.config.clone()));
+        if same {
+            return;
         }
+        let current = job.config.runtime.newest_config(&self.topic, &job.config);
+        self.configure(current);
     }
 
     /// Mark the index stale after the log lost records at its end.
@@ -341,10 +316,7 @@ impl PartitionDedup {
         let Some(active) = &mut self.active else {
             return;
         };
-        let log_end = log
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .log_end_offset();
+        let log_end = lock_log(log).log_end_offset();
         if active.is_current(log_end) {
             return;
         }
@@ -400,7 +372,7 @@ impl PartitionDedup {
         let Some(mut records) = records else {
             return ClassifiedAppend {
                 pending: PendingAppend::Observed {
-                    batch: ObservedBatch::of_produce(&data),
+                    batch: active.identities(produce_source(&data)),
                     log_end,
                 },
                 data,
@@ -411,51 +383,57 @@ impl PartitionDedup {
                 record.timestamp_ms = stamp;
             }
         }
-        let classification = active.filter.classify(&records, now_ms);
-        let classified = |data| ClassifiedAppend {
-            data,
-            pending: PendingAppend::Classified {
-                undo: classification.undo.clone(),
-                log_end,
-            },
-        };
-        if classification.kept == records.len() {
-            return classified(data);
-        }
-        match drop_records(&data, &classification.dropped, active.policy()) {
-            Ok(Some(batch)) => classified(ProduceData::Owned(batch)),
-            Ok(None) => classified(data),
-            Err(error) => {
-                // The produce handler decoded these bytes already, so this
-                // does not occur. Append the batch whole rather than lose it.
-                active.filter.revert(&classification.undo);
-                warn!(
-                    topic = &*self.topic,
-                    partition = self.partition,
-                    %error,
-                    "dedup: could not rebuild a batch without its duplicates; appending it whole"
-                );
-                ClassifiedAppend {
-                    pending: PendingAppend::Observed {
-                        batch: ObservedBatch::of_produce(&data),
-                        log_end,
-                    },
-                    data,
+        let Classification {
+            dropped,
+            kept,
+            undo,
+        } = active.filter.classify(&records, now_ms);
+        let data = if kept == records.len() {
+            data
+        } else {
+            match drop_records(data, &dropped, active.policy()) {
+                Rewritten::Batch(data) => data,
+                Rewritten::Undecodable(data, error) => {
+                    // The produce handler decoded these bytes already, so this
+                    // does not occur. Append the batch whole rather than lose
+                    // it.
+                    active.filter.revert(&undo);
+                    warn!(
+                        topic = &*self.topic,
+                        partition = self.partition,
+                        %error,
+                        "dedup: could not rebuild a batch without its duplicates; appending it \
+                         whole"
+                    );
+                    return ClassifiedAppend {
+                        pending: PendingAppend::Observed {
+                            batch: active.identities(produce_source(&data)),
+                            log_end,
+                        },
+                        data,
+                    };
                 }
             }
+        };
+        ClassifiedAppend {
+            data,
+            pending: PendingAppend::Classified { undo, log_end },
         }
     }
 
     /// Bring the index in line with the result of a leader's append.
     ///
-    /// `log_end` is the log end offset after the append, and `append_time_ms`
-    /// is the value [`Self::classify`] received.
+    /// `log_end` is the log end offset after the append. `stamp` is the
+    /// append time the log wrote into the batch on a `LogAppendTime` topic.
+    /// [`Self::classify`] had to decide before the append, with its own
+    /// reading of the clock; the index moves the identities it admitted to
+    /// the log's stamp, which is what a follower and a rebuild read.
     pub(crate) fn finish(
         &mut self,
         pending: PendingAppend,
         appended: bool,
         log_end: Offset,
-        append_time_ms: Option<i64>,
+        stamp: Option<i64>,
         now_ms: i64,
     ) {
         let Some(active) = &mut self.active else {
@@ -474,6 +452,11 @@ impl PartitionDedup {
                 if !appended {
                     active.filter.revert(&undo);
                 } else if active.is_current(before) {
+                    if let Some(stamp) = stamp {
+                        for entry in undo.entries() {
+                            active.filter.populate(entry.identity, stamp, now_ms);
+                        }
+                    }
                     active.covered_through = Some(log_end);
                 }
             }
@@ -482,11 +465,26 @@ impl PartitionDedup {
                 log_end: before,
             } => {
                 if appended && active.is_current(before) {
-                    active.observe(&batch, append_time_ms, now_ms);
+                    active.observe(&batch, stamp, now_ms);
                     active.covered_through = Some(log_end);
                 }
             }
         }
+    }
+
+    /// Prepare to follow a batch that a follower is about to append from its
+    /// leader: bring a stale index up to date, then read the batch's
+    /// identities while the batch is still at hand. `None` when the
+    /// partition does not deduplicate.
+    pub(crate) fn identities_for_follow(
+        &mut self,
+        log: &Mutex<Log>,
+        source: BatchSource<'_>,
+        now_ms: i64,
+    ) -> Option<ObservedBatch> {
+        self.active.as_ref()?;
+        self.make_current(log, now_ms);
+        self.active.as_ref().map(|active| active.identities(source))
     }
 
     /// Follow a batch that a follower appended from its leader.
@@ -510,6 +508,18 @@ impl PartitionDedup {
         } else {
             active.covered_through = None;
         }
+    }
+
+    /// Let time pass for an index that may be idle: expire what the broker
+    /// clock has moved past, a bounded number of entries per call, so an
+    /// idle partition gives its entries back to the broker-wide budget. The
+    /// broker's dedup ticker calls this about once a second.
+    pub(crate) fn tick(&mut self, now_ms: i64) {
+        let Some(active) = &mut self.active else {
+            return;
+        };
+        active.filter.tick(now_ms);
+        self.report_metrics();
     }
 
     /// Report the counters that changed since the last report, and the

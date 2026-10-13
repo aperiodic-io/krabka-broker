@@ -11,7 +11,7 @@ use {
         storage::{StorageStatus, flag_storage_failure, lock_log, run_log_mutation},
     },
     crate::{
-        dedup::{ObservedBatch, PartitionDedup},
+        dedup::{BatchSource, PartitionDedup},
         error::BrokerError,
         log_dir_status::LogDirRegistry,
         producer_state::ProducerState,
@@ -20,7 +20,8 @@ use {
         wal::SharedWal,
     },
     arc_swap::ArcSwap,
-    krabka_log::{Log, Offset},
+    krabka_log::{Log, Offset, VerbatimBatch},
+    krabka_protocol::records::RecordBatch,
     std::{
         path::PathBuf,
         sync::{Arc, Mutex},
@@ -37,34 +38,46 @@ pub(super) struct ReplicationState<'a> {
     pub(super) dedup: &'a Arc<Mutex<PartitionDedup>>,
 }
 
+/// A batch a follower appends, as the dedup index reads it.
+trait ReplicatedBatch {
+    fn source(&self) -> BatchSource<'_>;
+}
+
+impl ReplicatedBatch for RecordBatch {
+    fn source(&self) -> BatchSource<'_> { BatchSource::Owned(self) }
+}
+
+impl ReplicatedBatch for VerbatimBatch {
+    fn source(&self) -> BatchSource<'_> { BatchSource::Wire(&self.bytes) }
+}
+
 /// Follow one replicated append with the partition's dedup index.
 ///
 /// A follower indexes what it replicates with the rule its leader classified
 /// with, so that a promoted follower deduplicates its first produce without a
-/// rebuild. `append` runs under the log lock; the index reads the batch after
-/// that lock is released. A stale index catches up from the log first, which
-/// costs one window of reading after a restart or a config change.
-fn follow_replicated<T>(
+/// rebuild. The index reads the batch's identities before `append` takes the
+/// batch, and adds them once it has succeeded. A stale index catches up from
+/// the log first, which costs one window of reading after a restart or a
+/// config change.
+fn follow_replicated<B: ReplicatedBatch, T>(
     log: &Mutex<Log>,
     dedup: &Mutex<PartitionDedup>,
-    observed: impl FnOnce() -> ObservedBatch,
-    append: impl FnOnce(&mut Log) -> Result<T, BrokerError>,
+    mut batch: B,
+    append: impl FnOnce(&mut Log, &mut B) -> Result<T, BrokerError>,
 ) -> Result<T, BrokerError> {
     let mut index = lock_dedup(dedup);
-    if !index.is_enabled() {
-        return append(&mut lock_log(log));
-    }
     let now = now_ms();
-    index.make_current(log, now);
-    let observed = observed();
+    let observed = index.identities_for_follow(log, batch.source(), now);
     let (value, before, after) = {
         let mut log = lock_log(log);
         let before = log.log_end_offset();
-        let value = append(&mut log)?;
+        let value = append(&mut log, &mut batch)?;
         (value, before, log.log_end_offset())
     };
-    index.follow(&observed, before, after, now);
-    index.report_metrics();
+    if let Some(observed) = observed {
+        index.follow(&observed, before, after, now);
+        index.report_metrics();
+    }
     Ok(value)
 }
 
@@ -81,7 +94,7 @@ pub(super) async fn handle_replicate(
     log: &Arc<Mutex<Log>>,
     storage_status: StorageStatus<'_>,
     state: ReplicationState<'_>,
-    mut batch: krabka_protocol::records::RecordBatch,
+    batch: RecordBatch,
     ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
     append_notify: &Notify,
 ) {
@@ -123,33 +136,24 @@ pub(super) async fn handle_replicate(
     // catching up on replicated markers across many partitions at once, that
     // can starve this broker's own heartbeat-sending task past the
     // controller's liveness timeout.
-    let result = run_log_mutation(
-        move || {
-            // The append borrows the batch mutably, so the index's copy is
-            // taken first, and only when the partition deduplicates.
-            let observed = lock_dedup(&dedup)
-                .is_enabled()
-                .then(|| ObservedBatch::Owned(batch.clone()));
-            follow_replicated(
-                &log_for_blocking,
-                &dedup,
-                || observed.unwrap_or(ObservedBatch::Empty),
-                |guard| {
+    let result =
+        run_log_mutation(
+            move || {
+                follow_replicated(&log_for_blocking, &dedup, batch, |guard, batch| {
                     if let Some(high_watermark) = high_watermark {
                         guard.release_replicated_transactions(high_watermark);
                     }
                     guard
-                        .append_at(&mut batch, Offset(offset))
+                        .append_at(batch, Offset(offset))
                         .map_err(BrokerError::from)?;
                     Ok(control_producer
                         .and_then(|producer_id| guard.producer_state_entry(producer_id)))
-                },
-            )
-        },
-        "replicate task panicked",
-        storage_status,
-    )
-    .await;
+                })
+            },
+            "replicate task panicked",
+            storage_status,
+        )
+        .await;
     match result {
         Ok(entry) => {
             // A follower mirrors a replicated marker's producer-state effect,
@@ -175,7 +179,7 @@ pub(super) async fn handle_replicate(
 pub(super) async fn handle_replicate_verbatim(
     (log, log_dir, log_dir_status): (&Arc<Mutex<Log>>, &Arc<ArcSwap<PathBuf>>, &LogDirRegistry),
     dedup: &Arc<Mutex<PartitionDedup>>,
-    batch: krabka_log::VerbatimBatch,
+    batch: VerbatimBatch,
     base_offset: Offset,
     ack: tokio::sync::oneshot::Sender<Result<(), BrokerError>>,
     append_notify: &Notify,
@@ -184,16 +188,11 @@ pub(super) async fn handle_replicate_verbatim(
     let dedup = Arc::clone(dedup);
     let result = run_log_mutation(
         move || {
-            follow_replicated(
-                &log_for_blocking,
-                &dedup,
-                || ObservedBatch::Bytes(batch.bytes.clone()),
-                |log| {
-                    log.append_verbatim_at(&batch, base_offset)
-                        .map(|_| ())
-                        .map_err(BrokerError::from)
-                },
-            )
+            follow_replicated(&log_for_blocking, &dedup, batch, |log, batch| {
+                log.append_verbatim_at(batch, base_offset)
+                    .map(|_| ())
+                    .map_err(BrokerError::from)
+            })
         },
         "replicate verbatim task panicked",
         StorageStatus {

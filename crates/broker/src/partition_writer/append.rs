@@ -68,7 +68,9 @@ pub(crate) struct DedupGroup {
 /// would decide every job before any of them appended.
 ///
 /// A stale index catches up from the log before the group takes the log lock,
-/// so the rebuild's reads do not hold up fetches.
+/// so the rebuild's reads do not hold up fetches. The clock is read after
+/// that: a rebuild can take seconds, and records classified against a clock
+/// from before it would look as if they came from the future.
 fn append_deduplicated_batch(
     log: &Mutex<Log>,
     high_watermark: Option<Offset>,
@@ -77,9 +79,9 @@ fn append_deduplicated_batch(
 ) -> AppendOutcome {
     let DedupGroup { index, mut jobs } = dedup;
     let mut index = lock_dedup(&index);
-    let now = now_ms();
     index.adopt(jobs.iter().flatten().next());
-    index.make_current(log, now);
+    index.make_current(log, now_ms());
+    let now = now_ms();
     let LockedLog {
         mut guard,
         target,
@@ -100,13 +102,11 @@ fn append_deduplicated_batch(
             index.classify(data, job, before, append_time_ms, now);
         let control_producer = data.control_producer_id();
         let r = append_data(&mut guard, data, target, None);
-        index.finish(
-            pending,
-            r.is_ok(),
-            guard.log_end_offset(),
-            append_time_ms,
-            now,
-        );
+        let stamp = r
+            .as_ref()
+            .ok()
+            .and_then(|appended| appended.log_append_time_ms);
+        index.finish(pending, r.is_ok(), guard.log_end_offset(), stamp, now);
         capture_control_entry(&guard, r.is_ok(), control_producer, &mut control_entries);
         results.push(r);
     }

@@ -2,10 +2,11 @@
 
 use {
     super::identity::{RecordIdentity, visit_owned_batch},
+    crate::partition_writer::lock_log as lock,
     krabka_dedup::DedupWindowFilter,
     krabka_log::{Log, LogError, Offset},
     krabka_units::mebibytes,
-    std::sync::{Mutex, MutexGuard, PoisonError},
+    std::sync::Mutex,
 };
 
 /// How a rebuild ended.
@@ -71,7 +72,7 @@ pub(super) fn rebuild_from_log(
             if last < next.0 {
                 continue;
             }
-            visit_owned_batch(batch, key_header, None, |identity| {
+            visit_owned_batch(batch, key_header, |identity| {
                 if let RecordIdentity::Indexed(record) = identity
                     && let Some(digest) = record.identity
                 {
@@ -89,8 +90,4 @@ pub(super) fn rebuild_from_log(
         covered_through: end,
         error: None,
     }
-}
-
-fn lock(log: &Mutex<Log>) -> MutexGuard<'_, Log> {
-    log.lock().unwrap_or_else(PoisonError::into_inner)
 }

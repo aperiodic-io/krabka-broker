@@ -22,7 +22,7 @@ The feature is advisory, as a cache is. It is not exactly-once delivery. Its con
 
 ## Public Interfaces
 
-The feature adds two topic configs, two broker settings and ten metrics. It adds no API key, no error code and no field to a request or a response.
+The feature adds two topic configs, two broker settings and eleven metrics. It adds no API key, no error code and no field to a request or a response.
 
 ### Topic Configs
 
@@ -62,6 +62,7 @@ A consumer of a deduplicated topic sees gaps in the offsets, as a consumer of a 
 | :--- | :--- | :--- | :--- |
 | `krabka_broker_dedup_records_dropped_total` | counter | topic, partition | Records dropped as duplicates. |
 | `krabka_broker_dedup_records_unindexed_total` | counter | topic, partition | Records appended without being indexed, because an entry limit was full. Their duplicates are not detected. |
+| `krabka_broker_dedup_records_expired_on_arrival_total` | counter | topic, partition | Records already more than a window behind the broker clock on arrival. They are appended without being indexed. |
 | `krabka_broker_dedup_records_skew_clamped_total` | counter | topic, partition | Records whose timestamp was ahead of the broker clock and was clamped. |
 | `krabka_broker_dedup_capacity_evicted_entries_total` | counter | topic, partition | Identities still inside the window that were removed to make room. Above zero, the effective window is narrower than the configured one. |
 | `krabka_broker_dedup_batches_rebuilt_total` | counter | topic, partition | Batches re-encoded because some, but not all, of their records were dropped. This is the cost driver of the feature. |
@@ -75,9 +76,11 @@ A consumer of a deduplicated topic sees gaps in the offsets, as a consumer of a 
 
 ### The Rule
 
-A record is dropped when an earlier record with the same identity was admitted and the two timestamps are at most `dedup.window.ms` apart. Within one batch the rule applies in record order, so a batch that holds the same key twice keeps the first record. The earliest record of an identity wins. A later copy never replaces it, and so a consumer reads the value that was written first.
+A record is dropped when an earlier record with the same identity was admitted, the two timestamps are at most `dedup.window.ms` apart, and the earlier record is still inside the window by the broker clock: its timestamp is at most `dedup.window.ms` behind now. Within one batch the rule applies in record order, so a batch that holds the same key twice keeps the first record. The earliest record of an identity wins. A later copy never replaces it, and so a consumer reads the value that was written first.
 
 The timestamp is the record's `CreateTime`, clamped to the broker clock. On a `LogAppendTime` topic it is the time of the append.
+
+The window is judged against the broker clock, as Kafka's `retention.ms` judges a segment's newest timestamp against it. So a record whose `CreateTime` is already more than a window old when it arrives, such as a backfill of last week's data, is appended and never indexed, and a replay of it is not deduplicated. `dedup_records_expired_on_arrival` counts such records.
 
 ### The Index
 
@@ -129,7 +132,11 @@ From 90% of `dedup_max_entries_per_partition`, the cursor also removes entries i
 
 ### Timestamps
 
-A producer's `CreateTime` has no ordering guarantee. The index measures expiry against the newest timestamp it has seen. One record dated an hour ahead, which `message.timestamp.after.max.ms` admits by default, would move that point an hour forward. The next sweep would then empty the index, and every entry inserted after that would be expired as soon as it was written. Deduplication would stay off for the partition until a restart. So every timestamp is clamped to the broker clock before it reaches the index. A clamp does not change a timestamp that is at or behind the broker clock, which every timestamp in a rebuild is, so the index stays a function of the log. Clamped records are counted in `dedup_records_skew_clamped`.
+An entry expires when the broker clock passes its timestamp by more than the window. Every lookup treats an expired entry as absent, so whether a sweep has reached it yet never changes an answer. A rebuild reads the log from the offset for `now - dedup.window.ms`, the same edge, so a running index and a rebuilt one agree on the same log.
+
+A busy partition sweeps expired entries as it inserts new ones. An idle one inserts nothing, so the broker also runs a ticker that visits every index once a second and sweeps a bounded number of its expired entries. An idle partition therefore gives its entries, and its share of the broker-wide budget, back within minutes of its window passing. The ticker skips an index its writer is using.
+
+A producer's `CreateTime` has no ordering guarantee, and one record dated an hour ahead, which `message.timestamp.after.max.ms` admits by default, would otherwise stay in the index an hour longer than the window. So every timestamp is clamped to the broker clock before it reaches the index. Clamped records are counted in `dedup_records_skew_clamped`.
 
 ### Best-Effort Edges
 
@@ -154,7 +161,7 @@ These edges are part of the contract. Each one is bounded by about one window.
 
 ## Test Plan
 
-- **Index unit tests** in `krabka-dedup`. They cover the rule, the window, every capacity path, the budget accounting, the clamp, give-back and its interaction with later writes, and a property test that holds the budget equal to the sum of the indexes. A leader-path and follower-path test given the same identities checks for the same contents in the same internal order. Bounds tests prove, without a clock, that no call moves more than one table, that the heap stays within a constant factor of the limit, that it shrinks after a burst, and that the work of every call is bounded at every size.
+- **Index unit tests** in `krabka-dedup`. They cover the rule, the window by the broker clock, idle expiry through ticks, every capacity path, the budget accounting, the clamp, give-back and its interaction with later writes, and a property test that holds the budget equal to the sum of the indexes. A leader-path and follower-path test given the same identities checks for the same contents in the same internal order. Bounds tests prove, without a clock, that no call moves more than one table, that the heap stays within a constant factor of the limit, that it shrinks after a burst, and that the work of every call is bounded at every size.
 - **Writer-level tests** in the broker's `dedup` module, against a real log. They cover offset gaps, empty batches, a failed append, a rebuild from the window, truncation, a change of identity rule, a wider and a narrower window, and a follower that holds its leader's index.
 - **Acceptance tests** that produce through the Kafka protocol. They cover duplicates across requests and within one request, exact base offsets, every codec, an idempotent producer, the header rule and its `INVALID_RECORD` refusal, transactional bypass, the clock-skew clamp, `LogAppendTime`, every `acks` value, and the config surface.
 - **Recovery tests.** A restart, a torn log tail, a config change while a broker is down, a leader failover, a follower truncation and a rolling restart, each checked against what the recovered log holds.
@@ -190,9 +197,9 @@ The fork bumps a generation counter in the topic config and clears the index whe
 
 Exact keys would remove the digest's collision chance. They would also make an entry cost the size of the key, and a header-based identity can be large. A 128-bit digest bounds the cost of an entry at a collision chance far below every other edge of the feature.
 
-### Use the Broker Clock as the Watermark
+### Measure the Window Against the Newest Record Timestamp
 
-Measuring expiry against the broker clock rather than the newest record timestamp avoids skew. But a rebuild would then depend on when it runs rather than only on the log, so two replicas could rebuild different indexes from the same log. The clamp keeps the timestamp-based watermark and removes only its failure.
+The Redpanda fork expired entries against the newest timestamp the index had seen, so record time alone decided expiry, and a backfill with old `CreateTime`s deduplicated among itself. But no time passes for a partition that receives nothing: its entries never expire, and their share of the broker-wide budget is held for good. Sixteen idle partitions at a million entries each fill the default budget and leave every active partition unindexed. A rebuild could not match it either, because it has to start somewhere in the log, and the newest record timestamp is not where the running index's edge was. The broker clock gives every replica, every rebuild and every idle partition the same edge, at the cost of the backfill case. That is the trade-off Kafka's `retention.ms` makes too.
 
 ### Use an LRU List for the Entry Limit
 

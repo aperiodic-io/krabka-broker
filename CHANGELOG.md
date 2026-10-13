@@ -31,9 +31,12 @@ the release tag; [Releasing](docs/releasing.md#cratesio) gives the procedure.
   names, was written within that many milliseconds. The first record wins. A
   dropped record leaves a gap in the offsets as compaction does, so the
   produce response stays exact and idempotent producers keep working.
-  Transactional produce bypasses it. The `[runtime]` settings
+  Transactional produce bypasses it. The window is judged against the broker
+  clock, as `retention.ms` is, so a record whose `CreateTime` is already more
+  than a window old is not deduplicated, and an idle partition releases its
+  index once its window passes. The `[runtime]` settings
   `dedup_max_entries_per_partition` and `dedup_max_entries` bound the
-  in-memory index, and ten `krabka_broker_dedup_*` metrics report drops,
+  in-memory index, and eleven `krabka_broker_dedup_*` metrics report drops,
   saturation, clock skew, index memory and rebuild cost. Nothing new is written to disk.
   Set the two topic configs only after every broker runs this release: an
   older broker refuses `IncrementalAlterConfigs` on a topic that carries

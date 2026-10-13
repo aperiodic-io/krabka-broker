@@ -53,7 +53,7 @@ mod tests;
 // the re-export is test-gated: in a normal build it would be dead.
 #[cfg(test)]
 pub(crate) use self::append::run_produce_append_batch;
-pub(crate) use self::storage::{flag_storage_failure, storage_failure_error};
+pub(crate) use self::storage::{flag_storage_failure, lock_log, storage_failure_error};
 use self::{
     compaction::handle_compact,
     mutations::{
@@ -62,7 +62,7 @@ use self::{
     },
     produce::{DisklessParts, ProduceGroup, ProduceSignals, ProduceStorage, handle_produce},
     retention::handle_retention,
-    storage::{StorageStatus, lock_log},
+    storage::StorageStatus,
     swap::handle_swap,
 };
 
@@ -284,7 +284,9 @@ pub async fn run_with_sequencer(
                 let _ = ack.send(());
             }
             WriterMessage::SetDedupConfig { config, ack } => {
-                lock_dedup(&dedup).configure(config);
+                if let Some(runtime) = lock_dedup(&dedup).apply_pushed(config) {
+                    runtime.track(&dedup);
+                }
                 let _ = ack.send(());
             }
             WriterMessage::Retain { ack } => {

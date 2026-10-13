@@ -31,6 +31,6 @@ mod rewrite;
 
 pub use self::config::{DedupConfig, DedupRuntime, DedupSettings};
 pub(crate) use self::{
-    identity::{CollectedIdentities, IdentityCollector},
-    partition::{ClassifiedAppend, DedupJob, ObservedBatch, PartitionDedup},
+    identity::{BatchSource, CollectedIdentities, IdentityCollector},
+    partition::{ClassifiedAppend, DedupJob, PartitionDedup},
 };

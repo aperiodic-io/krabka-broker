@@ -170,13 +170,13 @@ async fn the_rebuilt_index_holds_exactly_the_records_that_log_recovery_kept() {
 }
 
 #[tokio::test]
-async fn a_restart_forgets_records_that_left_the_window_and_keeps_the_rest() {
-    // `old` is 35 s old and `fresh` 10 s, against a 30 s window. While the
-    // broker runs, its index keeps `old`: the newest timestamp it has seen is
-    // `fresh`'s, and `old` is within the window of that. A rebuild starts at
+async fn a_restart_agrees_with_the_running_index_on_what_left_the_window() {
+    // `old` is 35 s old and `fresh` 10 s, against a 30 s window. The window
+    // is judged against the broker clock, so `old` is outside it the moment
+    // it arrives and is never indexed, while `fresh` is. A rebuild starts at
     // the first record inside the window of the broker clock, which is
-    // `fresh`, so after a restart `old` is gone from the index. A copy of
-    // `old` that is a second younger then is the first record of its
+    // `fresh`. So a running broker and a restarted one hold the same index:
+    // a copy of `old` that is a second younger is the first record of its
     // identity, while a copy of `fresh` is still a duplicate.
     struct Case {
         restart: bool,
@@ -184,16 +184,10 @@ async fn a_restart_forgets_records_that_left_the_window_and_keeps_the_rest() {
     }
 
     const WINDOW: i64 = 30_000;
-    let cases = [
-        Case {
-            restart: false,
-            expected: at(&[(0, "old"), (1, "fresh")]),
-        },
-        Case {
-            restart: true,
-            expected: at(&[(0, "old"), (1, "fresh"), (2, "old")]),
-        },
-    ];
+    let cases = [false, true].map(|restart| Case {
+        restart,
+        expected: at(&[(0, "old"), (1, "fresh"), (2, "old")]),
+    });
 
     for case in cases {
         let topic = format!("window-restart-{}", case.restart);

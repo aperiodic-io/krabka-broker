@@ -1,15 +1,16 @@
 use {
     super::*,
     crate::{
-        dedup::{DedupRuntime, DedupSettings, IdentityCollector},
+        config_keys::DedupTopicConfig,
+        dedup::{BatchSource, DedupRuntime, DedupSettings, IdentityCollector},
         metrics::BrokerMetrics,
         time_util::now_ms,
     },
     assert2::assert,
-    bytes::BytesMut,
+    bytes::{Bytes, BytesMut},
     krabka_dedup::IdentityDigest,
     krabka_log::LogConfig,
-    krabka_protocol::records::{Record, RecordHeader},
+    krabka_protocol::records::{Record, RecordBatch, RecordHeader},
     krabka_units::mebibytes,
     std::{
         sync::atomic::{AtomicBool, Ordering},
@@ -201,9 +202,21 @@ impl Replica {
         base
     }
 
-    // The follower path for one batch its leader stored, which the index
-    // reads as `observed`.
-    fn replicate(&mut self, mut batch: RecordBatch, observed: &ObservedBatch) {
+    // The follower path for one batch its leader stored. With `wire` the
+    // index reads it as wire bytes, the way the verbatim replication path
+    // delivers it.
+    fn replicate(&mut self, mut batch: RecordBatch, wire: bool) {
+        let bytes = wire.then(|| {
+            let mut bytes = BytesMut::new();
+            batch.encode(&mut bytes).unwrap();
+            bytes.freeze()
+        });
+        let source = bytes
+            .as_ref()
+            .map_or(BatchSource::Owned(&batch), BatchSource::Wire);
+        let observed = self
+            .dedup
+            .identities_for_follow(&self.log, source, now_ms());
         let before = self.log_end();
         let base = Offset(batch.base_offset);
         self.log
@@ -212,7 +225,9 @@ impl Replica {
             .append_at(&mut batch, base)
             .unwrap();
         let after = self.log_end();
-        self.dedup.follow(observed, before, after, now_ms());
+        if let Some(observed) = observed {
+            self.dedup.follow(&observed, before, after, now_ms());
+        }
     }
 
     // Every stored batch, read from offset 0 the way a follower fetches.
@@ -429,16 +444,8 @@ fn a_follower_holds_the_index_its_leader_holds() {
         leader.produce_keys(&config, keys);
     }
     for (index, batch) in leader.stored_batches().into_iter().enumerate() {
-        // Half the batches arrive as wire bytes, the way the verbatim
-        // replication path delivers them.
-        let observed = if index % 2 == 0 {
-            ObservedBatch::Owned(batch.clone())
-        } else {
-            let mut bytes = BytesMut::new();
-            batch.encode(&mut bytes).unwrap();
-            ObservedBatch::Bytes(bytes.freeze())
-        };
-        follower.replicate(batch, &observed);
+        // Half the batches arrive as wire bytes.
+        follower.replicate(batch, index % 2 == 1);
     }
 
     assert!(follower.entries() == leader.entries());
@@ -452,7 +459,7 @@ fn a_follower_that_missed_an_append_goes_stale() {
 
     follower
         .dedup
-        .follow(&ObservedBatch::Empty, Offset(5), Offset(6), now_ms());
+        .follow(&ObservedBatch::default(), Offset(5), Offset(6), now_ms());
 
     assert!(follower.active().covered_through.is_none());
 }
@@ -610,7 +617,7 @@ fn the_index_never_exceeds_its_partition_limit_on_any_path() {
         follower.dedup.make_current(&follower.log, now_ms());
         let mut follower_sizes = Vec::new();
         for stored in leader.stored_batches() {
-            follower.replicate(stored.clone(), &ObservedBatch::Owned(stored));
+            follower.replicate(stored, false);
             follower_sizes.push(follower.index_len());
         }
 
@@ -750,4 +757,81 @@ fn a_rebuild_reads_the_window_and_not_the_log_before_it() {
     // The sweep visits at most eight entries for each identity it indexes.
     assert!(tail_visits <= 8 * RECENT);
     assert!(tail_took * 4 < whole_took);
+}
+
+#[test]
+fn a_job_whose_config_disagrees_takes_the_newest_image_config() {
+    // The resolver stands in for the broker's newest metadata image: dedup
+    // is off there, so a job prepared before it was turned off does not turn
+    // it back on.
+    let runtime = runtime();
+    runtime.set_resolver(|_| None);
+    let config = config(&runtime, None);
+    let mut replica = Replica::new(None);
+    replica.dedup.apply_pushed(Some(config.clone()));
+    let first = batch().keys(&["a"]).call();
+    let stale = job(&config, &first);
+
+    replica.dedup.apply_pushed(None);
+    replica.produce(first.clone(), Some(stale));
+    let again = job(&config, &first);
+    let second = replica.produce(first, Some(again));
+
+    assert!(!replica.dedup.is_enabled());
+    assert!(second == Offset(1));
+}
+
+#[test]
+fn a_job_with_a_newer_config_than_the_last_push_applies_it_at_once() {
+    let runtime = runtime();
+    let newest = config(&runtime, Some("h"));
+    let image = newest.settings.clone();
+    runtime.set_resolver(move |_| {
+        Some(DedupTopicConfig {
+            window_ms: image.window_ms,
+            key_header: image.key_header.as_deref().map(str::to_owned),
+        })
+    });
+    let mut replica = Replica::new(None);
+    replica.dedup.apply_pushed(Some(config(&runtime, None)));
+
+    // Two keys with one header value: duplicates only under the newer rule.
+    let mut first = batch().keys(&["a"]).call();
+    first.records[0].headers[0].value = Some(Bytes::from_static(b"H"));
+    let mut second = batch().keys(&["b"]).call();
+    second.records[0].headers[0].value = Some(Bytes::from_static(b"H"));
+    replica.produce(first.clone(), Some(job(&newest, &first)));
+    replica.produce(second.clone(), Some(job(&newest, &second)));
+
+    assert!(replica.contents().records.len() == 1);
+}
+
+#[test]
+fn a_log_append_time_stamp_replaces_the_time_the_leader_classified_with() {
+    let config = config(&runtime(), None);
+    let mut replica = Replica::new(Some(config.clone()));
+    replica.dedup.make_current(&replica.log, now_ms());
+    let classified_at = now_ms() - 5_000;
+    let stamp = now_ms();
+    let produced = batch().keys(&["a"]).call();
+    let identity = job(&config, &produced).records[0].identity.unwrap();
+    let log_end = replica.log_end();
+
+    let ClassifiedAppend { data, pending } = replica.dedup.classify(
+        ProduceData::Owned(produced.clone()),
+        Some(job(&config, &produced)),
+        log_end,
+        Some(classified_at),
+        now_ms(),
+    );
+    let ProduceData::Owned(mut appended) = data else {
+        panic!("an owned batch stays owned");
+    };
+    replica.log.lock().unwrap().append(&mut appended).unwrap();
+    let after = replica.log_end();
+    replica
+        .dedup
+        .finish(pending, true, after, Some(stamp), now_ms());
+
+    assert!(replica.entries() == [(identity, stamp)]);
 }
