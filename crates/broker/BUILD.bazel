@@ -123,8 +123,18 @@ crate_tests(
     # `cli_smoke_test`, `config_reference_test` and `krabka-broker_test` -- and
     # this suite, like the other 114, contributes none. It still runs on every
     # pull request, in the `test` step that exists for this tag.
+    #
+    # `dedup_recovery` and `dedup_bounds` are KFC-10 suites that measure what
+    # contention distorts. `dedup_recovery` is `durability`'s shape: 3-broker
+    # failovers, a divergent-suffix truncation and a rolling restart, about 45s
+    # on an idle machine. `dedup_bounds` times produce and fetch latency while
+    # an index fills, grows and rebuilds, and compares it with a topic without
+    # dedup in the same run; its bounds are wide, but a lane of ~140 suites on
+    # four cores is exactly the noise they would otherwise have to absorb.
     cpu_heavy = [
         "compaction",
+        "dedup_bounds",
+        "dedup_recovery",
         "diskless_e2e",
         "durability",
         "elect_leaders",
